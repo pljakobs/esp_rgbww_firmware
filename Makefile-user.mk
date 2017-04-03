@@ -4,7 +4,7 @@
 
 ## Add your source directories here separated by space
 MODULES = app
-# EXTRA_INCDIR = include
+#EXTRA_INCDIR = include
 
 ## ESP_HOME sets the path where ESP tools and SDK are located.
 ## Windows:
@@ -28,7 +28,7 @@ MODULES = app
 # COM_PORT = /dev/tty.usbserial
 
 ## Com port speed
-COM_SPEED	= 115200
+COM_SPEED	= 1100000
 
 ## Configure flash parameters (for ESP12-E and other new boards):
 # SPI_MODE = dio
@@ -66,3 +66,5 @@ RBOOT_SPIFFS_1  = 0x300000
 #RBOOT_ROM_0     ?= rom0
 ## input linker file for first rom
 #RBOOT_LD_0      ?= rom0.ld
+
+ENABLE_GDB=0

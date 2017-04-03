@@ -719,10 +719,11 @@ void ApplicationWebserver::colorPost(HttpRequest &request, HttpResponse &respons
 			t = root["t"].as<int>();
 		}
 		if (root["q"].success()) {
-			if (app.rgbwwctrl.isAnimationQFull()) {
-				sendApiCode(response, API_CODES::API_BAD_REQUEST, "queue is full");
-				return;
-			}
+			debugapp("parse Q Exec HSV");
+//			if (app.rgbwwctrl.isAnimationQFull()) {
+//				sendApiCode(response, API_CODES::API_BAD_REQUEST, "queue is full");
+//				return;
+//			}
 
 			const String& q = root["q"].asString();
 			if (q == "back")
@@ -750,14 +751,20 @@ void ApplicationWebserver::colorPost(HttpRequest &request, HttpResponse &respons
 		}
 		c = HSVCT(h, s, v, ct);
 
+		debugapp("Exec HSV");
+
 		if(!root["hsv"]["from"].success()) {
-			debugapp("ApplicationWebserver::onColor hsv CMD:%s Q:%d  h:%f s:%f v:%f ct:%i ", cmd.c_str(), q, h, s, v, ct);
+			debugapp("a1");
+
+			debugapp("ApplicationWebserver::onColor hsv CMD:%d Q:%d  h:%f s:%f v:%f ct:%i ", cmd.c_str(), queuePolicy, h, s, v, ct);
+			debugapp("a2");
 			if (cmd.equals("fade")) {
 				app.rgbwwctrl.fadeHSV(c, t, d, queuePolicy, r, name);
 			} else {
 				app.rgbwwctrl.setHSV(c, t, queuePolicy, r, name);
 			}
 		} else {
+			debugapp("1");
 			float from_h, from_s, from_v;
 			int from_ct = 0;
 			HSVCT from_c;
@@ -765,6 +772,7 @@ void ApplicationWebserver::colorPost(HttpRequest &request, HttpResponse &respons
 				sendApiCode(response, API_CODES::API_MISSING_PARAM);
 				return;
 			}
+			debugapp("2");
 			from_h = constrain(root["hsv"]["from"]["h"].as<float>(), 0.0, 360.0);
 			from_s = constrain(root["hsv"]["from"]["s"].as<float>(), 0.0, 100.0);
 			from_v = constrain(root["hsv"]["from"]["v"].as<float>(), 0.0, 100.0);
@@ -775,9 +783,13 @@ void ApplicationWebserver::colorPost(HttpRequest &request, HttpResponse &respons
 					return;
 				}
 			}
-			from_c = HSVCT(from_h, from_s, from_v, from_ct);
+			debugapp("3");
 
-			debugapp("ApplicationWebserver::onColor hsv CMD:%s Q:%d  FROM h:%f s:%f v:%f ct:%i - TO h:%f s :%f v:%f ct:%i ", cmd.c_str(), q, from_h, from_s, from_v, from_ct, h, s, v, ct);
+			from_c = HSVCT(from_h, from_s, from_v, from_ct);
+			debugapp("4");
+
+			debugapp("ApplicationWebserver::onColor hsv CMD:%s Q:%d  FROM h:%f s:%f v:%f ct:%i - TO h:%f s :%f v:%f ct:%i ", cmd.c_str(), queuePolicy, from_h, from_s, from_v, from_ct, h, s, v, ct);
+			debugapp("5");
 			app.rgbwwctrl.fadeHSV(from_c, c, t, d, queuePolicy);
 		}
 	} else if (root["raw"].success()) {
@@ -808,10 +820,11 @@ void ApplicationWebserver::colorPost(HttpRequest &request, HttpResponse &respons
 			t = root["t"].as<int>();
 		}
 		if (root["q"].success()) {
-			if (app.rgbwwctrl.isAnimationQFull()) {
-				sendApiCode(response, API_CODES::API_BAD_REQUEST, "queue is full");
-				return;
-			}
+			debugapp("Parsing queue parameter");
+//			if (app.rgbwwctrl.isAnimationQFull()) {
+//				sendApiCode(response, API_CODES::API_BAD_REQUEST, "queue is full");
+//				return;
+//			}
 
 			const String& q = root["q"].asString();
 			if (q == "back")
@@ -828,7 +841,7 @@ void ApplicationWebserver::colorPost(HttpRequest &request, HttpResponse &respons
 
 		output = ChannelOutput(r, g, b, ww, cw);
 		if(!root["raw"]["from"].success()) {
-			debugapp("ApplicationWebserver::onColor raw CMD:%s Q:%d r:%i g:%i b:%i ww:%i cw:%i", cmd.c_str(), q, r, g, b, ww, cw);
+			debugapp("ApplicationWebserver::onColor raw CMD:%s Q:%d r:%i g:%i b:%i ww:%i cw:%i", cmd.c_str(), queuePolicy, r, g, b, ww, cw);
 			if (cmd.equals("fade")) {
 				app.rgbwwctrl.fadeRAW(output, t, queuePolicy);
 			} else {
@@ -854,7 +867,7 @@ void ApplicationWebserver::colorPost(HttpRequest &request, HttpResponse &respons
 
 			from_output = ChannelOutput(from_r, from_g, from_b, from_ww, from_cw);
 			debugapp("ApplicationWebserver::onColor raw CMD:%s Q:%d FROM r:%i g:%i b:%i ww:%i cw:%i  TO r:%i g:%i b:%i ww:%i cw:%i",
-							cmd.c_str(), q, from_r, from_g, from_b, from_ww, from_cw, r, g, b, ww, cw);
+							cmd.c_str(), queuePolicy, from_r, from_g, from_b, from_ww, from_cw, r, g, b, ww, cw);
 			app.rgbwwctrl.fadeRAW(from_output, output, t, queuePolicy);
 		}
 
@@ -865,7 +878,7 @@ void ApplicationWebserver::colorPost(HttpRequest &request, HttpResponse &respons
 	sendApiCode(response, API_CODES::API_SUCCESS);
 }
 
-void ApplicationWebserver::onColor(HttpRequest &request, HttpResponse &response) {
+void GDB_IRAM_ATTR ApplicationWebserver::onColor(HttpRequest &request, HttpResponse &response) {
 	if (!authenticated(request, response)) {
 		return;
 	}
