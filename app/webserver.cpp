@@ -699,7 +699,6 @@ void ApplicationWebserver::colorPost(HttpRequest &request, HttpResponse &respons
 		QueuePolicy queuePolicy = QueuePolicy::Single;
 		String cmd = "solid";
 		String name;
-		HSVCT c;
 		h = constrain(root["hsv"]["h"].as<float>(), 0.0, 360.0);
 		s = constrain(root["hsv"]["s"].as<float>(), 0.0, 100.0);
 		v = constrain(root["hsv"]["v"].as<float>(), 0.0, 100.0);
@@ -749,14 +748,14 @@ void ApplicationWebserver::colorPost(HttpRequest &request, HttpResponse &respons
 		if (root["name"].success()) {
 			name = root["name"].asString();
 		}
-		c = HSVCT(h, s, v, ct);
+		HSVCT c(h, s, v, ct);
 
 		debugapp("Exec HSV");
 
 		if(!root["hsv"]["from"].success()) {
 			debugapp("a1");
 
-			debugapp("ApplicationWebserver::onColor hsv CMD:%d Q:%d  h:%f s:%f v:%f ct:%i ", cmd.c_str(), queuePolicy, h, s, v, ct);
+			debugapp("ApplicationWebserver::onColor hsv CMD:%s t:%d Q:%d  h:%d s:%d v:%d ct:%d ", cmd.c_str(), t, queuePolicy, c.h, c.s, c.v, c.ct);
 			debugapp("a2");
 			if (cmd.equals("fade")) {
 				app.rgbwwctrl.fadeHSV(c, t, d, queuePolicy, r, name);
