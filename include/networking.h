@@ -21,7 +21,7 @@
  */
 #ifndef APP_NETWORKING_H_
 #define APP_NETWORKING_H_
-
+#include "mdnshandler.h"
 
 enum CONNECTION_STATUS {
     IDLE = 0,
@@ -35,8 +35,7 @@ class AppWIFI {
 public:
     AppWIFI();
     virtual ~AppWIFI() {
-    }
-    ;
+    };
 
     void init();
 
@@ -68,6 +67,7 @@ private:
     IpAddress _ApIP;
 
     CONNECTION_STATUS _client_status;
+    mdnsHandler myMdnsHandler;
 
 private:
     void _STADisconnect(const String& ssid, MacAddress bssid, WifiDisconnectReason reason);

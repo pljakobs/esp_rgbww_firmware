@@ -20,9 +20,6 @@
  *
  */
 #include <RGBWWCtrl.h>
-#include "mdnshandler.cpp"
-
-mdnsHandler mdnsHandler;
 
 AppWIFI::AppWIFI() {
     _ApIP = IpAddress(String(DEFAULT_AP_IP));
@@ -193,7 +190,7 @@ void AppWIFI::_STAGotIP(IpAddress ip, IpAddress mask, IpAddress gateway) {
         debug_i("AppWIFI::_STAGotIP - setting mdns hostname to %s", app.cfg.network.connection.mdnshostname.c_str());
     }
 
-    mdnsHandler.start();
+    myMdnsHandler.start();
 
     if(app.cfg.network.mqtt.enabled) {
         app.mqttclient.start();

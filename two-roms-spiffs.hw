@@ -1,0 +1,37 @@
+{
+    "name": "Standard config with 4M flash",
+    "base_config": "standard",
+    "options": [
+        "4m"
+    ],
+    "partitions": {
+        "rom0": {
+            "size": "1536K",
+            "subtype": "ota_0"
+        },
+        "rom1": {
+            "device": "spiFlash",
+            "address": "0x00182000",
+            "size": "1536K",
+            "type": "app",
+            "subtype": "ota_1",
+            "readonly": false,
+            "encrypted": false,
+            "filename": "$(RBOOT_ROM_0_BIN)"
+        },
+        "spiffs": {
+            "device": "spiFlash",
+            "address": "0x00302000",
+            "size": "992K",
+            "type": "data",
+            "subtype": "spiffs",
+            "readonly": false,
+            "encrypted": false,
+            "filename": "",
+            "build": {
+                "target": "spiffsgen",
+                "files": "Storage"
+            }
+        }
+    }
+}

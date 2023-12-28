@@ -69,9 +69,12 @@ void Application::uptimeCounter() {
 }
 
 void Application::init() {
-    for(int i=0;i<10;i++){
-        Serial.print("=");
-        delay(200);
+    char* spinner[]={"/","-","\\","|"};
+
+    for(int i=0;i<50;i++){
+        Serial.print("\b");
+        Serial.print(spinner[i%4]);
+        delay(40);
     }
     
     debug_i("RGBWW Controller v %s\r\n", fw_git_version);

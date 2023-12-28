@@ -1,29 +1,45 @@
+#pragma once
 #include <Network/Mdns/Handler.h>
 #include <Network/Mdns/Message.h>
-#include <SimpleTimer.h>
 #include <Network/Mdns/Resource.h>
 #include <Network/Mdns/Responder.h>
 #include <Network/Mdns/debug.h>
-
+#include <SimpleTimer.h>
+#include "/opt/sming/Sming/Services/HexDump/HexDump.h"
+#include <sstream>
+//#include <vector>
 class mdnsHandler: public mDNS::Responder {
     public:
         mdnsHandler();
         virtual ~mdnsHandler(){};
         void start();
-        void setSearchName(const String& name){
+        void setSearchName(const String name){
+            debug_i("setSearchName called with %s", name.c_str());
             searchName=name;
         }
         bool onMessage(mDNS::Message& message);
         
+        void printType(const std::string&) {
+    debug_i("Type of answer->getName(): std::string");
+    }
+
+    void printType(const char*) {
+        debug_i("Type of answer->getName(): const char*");
+    }
+    
     private:
         SimpleTimer _mdnsSearchTimer;        
         String searchName;
-        String service = "esprgbwwAPI._http._tcp.local";
-        int _mdnsTimerInterval = 10000; //search every 10 seconds
-
-        static void sendSearchCb(void* pTimerArg);
-        void sendSearch();
+        String searchService;
+        int _mdnsTimerInterval = 30000; //search every 10 seconds
+        std::vector<std::vector<String>> records;
         
+        HexDump hd;
+        
+        static void sendSearchCb(void* pTimerArg);
+        std::vector<std::vector<String>> parseMdnsRecordString(const String& recordString);
+        void sendSearch();
+    
 };
 
 class LEDControllerAPIService : public mDNS::Service{
