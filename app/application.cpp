@@ -167,18 +167,8 @@ void Application::init()
 	debug_i("ESP RGBWW Controller Version %s\r\n", fw_git_version);
 	debug_i("Sming Version: %s\r\n", sming_git_version);
 
-#if defined(SOC_ESP8266)
-	#define SOC "esp8266"
-#elif defined(SOC_ESP32S2)
-	#define SOC "esp32s2"
-#elif defined(SOC_ESP32S3)
-	#define SOC "esp32s3"
-#elif defined(SOC_ESP32C2)
-	#define SOC "esp32c2"
-#elif defined(SOC_ESP32C3)
-	#define SOC "esp32c3"
-#endif
-debug_i("Platform: %s\r\n", SOC);
+	debug_i("Platform: %s\r\n", SOC);
+
 
 #if defined(ARCH_ESP8266) || defined(ESP32)
 	app.ota.checkAtBoot();
