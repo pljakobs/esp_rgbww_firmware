@@ -23,7 +23,6 @@
 #define APP_WEBSERVER_H_
 
 #include <RGBWWLed/RGBWWLedColor.h>
-#include <Network/Http/Websocket/WebsocketResource.h>
 
 #define FILE_MAX_SIZE 16384 //max filesize for storage api files.
 
@@ -45,11 +44,7 @@ public:
     void init();
     inline bool isRunning() { return _running; };
 
-    void wsBroadcast(String message);
-
     String getApiCodeMsg(API_CODES code);
-
-
 
 private:
 
@@ -57,9 +52,6 @@ private:
     bool _running = false;
     unsigned _minimumHeap = 8000;
     unsigned _minimumHeapAccept = 8000;
-
-    WebsocketResource* wsResource;
-    WebsocketList webSockets;
 
     bool authenticated(HttpRequest &request, HttpResponse &response);
     bool authenticateExec(HttpRequest &request, HttpResponse &response);
@@ -75,9 +67,6 @@ private:
     void onSystemReq(HttpRequest &request, HttpResponse &response);
     void onUpdate(HttpRequest &request, HttpResponse &response);
     void onConnect(HttpRequest &request, HttpResponse &response);
-    void onHosts(HttpRequest &request, HttpResponse &response);
-    void onPresets(HttpRequest &request, HttpResponse &response);
-    void onScenes(HttpRequest &request, HttpResponse &response);
     void onPing(HttpRequest &request, HttpResponse &response);
     void onStop(HttpRequest &request, HttpResponse &response);
     void onSkip(HttpRequest &request, HttpResponse &response);
@@ -94,18 +83,13 @@ private:
     void sendApiCode(HttpResponse &response, API_CODES code, String msg = "");
 
     void onUpload(HttpRequest &request, HttpResponse &response);
-    void onObject(HttpRequest &request, HttpResponse &response);
+
     bool checkHeap(HttpResponse &response);
 
     static bool isPrintable(String& str);
 
     void onStorage(HttpRequest &request, HttpResponse &response);
 
-    void setCorsHeaders(HttpResponse &response);
-
-    void wsConnected(WebsocketConnection& socket);
-    void wsDisconnected(WebsocketConnection& socket);
-    String makeId();
 };
 
 #endif // APP_WEBSERVER_H_
