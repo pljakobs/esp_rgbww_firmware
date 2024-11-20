@@ -1,5 +1,4 @@
-/**
- * @file
+ /*
  * @author  Patrick Jahns http://github.com/patrickjahns
  *
  * @section LICENSE
@@ -23,6 +22,7 @@
 
 static const char* fw_git_version = GITVERSION;
 static const char* fw_git_date = GITDATE;
+static const char* sming_git_version = SMING_VERSION;
 
 // main forward declarations
 class Application {
@@ -38,26 +38,33 @@ public:
 
     void reset();
     void restart();
+    void forget_wifi_and_restart();
     bool delayedCMD(String cmd, int delay);
 
-    //void listSpiffsPartitions();
+    void wsBroadcast(String message);
+    void wsBroadcast(String cmd, String message);
+
+    void listSpiffsPartitions();
     
-    void mountfs(int slot);
+    bool mountfs(int slot);
     void umountfs();
 
     inline bool isFilesystemMounted() { return _fs_mounted; };
     inline bool isFirstRun() { return _first_run; };
+
+    void checkRam();
 #ifdef ARCH_ESP8266
     inline bool isTempBoot() { return _bootmode == MODE_TEMP_ROM; };
 #else
     bool isTempBoot() { return false; };
 #endif
-    inline int getRomSlot() { return _romslot; };
-    inline int getBootMode() { return _bootmode; };
+    int getRomSlot();
+    //inline int getBootMode() { return _bootmode; };
     void switchRom();
 
     void onCommandRelay(const String& method, const JsonObject& json);
-    void onWifiConnected(const String& ssid);
+    //void onWifiConnected(const String& ssid);
+    
     void onButtonTogglePressed(int pin);
 
     uint32_t getUptime();
@@ -67,10 +74,12 @@ public:
     AppWIFI network;
     ApplicationWebserver webserver;
     APPLedCtrl rgbwwctrl;
-#ifdef ARCH_ESP8266
+#if defined(ARCH_ESP8266) || defined(ESP32)
     ApplicationOTA ota;
 #endif
-    ApplicationSettings cfg;
+    std::unique_ptr<AppConfig> cfg;
+    //std::unique_ptr<AppConfig> cfg;
+    std::unique_ptr<AppData> data;
     EventServer eventserver;
     AppMqttClient mqttclient;
     JsonProcessor jsonproc;
@@ -78,6 +87,7 @@ public:
 
 private:
     void loadbootinfo();
+    void listFiles();
 
     Timer _systimer;
     int _bootmode = 0;
@@ -87,6 +97,7 @@ private:
     bool _run_after_ota = false;
 
     Timer _uptimetimer;
+    Timer _checkRamTimer;
     uint32_t _uptimeMinutes;
     std::array<int, 17> _lastToggles;
 };

@@ -22,6 +22,7 @@
 #ifndef APP_NETWORKING_H_
 #define APP_NETWORKING_H_
 
+
 enum CONNECTION_STATUS {
     IDLE = 0,
     CONNECTING = 1,
@@ -34,8 +35,7 @@ class AppWIFI {
 public:
     AppWIFI();
     virtual ~AppWIFI() {
-    }
-    ;
+    };
 
     void init();
 
@@ -52,6 +52,8 @@ public:
     bool isScanning() { return _scanning; };
     BssList getAvailableNetworks();
 
+    String getMdnsHosts();
+    
     void forgetWifi();
 
 private:
@@ -72,7 +74,10 @@ private:
     void _STADisconnect(const String& ssid, MacAddress bssid, WifiDisconnectReason reason);
     void _STAConnected(const String& ssid, MacAddress bssid, uint8_t channel);
     void _STAGotIP(IpAddress ip, IpAddress mask, IpAddress gateway);
+    void broadcastWifiStatus();
+    void broadcastWifiStatus(String message);
     void scanCompleted(bool succeeded, BssList& list);
 };
+
 
 #endif //APP_NETWORKING_H_
