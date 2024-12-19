@@ -1,15 +1,13 @@
 name: Application CI (no cache)
 
-on:
-  push:
-    branches: [develop]
-  pull_request:
-    branches: [develop]
-  repository_dispatch:
-    types: [frontend-build-completed]
+#on:
+#  workflow_run:
+#    workflows: ["Application CI - get webapp artifacts"]
+#    types:
+#      - completed
 
 jobs:
-  setup:
+  install_sming:
     runs-on: ubuntu-latest
 
     steps:
@@ -20,87 +18,113 @@ jobs:
 
       - name: Install Sming Framework
         run: |
-          cd /opt
+          cd /tmp
           git clone https://github.com/SmingHub/Sming.git
           cd Sming/Sming
           git checkout develop
           export SMING_HOME=$(pwd)
-          ../Tools/install.sh Esp8266
-          ../Tools/install.sh Esp32
 
-      - name: Get Latest Successful Workflow Run
-        id: get_run
-        run: |
-          latest_run_id=$(curl -s -H "Authorization: token ${{ secrets.artifact_download_token }}" \
-            "https://api.github.com/repos/pljakobs/esp_rgb_webapp2/actions/runs?status=success&branch=devel" | \
-            jq -r '.workflow_runs[0].id')
-          echo "latest_run_id=$latest_run_id" >> $GITHUB_ENV
-
-      - name: Download fileList.h artifact
-        run: |
-          if [ -f ./include/fileList.h ]; then
-            rm ./include/fileList.h
-          fi
-          artifact_url=$(curl -s -H "Authorization: token ${{ secrets.artifact_download_token }}" \
-            "https://api.github.com/repos/pljakobs/esp_rgb_webapp2/actions/runs/${{ env.latest_run_id }}/artifacts" | \
-            jq -r '.artifacts[] | select(.name=="fileList.h") | .archive_download_url')
-          curl -L -o fileList.h.zip -H "Authorization: token ${{ secrets.artifact_download_token }}" "$artifact_url"
-          unzip fileList.h.zip -d ./include
-
-      - name: Download webapp files artifact
-        run: |
-          if [ -d ./webapp ]; then
-            rm -rf ./webapp
-            mkdir .webapp
-          fi
-          artifact_url=$(curl -s -H "Authorization: token ${{ secrets.artifact_download_token }}" \
-            "https://api.github.com/repos/pljakobs/esp_rgb_webapp2/actions/runs/${{ env.latest_run_id }}/artifacts" | \
-            jq -r '.artifacts[] | select(.name=="spa-files") | .archive_download_url')
-          curl -L -o spa-files.zip -H "Authorization: token ${{ secrets.artifact_download_token }}" "$artifact_url"
-          unzip spa-files.zip -d ./webapp
-
-      - name: Upload workspace
+      - name: Save Sming Image
         uses: actions/upload-artifact@v4
         with:
-          name: workspace
-          path: |
-            /opt
-            /tmp/Sming
-            ./webapp
-            ./include
+          name: sming-image
+          path: /tmp/Sming
 
-  build:
-    needs: setup
+  install_toolchains_esp8266:
     runs-on: ubuntu-latest
+    needs: install_sming
+
+    steps:
+      - name: Download Sming Image
+        uses: actions/download-artifact@v4
+        with:
+          name: sming-image
+          path: /tmp/Sming
+
+      - name: Install ESP8266 Toolchain
+        run: |
+          export SMING_HOME=/tmp/Sming/Sming
+          $SMING_HOME/../Tools/install.sh Esp8266
+
+      - name: Save ESP8266 Image
+        uses: actions/upload-artifact@v4
+        with:
+          name: esp8266-image
+          path: /tmp/Sming
+
+  install_toolchains_esp32:
+    runs-on: ubuntu-latest
+    needs: install_sming
+
+    steps:
+      - name: Download Sming Image
+        uses: actions/download-artifact@v4
+        with:
+          name: sming-image
+          path: /tmp/Sming
+
+      - name: Install ESP32 Toolchain
+        run: |
+          export SMING_HOME=/tmp/Sming/Sming
+          $SMING_HOME/../Tools/install.sh Esp32
+
+      - name: Save ESP32 Image
+        uses: actions/upload-artifact@v4
+        with:
+          name: esp32-image
+          path: /tmp/Sming
+
+  build_firmware_esp8266:
+    runs-on: ubuntu-latest
+    needs: install_toolchains_esp8266
     strategy:
       matrix:
-        soc: [esp8266, esp32, esp32c3]
         release: [0, 1]
 
     steps:
-      - name: check out Repo
-        uses: actions/checkout@v2
-        with:
-          ref: develop
-
-      - name: Download workspace
+      - name: Download ESP8266 Image
         uses: actions/download-artifact@v4
         with:
-          name: workspace
-          path: /
+          name: esp8266-image
+          path: /tmp/Sming
 
-      - name: Set up Sming Environment
-        run: |
-          ls /opt
-          export SMING_HOME=/opt/Sming
-
-      - name: Compile Application
+      - name: Compile Application for ESP8266
         env:
-          SMING_HOME: /opt/Sming/Sming
+          SMING_HOME: /tmp/Sming/Sming
+          SMING_ARCH: Esp8266
+          SMING_SOC: esp8266
+          SMING_RELEASE: ${{ matrix.release }}
+        run: |
+          source $SMING_HOME/../Tools/export.sh
+          make
+
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-esp8266-${{ matrix.release }}
+          path: out/esp8266/release/firmware/
+
+  build_firmware_esp32:
+    runs-on: ubuntu-latest
+    needs: install_toolchains_esp32
+    strategy:
+      matrix:
+        soc: [esp32, esp32c3]
+        release: [0, 1]
+
+    steps:
+      - name: Download ESP32 Image
+        uses: actions/download-artifact@v4
+        with:
+          name: esp32-image
+          path: /tmp/Sming
+
+      - name: Compile Application for ESP32
+        env:
+          SMING_HOME: /tmp/Sming/Sming
           SMING_SOC: ${{ matrix.soc }}
           SMING_RELEASE: ${{ matrix.release }}
         run: |
-          ls /opt/
           source $SMING_HOME/../Tools/export.sh
           make
 
@@ -110,6 +134,11 @@ jobs:
           name: firmware-${{ matrix.soc }}-${{ matrix.release }}
           path: out/${{ matrix.soc }}/release/firmware/
 
+  create_download_page:
+    runs-on: ubuntu-latest
+    needs: [build_firmware_esp8266, build_firmware_esp32]
+
+    steps:
       - name: Create download page
         run: |
           mkdir -p dist/download
