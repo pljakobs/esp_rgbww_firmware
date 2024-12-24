@@ -86,6 +86,8 @@ private:
     void onBlink(HttpRequest &request, HttpResponse &response);
     void onToggle(HttpRequest &request, HttpResponse &response);
 
+    void onLog(HttpRequest &request, HttpResponse &response);
+
     void onColorGet(HttpRequest &request, HttpResponse &response);
     void onColorPost(HttpRequest &request, HttpResponse &response);
     bool onColorPostCmd(JsonObject& root, String& errorMsg);

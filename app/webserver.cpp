@@ -68,6 +68,7 @@ void ApplicationWebserver::init()
 	paths.set(F("/canonical.html"), HttpPathDelegate(&ApplicationWebserver::onIndex, this));
 	paths.set(F("/generate_204"), HttpPathDelegate(&ApplicationWebserver::onIndex, this));
 	paths.set(F("/static/hotspot.txt"), HttpPathDelegate(&ApplicationWebserver::onIndex, this));
+	paths.set(F("/log"), HttpPathDelegate(&ApplicationWebserver::onLog, this));
 
 	// animation controls
 	paths.set(F("/stop"), HttpPathDelegate(&ApplicationWebserver::onStop, this));
@@ -1223,6 +1224,24 @@ void ApplicationWebserver::onStorage(HttpRequest& request, HttpResponse& respons
 	}
 }
 
+void ApplicationWebserver::onLog(HttpRequest& request, HttpResponse& response){
+	if(request.method == HTTP_OPTIONS) {
+		// probably a CORS request
+		sendApiCode(response, API_CODES::API_SUCCESS, "");
+		debug_i("HTTP_OPTIONS Request, sent API_SUCCSSS");
+		return;
+	}
+	if(request.method != HTTP_GET) {
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not GET request");
+		return;
+	}
+
+		// Set the response body with the JSON
+		setCorsHeaders(response);
+		response.setContentType(F("text/plain"));
+		response.sendDataStream(app.cfg.get(), MIME_TEXT);
+		return;
+}
 void ApplicationWebserver::onHosts(HttpRequest& request, HttpResponse& response)
 {
 	if(request.method != HTTP_GET && request.method != HTTP_OPTIONS) {

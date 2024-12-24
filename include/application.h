@@ -20,6 +20,8 @@
  */
 #pragma once
 
+#include <RingBufferFileStream.h>
+
 static const char* fw_git_version = GITVERSION;
 static const char* fw_git_date = GITDATE;
 static const char* sming_git_version = SMING_VERSION;
@@ -78,12 +80,12 @@ public:
     ApplicationOTA ota;
 #endif
     std::unique_ptr<AppConfig> cfg;
-    //std::unique_ptr<AppConfig> cfg;
     std::unique_ptr<AppData> data;
     EventServer eventserver;
     AppMqttClient mqttclient;
     JsonProcessor jsonproc;
     NtpClient* pNtpclient = nullptr;
+    std::unique_ptr<RingBufferFileStream> logFile;
 
 private:
     void loadbootinfo();

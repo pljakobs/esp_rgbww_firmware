@@ -36,6 +36,7 @@
 
 
 
+
 #if ARCH_ESP8266
 #define PART0 "lfs0"
 #elif ARCH_ESP32
@@ -85,7 +86,14 @@ static void onOsMessage(OsMessage& msg)
 			gdb_do_break();
 		} else {
 			//#ifdef ARCH_ESP8266
-			register uint32_t sp __asm__("a1");
+			register uint32_t sp __a        if (head >= tail)
+        {
+            return head - tail;
+        }
+        else
+        {
+            return maxSize - tail + head;
+        }sm__("a1");
 			debug_print_stack(sp + 0x10, 0x3fffffb0);
 			//#endif
 		}
@@ -140,11 +148,13 @@ unsigned int debugStreamOutputCallback(const char* buffer, unsigned int length)
 void init()
 {
 	Serial.begin(SERIAL_BAUD_RATE); // 115200 by default
-	Serial.systemDebugOutput(true); // Debug output to serial
+	//Serial.systemDebugOutput(true); // Debug output to serial
 	//System.setCpuFrequencye(CF_160MHz);
 
     debugStream.addStream(&Serial);
-    m_setPuts(Delegate<unsigned int(const char*, unsigned int)>::fromFunction<&debugStreamOutputCallback>());
+
+
+    m_setPuts(&debugStreamOutputCallback);
 
 #ifdef ARCH_ESP8266
 	osMessageInterceptor.begin(onOsMessage);
@@ -196,6 +206,12 @@ void Application::checkRam()
 
 void Application::init()
 {
+    logFile = std::make_unique<RingBufferFileStream>("log.txt", 4096);
+    if (logFile->initialize())
+    {
+        debugStream.addStream(logFile.get());
+    }
+
 	for(int i = 0; i < 10; i++) {
 		Serial.print(_F("="));
 		delay(200);
