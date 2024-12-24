@@ -32,6 +32,8 @@
 #include <VersionListener.h>
 #include <FlashString/Stream.hpp>
 #include <fileMap.h>
+#include <MultiOutputStream.h>
+
 
 
 #if ARCH_ESP8266
@@ -41,6 +43,7 @@
 #endif
 
 //IMPORT_FSTR_LOCAL(default_config, PROJECT_DIR "/default_config.json");
+
 
 #ifdef ARCH_ESP8266
 #include <Platform/OsMessageInterceptor.h>
@@ -110,7 +113,7 @@ extern "C" void __wrap_user_pre_init(void)
 	Storage::initialize();
 	auto& flash = *Storage::spiFlash;
 	if(!flash.partitions()) {
-		{
+		{    
 			LOAD_FSTR(data, partitionTableData)
 			flash.erase_range(PARTITION_TABLE_OFFSET, flash.getBlockSize());
 			flash.write(PARTITION_TABLE_OFFSET, data, partitionTableData.size());
@@ -126,12 +129,22 @@ extern "C" void __wrap_user_pre_init(void)
 
 Application app;
 
+MultiOutputStream debugStream;
+
+unsigned int debugStreamOutputCallback(const char* buffer, unsigned int length)
+{
+    return debugStream.write((const uint8_t*)buffer, length);
+}
+
 // Sming Framework INIT method - called during boot
 void init()
 {
 	Serial.begin(SERIAL_BAUD_RATE); // 115200 by default
 	Serial.systemDebugOutput(true); // Debug output to serial
 	//System.setCpuFrequencye(CF_160MHz);
+
+    debugStream.addStream(&Serial);
+    m_setPuts(Delegate<unsigned int(const char*, unsigned int)>::fromFunction<&debugStreamOutputCallback>());
 
 #ifdef ARCH_ESP8266
 	osMessageInterceptor.begin(onOsMessage);
