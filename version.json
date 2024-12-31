@@ -6,9 +6,7 @@
             "branch": "",
             "fw_version": "",
             "files": {
-                "rom": {
-                    "url": "download/esp8266//debug/rom0.bin"
-                }
+                "rom": {download
             }
         },
         {
@@ -57,8 +55,7 @@
         },
         {
             "soc": "esp32c3",
-            "type": "release",
-            "branch": "",
+            "type": "release",downloadtputs.fw_branch }}",
             "fw_version": "",
             "files": {
                 "rom": {
