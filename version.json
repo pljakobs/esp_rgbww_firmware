@@ -6,7 +6,9 @@
             "branch": "",
             "fw_version": "",
             "files": {
-                "rom": {download
+                "rom": {
+                    "url": "download/esp8266//debug/rom0.bin"
+                }
             }
         },
         {
@@ -24,10 +26,7 @@
             "soc": "esp32",
             "type": "debug",
             "branch": "",
-            "fw_version": "",
-            "files": {
-                "rom": {
-                    "url": "download/esp32//debug/app.bin"
+            "fwneeds.    "url": "download/esp32//debug/app.bin"
                 }
             }
         },
