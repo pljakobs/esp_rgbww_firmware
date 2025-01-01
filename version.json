@@ -55,7 +55,8 @@
         },
         {
             "soc": "esp32c3",
-            "type": "release",downloadtputs.fw_branch }}",
+            "type": "release",
+            "branch": "",
             "fw_version": "",
             "files": {
                 "rom": {
