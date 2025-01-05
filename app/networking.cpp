@@ -347,7 +347,9 @@ void AppWIFI::_STAGotIP(IpAddress ip, IpAddress mask, IpAddress gateway)
 		if(network.connection.getDhcp()) {
 			ipAddress = "dhcp";
 		}
-		mdnsHandler.addHost(network.mdns.getName(), ipAddress, -1);
+		String soc=String(SOC);
+		String id= String( system_get_chip_id());
+		mdnsHandler.addHost(network.mdns.getName(), ipAddress, soc, id, -1);
 
 		broadcastWifiStatus();
 
@@ -414,11 +416,6 @@ void AppWIFI::startAp()
 	//start dns server for captive portal
 	dnsServer.start(DNS_PORT, "*", WifiAccessPoint.getIP());
 	broadcastWifiStatus(F("AP started"));
-}
-
-String AppWIFI::getMdnsHosts()
-{
-	return mdnsHandler.getHosts();
 }
 
 /**

@@ -171,7 +171,7 @@ Application::~Application()
 
 void Application::uptimeCounter()
 {
-	++_uptimeMinutes;
+	++_uptimeSeconds;
 }
 
 void Application::checkRam()
@@ -235,7 +235,7 @@ debug_i("Platform: %s\r\n", SOC);
 #endif
 
 	//load settings
-	_uptimetimer.initializeMs(60000, TimerDelegate(&Application::uptimeCounter, this)).start();
+	_uptimetimer.initializeMs(1000, TimerDelegate(&Application::uptimeCounter, this)).start();
 	_checkRamTimer.initializeMs(10000, TimerDelegate(&Application::checkRam, this)).start();
 #ifdef ARCH_ESP8266
 	// load boot information
@@ -707,5 +707,5 @@ void Application::onButtonTogglePressed(int pin)
 
 uint32_t Application::getUptime()
 {
-	return _uptimeMinutes * 60u;
+	return  _uptimeSeconds;
 }

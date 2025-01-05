@@ -8,7 +8,7 @@
 #define JSON_SIZE 2048
 
 // activate debug output
-//#define DEBUG_MDNS 
+#define DEBUG_MDNS 
 
 /**
  * @class mdnsHandler
@@ -27,8 +27,7 @@ class mdnsHandler: public mDNS::Responder {
             searchName=name;
         }
         bool onMessage(mDNS::Message& message);
-        void addHost(const String& hostname, const String& ip_address, int ttl);
-        String getHosts();
+        void addHost(const String& hostname, const String& ip_address, const String& model, const String& id, int ttl);
 
     private:
         SimpleTimer _mdnsSearchTimer;        
@@ -37,7 +36,6 @@ class mdnsHandler: public mDNS::Responder {
         int _mdnsTimerInterval = 60000; //TTL for the records is 120s, so we need to update the list every 60s to be sure.
 
         StaticJsonDocument<JSON_SIZE> hostsDoc;
-        JsonArray hosts;
 
         static void sendSearchCb(void* pTimerArg);
         void sendSearch();

@@ -98,7 +98,7 @@ private:
 
     Timer _uptimetimer;
     Timer _checkRamTimer;
-    uint32_t _uptimeMinutes;
+    uint32_t _uptimeSeconds;
     std::array<int, 17> _lastToggles;
 };
 // forward declaration for global vars

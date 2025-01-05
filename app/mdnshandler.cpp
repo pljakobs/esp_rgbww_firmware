@@ -3,6 +3,7 @@
 #include <RGBWWCtrl.h>
 #include "application.h"
 
+
 // ...
 
 mdnsHandler::mdnsHandler(){};
@@ -27,7 +28,7 @@ void mdnsHandler::start()
 	responder.addService(ledControllerWSService);
 
 	//create an empty hosts array to store recieved host entries
-	hosts = hostsDoc.createNestedArray("hosts");
+	//hosts = hostsDoc.createNestedArray("hosts");
 
 	//serch for the esprgbwwAIP service. This is used in the onMessage handler to filter out unwanted messages.
 	//to fulter for a number of services, this would have to be adapted a bit.
@@ -66,7 +67,7 @@ bool mdnsHandler::onMessage(mDNS::Message& message)
 		return false;
 	}
 
-	//mDNS::printMessage(Serial, message);
+	mDNS::printMessage(Serial, message);
 
 	auto answer = message[mDNS::ResourceType::SRV];
 	if(answer == nullptr) {
@@ -75,7 +76,7 @@ bool mdnsHandler::onMessage(mDNS::Message& message)
 #endif
 		return false;
 	}
-	//mDNS::printMessage(Serial, message);
+	mDNS::printMessage(Serial, message);
 	String answerName = String(answer->getName());
 #ifdef DEBUG_MDNS
 	debug_i("\nanswerName: %s\nsearchName: %s", answerName.c_str(), searchName.c_str());
@@ -91,6 +92,8 @@ bool mdnsHandler::onMessage(mDNS::Message& message)
 	struct {
 		String hostName;
 		IpAddress ipAddr;
+		String Model;
+		String	ID;
 		int ttl;
 	} info;
 
@@ -100,12 +103,24 @@ bool mdnsHandler::onMessage(mDNS::Message& message)
 		info.hostName = info.hostName.substring(0, info.hostName.lastIndexOf(".local"));
 		info.ipAddr = String(answer->getRecordString());
 		info.ttl = answer->getTtl();
+		//mDNS::printAnswer(Serial, *answer);
+		auto recordPointer=answer->getRecordPtr();
+
 	}
+	answer = message[mDNS::ResourceType::TXT];
+	if(answer!=nullptr){
+		debug_i("mDNS ressource type TXT");
+		mDNS::Resource::TXT txt(*answer);
+		//mDNS::printAnswer(Serial, *answer);
+		info.ID=txt["id"];
+		info.Model=txt["mo"];
+	}
+
 #ifdef DEBUG_MDNS
 	debug_i("found Host %s with IP %s and TTL %i", info.hostName.c_str(), info.ipAddr.toString().c_str(), info.ttl);
 #endif
 
-	addHost(info.hostName, info.ipAddr.toString(), info.ttl); //add host to list
+	addHost(info.hostName, info.ipAddr.toString(), info.ID, info.Model, info.ttl); //add host to list
 	return true;
 }
 
@@ -125,28 +140,24 @@ void mdnsHandler::sendSearch()
 
 	//restart the timer
 	_mdnsSearchTimer.startOnce();
-	for(size_t i = 0; i < hosts.size(); ++i) {
-		JsonVariant host = hosts[i];
-		if((int)host[F("ttl")] == -1) {
-			continue;
+	AppData::Controllers controllers(*app.data);
+	for (auto controller : controllers){
+		if(controller.getTtl()>0){
+			int lastSeen=controller.getLastSeen();
+			if(app.getUptime()-lastSeen>controller.getTtl()){
+				auto controllersUpdate=controllers.update();
+				controllersUpdate.removeItem(controller.getId());
+	
+				JsonRpcMessage msg(F("removed_host"));
+				JsonObject root = msg.getParams();
+				root[F("hostname")] = controller.getName();
+				String jsonStr = Json::serialize(msg.getRoot());
+				app.wsBroadcast(jsonStr);
+			}
 		}
-		host[F("ttl")] = (int)host[F("ttl")] - _mdnsTimerInterval / 1000;
-		if(host[F("ttl")].as<int>() < 0) {
-			debug_i("Removing host %s from list", host[F("hostname")].as<const char*>());
-
-			// notify websocket clients
-			JsonRpcMessage msg(F("removed_host"));
-			JsonObject root = msg.getParams();
-			root[F("hostname")] = host[F("hostname")];
-			String jsonStr = Json::serialize(msg.getRoot());
-
-			app.wsBroadcast(jsonStr);
-			hosts.remove(i);
-			--i;
-		}
-
-		if(host[F("hostname")] == null) {
-			hosts.remove(i);
+		if(controller.getName() == null) {
+			auto controllersUpdate=controllers.update();
+			controllersUpdate.removeItem(controller.getId());
 		}
 	}
 }
@@ -160,35 +171,27 @@ void mdnsHandler::sendSearchCb(void* pTimerArg)
 	pThis->sendSearch();
 }
 
-void mdnsHandler::addHost(const String& hostname, const String& ip_address, int ttl)
+void mdnsHandler::addHost(const String& hostname, const String& ip_address, const String& model, const String& id, int ttl)
 {
-/*
-     * ToDo: this is currently an ugly implementation, as it needs both, the hosts 
-     * JsonArray and the app.cfg.network.mdnsHosts string, wasting memory
-     * however, it's the most convenient way to pass the list from here to the webserver
-     * without having to pass object references around
-     */
-#ifdef DEBUG_MDNS
-	debug_i("Adding host %s with IP %s and ttl %i", hostname.c_str(), ip_address.c_str(), ttl);
-#endif
-	String _hostname, _ip_address;
-	int _ttl;
-	_hostname = hostname;
-	_ip_address = ip_address;
-	_ttl = ttl;
-
-	bool knownHost = false;
-	for(JsonVariant host : hosts) {
-		if(host[F("hostname")] == _hostname && host[F("ip_address")] == _ip_address) {
-#ifdef DEBUG_MDNS
-			debug_i("Hostname %s already in list", _hostname.c_str());
-#endif
-			if(_ttl != -1)
-				host[F("ttl")] = _ttl; //reset ttl
-			knownHost = true;
-			break;
+	AppData::Controllers controllers(*app.data);
+	controllerUpdate=controllers.update();
+	bool knownHost=false;
+	for (auto controller : controllers){
+		if (controller.getId()==id)
+		{
+			knownHost=true;
 		}
+		if(!knownHost){
+			auto controller=controllerUpdate.addItem();
+		}
+		controller.setName(hostname);
+		controller.setIp(ip_address);
+		controller.setModel(model);
+		controller.setId(id);
+		controller.setTtl(ttl);
+		controller.setLastSeen(app.getuptime());
 	}
+	
 
 	if(!knownHost) {
 		JsonObject newHost = hosts.createNestedObject();
@@ -211,10 +214,3 @@ void mdnsHandler::addHost(const String& hostname, const String& ip_address, int 
 	}
 }
 
-String mdnsHandler::getHosts()
-{
-	String mdnsHosts;
-	serializeJson(hostsDoc, mdnsHosts);
-	//Serial.printf("\nnew hosts document:\n %s",mdnsHosts.c_str());
-	return mdnsHosts;
-}

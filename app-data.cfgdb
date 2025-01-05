@@ -37,8 +37,8 @@
       "items": {
         "type": "object",
         "properties": {
-          "id":{
-            "type":"integer"
+          "cid":{
+            "type":"String"
           },
           "ip": {
             "type": "string"
@@ -48,6 +48,9 @@
           },
           "last-seen": {
             "type": "integer"
+          },
+          "ttl":{
+            "type":"integer"
           }
         }
       }

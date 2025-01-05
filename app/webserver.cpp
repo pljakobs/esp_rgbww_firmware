@@ -74,6 +74,8 @@ void ApplicationWebserver::init()
 	paths.set(F("/blink"), HttpPathDelegate(&ApplicationWebserver::onBlink, this));
 	paths.set(F("/toggle"), HttpPathDelegate(&ApplicationWebserver::onToggle, this));
 
+	// presets, scenes and controllers
+
 	// websocket api
 	wsResource = new WebsocketResource();
 	wsResource->setConnectionHandler([this](WebsocketConnection& socket) { this->wsConnected(socket); });
@@ -1234,11 +1236,11 @@ void ApplicationWebserver::onHosts(HttpRequest& request, HttpResponse& response)
 		return;
 	}
 
-	String myHosts;
-	// Set the response body with the JSON
 	setCorsHeaders(response);
-	response.setContentType(F("application/json"));
-	response.sendString(app.network.getMdnsHosts());
+	//response.setContentType(F("application/json"));
+	AppData::Controllers controllers(*app.data);
+	auto controllersStream = controllers.createExportStream(ConfigDB::Json::format);
+	response.sendDataStream(controllersStream.release(), MIME_JSON);
 
 	return;
 }
