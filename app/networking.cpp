@@ -348,7 +348,7 @@ void AppWIFI::_STAGotIP(IpAddress ip, IpAddress mask, IpAddress gateway)
 			ipAddress = "dhcp";
 		}
 		String soc=String(SOC);
-		String id= String( system_get_chip_id());
+		unsigned int id= system_get_chip_id();
 		mdnsHandler.addHost(network.mdns.getName(), ipAddress, soc, id, -1);
 
 		broadcastWifiStatus();

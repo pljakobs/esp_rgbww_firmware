@@ -8,7 +8,7 @@
 #define JSON_SIZE 2048
 
 // activate debug output
-#define DEBUG_MDNS 
+//#define DEBUG_MDNS 
 
 /**
  * @class mdnsHandler
@@ -26,8 +26,9 @@ class mdnsHandler: public mDNS::Responder {
             debug_i("setting searchName to %s", name.c_str());
             searchName=name;
         }
+        
         bool onMessage(mDNS::Message& message);
-        void addHost(const String& hostname, const String& ip_address, const String& model, const String& id, int ttl);
+        void addHost(const String& hostname, const String& ip_address, const String& model, unsigned int id, int ttl);
 
     private:
         SimpleTimer _mdnsSearchTimer;        
@@ -40,6 +41,7 @@ class mdnsHandler: public mDNS::Responder {
         static void sendSearchCb(void* pTimerArg);
         void sendSearch();
         
+        uint32_t db_writes = 0;
 };
 
 class LEDControllerAPIService : public mDNS::Service{
@@ -53,10 +55,11 @@ class LEDControllerAPIService : public mDNS::Service{
         }
         Protocol getProtocol() override{
 		    return Protocol::Tcp;
-	    }
+	     }
         uint16_t getPort() override{
 		    return 80;
     	};
+
 	    void addText(mDNS::Resource::TXT& txt) override{
             txt.add("ty=rgbwwctrl");
             #ifdef ESP8266
@@ -73,7 +76,6 @@ class LEDControllerAPIService : public mDNS::Service{
 
 class LEDControllerWebAppService : public mDNS::Service{
     public:
-
         String getInstance() override{
 		    return F("esprgbwwWebApp");
         }
