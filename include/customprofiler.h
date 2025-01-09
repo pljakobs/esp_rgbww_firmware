@@ -1,5 +1,3 @@
-namespace
-{
 class CustomProfiler : public IFS::IProfiler
 {
 public:
@@ -77,12 +75,12 @@ public:
 	size_t printTo(Print& p) const
 	{
 		size_t n{0};
-		n += p.print(_F("Read: "));
-		n += p.println(readStat);
+		//n += p.print(_F("Read: "));
+		//n += p.println(readStat);
 		n += p.print(_F("Write: "));
 		n += p.println(writeStat);
-		n += p.print(_F("Erase: "));
-		n += p.println(eraseStat);
+		//n += p.print(_F("Erase: "));
+		//n += p.println(eraseStat);
 		return n;
 	}
 };

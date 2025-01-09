@@ -74,7 +74,12 @@ class LEDControllerAPIService : public mDNS::Service{
     private:
 };
 
-class LEDControllerWebAppService : public Service
+
+class LEDControllerWebAppService : public mDNS::Service{
+    public:
+
+        String getInstance() override{
+		    return F("esprgbwwWebApp");
         }
         String getName() override{
 		    return F("http");
@@ -85,7 +90,7 @@ class LEDControllerWebAppService : public Service
         uint16_t getPort() override{
 		    return 80;
     	};
-	
+
     void addText(mDNS::Resource::TXT& txt) override{
             txt.add("ty=rgbwwctrl");
             #ifdef ESP8266
@@ -96,30 +101,6 @@ class LEDControllerWebAppService : public Service
             txt.add("fn=LED Controller WebApp");
             txt.add("id=" + String(system_get_chip_id()));
             txt.add("path=/webapp");
-        }
-    private:
-};
-
-class LEDControllerWSService : public mDNS::Service{
-    public:
-
-        String getInstance() override{
-		    return F("esprgbwwWS");Service
-	    }
-        uint16_t getPort() override{
-		    return 80;
-    	};
-	
-    void addText(mDNS::Resource::TXT& txt) override{
-            txt.add("ty=rgbwwctrl");
-            #ifdef ESP8266
-            txt.add("mo=esp8266");
-            #elif defined(ESP32)
-            txt.add("mo=esp32");
-            #endif
-            txt.add("fn=LED Controller");
-            txt.add("id=" + String(system_get_chip_id()));
-            txt.add("path=/ws");
         }
     private:
 };
