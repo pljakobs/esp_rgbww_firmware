@@ -1241,7 +1241,10 @@ void ApplicationWebserver::onHosts(HttpRequest& request, HttpResponse& response)
 	AppData::Controllers controllers(*app.data);
 	auto controllersStream = controllers.createExportStream(ConfigDB::Json::format);
 	response.sendDataStream(controllersStream.release(), MIME_JSON);
-
+	debug_i("webserver, listing controllers");
+	for(auto controller : controllers) {
+		debug_i("controller %s", controller.getName().c_str());
+	}
 	return;
 }
 

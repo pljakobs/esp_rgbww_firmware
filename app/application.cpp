@@ -32,7 +32,7 @@
 #include <VersionListener.h>
 #include <FlashString/Stream.hpp>
 #include <fileMap.h>
-
+#include <customprofiler.h>
 
 #if ARCH_ESP8266
 #define PART0 "lfs0"
@@ -42,10 +42,13 @@
 
 //IMPORT_FSTR_LOCAL(default_config, PROJECT_DIR "/default_config.json");
 
+CustomProfiler* globalProfiler = nullptr;
+
 #ifdef ARCH_ESP8266
 #include <Platform/OsMessageInterceptor.h>
 
 static OsMessageInterceptor osMessageInterceptor;
+
 
 /**
  * @brief See if the OS debug message is something we're interested in.
@@ -176,9 +179,16 @@ void Application::uptimeCounter()
 
 void Application::checkRam()
 {
+	debug_i("uptime: %i", _uptimeSeconds);
 	debug_i("Free heap: %d", system_get_free_heap_size());
 	String _client_status = WifiStation.getConnectionStatusName();
 	debug_i("wifi conection Status: %s", _client_status.c_str());
+    if (globalProfiler) {
+        // Use the globalProfiler object
+		Serial.println(*globalProfiler);
+    } else {
+        debug_e("Profiler not initialized");
+    }
 }
 
 void Application::init()
@@ -249,6 +259,7 @@ debug_i("Platform: %s\r\n", SOC);
 			debug_i("Application::init - normal boot");
 		}
 		_bootmode = bootmode;
+
 	}
 #endif
 
@@ -545,7 +556,7 @@ void Application::listSpiffsPartitions()
 bool Application::mountfs(int slot)
 {
 	/*
-    *
+    * ToDo
     * need a new mount method for the transitional time when the data file
     * system could be spiffs or LitleFS
     *
@@ -571,6 +582,10 @@ bool Application::mountfs(int slot)
 		if(part) {
 			debug_i("mouting primary littlefs partition at %x, length %d", part.address(), part.size());
 			if(lfs_mount(part)) {
+				// add profiler to lfs0
+                globalProfiler = new CustomProfiler(part);
+				auto fs=getFileSystem();
+                fs->setProfiler(globalProfiler);
 				return true;
 			} else {
 				part = Storage::findPartition(F("lfs1"));

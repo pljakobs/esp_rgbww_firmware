@@ -22,7 +22,6 @@
 #ifndef APP_NETWORKING_H_
 #define APP_NETWORKING_H_
 
-
 enum CONNECTION_STATUS {
     IDLE = 0,
     CONNECTING = 1,
@@ -53,6 +52,7 @@ public:
     BssList getAvailableNetworks();
     
     void forgetWifi();
+
 
 private:
     int _con_ctr;

@@ -14,21 +14,29 @@ void mdnsHandler::start()
 	static mDNS::Responder responder;
 
 	static LEDControllerAPIService ledControllerAPIService;
-	static LEDControllerWebAppService ledControllerWebAppService;
-	static LEDControllerWSService ledControllerWSService;
+	//static LEDControllerWebAppService ledControllerWebAppService;
+	///static LEDControllerWSService ledControllerWSService;
 
 	//start the mDNS responder with the configured services, using the configured hostname
 	{
 		AppConfig::Network network(*app.cfg);
 		responder.begin(network.mdns.getName().c_str());
 	} // end of ConfigDB network context
+
 	  //responder.begin(app.cfg.network.connection.mdnshostname.c_str());
 	responder.addService(ledControllerAPIService);
-	responder.addService(ledControllerWebAppService);
-	responder.addService(ledControllerWSService);
+	//responder.addService(ledControllerWebAppService);
+	//responder.addService(ledControllerWSService);
 
 	//create an empty hosts array to store recieved host entries
 	//hosts = hostsDoc.createNestedArray("hosts");
+	
+	{
+		AppData::Controllers controllers(*app.data);
+		auto controllersUpdate = controllers.update();
+		controllersUpdate.clear();
+		
+	} // end of ConfigDB controllers context
 
 	//serch for the esprgbwwAIP service. This is used in the onMessage handler to filter out unwanted messages.
 	//to fulter for a number of services, this would have to be adapted a bit.
@@ -67,7 +75,9 @@ bool mdnsHandler::onMessage(mDNS::Message& message)
 		return false;
 	}
 
-	mDNS::printMessage(Serial, message);
+	#ifdef MDNS_DEBUG
+		mDNS::printMessage(Serial, message);
+	#endif
 
 	auto answer = message[mDNS::ResourceType::SRV];
 	if(answer == nullptr) {
@@ -76,7 +86,9 @@ bool mdnsHandler::onMessage(mDNS::Message& message)
 #endif
 		return false;
 	}
-	mDNS::printMessage(Serial, message);
+	#ifdef MDNS_DEBUG
+		mDNS::printMessage(Serial, message);
+	#endif
 	String answerName = String(answer->getName());
 #ifdef DEBUG_MDNS
 	debug_i("\nanswerName: %s\nsearchName: %s", answerName.c_str(), searchName.c_str());
@@ -87,13 +99,14 @@ bool mdnsHandler::onMessage(mDNS::Message& message)
 	}
 #ifdef DEBUG_MDNS
 	debug_i("Found matching SRV record");
+	debug_i(">>>> db writes / s: %f", ((db_writes*100)/app.getUptime())/(float)100);
 #endif
 	// Extract our required information from the message
 	struct {
 		String hostName;
 		IpAddress ipAddr;
 		String Model;
-		String	ID;
+		unsigned int	id;
 		int ttl;
 	} info;
 
@@ -103,16 +116,14 @@ bool mdnsHandler::onMessage(mDNS::Message& message)
 		info.hostName = info.hostName.substring(0, info.hostName.lastIndexOf(".local"));
 		info.ipAddr = String(answer->getRecordString());
 		info.ttl = answer->getTtl();
-		//mDNS::printAnswer(Serial, *answer);
-		auto recordPointer=answer->getRecordPtr();
-
+		
 	}
 	answer = message[mDNS::ResourceType::TXT];
 	if(answer!=nullptr){
 		debug_i("mDNS ressource type TXT");
 		mDNS::Resource::TXT txt(*answer);
 		//mDNS::printAnswer(Serial, *answer);
-		info.ID=txt["id"];
+		info.id=txt["id"].toInt();
 		info.Model=txt["mo"];
 	}
 
@@ -120,7 +131,8 @@ bool mdnsHandler::onMessage(mDNS::Message& message)
 	debug_i("found Host %s with IP %s and TTL %i", info.hostName.c_str(), info.ipAddr.toString().c_str(), info.ttl);
 #endif
 
-	addHost(info.hostName, info.ipAddr.toString(), info.ID, info.Model, info.ttl); //add host to list
+	if(info.Model!="" && info.id >0) 
+		addHost(info.hostName, info.ipAddr.toString(), info.Model, info.id, info.ttl); //add host to list
 	return true;
 }
 
@@ -135,29 +147,36 @@ void mdnsHandler::sendSearch()
 	// Search for the service
 	bool ok = mDNS::server.search(service);
 #ifdef DEBUG_MDNS
-	debug_i("search('%s'): %s", service.c_str(), ok ? "OK" : "FAIL");
+	debug_i("search('%s'): %s", service.c_str(), debug_i("known host: %s", hostname.c_str());ok ? "OK" : "FAIL");
 #endif
 
 	//restart the timer
 	_mdnsSearchTimer.startOnce();
-	AppData::Controllers controllers(*app.data);
-	for (auto controller : controllers){
-		if(controller.getTtl()>0){
-			int lastSeen=controller.getLastSeen();
-			if(app.getUptime()-lastSeen>controller.getTtl()){
-				auto controllersUpdate=controllers.update();
-				controllersUpdate.removeItem(controller.getId());
-	
-				JsonRpcMessage msg(F("removed_host"));
-				JsonObject root = msg.getParams();
-				root[F("hostname")] = controller.getName();
-				String jsonStr = Json::serialize(msg.getRoot());
-				app.wsBroadcast(jsonStr);
+	{
+		AppData::Controllers controllers(*app.data);
+		auto controllersUpdate=controllers.update();
+		for (auto it = controllersUpdate.begin(); it; ++it) {
+			auto controller = *it;
+			if(controller.getTtl()>0){
+				int lastSeen=controller.getLastSeen();
+				if(app.getUptime()-lastSeen>controller.getTtl()){
+					debug_i("+---------------------------------+");
+					debug_i("removing controller %s, last seen %is ago, ttl %is", controller.getName().c_str(),app.getUptime()-lastSeen, controller.getTtl());
+					debug_i(">>>> db writes / s: %f", ((db_writes*100)/app.getUptime())/(float)100);
+					debug_i("+---------------------------------+");
+					
+		
+					JsonRpcMessage msg(F("removed_host"));
+					JsonObject root = msg.getParams();
+					root[F("hostname")] = controller.getName();
+					String jsonStr = Json::serialize(msg.getRoot());
+					app.wsBroadcast(jsonStr);
+					
+					controllersUpdate.removeItem(it.index());
+					db_writes++;
+					continue;
+				}
 			}
-		}
-		if(controller.getName() == null) {
-			auto controllersUpdate=controllers.update();
-			controllersUpdate.removeItem(controller.getId());
 		}
 	}
 }
@@ -171,46 +190,71 @@ void mdnsHandler::sendSearchCb(void* pTimerArg)
 	pThis->sendSearch();
 }
 
-void mdnsHandler::addHost(const String& hostname, const String& ip_address, const String& model, const String& id, int ttl)
+void mdnsHandler::addHost(const String& hostname, const String& ip_address, const String& model, unsigned int id, int ttl)
 {
-	AppData::Controllers controllers(*app.data);
-	controllerUpdate=controllers.update();
-	bool knownHost=false;
-	for (auto controller : controllers){
-		if (controller.getId()==id)
-		{
-			knownHost=true;
+    AppData::Controllers controllers(*app.data);
+    auto controllersUpdate = controllers.update();
+    bool knownHost = false;
+
+    for (auto controller : controllersUpdate) {
+        if (controller.getCid() == id) {
+            knownHost = true;
+            break;
+        }
+    }
+
+    if (!knownHost) {
+        debug_i("+---------------------------------+");
+        debug_i("new host: %s", hostname.c_str());
+		debug_i("adding to database");
+		debug_i(">>>> db writes / s: %f", ((db_writes*100)/app.getUptime())/(float)100);
+        debug_i("+---------------------------------+");
+		if (id != 0 && hostname != "" ){
+			auto controller = controllersUpdate.addItem();
+			controller.setName(hostname);
+			controller.setIpAddress(ip_address);
+			controller.setModel(model);
+			controller.setCid(id);
+			controller.setTtl(ttl);
+			controller.setLastSeen(app.getUptime());
+
+			StaticJsonDocument<200> hosts;
+			JsonObject newHost = hosts.createNestedObject();
+
+			newHost[F("hostname")] = hostname;
+			newHost[F("ip_address")] = ip_address;
+			newHost[F("ttl")] = ttl;
+			String newHostString;
+			serializeJsonPretty(newHost, newHostString);
+	#ifdef DEBUG_MDNS
+			debug_i("new host: %s", newHostString.c_str());
+	#endif
+		
+        JsonRpcMessage msg(F("new_host"));
+        JsonObject root = msg.getParams();
+        root.set(newHost);
+        String jsonStr = Json::serialize(msg.getRoot());
+
+        app.wsBroadcast(jsonStr);
+
+		db_writes++;
 		}
-		if(!knownHost){
-			auto controller=controllerUpdate.addItem();
-		}
-		controller.setName(hostname);
-		controller.setIp(ip_address);
-		controller.setModel(model);
-		controller.setId(id);
-		controller.setTtl(ttl);
-		controller.setLastSeen(app.getuptime());
-	}
-	
-
-	if(!knownHost) {
-		JsonObject newHost = hosts.createNestedObject();
-
-		newHost[F("hostname")] = _hostname;
-		newHost[F("ip_address")] = _ip_address;
-		newHost[F("ttl")] = _ttl;
-		String newHostString;
-		serializeJsonPretty(newHost, newHostString);
-#ifdef DEBUG_MDNS
-		debug_i("new host: %s", newHostString.c_str());
-#endif
-
-		JsonRpcMessage msg(F("new_host"));
-		JsonObject root = msg.getParams();
-		root.set(newHost);
-		String jsonStr = Json::serialize(msg.getRoot());
-
-		app.wsBroadcast(jsonStr);
-	}
+    } else {
+        // Update the existing controller's information
+        for (auto controller : controllersUpdate) {
+            if (controller.getCid() == id) {
+				if(app.getUptime()-controller.getLastSeen()>controller.getTtl()/2) {// only update if half ttl has elapsed to minimize flash writes
+					debug_i("+---------------------------------+");
+					debug_i("known host: %s", hostname.c_str());
+					debug_i("updating last seen");
+					debug_i(">>>> db writes / s: %f", ((db_writes*100)/app.getUptime())/(float)100);
+					debug_i("+---------------------------------+");
+					controller.setLastSeen(app.getUptime());
+					db_writes++;
+					break;
+				}
+            }
+        }
+    }
 }
 

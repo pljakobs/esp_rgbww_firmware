@@ -38,19 +38,22 @@
         "type": "object",
         "properties": {
           "cid":{
-            "type":"String"
-          },
-          "ip": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
+            "type":"integer"
           },
           "last-seen": {
             "type": "integer"
           },
           "ttl":{
             "type":"integer"
+          },
+          "ip_address": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "model":{
+            "type":"string"
           }
         }
       }
