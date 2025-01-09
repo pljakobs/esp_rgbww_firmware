@@ -55,10 +55,11 @@ class LEDControllerAPIService : public mDNS::Service{
         }
         Protocol getProtocol() override{
 		    return Protocol::Tcp;
-	    }
+	     }
         uint16_t getPort() override{
 		    return 80;
     	};
+
 	    void addText(mDNS::Resource::TXT& txt) override{
             txt.add("ty=rgbwwctrl");
             #ifdef ESP8266
@@ -73,11 +74,7 @@ class LEDControllerAPIService : public mDNS::Service{
     private:
 };
 
-class LEDControllerWebAppService : public mDNS::Service{
-    public:
-
-        String getInstance() override{
-		    return F("esprgbwwWebApp");
+class LEDControllerWebAppService : public Service
         }
         String getName() override{
 		    return F("http");
@@ -107,14 +104,7 @@ class LEDControllerWSService : public mDNS::Service{
     public:
 
         String getInstance() override{
-		    return F("esprgbwwWS");
-        }
-        String getName() override{
-		    return F("http");
-        }
-        
-        Protocol getProtocol() override{
-		    return Protocol::Tcp;
+		    return F("esprgbwwWS");Service
 	    }
         uint16_t getPort() override{
 		    return 80;

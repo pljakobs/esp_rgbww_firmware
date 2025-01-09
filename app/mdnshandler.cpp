@@ -164,7 +164,6 @@ void mdnsHandler::sendSearch()
 					debug_i("removing controller %s, last seen %is ago, ttl %is", controller.getName().c_str(),app.getUptime()-lastSeen, controller.getTtl());
 					debug_i(">>>> db writes / s: %f", ((db_writes*100)/app.getUptime())/(float)100);
 					debug_i("+---------------------------------+");
-					
 		
 					JsonRpcMessage msg(F("removed_host"));
 					JsonObject root = msg.getParams();

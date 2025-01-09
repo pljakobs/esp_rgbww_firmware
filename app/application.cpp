@@ -32,7 +32,6 @@
 #include <VersionListener.h>
 #include <FlashString/Stream.hpp>
 #include <fileMap.h>
-#include <customprofiler.h>
 
 #if ARCH_ESP8266
 #define PART0 "lfs0"
@@ -42,7 +41,6 @@
 
 //IMPORT_FSTR_LOCAL(default_config, PROJECT_DIR "/default_config.json");
 
-CustomProfiler* globalProfiler = nullptr;
 
 #ifdef ARCH_ESP8266
 #include <Platform/OsMessageInterceptor.h>

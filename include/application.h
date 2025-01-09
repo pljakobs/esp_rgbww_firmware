@@ -20,6 +20,8 @@
  */
 #pragma once
 
+#include <customprofiler.h>
+
 static const char* fw_git_version = GITVERSION;
 static const char* fw_git_date = GITDATE;
 static const char* sming_git_version = SMING_VERSION;
@@ -100,6 +102,8 @@ private:
     Timer _checkRamTimer;
     uint32_t _uptimeSeconds;
     std::array<int, 17> _lastToggles;
+    CustomProfiler* globalProfiler = nullptr;
+
 };
 // forward declaration for global vars
 extern Application app;
