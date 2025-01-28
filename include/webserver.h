@@ -85,7 +85,8 @@ private:
     void onToggle(HttpRequest &request, HttpResponse &response);
     void onPresets(HttpRequest &request, HttpResponse &response);
     
-
+    void onTest(HttpRequest &request, HttpResponse &response);
+    
     void onColorGet(HttpRequest &request, HttpResponse &response);
     void onColorPost(HttpRequest &request, HttpResponse &response);
     bool onColorPostCmd(JsonObject& root, String& errorMsg);

@@ -78,8 +78,9 @@ public:
     ApplicationOTA ota;
 #endif
     std::unique_ptr<AppConfig> cfg;
-    //std::unique_ptr<AppConfig> cfg;
     std::unique_ptr<AppData> data;
+    std::unique_ptr<AppTest> test;
+    
     EventServer eventserver;
     AppMqttClient mqttclient;
     JsonProcessor jsonproc;

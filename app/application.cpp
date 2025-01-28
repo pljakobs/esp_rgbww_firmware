@@ -283,8 +283,9 @@ debug_i("Application::init - running partition %s", part.name());
 #endif
 
 	// initialize config and data
-	cfg = std::make_unique<AppConfig>(configDB_PATH);
+	cfg =  std::make_unique<AppConfig>(configDB_PATH);
 	data = std::make_unique<AppData>(dataDB_PATH);
+	test = std::make_unique<AppTest>(testDB_PATH);
 
 	// verify if there is a new version of the hardware config
 

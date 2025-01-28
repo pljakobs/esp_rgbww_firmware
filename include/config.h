@@ -38,6 +38,7 @@
 #include <JsonObjectStream.h>
 #include <app-config.h>
 #include <app-data.h>
+#include <app-test.h>
 #include <ConfigDB/Json/Format.h>
 #include <ConfigDB/Network/HttpImportResource.h>
 #include <Data/CStringArray.h>
@@ -45,6 +46,7 @@
 
 #define configDB_PATH "app-config"
 #define dataDB_PATH "app-data"
+#define testDB_PATH "app-test"
 
 /*
 void save(bool print = true) {
