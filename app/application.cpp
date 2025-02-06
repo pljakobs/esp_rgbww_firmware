@@ -392,11 +392,11 @@ debug_i("Application::init - running partition %s", part.name());
 	// ConfigDB: temp only: create an example preset
 	
 	{
-		AppData::Presets::OuterUpdater presets(*data);
+		AppData::Root::OuterUpdater appData(*data);
 
-		presets.clear();
+		appData.presets.clear();
 
-		auto preset = presets.addItem();
+		auto preset = appData.presets.addItem();
 		preset.setName("example-hsv");
 		preset.setFavorite(true);
 		auto hsvUpdater = preset.color.toHsv();
@@ -405,8 +405,11 @@ debug_i("Application::init - running partition %s", part.name());
 		hsvUpdater.setV(100);
 	}
 	{
-		AppData::Presets::OuterUpdater presets(*data);
-		auto preset = presets.addItem();
+		AppData::Root::OuterUpdater appData(*data);
+
+		appData.presets.clear();
+
+		auto preset = appData.presets.addItem();
 		preset.setName("example-raw");
 		auto rawUpdater = preset.color.toRaw();
 		rawUpdater.setR(255);
@@ -415,6 +418,7 @@ debug_i("Application::init - running partition %s", part.name());
 		rawUpdater.setWw(255);
 		rawUpdater.setCw(255);
 	}
+	/*
 	{
 		debug_i("creating example scene");
 		AppData::Scenes::OuterUpdater scenes(*data);
@@ -439,6 +443,7 @@ debug_i("Application::init - running partition %s", part.name());
 			hsvUpdater.setV(100);
 		}
 	}
+	*/
 	
 }
 void Application::initButtons()
