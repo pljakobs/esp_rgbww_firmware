@@ -113,7 +113,6 @@ void ApplicationWebserver::wsDisconnected(WebsocketConnection& socket)
 void ApplicationWebserver::wsBroadcast(String message)
 {
 	HttpConnection* connection = nullptr;
-	Serial.printf("ApplicationWebserver::wsBroadcast send %s\n", message.c_str());
 	//String remoteIP;
 	auto tcpConnections = getConnections();
 	//debug_i("=== Websocket Broadcast === -> %s", message.c_str());

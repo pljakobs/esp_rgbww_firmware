@@ -17,15 +17,18 @@ public:
 
     size_t write(const uint8_t* buffer, size_t size) override
     {
-        if (msg.length()>0)
-        {
-            msg=msg+"\n";
-            wsBroadcast( msg);
-            msg="";
+        if(system_get_free_heap_size()>15000){ // do not overload memory, rather lose messages
+            if (msg.length()>0)
+            {
+                msg=msg+"\n";
+                wsBroadcast( msg);
+                msg="";
+            }
+            msg=String((const char*)buffer, size);
+            wsBroadcast(msg);
+            return size;
         }
-        msg=String((const char*)buffer, size);
-        wsBroadcast(msg);
-        return size;
+        return 0;
     }
 
     int available() override
@@ -57,7 +60,6 @@ public:
 	    JsonObject root = msg.getParams();
 	    root[F("message")] = message;
 	    String jsonStr = Json::serialize(msg.getRoot());
-        Serial.printf("wsBroadcast log %s\n", jsonStr.c_str());
         app.webserver.wsBroadcast(jsonStr);
     }
 private:

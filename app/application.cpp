@@ -194,7 +194,8 @@ void Application::uptimeCounter()
 void Application::checkRam()
 {
 	debug_i("Free heap: %d", system_get_free_heap_size());
-	
+	// String _client_status = WifiStation.getConnectionStatusName();
+	// debug_i("wifi conection Status: %s", _client_status.c_str());
 }
 
 
@@ -712,20 +713,9 @@ int Application::getRomSlot()
 */
 void Application::wsBroadcast(String message)
 {
-    size_t length = message.length();
-    if(length > MAX_LOG_LINE_SIZE) length = MAX_LOG_LINE_SIZE;
-
-    char* buffer = new char[length + 1]; // +1 for null terminator
-    message.toCharArray(buffer, length + 1);
-
-    app.webserver.wsSendBroadcast(buffer, length);
-
-    delete[] buffer;
+	app.webserver.wsBroadcast(message);
 }
 
-/*
-*	build a jsonrpc message from a command and a parameters string
-*/
 void Application::wsBroadcast(String cmd, String message)
 {
 	JsonRpcMessage msg(cmd);
