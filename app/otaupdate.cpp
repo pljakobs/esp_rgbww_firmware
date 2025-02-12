@@ -389,7 +389,7 @@ void ApplicationOTA::checkAtBoot()
     * then change the file systems if necessary.
     */
 	int rom = app.getRomSlot();
-	Serial.systemDebugOutput(true);
+	//Serial.systemDebugOutput(true);
 	debug_i("ApplicationOTA::checkAtBoot status: %i", status);
 	debug_i("after reboot, checking partition layout");
 	debug_i("current active rom is: %i", rom);
