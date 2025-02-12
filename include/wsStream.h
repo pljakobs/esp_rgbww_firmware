@@ -17,8 +17,6 @@ public:
 
     size_t write(const uint8_t* buffer, size_t size) override
     {
-        Serial.printf("wsBroadcast log \n");
-
         if (msg.length()>0)
         {
             msg=msg+"\n";
@@ -59,8 +57,8 @@ public:
 	    JsonObject root = msg.getParams();
 	    root[F("message")] = message;
 	    String jsonStr = Json::serialize(msg.getRoot());
-
-        app.webserver.wsBroadcast(message);
+        Serial.printf("wsBroadcast log %s\n", jsonStr.c_str());
+        app.webserver.wsBroadcast(jsonStr);
     }
 private:
     String msg;

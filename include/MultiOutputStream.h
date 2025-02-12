@@ -28,7 +28,7 @@ public:
     {
         for (auto stream : streams)
         {
-            stream->write("*"); // For verification
+            // stream->write("*"); // For verification
             stream->write(buffer, size);
         }
         return size;

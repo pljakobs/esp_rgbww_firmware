@@ -78,7 +78,7 @@ static bool __noinline parseOsMessage(OsMessage& msg)
  */
 static void onOsMessage(OsMessage& msg)
 {
-	// Note: We do the check in a separate function to avoid messing up the stack pointer
+	// Note: We do the check in a separate functionunsigned int  to avoid messing up the stack pointer
 	if(parseOsMessage(msg)) {
 		if(gdb_present() == eGDB_Attached) {
 			gdb_do_break();
@@ -131,10 +131,9 @@ Application app;
 MultiOutputStream debugStream;
 wsStream wsLogStream;
 
-unsigned int debugStreamOutputCallback(const char* buffer, unsigned int length)
+size_t debugStreamOutputCallback(const char* buffer, unsigned int length)
 {
-	Serial.printf("writing %s to log stream", String(buffer).c_str());
-    return debugStream.write((const uint8_t*)buffer, length);
+	return debugStream.write((const uint8_t*)buffer, length);
 }
 
 // Sming Framework INIT method - called during boot
@@ -143,9 +142,12 @@ void init()
 	Serial.begin(SERIAL_BAUD_RATE); // 115200 by default
 	//Serial.systemDebugOutput(true); // Debug output to serial
 	//System.setCpuFrequencye(CF_160MHz);
-	m_setPuts(&debugStreamOutputCallback);
+	Serial.printf("redirecting log output to multistream");
+	
+	auto oldCallback = m_setPuts(&debugStreamOutputCallback);
+
 	debugStream.addStream(&Serial);
-	//debugStream.addStream(&wsLogStream);
+	debugStream.addStream(&wsLogStream);
 
 
 #ifdef ARCH_ESP8266
