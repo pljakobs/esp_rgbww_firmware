@@ -194,8 +194,8 @@ void Application::uptimeCounter()
 void Application::checkRam()
 {
 	debug_i("Free heap: %d", system_get_free_heap_size());
-	String _client_status = WifiStation.getConnectionStatusName();
-	debug_i("wifi conection Status: %s", _client_status.c_str());
+	// String _client_status = WifiStation.getConnectionStatusName();
+	// debug_i("wifi conection Status: %s", _client_status.c_str());
 }
 
 void Application::init()
@@ -725,7 +725,6 @@ int Application::getRomSlot()
 
 void Application::wsBroadcast(String message)
 {
-	debug_i("Application::wsBroadcast");
 	app.webserver.wsBroadcast(message);
 }
 
