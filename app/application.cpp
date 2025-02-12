@@ -32,6 +32,8 @@
 #include <VersionListener.h>
 #include <FlashString/Stream.hpp>
 #include <fileMap.h>
+#include <MultiOutputStream.h>
+#include <wsStream.h>
 
 
 #if ARCH_ESP8266
@@ -126,12 +128,25 @@ extern "C" void __wrap_user_pre_init(void)
 
 Application app;
 
+MultiOutputStream debugStream;
+wsStream wsLogStream;
+
+unsigned int debugStreamOutputCallback(const char* buffer, unsigned int length)
+{
+	Serial.printf("writing %s to log stream", String(buffer).c_str());
+    return debugStream.write((const uint8_t*)buffer, length);
+}
+
 // Sming Framework INIT method - called during boot
 void init()
 {
 	Serial.begin(SERIAL_BAUD_RATE); // 115200 by default
-	Serial.systemDebugOutput(true); // Debug output to serial
+	//Serial.systemDebugOutput(true); // Debug output to serial
 	//System.setCpuFrequencye(CF_160MHz);
+	m_setPuts(&debugStreamOutputCallback);
+	debugStream.addStream(&Serial);
+	//debugStream.addStream(&wsLogStream);
+
 
 #ifdef ARCH_ESP8266
 	osMessageInterceptor.begin(onOsMessage);
