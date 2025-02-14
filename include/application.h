@@ -100,6 +100,8 @@ private:
     Timer _checkRamTimer;
     uint32_t _uptimeMinutes;
     std::array<int, 17> _lastToggles;
+
+    int jsonrpc_id = 0;
 };
 // forward declaration for global vars
 extern Application app;

@@ -88,7 +88,12 @@ void ApplicationWebserver::init()
 void ApplicationWebserver::wsConnected(WebsocketConnection& socket)
 {
 	debug_i("===>wsConnected");
-	webSockets.addElement(&socket);
+	if (webSockets.size() <=2) {
+		webSockets.addElement(&socket);
+	}else{
+		debug_i("===>wsConnected - too many websockets");
+		socket.close();
+	}
 	debug_i("===>nr of websockets: %i", webSockets.size());
 }
 
@@ -99,25 +104,16 @@ void ApplicationWebserver::wsDisconnected(WebsocketConnection& socket)
 	debug_i("===>nr of websockets: %i", webSockets.size());
 }
 
-void ApplicationWebserver::wsBroadcast(String message)
+/*
+*	send a websocket broadcast
+*/
+void ICACHE_FLASH_ATTR ApplicationWebserver::wsSendBroadcast(const char* buffer, size_t length)
 {
-	HttpConnection* connection = nullptr;
-	//String remoteIP;
-	auto tcpConnections = getConnections();
-	//debug_i("=== Websocket Broadcast === -> %s", message.c_str());
-	//debug_i("===>nr of tcpConnections: %i", tcpConnections.size());
-	//for(auto& connection : tcpConnections) { // Iterate over all active sockets
-	//	remoteIP = String(connection->getRemoteIp().toString());
-		//debug_i("====> remote: %s", remoteIP.c_str());
-	//}
-	//debug_i("=========================================");
-	//debug_i("===>nr of websockets: %i", webSockets.size());
-	for(auto& socket : webSockets) { // Iterate over all active sockets
-		connection = socket->getConnection();
-		//remoteIP = String(connection->getRemoteIp().toString());
-		//debug_i("====> sending to socket %s", remoteIP.c_str());
-		socket->send(message, WS_FRAME_TEXT); // Send the message to each socket
-	}
+    if (!webSockets.isEmpty()) {
+        WebsocketConnection* socket = webSockets[0];
+        // Use firstSocket as needed
+        socket->broadcast(buffer, length, WS_FRAME_TEXT);
+    }
 }
 
 void ApplicationWebserver::start()

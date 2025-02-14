@@ -23,11 +23,13 @@ public:
         }
         return 1;
     }
-
-    size_t write(const uint8_t* buffer, size_t size) override
+    
+    size_t ICACHE_FLASH_ATTR write(const uint8_t* buffer, size_t size) override
     {
+        uint8_t streamId=0;
         for (auto stream : streams)
         {
+            Serial.printf("MultiOutputStream::write: stream %d:%s\n", ++streamId, buffer);
             // stream->write("*"); // For verification
             stream->write(buffer, size);
         }
