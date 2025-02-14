@@ -210,4 +210,4 @@ void EventServer::sendToClients(JsonRpcMessage& rpcMsg)
 	}
 
 	app.wsBroadcast(jsonStr);
-  }
+}

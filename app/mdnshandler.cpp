@@ -565,6 +565,13 @@ void mdnsHandler::checkForLeadership() {
     }
 }
 
+void mdnsHandler::sendWsUpdate(const String& type, JsonObject host){
+	String hostString;
+	if (serializeJsonPretty(host, hostString)) {
+		app.wsBroadcast(type,hostString);
+	}
+}
+
 void mdnsHandler::checkForLeadershipCb(void* pTimerArg) {
     mdnsHandler* pThis = static_cast<mdnsHandler*>(pTimerArg);
     pThis->checkForLeadership();
@@ -819,3 +826,7 @@ void mdnsHandler::relinquishGroupLeadership(const String& groupId) {
     debug_i("This controller is no longer leader for group: %s", groupName.c_str());
     #endif
 }
+
+}
+
+void Application::checkRam()

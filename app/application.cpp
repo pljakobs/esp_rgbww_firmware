@@ -158,6 +158,9 @@ void init()
 #ifdef ARCH_ESP32
 	esp_wifi_set_ps (WIFI_PS_NONE);
 #endif
+	//set CLR pin to input
+	pinMode(CLEAR_PIN, INPUT);
+
 	// seperated application init
 	app.init();
 

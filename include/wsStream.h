@@ -7,25 +7,25 @@ public:
     size_t write(uint8_t c) override
     {
         msg = msg+String((char)c);
-        if (c==0xa || c==0xc)
+        if (c==0x0a || c==0x0c || msg.length()>=32)
         {
-            wsBroadcast( msg);
+            wsLog( msg);
             msg="";
         }
         return 1;
     }
 
-    size_t write(const uint8_t* buffer, size_t size) override
+    size_t ICACHE_FLASH_ATTR write(const uint8_t* buffer, size_t size) override
     {
-        if(system_get_free_heap_size()>15000){ // do not overload memory, rather lose messages
+        if(system_get_free_heap_size()>18000){ // do not overload memory, rather lose messages
             if (msg.length()>0)
             {
-                msg=msg+"\n";
-                wsBroadcast( msg);
+                //msg=msg+"\n";
+                wsLog( msg);
                 msg="";
             }
             msg=String((const char*)buffer, size);
-            wsBroadcast(msg);
+            wsLog(msg);
             return size;
         }
         return 0;
@@ -51,16 +51,14 @@ public:
 
     void flush() override
     {
-
+        if (msg.length() > 0) {
+            wsLog(msg);
+            msg = "";
+        }
     }
 
-    void wsBroadcast(String message)
-    {
-        JsonRpcMessage msg(F("log"));
-	    JsonObject root = msg.getParams();
-	    root[F("message")] = message;
-	    String jsonStr = Json::serialize(msg.getRoot());
-        app.webserver.wsBroadcast(jsonStr);
+    void ICACHE_FLASH_ATTR wsLog(String message){
+		app.wsBroadcast(F("log"),message);
     }
 private:
     String msg;
