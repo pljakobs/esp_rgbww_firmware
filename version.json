@@ -1,6 +1,6 @@
 {
     "rom": {
-        "fw_version": "pj-1-702-g542a",
+        "fw_version": "pj-1-704-gafac",
         "url": "%host%/download/esp8266/develop/release/rom0.bin"
     },
     "spiffs": {
@@ -12,7 +12,7 @@
             "soc": "esp8266",
             "type": "debug",
             "branch": "develop",
-            "fw_version": "pj-1-702-g542a",
+            "fw_version": "pj-1-704-gafac",
             "files": {
                 "rom": {
                     "url": "%host%/download/esp8266/develop/debug/rom0.bin"
@@ -23,7 +23,7 @@
             "soc": "esp8266",
             "type": "release",
             "branch": "develop",
-            "fw_version": "pj-1-702-g542a",
+            "fw_version": "pj-1-704-gafac",
             "files": {
                 "rom": {
                     "url": "%host%/download/esp8266/develop/release/rom0.bin"
@@ -34,7 +34,7 @@
             "soc": "esp32",
             "type": "debug",
             "branch": "develop",
-            "fw_version": "pj-1-702-g542a",
+            "fw_version": "pj-1-704-gafac",
             "files": {
                 "rom": {
                     "url": "%host%/download/esp32/develop/debug/app.bin"
@@ -45,7 +45,7 @@
             "soc": "esp32",
             "type": "release",
             "branch": "develop",
-            "fw_version": "pj-1-702-g542a",
+            "fw_version": "pj-1-704-gafac",
             "files": {
                 "rom": {
                     "url": "%host%/download/esp32/develop/release/app.bin"
@@ -56,7 +56,7 @@
             "soc": "esp32c3",
             "type": "debug",
             "branch": "develop",
-            "fw_version": "pj-1-702-g542a",
+            "fw_version": "pj-1-704-gafac",
             "files": {
                 "rom": {
                     "url": "%host%/download/esp32c3/develop/debug/app.bin"
@@ -67,7 +67,7 @@
             "soc": "esp32c3",
             "type": "release",
             "branch": "develop",
-            "fw_version": "pj-1-702-g542a",
+            "fw_version": "pj-1-704-gafac",
             "files": {
                 "rom": {
                     "url": "%host%/download/esp32c3/develop/release/app.bin"
