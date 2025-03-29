@@ -21,7 +21,7 @@ def prime_json(file_path):
     data = {
         "rom": {
             "fw_version": "V5.0-1-develop",
-            "url": "http://lightinator.de/download/esp8266/develop/release/rom0.bin"
+            "url": "http://lightinator.de/download/develop/V5.0-1-develop/esp8266/release/rom0.bin"
         },
         "spiffs": {
             "webapp_version": "0.3.3",

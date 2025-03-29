@@ -12,10 +12,10 @@
             "soc": "esp8266",
             "type": "debug",
             "branch": "develop",
-            "fw_version": "V5.0-294-develop",
+            "fw_version": "V5.0-296-develop",
             "files": {
                 "rom": {
-                    "url": "http://lightinator.de/download/esp8266/develop/debug/rom0.bin"
+                    "url": "http://lightinator.de/download/develop/V5.0-296-develop/esp8266/debug/rom0.bin"
                 }
             }
         },
@@ -23,10 +23,10 @@
             "soc": "esp8266",
             "type": "release",
             "branch": "develop",
-            "fw_version": "V5.0-294-develop",
+            "fw_version": "V5.0-296-develop",
             "files": {
                 "rom": {
-                    "url": "http://lightinator.de/download/esp8266/develop/release/rom0.bin"
+                    "url": "http://lightinator.de/download/develop/V5.0-296-develop/esp8266/release/rom0.bin"
                 }
             }
         },
@@ -34,10 +34,10 @@
             "soc": "esp32",
             "type": "debug",
             "branch": "develop",
-            "fw_version": "V5.0-294-develop",
+            "fw_version": "V5.0-296-develop",
             "files": {
                 "rom": {
-                    "url": "http://lightinator.de/download/esp32/develop/debug/app.bin"
+                    "url": "http://lightinator.de/download/develop/V5.0-296-develop/esp32/debug/app.bin"
                 }
             }
         },
@@ -45,10 +45,10 @@
             "soc": "esp32",
             "type": "release",
             "branch": "develop",
-            "fw_version": "V5.0-294-develop",
+            "fw_version": "V5.0-296-develop",
             "files": {
                 "rom": {
-                    "url": "http://lightinator.de/download/esp32/develop/release/app.bin"
+                    "url": "http://lightinator.de/download/develop/V5.0-296-develop/esp32/release/app.bin"
                 }
             }
         },
@@ -56,10 +56,10 @@
             "soc": "esp32c3",
             "type": "debug",
             "branch": "develop",
-            "fw_version": "V5.0-294-develop",
+            "fw_version": "V5.0-296-develop",
             "files": {
                 "rom": {
-                    "url": "http://lightinator.de/download/esp32c3/develop/debug/app.bin"
+                    "url": "http://lightinator.de/download/develop/V5.0-296-develop/esp32c3/debug/app.bin"
                 }
             }
         },
@@ -67,10 +67,10 @@
             "soc": "esp32c3",
             "type": "release",
             "branch": "develop",
-            "fw_version": "V5.0-294-develop",
+            "fw_version": "V5.0-296-develop",
             "files": {
                 "rom": {
-                    "url": "http://lightinator.de/download/esp32c3/develop/release/app.bin"
+                    "url": "http://lightinator.de/download/develop/V5.0-296-develop/esp32c3/release/app.bin"
                 }
             }
         },
