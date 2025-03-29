@@ -139,6 +139,72 @@
                     "url": "http://lightinator.de/download/esp32c3/develop/release/single_image/app-merged.bin"
                 }
             }
+        },
+        {
+            "soc": "esp8266",
+            "type": "debug",
+            "branch": "testing",
+            "fw_version": "V5.0-295-testing",
+            "files": {
+                "rom": {
+                    "url": "http://lightinator.de/download/esp8266/testing/debug/rom0.bin"
+                }
+            }
+        },
+        {
+            "soc": "esp8266",
+            "type": "release",
+            "branch": "testing",
+            "fw_version": "V5.0-295-testing",
+            "files": {
+                "rom": {
+                    "url": "http://lightinator.de/download/esp8266/testing/release/rom0.bin"
+                }
+            }
+        },
+        {
+            "soc": "esp32",
+            "type": "debug",
+            "branch": "testing",
+            "fw_version": "V5.0-295-testing",
+            "files": {
+                "rom": {
+                    "url": "http://lightinator.de/download/esp32/testing/debug/app.bin"
+                }
+            }
+        },
+        {
+            "soc": "esp32",
+            "type": "release",
+            "branch": "testing",
+            "fw_version": "V5.0-295-testing",
+            "files": {
+                "rom": {
+                    "url": "http://lightinator.de/download/esp32/testing/release/app.bin"
+                }
+            }
+        },
+        {
+            "soc": "esp32c3",
+            "type": "debug",
+            "branch": "testing",
+            "fw_version": "V5.0-295-testing",
+            "files": {
+                "rom": {
+                    "url": "http://lightinator.de/download/esp32c3/testing/debug/app.bin"
+                }
+            }
+        },
+        {
+            "soc": "esp32c3",
+            "type": "release",
+            "branch": "testing",
+            "fw_version": "V5.0-295-testing",
+            "files": {
+                "rom": {
+                    "url": "http://lightinator.de/download/esp32c3/testing/release/app.bin"
+                }
+            }
         }
     ]
 }
