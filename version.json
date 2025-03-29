@@ -12,10 +12,10 @@
             "soc": "esp8266",
             "type": "debug",
             "branch": "develop",
-            "fw_version": "pj-1-719-gad87",
+            "fw_version": "V5.0-288-develop",
             "files": {
                 "rom": {
-                    "url": "%host%/download/esp8266/develop/debug/rom0.bin"
+                    "url": "http://lightinator.de/download/esp8266/develop/debug/rom0.bin"
                 }
             }
         },
@@ -23,10 +23,10 @@
             "soc": "esp8266",
             "type": "release",
             "branch": "develop",
-            "fw_version": "pj-1-719-gad87",
+            "fw_version": "V5.0-288-develop",
             "files": {
                 "rom": {
-                    "url": "%host%/download/esp8266/develop/release/rom0.bin"
+                    "url": "http://lightinator.de/download/esp8266/develop/release/rom0.bin"
                 }
             }
         },
@@ -34,10 +34,10 @@
             "soc": "esp32",
             "type": "debug",
             "branch": "develop",
-            "fw_version": "pj-1-719-gad87",
+            "fw_version": "V5.0-288-develop",
             "files": {
                 "rom": {
-                    "url": "%host%/download/esp32/develop/debug/app.bin"
+                    "url": "http://lightinator.de/download/esp32/develop/debug/app.bin"
                 }
             }
         },
@@ -45,10 +45,10 @@
             "soc": "esp32",
             "type": "release",
             "branch": "develop",
-            "fw_version": "pj-1-719-gad87",
+            "fw_version": "V5.0-288-develop",
             "files": {
                 "rom": {
-                    "url": "%host%/download/esp32/develop/release/app.bin"
+                    "url": "http://lightinator.de/download/esp32/develop/release/app.bin"
                 }
             }
         },
@@ -56,10 +56,10 @@
             "soc": "esp32c3",
             "type": "debug",
             "branch": "develop",
-            "fw_version": "pj-1-719-gad87",
+            "fw_version": "V5.0-288-develop",
             "files": {
                 "rom": {
-                    "url": "%host%/download/esp32c3/develop/debug/app.bin"
+                    "url": "http://lightinator.de/download/esp32c3/develop/debug/app.bin"
                 }
             }
         },
@@ -67,10 +67,76 @@
             "soc": "esp32c3",
             "type": "release",
             "branch": "develop",
-            "fw_version": "pj-1-719-gad87",
+            "fw_version": "V5.0-288-develop",
             "files": {
                 "rom": {
-                    "url": "%host%/download/esp32c3/develop/release/app.bin"
+                    "url": "http://lightinator.de/download/esp32c3/develop/release/app.bin"
+                }
+            }
+        },
+        {
+            "soc": "esp8266_single",
+            "type": "debug",
+            "branch": "develop",
+            "fw_version": "V5.0-288-develop",
+            "files": {
+                "rom": {
+                    "url": "http://lightinator.de/download/esp8266/develop/debug/single_image/app-merged.bin"
+                }
+            }
+        },
+        {
+            "soc": "esp8266_single",
+            "type": "release",
+            "branch": "develop",
+            "fw_version": "V5.0-288-develop",
+            "files": {
+                "rom": {
+                    "url": "http://lightinator.de/download/esp8266/develop/release/single_image/app-merged.bin"
+                }
+            }
+        },
+        {
+            "soc": "esp32_single",
+            "type": "debug",
+            "branch": "develop",
+            "fw_version": "V5.0-288-develop",
+            "files": {
+                "rom": {
+                    "url": "http://lightinator.de/download/esp32/develop/debug/single_image/app-merged.bin"
+                }
+            }
+        },
+        {
+            "soc": "esp32_single",
+            "type": "release",
+            "branch": "develop",
+            "fw_version": "V5.0-288-develop",
+            "files": {
+                "rom": {
+                    "url": "http://lightinator.de/download/esp32/develop/release/single_image/app-merged.bin"
+                }
+            }
+        },
+        {
+            "soc": "esp32c3_single",
+            "type": "debug",
+            "branch": "develop",
+            "fw_version": "V5.0-288-develop",
+            "files": {
+                "rom": {
+                    "url": "http://lightinator.de/download/esp32c3/develop/debug/single_image/app-merged.bin"
+                }
+            }
+        },
+        {
+            "soc": "esp32c3_single",
+            "type": "release",
+            "branch": "develop",
+            "fw_version": "V5.0-288-develop",
+            "files": {
+                "rom": {
+                    "url": "http://lightinator.de/download/esp32c3/develop/release/single_image/app-merged.bin"
                 }
             }
         }
