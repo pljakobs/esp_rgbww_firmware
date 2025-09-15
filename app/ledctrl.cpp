@@ -223,11 +223,15 @@ void APPLedCtrl::init()
 			config.spreadSpectrum.mode = SpreadSpectrumMode::OFF;
 		}
 
-		config.spreadSpectrum.WidthPercent = pwmconfig.spreadSpectrum.getWidth();
-		config.spreadSpectrum.Subsampling = pwmconfig.spreadSpectrum.getSubsampling();
+			config.spreadSpectrum.WidthPercent = pwmconfig.spreadSpectrum.getWidth();
+			config.spreadSpectrum.Subsampling = pwmconfig.spreadSpectrum.getSubsampling();
 
-		// ✅ Use PhaseShiftMode enum  directly
-		(pwmconfig.phaseShift.getMode()==AppConfig::ContainedHardware::ContainedPwm::PhaseShiftMode::ON)?config.phaseShift.mode=PhaseShiftMode::AUTO:config.phaseShift.mode=PhaseShiftMode::OFF;
+		auto phaseShiftMode = pwmconfig.phaseShift.getMode();
+		if (phaseShiftMode == AppConfig::ContainedHardware::ContainedPwm::PhaseShiftMode::ON) {
+			config.phaseShift.mode = PhaseShiftMode::AUTO;
+		} else if (phaseShiftMode == AppConfig::ContainedHardware::ContainedPwm::PhaseShiftMode::OFF) {
+			config.phaseShift.mode = PhaseShiftMode::OFF;
+		}
 		
 			RGBWWLed::init(pins.red, pins.green, pins.blue, pins.warmwhite, pins.coldwhite, config);
 		}
