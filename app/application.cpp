@@ -193,6 +193,7 @@ void Application::checkRam()
 	cpuPercent = cpuUsage.getUtilisation();
 	debug_i("CPU usage: %d%%", cpuPercent);
 	cpuUsage.reset();
+	WDT.alive();
 }
 
 
