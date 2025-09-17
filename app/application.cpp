@@ -158,6 +158,7 @@ void init(){
 	Serial.println(system_get_free_heap_size());
 	Serial.println("===starting cpu profiling===");
 	cpuUsage.begin(onReady);
+	WDT.alive();
 }
 
 int32_t getVersion(IDataSourceStream& input)
