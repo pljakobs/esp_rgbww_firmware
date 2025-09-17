@@ -232,7 +232,7 @@ void Application::init()
 
 	//load settings
 	_uptimetimer.initializeMs(60000, TimerDelegate(&Application::uptimeCounter, this)).start();
-	_checkRamTimer.initializeMs(10000, TimerDelegate(&Application::checkRam, this)).start();
+	_checkRamTimer.initializeMs(1000, TimerDelegate(&Application::checkRam, this)).start();
 #ifdef ARCH_ESP8266
 	// load boot information
 	uint8 bootmode, bootslot;
