@@ -191,7 +191,7 @@ void Application::checkRam()
 {
 	debug_i("Free heap: %d", system_get_free_heap_size());
 	cpuPercent = cpuUsage.getUtilisation();
-	debug_i("CPU usage: %d%%", cpuPercent);
+	debug_i("CPU usage: %d%%", cpuPercent/100);
 	WDT.alive();
 
 	cpuUsage.reset();
