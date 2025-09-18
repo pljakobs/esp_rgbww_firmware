@@ -232,7 +232,7 @@ void Application::init()
 	//start timers
 	_uptimetimer.initializeMs(UPDATE_TIMER_INTERVAL, TimerDelegate(&Application::uptimeCounter, this)).start();
 	_checkRamTimer.initializeMs(CHECKRAM_TIMER_INTERVAL, TimerDelegate(&Application::checkRam, this)).start();
-	_WDTaliveTimer.initializeMS(WDT_ALIVE_TIMER_INTERVAL, []() { WDT.alive(); }).start();
+	_WDTaliveTimer.initializeMs(WDT_ALIVE_TIMER_INTERVAL, []() { WDT.alive(); }).start();
 
 #ifdef ARCH_ESP8266
 	// load boot information
