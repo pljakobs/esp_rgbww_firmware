@@ -413,10 +413,12 @@ void AppWIFI::startAp()
 				WifiAccessPoint.config(network.ap.getSsid(), "", AUTH_OPEN);
 			}
 		} // end AppConfig network context
+		debug_i("AP configured");
 	}
 
     // Wait for AP IP to be assigned before starting DNS server
     Timer* dnsStartTimer = new Timer();
+	// wait for the Accesspoint to have an assigned ip address to start DNS
     dnsStartTimer->initializeMs(500, [this, dnsStartTimer]() {
         IpAddress apIP = WifiAccessPoint.getIP();
         if (apIP.toString() != "0.0.0.0") {

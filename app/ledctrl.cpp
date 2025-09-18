@@ -194,7 +194,7 @@ void APPLedCtrl::init()
 	} //end ConfigDB::General context
 
 	if(pins.isValid)
-		{
+	{
 		#ifdef ARCH_ESP32
 		{
 			AppConfig::Hardware::Pwm pwmconfig(*app.cfg);
@@ -203,10 +203,12 @@ void APPLedCtrl::init()
 			config.timer.resolution = (ledc_timer_bit_t)pwmconfig.timer.getResolution();
 				
 		auto speedMode = pwmconfig.timer.getSpeedMode();
+		
 		#ifdef SOC_ESP32 // a bit ugly, but LEDC_HIGH_SPEED_MODE is not defined for anything but the ESP32 so using the constant directly would throw an error at compile time
 		if(speedMode == AppConfig::ContainedHardware::ContainedPwm::TimerSpeedMode::HIGHSPEED)
 			config.timer.speed_mode = LEDC_HIGH_SPEED_MODE;
 		#endif
+		
 		if(speedMode == AppConfig::ContainedHardware::ContainedPwm::TimerSpeedMode::LOWSPEED){
 			config.timer.speed_mode = LEDC_LOW_SPEED_MODE;
 		} else{
@@ -223,24 +225,20 @@ void APPLedCtrl::init()
 			config.spreadSpectrum.mode = SpreadSpectrumMode::OFF;
 		}
 
-			config.spreadSpectrum.WidthPercent = pwmconfig.spreadSpectrum.getWidth();
-			config.spreadSpectrum.Subsampling = pwmconfig.spreadSpectrum.getSubsampling();
+		config.spreadSpectrum.WidthPercent = pwmconfig.spreadSpectrum.getWidth();
+		config.spreadSpectrum.Subsampling = pwmconfig.spreadSpectrum.getSubsampling();
 
-		auto phaseShiftMode = pwmconfig.phaseShift.getMode();
-		if (phaseShiftMode == AppConfig::ContainedHardware::ContainedPwm::PhaseShiftMode::ON) {
-			config.phaseShift.mode = PhaseShiftMode::AUTO;
-		} else if (phaseShiftMode == AppConfig::ContainedHardware::ContainedPwm::PhaseShiftMode::OFF) {
-			config.phaseShift.mode = PhaseShiftMode::OFF;
-		}
+		// ✅ Use PhaseShiftMode enum  directly
+		(pwmconfig.phaseShift.getMode()==AppConfig::ContainedHardware::ContainedPwm::PhaseShiftMode::ON)?config.phaseShift.mode=PhaseShiftMode::AUTO:config.phaseShift.mode=PhaseShiftMode::OFF;
 		
 			RGBWWLed::init(pins.red, pins.green, pins.blue, pins.warmwhite, pins.coldwhite, config);
-		}
+		} // end of AppConfig::Hardware::Pwm context
 		#else
 		RGBWWLed::init(pins.red, pins.green, pins.blue, pins.warmwhite, pins.coldwhite, PWM_FREQUENCY);
-		#endif
 		debug_i("APPLedCtrl::init - finished setting up RGBWWLed");
 		setup();
-		}
+		#endif	
+	}
 
 	HSVCT startupColor;
 	{
@@ -264,7 +262,7 @@ void APPLedCtrl::init()
 	// boot from off to startup color
 	HSVCT startupColorDark = startupColor;
 	startupColorDark.v = 0;
-	fadeHSV(startupColorDark, startupColor, 700); //fade to color in 700ms 
+	fadeHSV(startupColorDark, startupColor, 2000); //fade to color in 700ms
 }
 
 bool APPLedCtrl::isPinValid(int currentPin)

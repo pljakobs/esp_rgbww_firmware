@@ -76,7 +76,7 @@ static bool __noinline parseOsMessage(OsMessage& msg)
  * @param msg The message
  */
 static void onOsMessage(OsMessage& msg)
-{checkRam
+{
 	// Note: We do the check in a separate function to avoid messing up the stack pointer
 	if(parseOsMessage(msg)) {
 		if(gdb_present() == eGDB_Attached) {
@@ -236,7 +236,7 @@ void Application::init()
 	_uptimetimer.initializeMs(UPDATE_TIMER_INTERVAL, TimerDelegate(&Application::uptimeCounter, this)).start();
 	_checkRamTimer.initializeMs(CHECKRAM_TIMER_INTERVAL, TimerDelegate(&Application::checkRam, this)).start();
 	_WDTaliveTimer.initializeMs(WDT_ALIVE_TIMER_INTERVAL, TimerDelegate(&Application::WDTAliveCallback, this)	).start();
-	
+
 #ifdef ARCH_ESP8266
 	// load boot information
 	uint8 bootmode, bootslot;
