@@ -22,7 +22,10 @@
 #include <otaupdate.h>
 #include <controllers.h>
 
-
+#define UPDATE_TIMER_INTERVAL 60000
+#define CHECKRAM_TIMER_INTERVAL 10000
+#define WDT_ALIVE_TIMER_INTERVAL 2000
+	
 
 static const char* fw_git_version = GITVERSION;
 static const char* fw_git_date = GITDATE;

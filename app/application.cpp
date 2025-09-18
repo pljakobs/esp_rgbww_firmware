@@ -158,7 +158,6 @@ void init(){
 	Serial.println(system_get_free_heap_size());
 	Serial.println("===starting cpu profiling===");
 	cpuUsage.begin(onReady);
-	WDT.alive();
 }
 
 int32_t getVersion(IDataSourceStream& input)
@@ -192,7 +191,6 @@ void Application::checkRam()
 	debug_i("Free heap: %d", system_get_free_heap_size());
 	cpuPercent = cpuUsage.getUtilisation();
 	debug_i("CPU usage: %d%%", cpuPercent/100);
-	WDT.alive();
 
 	cpuUsage.reset();
 }
@@ -230,9 +228,12 @@ void Application::init()
 
 #endif
 
-	//load settings
-	_uptimetimer.initializeMs(60000, TimerDelegate(&Application::uptimeCounter, this)).start();
-	_checkRamTimer.initializeMs(1000, TimerDelegate(&Application::checkRam, this)).start();
+
+	//start timers
+	_uptimetimer.initializeMs(UPDATE_TIMER_INTERVAL, TimerDelegate(&Application::uptimeCounter, this)).start();
+	_checkRamTimer.initializeMs(CHECKRAM_TIMER_INTERVAL, TimerDelegate(&Application::checkRam, this)).start();
+	_WDTaliveTimer.initializeMS(WDT_ALIVE_TIMER_INTERVAL, []() { WDT.alive(); }).start();
+
 #ifdef ARCH_ESP8266
 	// load boot information
 	uint8 bootmode, bootslot;
