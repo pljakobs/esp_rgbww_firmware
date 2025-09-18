@@ -62,6 +62,8 @@ public:
     inline bool isFirstRun() { return _first_run; };
 
     void checkRam();
+    void WDTAliveCallback();
+    
 #ifdef ARCH_ESP8266
     inline bool isTempBoot() { return _bootmode == MODE_TEMP_ROM; };
 #else
