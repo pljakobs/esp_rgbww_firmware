@@ -3,6 +3,17 @@
   "type": "object",
   "store":true,
   "properties": {
+    "sync-lock":{
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "integer"
+        }
+      }
+    },
     "last-color":{
       "$ref":"defs/$defs/hsvct"
     },
