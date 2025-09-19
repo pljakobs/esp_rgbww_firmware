@@ -7,10 +7,12 @@
       "type": "object",
       "properties": {
         "id": {
-          "type": "string"
+          "type": "string",
+          "default":""
         },
         "ts": {
-          "type": "integer"
+          "type": "integer",
+          "default":0
         }
       }
     },
