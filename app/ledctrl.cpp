@@ -201,6 +201,8 @@ void APPLedCtrl::init()
 			Esp32HwPwmConfig config;
 			config.timer.frequency = pwmconfig.timer.getFrequency();
 			config.timer.resolution = (ledc_timer_bit_t)pwmconfig.timer.getResolution();
+
+
 				
 		auto speedMode = pwmconfig.timer.getSpeedMode();
 		
@@ -230,6 +232,8 @@ void APPLedCtrl::init()
 
 		// ✅ Use PhaseShiftMode enum  directly
 		(pwmconfig.phaseShift.getMode()==AppConfig::ContainedHardware::ContainedPwm::PhaseShiftMode::ON)?config.phaseShift.mode=PhaseShiftMode::AUTO:config.phaseShift.mode=PhaseShiftMode::OFF;
+
+
 		
 			RGBWWLed::init(pins.red, pins.green, pins.blue, pins.warmwhite, pins.coldwhite, config);
 		} // end of AppConfig::Hardware::Pwm context
