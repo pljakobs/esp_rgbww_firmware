@@ -195,11 +195,6 @@ void Application::checkRam()
 	cpuUsage.reset();
 }
 
-void Application::WDTAliveCallback()
-{
-	WDT.alive();
-}
-
 void Application::init()
 {
 	debug_i("ESP RGBWW Controller Version %s\r\n", fw_git_version);
@@ -235,7 +230,6 @@ void Application::init()
 	//start timers
 	_uptimetimer.initializeMs(UPDATE_TIMER_INTERVAL, TimerDelegate(&Application::uptimeCounter, this)).start();
 	_checkRamTimer.initializeMs(CHECKRAM_TIMER_INTERVAL, TimerDelegate(&Application::checkRam, this)).start();
-	_WDTaliveTimer.initializeMs(WDT_ALIVE_TIMER_INTERVAL, TimerDelegate(&Application::WDTAliveCallback, this)	).start();
 
 #ifdef ARCH_ESP8266
 	// load boot information

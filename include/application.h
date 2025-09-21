@@ -24,8 +24,6 @@
 
 #define UPDATE_TIMER_INTERVAL 60000
 #define CHECKRAM_TIMER_INTERVAL 10000
-#define WDT_ALIVE_TIMER_INTERVAL 2000
-	
 
 static const char* fw_git_version = GITVERSION;
 static const char* fw_git_date = GITDATE;
@@ -62,7 +60,6 @@ public:
     inline bool isFirstRun() { return _first_run; };
 
     void checkRam();
-    void WDTAliveCallback();
     
 #ifdef ARCH_ESP8266
     inline bool isTempBoot() { return _bootmode == MODE_TEMP_ROM; };
@@ -125,7 +122,6 @@ private:
 
     Timer _uptimetimer;
     Timer _checkRamTimer;
-    Timer _WDTaliveTimer;
     uint32_t _uptimeMinutes;
     std::array<int, 17> _lastToggles;
 
