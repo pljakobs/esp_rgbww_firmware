@@ -487,13 +487,15 @@ void APPLedCtrl::colorSave()
 	AppData::Root data(*app.data);
 	{
 		auto update = data.update();
-		auto current = getCurrentColor();
-		debug_i("APPLedCtrl::colorSave - saving color H: %i | S: %i | V: %i | CT: %i", current.h, current.s,
-				current.v, current.ct);
-		update.lastColor.setH(current.h);
-		update.lastColor.setS(current.s);
-		update.lastColor.setV(current.v);
-		update.lastColor.setCt(current.ct);
+		float h, s, v;
+		int ct;
+		HSVCT c = app.rgbwwctrl.getCurrentColor();
+		c.asRadian(h, s, v, ct);
+		debug_i("APPLedCtrl::colorSave - saving color H: %f | S: %f | V: %f | CT: %f", h, s, v, ct);
+		update.lastColor.setH(h);
+		update.lastColor.setS(s);
+		update.lastColor.setV(v);
+		update.lastColor.setCt(ct);
 	}
 }
 
