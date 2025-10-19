@@ -1,3 +1,4 @@
+
 #include <RGBWWCtrl.h>
 
 #define MIN_HEAP_FREE 8192
@@ -700,4 +701,46 @@ void JsonProcessor::addChannelStatesToCmd(JsonObject root, const RGBWWLed::Chann
 		break;
 	}
 	}
+}
+bool JsonProcessor::onSetOn(JsonObject root, String& msg, bool relay) {
+	RequestParameters params;
+	parseRequestParams(root, params);
+
+	app.rgbwwctrl.setOn(
+		params.channels,
+		params.direction,
+		params.ramp,
+		params.queue,
+		params.requeue,
+		params.name
+	);
+	// Optionally relay or set msg
+	return true;
+}
+
+bool JsonProcessor::onSetOff(JsonObject root, String& msg, bool relay) {
+	RequestParameters params;
+	parseRequestParams(root, params);
+
+	// If no color specified and mode is HSV, use current HSV but set v=0
+	bool hasColor = params.mode == RequestParameters::Mode::Hsv &&
+		(params.hsv.h.hasValue() || params.hsv.s.hasValue() || params.hsv.v.hasValue() || params.hsv.ct.hasValue());
+
+	if (!hasColor && app.rgbwwctrl.getMode() == RGBWWLed::ColorMode::Hsv) {
+		HSVCT current = app.rgbwwctrl.getCurrentColor();
+		params.hsv = current;
+		params.mode = RequestParameters::Mode::Hsv;
+		params.hsv.v = 0;
+	}
+
+	app.rgbwwctrl.setOff(
+		params.channels,
+		params.direction,
+		params.ramp,
+		params.queue,
+		params.requeue,
+		params.name
+	);
+	// Optionally relay or set msg
+	return true;
 }
