@@ -47,13 +47,8 @@ public:
     void init();
     inline bool isRunning() { return _running; };
 
-<<<<<<< HEAD
     void wsSendBroadcast(const char* buffer, size_t length);
 
-=======
-    void wsSendBroadcast(const char* buffer, size_t size);
-    
->>>>>>> a3661078e34fee6c86b5e2c9f78e2b6f51f673b9
     String getApiCodeMsg(API_CODES code);
 
 private:
