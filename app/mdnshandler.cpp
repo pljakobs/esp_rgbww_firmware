@@ -507,13 +507,6 @@ int mdnsHandler::pingCallback(HttpConnection& connection, bool successful)
     return 0;
 }
 */
-void mdnsHandler::sendWsUpdate(const String& type, JsonObject host) {
-    String hostString;
-    
-    if (serializeJsonPretty(host, hostString)) {
-        app.wsBroadcast(type, hostString);
-    }
-}
 
 void mdnsHandler::checkForLeadership() {
     if (_leaderDetected) {
@@ -826,7 +819,3 @@ void mdnsHandler::relinquishGroupLeadership(const String& groupId) {
     debug_i("This controller is no longer leader for group: %s", groupName.c_str());
     #endif
 }
-
-}
-
-void Application::checkRam()
