@@ -40,6 +40,7 @@ private:
     const unsigned long _minEventInterval = 500; // 500ms = 2 per second max
 	
 	ChannelOutput _lastRaw;
+	const HSVCT* _lastpHsv = nullptr;
 	// websocket interface
     ApplicationWebserver* webServer;
 	};

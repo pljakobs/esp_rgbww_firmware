@@ -1,3 +1,5 @@
+#include <ArduinoJson.h>
+
 /**
  * @file
  * @author  Patrick Jahns http://github.com/patrickjahns
@@ -65,13 +67,9 @@ void ApplicationWebserver::init()
 	paths.set(F("/hosts"), HttpPathDelegate(&ApplicationWebserver::onHosts, this));
 	paths.set(F("/data"), HttpPathDelegate(&ApplicationWebserver::onData, this));
 
-	// redirectors for initial configuration
-	paths.set(F("/canonical.html"), HttpPathDelegate(&ApplicationWebserver::onIndex, this)); 
-	paths.set(F("/generate_204"), HttpPathDelegate(&ApplicationWebserver::onIndex, this)); //android
-	paths.set(F("/static/hotspot.txt"), HttpPathDelegate(&ApplicationWebserver::onIndex, this));
-	paths.set(F("/connecttest.txt"), HttpPathDelegate(&ApplicationWebserver::onIndex, this)); //Windows
-	paths.set(F("/hotspot-detect.html"), HttpPathDelegate(&ApplicationWebserver::onIndex, this)); //iOS/macOS
-	paths.set(F("/nmcheck.gnome.org"), HttpPathDelegate(&ApplicationWebserver::onIndex, this)); //Linux (NetworkManager)
+	// basic settings
+	paths.set(F("/on"), HttpPathDelegate(&ApplicationWebserver::onSetOn, this));
+	paths.set(F("/off"), HttpPathDelegate(&ApplicationWebserver::onSetOff, this));
 
 	// animation controls
 	paths.set(F("/stop"), HttpPathDelegate(&ApplicationWebserver::onStop, this));
@@ -80,6 +78,14 @@ void ApplicationWebserver::init()
 	paths.set(F("/continue"), HttpPathDelegate(&ApplicationWebserver::onContinue, this));
 	paths.set(F("/blink"), HttpPathDelegate(&ApplicationWebserver::onBlink, this));
 	paths.set(F("/toggle"), HttpPathDelegate(&ApplicationWebserver::onToggle, this));
+
+	// redirectors for initial configuration
+	paths.set(F("/canonical.html"), HttpPathDelegate(&ApplicationWebserver::onIndex, this)); 
+	paths.set(F("/generate_204"), HttpPathDelegate(&ApplicationWebserver::onIndex, this)); //android
+	paths.set(F("/static/hotspot.txt"), HttpPathDelegate(&ApplicationWebserver::onIndex, this));
+	paths.set(F("/connecttest.txt"), HttpPathDelegate(&ApplicationWebserver::onIndex, this)); //Windows
+	paths.set(F("/hotspot-detect.html"), HttpPathDelegate(&ApplicationWebserver::onIndex, this)); //iOS/macOS
+	paths.set(F("/nmcheck.gnome.org"), HttpPathDelegate(&ApplicationWebserver::onIndex, this)); //Linux (NetworkManager)
 
 	// websocket api
 	wsResource = new WebsocketResource();
@@ -1296,6 +1302,52 @@ void ApplicationWebserver::onData(HttpRequest& request, HttpResponse& response){
 	}
 
 	return;
+}
+void ApplicationWebserver::onSetOn(HttpRequest &request, HttpResponse &response) {
+	if(request.method == HTTP_OPTIONS) {
+		// probably a CORS request
+		setCorsHeaders(response);
+		sendApiCode(response, API_CODES::API_SUCCESS, "");
+		debug_i("HTTP_OPTIONS Request, sent API_SUCCESS");
+		return;
+	}
+
+	String body = request.getBody();
+	StaticJsonDocument<512> doc;
+	DeserializationError err = deserializeJson(doc, body);
+	if (err) {
+		sendApiCode(response, API_BAD_REQUEST, "Invalid JSON");
+		return;
+	}
+	String msg;
+		if (app.jsonproc.onSetOn(doc.as<JsonObject>(), msg, true)) {
+		sendApiCode(response, API_SUCCESS, "SetOn OK");
+	} else {
+		sendApiCode(response, API_BAD_REQUEST, msg);
+	}
+}
+
+void ApplicationWebserver::onSetOff(HttpRequest &request, HttpResponse &response) {
+	if(request.method == HTTP_OPTIONS) {
+		// probably a CORS request
+		setCorsHeaders(response);
+		sendApiCode(response, API_CODES::API_SUCCESS, "");
+		debug_i("HTTP_OPTIONS Request, sent API_SUCCESS");
+		return;
+	}
+	String body = request.getBody();
+	StaticJsonDocument<512> doc;
+	DeserializationError err = deserializeJson(doc, body);
+	if (err) {
+		sendApiCode(response, API_BAD_REQUEST, "Invalid JSON");
+		return;
+	}
+	String msg;
+		if (app.jsonproc.onSetOff(doc.as<JsonObject>(), msg, true)) {
+		sendApiCode(response, API_SUCCESS, "SetOff OK");
+	} else {
+		sendApiCode(response, API_BAD_REQUEST, msg);
+	}
 }
 
 void ApplicationWebserver::setCorsHeaders(HttpResponse& response)

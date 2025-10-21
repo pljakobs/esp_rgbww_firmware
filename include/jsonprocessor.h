@@ -12,36 +12,9 @@
  * pausing, continuing, blinking, toggling, and executing direct commands. It also supports
  * JSON-RPC commands.
  */
+
 class JsonProcessor {
 public:
-    bool onColor(const String& json, String& msg, bool relay = true);
-    bool onColor(JsonObject root, String& msg, bool relay = true);
-
-    bool onStop(const String& json, String& msg, bool relay = true);
-    bool onStop(JsonObject root, String& msg, bool relay = true);
-
-    bool onSkip(const String& json, String& msg, bool relay = true);
-    bool onSkip(JsonObject root, String& msg, bool relay = true);
-
-    bool onPause(const String& json, String& msg, bool relay = true);
-    bool onPause(JsonObject json, String& msg, bool relay = true);
-
-    bool onContinue(const String& json, String& msg, bool relay = true);
-    bool onContinue(JsonObject root, String& msg, bool relay = true);
-
-    bool onBlink(const String& json, String& msg, bool relay = true);
-    bool onBlink(JsonObject root, String& msg, bool relay = true);
-
-    bool onToggle(const String& json, String& msg, bool relay = true);
-    bool onToggle(JsonObject root, String& msg, bool relay = true);
-
-    bool onDirect(const String& json, String& msg, bool relay);
-    bool onDirect(JsonObject root, String& msg, bool relay);
-
-    bool onJsonRpc(const String& json);
-
-private:
-
     struct RequestParameters {
         String target;
 
@@ -76,6 +49,36 @@ private:
 
         int checkParams(String& errorMsg) const;
     };
+
+    bool onColor(const String& json, String& msg, bool relay = true);
+    bool onColor(JsonObject root, String& msg, bool relay = true);
+
+    bool onStop(const String& json, String& msg, bool relay = true);
+    bool onStop(JsonObject root, String& msg, bool relay = true);
+
+    bool onSkip(const String& json, String& msg, bool relay = true);
+    bool onSkip(JsonObject root, String& msg, bool relay = true);
+
+    bool onPause(const String& json, String& msg, bool relay = true);
+    bool onPause(JsonObject json, String& msg, bool relay = true);
+
+    bool onContinue(const String& json, String& msg, bool relay = true);
+    bool onContinue(JsonObject root, String& msg, bool relay = true);
+
+    bool onBlink(const String& json, String& msg, bool relay = true);
+    bool onBlink(JsonObject root, String& msg, bool relay = true);
+
+    // SetOn/SetOff API
+    bool onSetOn(JsonObject root, String& msg, bool relay = true);
+    bool onSetOff(JsonObject root, String& msg, bool relay = true);
+
+    bool onToggle(const String& json, String& msg, bool relay = true);
+    bool onToggle(JsonObject root, String& msg, bool relay = true);
+
+    bool onDirect(const String& json, String& msg, bool relay);
+    bool onDirect(JsonObject root, String& msg, bool relay);
+
+    bool onJsonRpc(const String& json);
 
     void parseRequestParams(JsonObject root, RequestParameters& params);
     void addChannelStatesToCmd(JsonObject root, const RGBWWLed::ChannelList& channels);

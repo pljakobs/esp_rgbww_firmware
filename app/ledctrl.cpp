@@ -1,3 +1,4 @@
+
 /**
  * @file
  * @author  Patrick Jahns http://github.com/patrickjahns
@@ -33,53 +34,6 @@ APPLedCtrl::~APPLedCtrl()
 	_stepSync = nullptr;
 }
 
-/**
- * @struct PinConfig
- * @brief Structure representing the pin configuration for controlling LEDs.
- * 
- * The PinConfig structure holds the pin numbers for controlling different color channels of LEDs.
- * It is used by the APPLedCtrl class to parse and store the pin configuration.
- * 
- * The structure has the following members:
- * - red: Pin number for the red color channel.
- * - green: Pin number for the green color channel.
- * - blue: Pin number for the blue color channel.
- * - warmwhite: Pin number for the warm white color channel.
- * - coldwhite: Pin number for the cold white color channel.
- */
-PinConfig APPLedCtrl::parsePinConfigString(const String& pinStr)
-{
-	Vector<int> pins;
-	bool isValid=true;
-	{
-		String _pinStr = pinStr;
-
-		splitString(_pinStr, ',', pins);
-	}
-	
-	// sanity check
-	for(int i = 0; i < 5; ++i) {
-		if(pins[i] == 0||!isPinValid(pins[i])) {
-			isValid = false;
-		}
-	}
-
-	if(pins.size() != 5)
-		isValid = false;
-
-	if(!isValid) {
-		debug_e("APPLedCtrl::parsePinConfigString - Error in pin configuration - Using default pin values");
-		return PinConfig();
-	}
-
-	PinConfig cfg;
-	cfg.red = pins[0];
-	cfg.green = pins[1];
-	cfg.blue = pins[2];
-	cfg.warmwhite = pins[3];
-	cfg.coldwhite = pins[4];
-	return cfg;
-}
 
 /**
  * @brief Initializes the APPLedCtrl class.
@@ -115,83 +69,63 @@ void APPLedCtrl::init()
 	PinConfig pins;
 	pins.isValid=true;
 	String SoC=SOC;
-		
+	String PinConfigName;
+	
 	{
-		debug_i("APPLedCtrl::init - reading pin config");
+		debug_i("APPLedCtrl::init - read PinConfig");
 		AppConfig::General general(*app.cfg);
-		if(general.channels.getItemCount() != 0) {
-			// prefer the channels config
-			debug_i("cannels array configured");
-			for(auto channel : general.channels) {
-				int pin=channel.getPin();
-				if (isPinValid(pin)){
-					if(channel.getName() == "red") {
-						pins.red = channel.getPin();
-					} else if(channel.getName() == "green") {
-						pins.green = channel.getPin();
-					} else if(channel.getName() == "blue") {
-						pins.blue = channel.getPin();
-					} else if(channel.getName() == "warmwhite") {
-						pins.warmwhite = channel.getPin();
-					} else if(channel.getName() == "coldwhite") {
-						pins.coldwhite = channel.getPin();
+		AppConfig::Hardware hardware(*app.cfg);
+	
+		PinConfigName=general.getCurrentPinConfigName();
+		if(hardware.pinconfigs.getItemCount()>0){
+			bool found=false;
+			for(auto pinconfig : hardware.pinconfigs){
+				if(pinconfig.getName()==PinConfigName && pinconfig.getSoc()==SoC){
+					debug_i("APPLedCtrl::init - found pin config %s", PinConfigName.c_str());
+					found=true;
+					for (auto channel : pinconfig.channels) {
+						int pin=channel.getPin();
+						if (isPinValid(pin)){
+							if(channel.getName() == "red") {
+								pins.red = channel.getPin();
+							} else if(channel.getName() == "green") {
+								pins.green = channel.getPin();
+							} else if(channel.getName() == "blue") {
+								pins.blue = channel.getPin();
+							} else if(channel.getName() == "warmwhite") {
+								pins.warmwhite = channel.getPin();
+							} else if(channel.getName() == "coldwhite") {
+								pins.coldwhite = channel.getPin();
+							}
+						}else{
+							debug_e("APPLedCtrl::init - invalid pin %i for SoC %s", pin, SOC);
+							pins.isValid=false;
+							if(auto generalUpdate = general.update()) {
+								generalUpdate.setCurrentPinConfigName("unconfigured");
+							} // end AppConfig::General::update context
+						}
 					}
-				}else{
-					debug_e("APPLedCtrl::init - invalid pin %i for SoC %s", pin, SOC);
-					pins.isValid=false;
-					if(auto generalUpdate = general.update()) {
-						generalUpdate.setCurrentPinConfigName("unconfigured");
-					} // end AppConfig::General::update context
+					if(!pins.isValid){
+						debug_e("APPLedCtrl::init - pin config %s is invalid", PinConfigName.c_str());
+					}
+					break;
 				}
 			}
-		}  
-		
-		else {
-			if(SoC=="esp8266") { // compatibility with old config, won't apply to esp32 systems
-				//fall back on the old pin config string if necessary
-				debug_i("no channels array configured");
-				pins = APPLedCtrl::parsePinConfigString(general.getPinConfig());
-				//populate the pin array for next time
-				if(auto generalUpdate = general.update()) {
-					{
-						auto pin = generalUpdate.channels.addItem();
-						pin.setName("red");
-						pin.setPin(pins.red);
-					}
-					{
-						auto pin = generalUpdate.channels.addItem();
-						pin.setName("green");
-						pin.setPin(pins.green);
-					}
-					{
-						auto pin = generalUpdate.channels.addItem();
-						pin.setName("blue");
-						pin.setPin(pins.blue);
-					}
-					{
-						auto pin = generalUpdate.channels.addItem();
-						pin.setName("warmwhite");
-						pin.setPin(pins.warmwhite);
-					}
-					{
-						auto pin = generalUpdate.channels.addItem();
-						pin.setName("coldwhite");
-						pin.setPin(pins.coldwhite);
-					}
-				} // end AppConfig::General::update context
-				else {
-					debug_e("APPLedCtrl::init - failed to update pin config");
-				}
-			} else {
-				debug_e("APPLedCtrl::init - no channels array configured and no pin config string available");
+			if(!found){
+				debug_e("APPLedCtrl::init - pin config %s not found", PinConfigName.c_str());
 				pins.isValid=false;
 			}
+		} else {
+			debug_e("APPLedCtrl::init - no pin configs defined");
+			pins.isValid=false;
 		}
+	}
+
+	
 		
 	debug_i(
-		"APPLedCtrl::init - initializing RGBWWLed\n   red: %i | green: %i | blue: %i | warmwhite: %i | coldwhite: %i| clear: %i, valid: [%s]",
-		pins.red, pins.green, pins.blue, pins.warmwhite, pins.coldwhite, general.getClearPin(), pins.isValid?"true":"false");
-	} //end ConfigDB::General context
+		"APPLedCtrl::init - initializing RGBWWLed\n   red: %i | green: %i | blue: %i | warmwhite: %i | coldwhite: %i, valid: [%s]",
+		pins.red, pins.green, pins.blue, pins.warmwhite, pins.coldwhite, pins.isValid?"true":"false");
 
 	if(pins.isValid)
 		{
@@ -441,7 +375,7 @@ void APPLedCtrl::updateLed()
 	}
 
 	checkStableColorState();
-
+	
 	if(transFinInterval >= 0) {
 		if(transFinInterval == 0 || ((stepLenMs * _stepCounter) % transFinInterval) < stepLenMs) {
 			publishFinishedStepAnimations();
@@ -554,11 +488,15 @@ void APPLedCtrl::colorSave()
 	AppData::Root data(*app.data);
 	{
 		auto update = data.update();
-		auto current = getCurrentColor();
-		update.lastColor.setH(current.h);
-		update.lastColor.setS(current.s);
-		update.lastColor.setV(current.v);
-		update.lastColor.setCt(current.ct);
+		float h, s, v;
+		int ct;
+		HSVCT c = app.rgbwwctrl.getCurrentColor();
+		c.asRadian(h, s, v, ct);
+		debug_i("APPLedCtrl::colorSave - saving color H: %f | S: %f | V: %f | CT: %f", h, s, v, ct);
+		update.lastColor.setH(h);
+		update.lastColor.setS(s);
+		update.lastColor.setV(v);
+		update.lastColor.setCt(ct);
 	}
 }
 
@@ -621,4 +559,82 @@ void APPLedCtrl::toggle()
 		}
 	}
 	}
+}
+
+
+// SetOn/SetOff implementation (refactored to use plain arguments)
+void APPLedCtrl::setOn(const RGBWWLed::ChannelList& channels, int direction, const RampTimeOrSpeed& ramp, QueuePolicy queue, bool requeue, const String& name)
+{
+	switch(_mode) {
+	case ColorMode::Hsv: {
+		HSVCT current = getCurrentColor();
+		HSVCT target = current;
+		// If v==0, restore last nonzero HSV (toggle logic)
+		if (current.v == 0) {
+			target = _lastHsvct;
+			if (target.v == 0) target.v = 100; // fallback if last was off
+		}
+		// For HSV mode, direction/ramp/queue/requeue/name are used, but channels are ignored
+		fadeHSV(current, target, ramp, direction, queue, requeue, name);
+		break;
+	}
+	case ColorMode::Raw: {
+		ChannelOutput current = getCurrentOutput();
+		ChannelOutput target = current;
+		// If channels specified, only set those to last or 255, else all
+		if (!channels.isEmpty()) {
+			for (auto ch : channels) {
+				switch (ch) {
+					case CtrlChannel::Red: target.r = 255; break;
+					case CtrlChannel::Green: target.g = 255; break;
+					case CtrlChannel::Blue: target.b = 255; break;
+					case CtrlChannel::WarmWhite: target.ww = 255; break;
+					case CtrlChannel::ColdWhite: target.cw = 255; break;
+					default: break;
+				}
+			}
+		} else {
+			target.r = target.g = target.b = target.cw = target.ww = 255;
+		}
+		fadeRAW(current, target, ramp, queue, requeue, name);
+		break;
+	}
+	default:
+		break;
+	}
+}
+
+void APPLedCtrl::setOff(const RGBWWLed::ChannelList& channels, int direction, const RampTimeOrSpeed& ramp, QueuePolicy queue, bool requeue, const String& name)
+{
+    switch(_mode) {
+    case ColorMode::Hsv: {
+        HSVCT current = getCurrentColor();
+        HSVCT target = current;
+        target.v = 0;
+        fadeHSV(current, target, ramp, direction, queue, requeue, name);
+        break;
+    }
+    case ColorMode::Raw: {
+        ChannelOutput current = getCurrentOutput();
+        ChannelOutput target = current;
+        if (!channels.isEmpty()) {
+            for (auto ch : channels) {
+                switch (ch) {
+                    case CtrlChannel::Red: target.r = 0; break;
+                    case CtrlChannel::Green: target.g = 0; break;
+                    case CtrlChannel::Blue: target.b = 0; break;
+                    case CtrlChannel::WarmWhite: target.ww = 0; break;
+                    case CtrlChannel::ColdWhite: target.cw = 0; break;
+                    default: break;
+                }
+            }
+        } else {
+            target.r = target.g = target.b = target.cw = target.ww = 0;
+        }
+        fadeRAW(current, target, ramp, queue, requeue, name);
+        break;
+    }
+    default:
+        break;
+    }
 }
