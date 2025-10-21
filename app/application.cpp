@@ -155,10 +155,16 @@ void init()
 	debug_i("starting os message interceptor");
 #endif
 
+<<<<<<< HEAD
 #ifdef ARCH_ESP32
 	esp_wifi_set_ps (WIFI_PS_NONE);
 #endif
 	
+=======
+	//set CLR pin to input
+	pinMode(CLEAR_PIN, INPUT);
+
+>>>>>>> a3661078e34fee6c86b5e2c9f78e2b6f51f673b9
 	// seperated application init
 	app.init();
 
@@ -714,9 +720,21 @@ int Application::getRomSlot()
 */
 void Application::wsBroadcast(String message)
 {
+<<<<<<< HEAD
 	app.webserver.wsSendBroadcast(message.c_str(), message.length());
+=======
+	static char buffer[MAX_LOG_LINE_SIZE];//max log line size for wsBroadcast
+	message.toCharArray(buffer, MAX_LOG_LINE_SIZE);
+	size_t length = message.length();
+	if(length>MAX_LOG_LINE_SIZE) length=MAX_LOG_LINE_SIZE;
+
+	app.webserver.wsSendBroadcast(buffer, length);
+>>>>>>> a3661078e34fee6c86b5e2c9f78e2b6f51f673b9
 }
 
+/*
+*	build a jsonrpc message from a command and a parameters string
+*/
 void Application::wsBroadcast(String cmd, String message)
 {
 	JsonRpcMessage msg(cmd);

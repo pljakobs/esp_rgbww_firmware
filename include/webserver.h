@@ -26,8 +26,7 @@
 #include <Network/Http/Websocket/WebsocketResource.h>
 
 #define FILE_MAX_SIZE 16384 //max filesize for storage api files.
-#define MAX_LOG_LINE_SIZE 512
-
+#define MAX_LOG_LINE_SIZE 200
 enum API_CODES {
     API_SUCCESS = 0,
     API_BAD_REQUEST = 1,
@@ -48,8 +47,13 @@ public:
     void init();
     inline bool isRunning() { return _running; };
 
+<<<<<<< HEAD
     void wsSendBroadcast(const char* buffer, size_t length);
 
+=======
+    void wsSendBroadcast(const char* buffer, size_t size);
+    
+>>>>>>> a3661078e34fee6c86b5e2c9f78e2b6f51f673b9
     String getApiCodeMsg(API_CODES code);
 
 private:
