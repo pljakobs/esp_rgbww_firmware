@@ -26,10 +26,14 @@ public:
     
     size_t ICACHE_FLASH_ATTR write(const uint8_t* buffer, size_t size) override
     {
+        if(system_get_free_heap_size()<10000){
+            // prevent heap exhaustion
+            return 0;
+        }
         uint8_t streamId=0;
         for (auto stream : streams)
         {
-            Serial.printf("MultiOutputStream::write: stream %d:%s\n", ++streamId, buffer);
+            //Serial.printf("MultiOutputStream::write: stream %d:%s\n", ++streamId, buffer);
             // stream->write("*"); // For verification
             stream->write(buffer, size);
         }
