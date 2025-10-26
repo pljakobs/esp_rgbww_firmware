@@ -182,7 +182,7 @@ void Application::checkRam()
 	StaticJsonDocument<256> doc;
 	time_t now = time(nullptr); // should be unix time if ntp is running
 	doc["time"] = now;
-	doc["uptime"] = _uptimeMinutes;
+	doc["uptime"] = _uptimeMinutes*60;
 	doc["freeHeap"] = system_get_free_heap_size();
 	doc["firmware"] = fw_git_version;
 	doc["soc"] = SOC;
