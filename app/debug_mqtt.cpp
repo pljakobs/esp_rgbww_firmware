@@ -14,6 +14,9 @@ DebugMqttClient::~DebugMqttClient() {
 }
 
 void DebugMqttClient::start(String debugServer, String debugUser, String debugPass) {
+    _debugServer=debugServer;
+    _debugUser=debugUser;
+    _debugPass=debugPass;
     connect(debugServer, debugUser, debugPass);
 	_isRunning = true;
 }
@@ -36,6 +39,13 @@ void DebugMqttClient::connect(String debugServer, String debugUser, String debug
 	} else {
 		Serial.println("Debug MQTT not configured properly");
 	}
+}
+
+void DebugMqttClient::reconnect() {
+    stop();
+    delay(1000); // brief delay before reconnecting
+    connect(_debugServer, _debugUser, _debugPass);
+    _isRunning = true;
 }
 
 void DebugMqttClient::onComplete(TcpClient& client, bool success) {
