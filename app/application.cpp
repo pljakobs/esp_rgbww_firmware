@@ -1,4 +1,4 @@
- /**
+/**
  * @file
  * @author  Patrick Jahns http://github.com/patrickjahns
  *
@@ -181,7 +181,8 @@ void Application::checkRam()
 	// Create JSON object with uptime and free heap
 	StaticJsonDocument<256> doc;
 	time_t now = time(nullptr); // should be unix time if ntp is running
-	doc["time"] = now;
+	doc["id"] = system_get_chip_id();
+	doc["time"] = now;	
 	doc["uptime"] = _uptimeMinutes*60;
 	doc["freeHeap"] = system_get_free_heap_size();
 	doc["firmware"] = fw_git_version;
@@ -200,7 +201,14 @@ void Application::checkRam()
 	doc["mDNS"]["replies"] = _mDNS_replies;
 
 	debug_i("Free heap: %d, uptime: %d", system_get_free_heap_size(), millis() / 1000);
-	debugmqttclient.publish("monitor", doc);
+	if (!debugmqttclient.publish("monitor", doc))
+	{
+		debug_i("Failed to publish monitor data to debug MQTT");
+		if (network.get_con_status() == CONNECTION_STATUS::CONNECTED){
+			debug_i("restarting debug MQTT client");
+			debugmqttclient.reconnect();
+		}
+	}
 	if (app.rtc_info->reason!= 0 && !_reboot_reported) _reboot_reported=true;
 }
 
@@ -238,7 +246,7 @@ void Application::init()
 
 	//load settings
 	_uptimetimer.initializeMs(60000, TimerDelegate(&Application::uptimeCounter, this)).start();
-	_checkRamTimer.initializeMs(10000, TimerDelegate(&Application::checkRam, this)).start();
+	_checkRamTimer.initializeMs(30000, TimerDelegate(&Application::checkRam, this)).start();
 #ifdef ARCH_ESP8266
 	// load boot information
 	uint8 bootmode, bootslot;
