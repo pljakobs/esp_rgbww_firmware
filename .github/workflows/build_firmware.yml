@@ -130,7 +130,7 @@ jobs:
             docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace \
               -e GITHUB_RUN_NUMBER=${{ github.run_number }} \
               -e MQTT_PASS=${{ secrets.MQTT_PASS }} \
-              -e MWTT_USER=${{ secrets.MQTT_USER }} \
+              -e MQTT_USER=${{ secrets.MQTT_USER }} \
               docker.io/pjakobs/sming:latest \
               bash -c "git config --global --add safe.directory /workspace && \
               source /opt/Sming/Tools/export.sh && \
