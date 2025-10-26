@@ -73,3 +73,7 @@ flashloop.sh
 colgrep
 colgrep.cfg
 esp_rgbww_8266.log
+out.*
+mqtt_pass
+ouput.txt
+output.txt

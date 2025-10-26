@@ -450,6 +450,19 @@
           }
         }
       }
+    },
+    "debug": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default":true
+        },
+        "server": {
+          "type": "string",
+          "default":"lightinator.de:1883"
+        }
+      }
     }
   }
 }

@@ -285,8 +285,11 @@ void AppWIFI::_STAConnected(const String& ssid, MacAddress bssid, uint8_t channe
 {
 	debug_i("AppWIFI::_STAConnected SSID - %s", ssid.c_str());
 	{
-		AppConfig::General general(*app.cfg);
-		String device_name = general.getDeviceName();
+		String device_name;
+		{
+			AppConfig::General general(*app.cfg);
+			device_name = general.getDeviceName();
+		} // end ConfigDB general context
 		if(device_name == "") {
 			device_name = String(DEFAULT_AP_SSIDPREFIX) + String(system_get_chip_id());
 			debug_i("no device name configured, building default name");
@@ -297,7 +300,8 @@ void AppWIFI::_STAConnected(const String& ssid, MacAddress bssid, uint8_t channe
 			AppConfig::Network::OuterUpdater network(*app.cfg);
 			network.mdns.setName(app.sanitizeName(device_name));
 		} // end ConfigDB network updater context
-	}	 // end ConfigDB general context
+	}	 
+	app.startNetworkServices();
 	broadcastWifiStatus(F("Connected to WiFi"));
 	_con_ctr = 0;
 	// wifi cstation connected

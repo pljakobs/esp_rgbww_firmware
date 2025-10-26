@@ -89,6 +89,7 @@
 #include <ledctrl.h>
 #include <networking.h>
 #include <webserver.h>
+#include <debug_mqtt.h>
 #include <mqtt.h>
 #include <eventserver.h>
 #include <jsonprocessor.h>
@@ -96,6 +97,6 @@
 #include <stepsync.h>
 #include <arduinojson.h>
 #include <controllers.h>
-
+#include <debug_mqtt.h>
 
 
