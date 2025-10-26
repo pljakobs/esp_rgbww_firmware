@@ -96,6 +96,8 @@ void mdnsHandler::start()
 
 bool mdnsHandler::onMessage(mDNS::Message& message)
 {
+    // update debug counter
+    app._mDNS_received++;
     bool msgHasA = false, msgHasTXT = false;
 #ifdef DEBUG_MDNS
     debug_i("onMessage handler called");
@@ -109,7 +111,8 @@ bool mdnsHandler::onMessage(mDNS::Message& message)
 #endif
         return false;
     }
-
+    // update debug counter
+    app._mDNS_replies++;
     auto srv_answer = message[mDNS::ResourceType::SRV];
     if(srv_answer == nullptr) {
 #ifdef DEBUG_MDNS

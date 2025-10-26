@@ -25,6 +25,15 @@ RBOOT_BIG_FLASH = 1
 ENABLE_CUSTOM_PWM = 0
 #ENABLE_CUSTOM_PWM = 0
 
+# MQTT credentials management
+ifneq ("$(wildcard mqtt_pass)","")
+  MQTT_CRED := $(shell cat mqtt_pass)
+  MQTT_USER := $(word 1,$(subst :, ,$(MQTT_CRED)))
+  MQTT_PASS := $(word 2,$(subst :, ,$(MQTT_CRED)))
+  export MQTT_USER
+  export MQTT_PASS
+endif
+
 //COM_SPEED = 230400
 //COM_SPEED = 460800
 //COM_SPEED = 921600
@@ -63,7 +72,7 @@ endif
 GIT_DATE = $(firstword $(shell git --no-pager show --date=short --format="%ad" --name-only))
 SMING_GITVERSION =	$(shell git -C $(SMING_HOME)/.. describe --abbrev=4 --dirty --always --tags)"-["$(shell git -C $(SMING_HOME)/.. rev-parse --abbrev-ref HEAD)"]"
 WEBAPP_VERSION = $(shell cat $(PROJECT_DIR)/webapp/VERSION)
-USER_CFLAGS = -DGITVERSION=\"$(GIT_VERSION)\" -DGITDATE=\"$(GIT_DATE)\" -DWEBAPP_VERSION=\"$(WEBAPP_VERSION)\" -DSMING_GITVERSION=\"$(SMING_GITVERSION)\"
+USER_CFLAGS = -DGITVERSION=\"$(GIT_VERSION)\" -DGITDATE=\"$(GIT_DATE)\" -DWEBAPP_VERSION=\"$(WEBAPP_VERSION)\" -DSMING_GITVERSION=\"$(SMING_GITVERSION)\" -DMQTT_USER=\"$(MQTT_USER)\" -DMQTT_PASS=\"$(MQTT_PASS)\"
 
 #ifdef MDNS_DEBUG
 #    USER_CFLAGS += -DMDNS_DEBUG

@@ -34,6 +34,7 @@
 #include <fileMap.h>
 
 
+
 #if ARCH_ESP8266
 #define PART0 "lfs0"
 #elif ARCH_ESP32
@@ -132,6 +133,7 @@ void init()
 	Serial.begin(SERIAL_BAUD_RATE); // 115200 by default
 	Serial.systemDebugOutput(true); // Debug output to serial
 	//System.setCpuFrequencye(CF_160MHz);
+	app.rtc_info = system_get_rst_info();
 
 #ifdef ARCH_ESP8266
 	osMessageInterceptor.begin(onOsMessage);
@@ -176,8 +178,26 @@ void Application::uptimeCounter()
 
 void Application::checkRam()
 {
-	debug_i("Free heap: %d", system_get_free_heap_size());
-	
+	// Create JSON object with uptime and free heap
+	StaticJsonDocument<256> doc;
+	doc["uptime"] = millis() / 1000; // uptime in seconds
+	doc["freeHeap"] = system_get_free_heap_size();
+	if (app.rtc_info->reason!= 0 && !_reboot_reported)
+	{
+		doc["reboot"]["reason"] = app.rtc_info->reason;
+		doc["reboot"]["exccause"] = app.rtc_info->exccause;
+		doc["reboot"]["epc1"] = app.rtc_info->epc1;
+		doc["reboot"]["epc2"] = app.rtc_info->epc2;
+		doc["reboot"]["epc3"] = app.rtc_info->epc3;
+		doc["reboot"]["excvaddr"] = app.rtc_info->excvaddr;
+		doc["reboot"]["depc"] = app.rtc_info->depc;
+	}
+	doc["mDNS"]["received"] = _mDNS_received;
+	doc["mDNS"]["replies"] = _mDNS_replies;
+
+	debug_i("Free heap: %d, uptime: %d", system_get_free_heap_size(), millis() / 1000);
+	debugmqttclient.publish("monitor", doc);
+	if (app.rtc_info->reason!= 0 && !_reboot_reported) _reboot_reported=true;
 }
 
 
@@ -460,27 +480,46 @@ void Application::startServices()
 			eventserver.start(app.webserver);
 		}
 	} // end of ConfigDB root context
-	if(WifiStation.isConnected())
-	{
-		debug_i("Application::startServices - starting mqtt");
-		AppConfig::Network network(*cfg);
-		AppConfig::General general(*cfg);
-		debug_i("Application::startServices - mqtt enabled: %s", network.mqtt.getEnabled() ? "true" : "false");
-		String mqttClientId = network.mqtt.homeassistant.getNodeId();
-		if(mqttClientId.length() > 0) {
-			debug_i("Application::startServices - mqtt client id: %s", mqttClientId.c_str());
+}
+void Application::startNetworkServices()
+{
+	debug_i("Application::startServices - starting mqtt");
+	AppConfig::Network network(*cfg);
+	AppConfig::General general(*cfg);
+	debug_i("Application::startServices - mqtt enabled: %s", network.mqtt.getEnabled() ? "true" : "false");
+	String mqttClientId = network.mqtt.homeassistant.getNodeId();
+	if(mqttClientId.length() > 0) {
+		debug_i("Application::startServices - mqtt client id: %s", mqttClientId.c_str());
+	} else {
+		if(general.getDeviceName().length() > 0) {
+			mqttClientId = general.getDeviceName();
 		} else {
-			if(general.getDeviceName().length() > 0) {
-				mqttClientId = general.getDeviceName();
-			} else {
-				mqttClientId = String("rgbww_") + WifiStation.getMAC();
-			}
+			mqttClientId = String("rgbww_") + WifiStation.getMAC();
 		}
-		mqttclient.init(); // initialize mqtt client with node name
-		debug_i("Application::startServices - mqtt client initialized");
-		if(network.mqtt.getEnabled()) {
-			mqttclient.start();
-		}
+	}
+	mqttclient.init(); // initialize mqtt client with node name
+	debug_i("Application::startServices - mqtt client initialized");
+	if(network.mqtt.getEnabled()) {
+		mqttclient.start();
+	}
+	AppConfig::Root::Debug debugcfg(*cfg);
+	if(debugcfg.getEnabled()) {
+		debug_i("Application::startServices - starting remote debug");
+		String debugUrl, debugUser, debugPass;
+		AppConfig::Root::Debug debugcfg(*app.cfg);
+		debugUrl=debugcfg.getServer();
+
+		#ifdef MQTT_USER
+			debugUser = MQTT_USER;
+		#endif
+		#ifdef MQTT_PASS
+			debugPass = MQTT_PASS;
+		#endif
+		debug_i("Application::startServices - debug mqtt server: %s", debugUrl.c_str());
+		debugmqttclient.start(debugUrl, debugUser, debugPass);
+	}
+	else {
+		debug_i("Application::startServices - mqtt debug disabled");
 	}
 }
 
