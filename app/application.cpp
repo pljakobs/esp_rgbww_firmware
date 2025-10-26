@@ -180,7 +180,9 @@ void Application::checkRam()
 {
 	// Create JSON object with uptime and free heap
 	StaticJsonDocument<256> doc;
-	doc["uptime"] = millis() / 1000; // uptime in seconds
+	time_t now = time(nullptr); // should be unix time if ntp is running
+	doc["time"] = now;
+	doc["uptime"] = _uptimeMinutes;
 	doc["freeHeap"] = system_get_free_heap_size();
 	if (app.rtc_info->reason!= 0 && !_reboot_reported)
 	{
