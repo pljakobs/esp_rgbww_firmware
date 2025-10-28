@@ -187,7 +187,7 @@ void Application::checkRam()
 	doc["freeHeap"] = system_get_free_heap_size();
 	doc["firmware"] = fw_git_version;
 	doc["soc"] = SOC;
-	if (app.rtc_info->reason!= 0 && !_reboot_reported)
+	if (!_reboot_reported)
 	{
 		doc["reboot"]["reason"] = app.rtc_info->reason;
 		doc["reboot"]["exccause"] = app.rtc_info->exccause;
