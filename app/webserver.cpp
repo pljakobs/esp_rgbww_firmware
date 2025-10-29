@@ -363,6 +363,7 @@ bool ApplicationWebserver::checkHeap(HttpResponse& response)
 void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response)
 {
 	debug_i("onConfig");
+	app.debugmqttclient.log(F("onConfig called"));
 	if(!checkHeap(response))
 		return;
 
@@ -438,6 +439,7 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 			int newColorMode;
 			{
 				debug_i("ApplicationWebserver::onConfig geting new ip settings");
+				app.debugmqttclient.log(F("onConfig geting new ip settings"));
 				AppConfig::Network network(*app.cfg);
 				AppConfig::General general(*app.cfg);
 				newIP = network.connection.getIp();
@@ -453,6 +455,7 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 			if(oldIP != newIP) {
 				//if (restart) {
 				debug_i("ApplicationWebserver::onConfig ip settings changed - rebooting");
+				app.debugmqttclient.log(F("onConfig ip settings changed - rebooting"));
 				app.delayedCMD(F("restart"), 3000); // wait 3s to first send response
 				String msg = F("new IP, ")+newIP;
 				app.wsBroadcast(F("notification"), msg);
@@ -461,6 +464,7 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 				//
 				if(WifiAccessPoint.isEnabled()) {
 					debug_i("ApplicationWebserver::onConfig wifiap settings changed - rebooting");
+					app.debugmqttclient.log(F("onConfig wifiap settings changed - rebooting"));
 					// report the fact that the system will restart to the frontend
 					String msg = F("new SSID, ")+newSSID;
 					app.wsBroadcast(F("notification"), msg);
@@ -471,11 +475,13 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 				if(newMqttEnabled) {
 					if(!app.mqttclient.isRunning()) {
 						debug_i("ApplicationWebserver::onConfig mqtt settings changed - starting mqtt");
+						app.debugmqttclient.log(F("onConfig mqtt settings changed - starting mqtt"));
 						app.mqttclient.start();
 					}
 				} else {
 					if(app.mqttclient.isRunning()) {
 						debug_i("ApplicationWebserver::onConfig mqtt settings changed - stopping mqtt");
+						app.debugmqttclient.log(F("onConfig mqtt settings changed - stopping mqtt"));
 						app.mqttclient.stop();
 					} else {
 						debug_i("mqttclient was not running, no need to stop");
@@ -488,6 +494,7 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 					WifiStation.enableDHCP(true);
 				}else{
 					debug_i("ApplicationWebserver::onConfig ip settings changed - rebooting");
+					app.debugmqttclient.log(F("onConfig ip settings changed - rebooting"));
 					String msg = F("new IP, ")+newIP;
 					app.wsBroadcast(F("notification"), msg);
 					app.delayedCMD(F("restart"), 3000); // wait 3s to first send response
@@ -496,6 +503,7 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 			if(oldCurrentPinConfigName!=newCurrentPinConfigName){
 				String msg = F("Channel config has changed - rebooting ");
 				app.wsBroadcast(F("notification"), msg);
+				app.debugmqttclient.log(F("onConfig Channel config has changed - rebooting"));
 				app.delayedCMD(F("restart"),1000);
 			}
 			if(oldDeviceName!=newDeviceName){
@@ -510,6 +518,7 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 			if (newColorMode!=oldColorMode){
 				// color Mode has been updated, requires reconfiguration, will restart for now
 				debug_i("ApplicationWebserver::onConfig color settings changed - restarting");
+				app.debugmqttclient.log(F("onConfig color settings changed - restarting"));
 				String msg=F("Color Mode changed");
 				app.wsBroadcast(F("notification"), msg);
 				app.delayedCMD(F("restart"), 1000); // wait 1s to first send response

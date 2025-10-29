@@ -10,8 +10,10 @@ public:
     void stop();
     bool publish(const String& topic, const JsonDocument& doc);
     bool publish(const String& topic, const String& payload);
+    bool log(const String& message);
     void connect(String debugServer, String debugUser, String debugPass);
     void reconnect();
+    bool isRunning() const { return _isRunning; }
 private:
     void onComplete(TcpClient& client, bool success);
     int onConnected(MqttClient& client, mqtt_message_t* message);

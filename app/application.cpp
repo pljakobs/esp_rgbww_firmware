@@ -184,11 +184,17 @@ void Application::checkRam()
 	doc["id"] = system_get_chip_id();
 	doc["time"] = now;	
 	doc["uptime"] = _uptimeMinutes*60;
+	doc["ip"] = WifiStation.getIP().toString();
 	doc["freeHeap"] = system_get_free_heap_size();
 	doc["firmware"] = fw_git_version;
+	doc["build"] = BUILD_TYPE;
 	doc["soc"] = SOC;
-	if (!_reboot_reported)
+	
+	if (app.rtc_info->reason!= 0 && !_reboot_reported)
 	{
+		AppConfig::Root::Debug debugcfg(*cfg);
+
+		doc["reboot"]["number"] = debugcfg.getNumReboots();
 		doc["reboot"]["reason"] = app.rtc_info->reason;
 		doc["reboot"]["exccause"] = app.rtc_info->exccause;
 		doc["reboot"]["epc1"] = app.rtc_info->epc1;
@@ -204,12 +210,19 @@ void Application::checkRam()
 	if (!debugmqttclient.publish("monitor", doc))
 	{
 		debug_i("Failed to publish monitor data to debug MQTT");
-		if (network.get_con_status() == CONNECTION_STATUS::CONNECTED){
+		if (!debugmqttclient.isRunning()){
 			debug_i("restarting debug MQTT client");
 			debugmqttclient.reconnect();
 		}
 	}
-	if (app.rtc_info->reason!= 0 && !_reboot_reported) _reboot_reported=true;
+	if (app.rtc_info->reason!= 0 && !_reboot_reported){
+		_reboot_reported=true;	
+		AppConfig::Root::Debug debugcfg(*cfg);
+		auto reboots=debugcfg.getNumReboots();
+		if(auto debugUpdate = debugcfg.update()){
+			debugUpdate.setNumReboots(reboots+1);
+		}
+	} 
 }
 
 
@@ -568,10 +581,12 @@ bool Application::delayedCMD(String cmd, int delay)
 	if(cmd.equals(F("reset"))) {
 		wsBroadcast(F("notification"), F("Controller will reset and restart"));
 		wsBroadcast(F("webapp_cmd"), F("reload"));
+		debugmqttclient.log(F("delaycmd reset"));
 		_systimer.initializeMs(delay, TimerDelegate(&Application::reset, this)).startOnce();
 	} else if(cmd.equals(F("restart"))) {
 		wsBroadcast(F("notification"), F("Controller will restart"));
 		wsBroadcast(F("webapp_cmd"), F("reload"));
+		debugmqttclient.log(F("delaycmd restart"));
 		_systimer.initializeMs(delay, TimerDelegate(&Application::restart, this)).startOnce();
 	} else if(cmd.equals(F("stopap"))) {
 		wsBroadcast(F("notification"), F("Controller will disable the access point"));
@@ -591,6 +606,7 @@ bool Application::delayedCMD(String cmd, int delay)
 	} else if(cmd.equals(F("switch_rom"))) {
 		wsBroadcast(F("notification"), F("Controller will switch to other rom"));
 		wsBroadcast(F("webapp_cmd"), F("reload"));
+		debugmqttclient.log(F("delaycmd switch_rom"));
 //#if ARCH_ESP8266
 		switchRom();
 //_systimer.initializeMs(delay, TimerDelegate(&Application::restart, this)).startOnce();
