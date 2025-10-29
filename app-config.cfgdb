@@ -461,6 +461,10 @@
         "server": {
           "type": "string",
           "default":"lightinator.de:1883"
+        },
+        "numReboots": {
+          "type": "integer",
+          "default":0
         }
       }
     }

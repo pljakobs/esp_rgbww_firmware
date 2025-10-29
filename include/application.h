@@ -127,6 +127,7 @@ private:
     int8_t clearPin = 16; //  GPIO16 is the default for the old mrpj boards, newer boards will load from pinconfig 
 
     bool _reboot_reported=false;
+    size_t numReboots = 0;
 
 };
 // forward declaration for global vars

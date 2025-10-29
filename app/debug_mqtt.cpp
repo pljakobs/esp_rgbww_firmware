@@ -18,7 +18,6 @@ void DebugMqttClient::start(String debugServer, String debugUser, String debugPa
     _debugUser=debugUser;
     _debugPass=debugPass;
     connect(debugServer, debugUser, debugPass);
-	_isRunning = true;
 }
 
 void DebugMqttClient::stop() {
@@ -45,8 +44,7 @@ void DebugMqttClient::reconnect() {
     stop();
     delay(1000); // brief delay before reconnecting
     connect(_debugServer, _debugUser, _debugPass);
-    _isRunning = true;
-}
+ }
 
 void DebugMqttClient::onComplete(TcpClient& client, bool success) {
 	if (!success) {
@@ -57,6 +55,7 @@ void DebugMqttClient::onComplete(TcpClient& client, bool success) {
 
 int DebugMqttClient::onConnected(MqttClient& client, mqtt_message_t* message) {
 	Serial.println("Debug MQTT connected");
+    _isRunning = true;
 	return 0;
 }
 
@@ -72,7 +71,8 @@ String DebugMqttClient::buildTopic(const String& suffix) {
 }
 
 bool DebugMqttClient::publish(const String& topic, const JsonDocument& doc) {
-	if (!_isRunning || !mqtt || mqtt->getConnectionState() != eTCS_Connected) {
+	//if (!_isRunning || !mqtt || mqtt->getConnectionState() != eTCS_Connected) {
+    if (!_isRunning) {
 		Serial.println("Debug MQTT not connected");
 		return false;
 	}
@@ -91,4 +91,9 @@ bool DebugMqttClient::publish(const String& topic, const String& payload) {
     debug_i("Debug MQTT publishing %s to topic: %s", payload.c_str(), topic.c_str());
     String fullTopic = buildTopic(topic);
     return mqtt->publish(fullTopic, payload);
+}
+
+bool DebugMqttClient::log(const String& message) {
+    
+    return publish("log", message);
 }
