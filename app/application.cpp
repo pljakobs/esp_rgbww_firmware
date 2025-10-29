@@ -134,7 +134,7 @@ void init()
 	Serial.systemDebugOutput(true); // Debug output to serial
 	//System.setCpuFrequencye(CF_160MHz);
 	app.rtc_info = system_get_rst_info();
-
+	
 #ifdef ARCH_ESP8266
 	osMessageInterceptor.begin(onOsMessage);
 	debug_i("starting os message interceptor");
@@ -542,6 +542,8 @@ void Application::startNetworkServices()
 		#endif
 		debug_i("Application::startServices - debug mqtt server: %s", debugUrl.c_str());
 		debugmqttclient.start(debugUrl, debugUser, debugPass);
+		String msg=String("restart, reason: ")+String(app.rtc_info->reason)+String(", exccause: ")+String(app.rtc_info->exccause);
+		debugmqttclient.log(msg);
 	}
 	else {
 		debug_i("Application::startServices - mqtt debug disabled");
