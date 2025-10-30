@@ -86,7 +86,7 @@ public:
     std::unique_ptr<AppData> data;
     EventServer eventserver;
     AppMqttClient mqttclient;
-    DebugMqttClient debugmqttclient;
+    TelemetryClient telemetryClient;
     JsonProcessor jsonproc;
     NtpClient* pNtpclient = nullptr;
 
@@ -128,7 +128,6 @@ private:
     int8_t clearPin = 16; //  GPIO16 is the default for the old mrpj boards, newer boards will load from pinconfig 
 
     bool _reboot_reported=false;
-
 };
 // forward declaration for global vars
 extern Application app;

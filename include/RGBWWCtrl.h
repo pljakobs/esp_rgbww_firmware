@@ -85,11 +85,20 @@
     #include <otaupdate.h>
 #endif
 
-#include <config.h>
+#include <JsonObjectStream.h>
+#include <ConfigDB/Json/Format.h>
+#include <ConfigDB/Network/HttpImportResource.h>
+
+#include <Data/CStringArray.h>
+#include <Data/Format/Json.h>
+
+#include "app-config.h"
+#include "app-data.h"
+
 #include <ledctrl.h>
 #include <networking.h>
 #include <webserver.h>
-#include <debug_mqtt.h>
+#include <telemetry.h>
 #include <mqtt.h>
 #include <eventserver.h>
 #include <jsonprocessor.h>
@@ -97,6 +106,6 @@
 #include <stepsync.h>
 #include <arduinojson.h>
 #include <controllers.h>
-#include <debug_mqtt.h>
 
-
+#define configDB_PATH "app-config"
+#define dataDB_PATH "app-data"

@@ -1,15 +1,18 @@
+
 #pragma once
+#include "app-config.h"
 
-class DebugMqttClient {
+using telemetryStats = AppConfig::ContainedRoot::telemetryStats;
+using telemetryLog = AppConfig::ContainedRoot::telemetryLog;
+
+class TelemetryClient {
 public:
-    DebugMqttClient();
-    virtual ~DebugMqttClient();
+    TelemetryClient();
+    virtual ~TelemetryClient();
 
-    void start(String debugServer, String debugUser, String debugPass);
-    
+    void start();
     void stop();
-    bool publish(const String& topic, const JsonDocument& doc);
-    bool publish(const String& topic, const String& payload);
+    bool stat(const String& topic, const JsonDocument& doc);
     bool log(const String& message);
     void connect(String debugServer, String debugUser, String debugPass);
     void reconnect();
@@ -18,12 +21,18 @@ private:
     void onComplete(TcpClient& client, bool success);
     int onConnected(MqttClient& client, mqtt_message_t* message);
     int onMessageReceived(MqttClient& client, mqtt_message_t* message);
+    bool publish(const String& topic, const JsonDocument& doc);
+    bool publish(const String& topic, const String& payload);
 
     String buildTopic(const String& suffix);
 
-    String _debugServer, _debugUser, _debugPass;
+    String _telemetryURL, _telemetryUser, _telemetryPass;
+    telemetryStats _telemetryStats;
+    telemetryLog _telemetryLog;
+
     bool _isRunning = false;
     MqttClient* mqtt = nullptr;
     String _chipId;
     String _id;
+
 };
