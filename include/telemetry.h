@@ -12,7 +12,7 @@ public:
 
     void start();
     void stop();
-    bool stat(const String& topic, const JsonDocument& doc);
+    bool stat( const JsonDocument& doc);
     bool log(const String& message);
     void connect(String debugServer, String debugUser, String debugPass);
     void reconnect();
