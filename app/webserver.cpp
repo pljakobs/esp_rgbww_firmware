@@ -407,15 +407,20 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 			debug_i("ApplicationWebserver::onConfig storing old settings");
 			app.debugmqttclient.log(F("onConfig storing old settings"));
 			AppConfig::Network network(*app.cfg);
-			AppConfig::General general(*app.cfg);
 			oldIP = network.connection.getIp();
 			oldSSID = network.ap.getSsid();
 			mqttEnabled = network.mqtt.getEnabled();
 			dhcpEnabled=network.connection.getDhcp();
-			AppConfig::Color color(*app.cfg);
-			oldColorMode=color.getColorMode();
+		}
+		{
+			AppConfig::General general(*app.cfg);
 			oldDeviceName=general.getDeviceName();
 			oldCurrentPinConfigName=general.getCurrentPinConfigName();
+		}
+		{
+			AppConfig::Color color(*app.cfg);
+			oldColorMode=color.getColorMode();
+			// TODO: Store other color settings if needed		
 		}
 
 		auto bodyStream = request.getBodyStream();
@@ -435,22 +440,26 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 
 			// bool restart = root[F("restart")] | false;
 
-			String newIP, newSSID,newDeviceName, newCurrentPinConfigName;
+			String newIP, newSSID, newDeviceName, newCurrentPinConfigName;
 			bool newMqttEnabled,newDhcpEnabled;
 			int newColorMode;
 			{
-				debug_i("ApplicationWebserver::onConfig geting new settings");
-				app.debugmqttclient.log(F("onConfig geting new settings"));
+				debug_i("ApplicationWebserver::onConfig getting new settings");
+				app.debugmqttclient.log(F("onConfig getting new settings"));
 				AppConfig::Network network(*app.cfg);
-				AppConfig::General general(*app.cfg);
 				newIP = network.connection.getIp();
 				newSSID = network.ap.getSsid();
 				newMqttEnabled = network.mqtt.getEnabled();
 				newDhcpEnabled=network.connection.getDhcp();
-				AppConfig::Color color(*app.cfg);
-				newColorMode=color.getColorMode();
+			}
+			{
+				AppConfig::General general(*app.cfg);
 				newDeviceName=general.getDeviceName();
 				newCurrentPinConfigName=general.getCurrentPinConfigName();
+			}
+			{
+				AppConfig::Color color(*app.cfg);
+				newColorMode=color.getColorMode();
 			}
 			
 			if(oldIP != newIP) {
@@ -511,7 +520,7 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 				app.delayedCMD(F("restart"),1000);
 			}
 			if(oldDeviceName!=newDeviceName){
-				String msg = F("new Device Name, ")+newDeviceName;
+				String msg = F("device name change, old Device Name: ")+oldDeviceName+F(", new Device Name: ")+newDeviceName;
 				AppConfig::Network::OuterUpdater network(*app.cfg);
 				network.mdns.setName(app.sanitizeName(newDeviceName));
 				app.wsBroadcast(F("notification"), msg);
