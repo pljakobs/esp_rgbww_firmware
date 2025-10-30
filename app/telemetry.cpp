@@ -29,9 +29,11 @@ void TelemetryClient::start() {
 	// this will only happen once upon first start
 
 	String _buildType=BUILD_TYPE;
-	if(_telemetryStats == telemetryStats::UNDEF and _buildType == "DEBUG"){
+	if(_telemetryStats == telemetryStats::UNDEF and _buildType == "debug"){
+		debug_i("TelemetryClient::start - enabling telemetry stats by default for debug build");
 		_telemetryStats = telemetryStats::ON; //enable stats in debug builds by default
 	}else if(_telemetryStats == telemetryStats::UNDEF){
+		debug_i("TelemetryClient::start - disabling telemetry stats by default for release build");
 		_telemetryStats = telemetryStats::OFF; //disable stats in release builds by default
 	}
 
