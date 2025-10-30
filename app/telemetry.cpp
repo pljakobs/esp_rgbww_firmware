@@ -27,7 +27,7 @@ void TelemetryClient::start() {
 
 	// set defaults if undefined
 	// this will only happen once upon first start
-	
+
 	String _buildType=BUILD_TYPE;
 	if(_telemetryStats == telemetryStats::UNDEF and _buildType == "DEBUG"){
 		_telemetryStats = telemetryStats::ON; //enable stats in debug builds by default
@@ -41,8 +41,8 @@ void TelemetryClient::start() {
 
 	{
 	auto telemetryUpdate=telemetryCfg.update();
-	telemetryUpdate->setStatsEnabled(_telemetryStats);
-	telemetryUpdate->setLogEnabled(_telemetryLog);
+	telemetryUpdate.setStatsEnabled(_telemetryStats);
+	telemetryUpdate.setLogEnabled(_telemetryLog);
 	}
 
 	if(_telemetryStats == telemetryStats::ON or _telemetryLog == telemetryLog::ON){
