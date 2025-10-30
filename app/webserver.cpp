@@ -363,7 +363,6 @@ bool ApplicationWebserver::checkHeap(HttpResponse& response)
 void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response)
 {
 	debug_i("onConfig");
-	app.debugmqttclient.log(F("onConfig called"));
 	if(!checkHeap(response))
 		return;
 
@@ -398,6 +397,7 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 
 	if(request.method == HTTP_POST) {
 		debug_i("======================\nHTTP POST request received, ");
+		app.debugmqttclient.log(F("onConfig POST"));
 
 		/* ConfigDB importFomStream */
 		String oldIP, oldSSID, oldDeviceName, oldCurrentPinConfigName;
@@ -457,9 +457,10 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 				//if (restart) {
 				debug_i("ApplicationWebserver::onConfig ip settings changed - rebooting");
 				app.debugmqttclient.log(F("onConfig ip settings changed - rebooting"));
-				app.delayedCMD(F("restart"), 3000); // wait 3s to first send response
 				String msg = F("new IP, ")+newIP;
 				app.wsBroadcast(F("notification"), msg);
+				app.debugmqttclient.log(msg);
+				app.delayedCMD(F("restart"), 3000); // wait 3s to first send response
 			}
 			if(oldSSID != newSSID) {
 				//
@@ -469,6 +470,7 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 					// report the fact that the system will restart to the frontend
 					String msg = F("new SSID, ")+newSSID;
 					app.wsBroadcast(F("notification"), msg);
+					app.debugmqttclient.log(msg);
 					app.delayedCMD(F("restart"), 3000); // wait 3s to first send response
 				}
 			}
@@ -498,13 +500,14 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 					app.debugmqttclient.log(F("onConfig ip settings changed - rebooting"));
 					String msg = F("new IP, ")+newIP;
 					app.wsBroadcast(F("notification"), msg);
+					app.debugmqttclient.log(msg);
 					app.delayedCMD(F("restart"), 3000); // wait 3s to first send response
 				}
 			}
 			if(oldCurrentPinConfigName!=newCurrentPinConfigName){
 				String msg = F("Channel config has changed - rebooting ");
 				app.wsBroadcast(F("notification"), msg);
-				app.debugmqttclient.log(F("onConfig Channel config has changed - rebooting"));
+				app.debugmqttclient.log(msg);
 				app.delayedCMD(F("restart"),1000);
 			}
 			if(oldDeviceName!=newDeviceName){
@@ -512,6 +515,7 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 				AppConfig::Network::OuterUpdater network(*app.cfg);
 				network.mdns.setName(app.sanitizeName(newDeviceName));
 				app.wsBroadcast(F("notification"), msg);
+				app.debugmqttclient.log(msg);
 				app.delayedCMD(F("restart"),1000);
 			}
 
@@ -522,6 +526,7 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 				app.debugmqttclient.log(F("onConfig color settings changed - restarting"));
 				String msg=F("Color Mode changed");
 				app.wsBroadcast(F("notification"), msg);
+				app.debugmqttclient.log(msg);
 				app.delayedCMD(F("restart"), 1000); // wait 1s to first send response
 			}
 
@@ -558,6 +563,8 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
          * /config GET
          */
 		setCorsHeaders(response);
+		app.debugmqttclient.log(F("onConfig GET"));
+
 		auto configStream = app.cfg->createExportStream(ConfigDB::Json::format);
 		response.sendDataStream(configStream.release(), MIME_JSON);
 	}

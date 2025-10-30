@@ -215,6 +215,8 @@ void Application::checkRam()
 			debugmqttclient.reconnect();
 		}
 	}
+	
+	
 	if (app.rtc_info->reason!= 0 && !_reboot_reported){
 		_reboot_reported=true;	
 		AppConfig::Root::Debug debugcfg(*cfg);
@@ -542,14 +544,17 @@ void Application::startNetworkServices()
 		#endif
 		debug_i("Application::startServices - debug mqtt server: %s", debugUrl.c_str());
 		debugmqttclient.start(debugUrl, debugUser, debugPass);
-		String msg=String("restart, reason: ")+String(app.rtc_info->reason)+String(", exccause: ")+String(app.rtc_info->exccause);
-		debugmqttclient.log(msg);
+		_systimer.initializeMs(1000, TimerDelegate(&Application::logRestart, this)).startOnce();
 	}
 	else {
 		debug_i("Application::startServices - mqtt debug disabled");
 	}
 }
 
+void Application::logRestart(){
+	String msg=String("restart, reason: ")+String(app.rtc_info->reason)+String(", exccause: ")+String(app.rtc_info->exccause);
+	debugmqttclient.log(msg);
+}
 void Application::restart()
 {
 	debug_i("Application::restart");
