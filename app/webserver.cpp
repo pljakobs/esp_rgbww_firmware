@@ -439,8 +439,8 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 			bool newMqttEnabled,newDhcpEnabled;
 			int newColorMode;
 			{
-				debug_i("ApplicationWebserver::onConfig geting new settings");
-				app.debugmqttclient.log(F("onConfig geting new settings"));
+				debug_i("ApplicationWebserver::onConfig getting new settings");
+				app.debugmqttclient.log(F("onConfig getting new settings"));
 				AppConfig::Network network(*app.cfg);
 				AppConfig::General general(*app.cfg);
 				newIP = network.connection.getIp();
