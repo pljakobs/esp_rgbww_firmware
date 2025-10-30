@@ -51,13 +51,15 @@ void TelemetryClient::start() {
 		debug_i("Application::startServices - starting remote telemetry");
 
 		debug_i("Application::startServices - telemetry mqtt server: %s", _telemetryURL.c_str());
+		connect(_telemetryURL, _telemetryUser, _telemetryPass);
 	}
 	else {
 		debug_i("Application::startServices - mqtt telemetry disabled");
+		stop();
 	}
 	
 	
-	connect(_telemetryURL, _telemetryUser, _telemetryPass);
+	
 }
 
 void TelemetryClient::stop() {
