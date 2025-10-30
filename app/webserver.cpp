@@ -440,6 +440,7 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 
 			// bool restart = root[F("restart")] | false;
 
+			app.telemetryClient.start();
 			String newIP, newSSID, newDeviceName, newCurrentPinConfigName;
 			bool newMqttEnabled,newDhcpEnabled;
 			int newColorMode;

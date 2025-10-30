@@ -29,9 +29,11 @@ void TelemetryClient::start() {
 	// this will only happen once upon first start
 
 	String _buildType=BUILD_TYPE;
-	if(_telemetryStats == telemetryStats::UNDEF and _buildType == "DEBUG"){
+	if(_telemetryStats == telemetryStats::UNDEF and _buildType == "debug"){
+		debug_i("TelemetryClient::start - enabling telemetry stats by default for debug build");
 		_telemetryStats = telemetryStats::ON; //enable stats in debug builds by default
 	}else if(_telemetryStats == telemetryStats::UNDEF){
+		debug_i("TelemetryClient::start - disabling telemetry stats by default for release build");
 		_telemetryStats = telemetryStats::OFF; //disable stats in release builds by default
 	}
 
@@ -49,13 +51,15 @@ void TelemetryClient::start() {
 		debug_i("Application::startServices - starting remote telemetry");
 
 		debug_i("Application::startServices - telemetry mqtt server: %s", _telemetryURL.c_str());
+		connect(_telemetryURL, _telemetryUser, _telemetryPass);
 	}
 	else {
 		debug_i("Application::startServices - mqtt telemetry disabled");
+		stop();
 	}
 	
 	
-	connect(_telemetryURL, _telemetryUser, _telemetryPass);
+	
 }
 
 void TelemetryClient::stop() {
