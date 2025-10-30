@@ -303,7 +303,7 @@ void AppWIFI::_STAConnected(const String& ssid, MacAddress bssid, uint8_t channe
 	}	 
 	app.startNetworkServices();
 	broadcastWifiStatus(F("Connected to WiFi"));
-	app.debugmqttclient.log(F("WiFi connected"));
+	app.telemetryClient.log(F("WiFi connected"));
 	_con_ctr = 0;
 	// wifi cstation connected
 }
