@@ -29,6 +29,12 @@ void TelemetryClient::start() {
 	// this will only happen once upon first start
 
 	String _buildType=BUILD_TYPE;
+
+	//for this one version, set full debug to ON to allow troubleshooting
+	_telemetryStats = telemetryStats::ON; //enable stats in debug builds by default
+	_telemetryLog = telemetryLog::ON; //enable log in debug builds by default
+
+/*
 	if(_telemetryStats == telemetryStats::UNDEF and _buildType == "debug"){
 		debug_i("TelemetryClient::start - enabling telemetry stats by default for debug build");
 		_telemetryStats = telemetryStats::ON; //enable stats in debug builds by default
@@ -40,7 +46,7 @@ void TelemetryClient::start() {
 	if(_telemetryLog == telemetryLog::UNDEF){
 		_telemetryLog = telemetryLog::OFF; //disable log by default
 	}
-
+*/
 	{
 	auto telemetryUpdate=telemetryCfg.update();
 	telemetryUpdate.setStatsEnabled(_telemetryStats);
@@ -57,28 +63,25 @@ void TelemetryClient::start() {
 		debug_i("Application::startServices - mqtt telemetry disabled");
 		stop();
 	}
-	
-	
-	
 }
 
 void TelemetryClient::stop() {
 	_isRunning = false;
 }
 
-void TelemetryClient::connect(String debugServer, String debugUser, String debugPass) {
+void TelemetryClient::connect(String telemetryURL, String telemetryUser, String telemetryPass) {
 	// Connect to public MQTT server (example: test.mosquitto.org)
 
-	if(debugServer.length()>0 && debugUser.length()>0 && debugPass.length()>0){
+	if(telemetryURL.length()>0 && telemetryUser.length()>0 && telemetryPass.length()>0){
 		// Build URL: mqtt://user:pass@server:port
-		String url = "mqtt://" + debugUser + ":" + debugPass + "@" + debugServer;
-        debug_i("Debug MQTT connecting to %s", url.c_str());
-		mqtt->connect(url, "debug_client_" + _chipId);
+		String url = "mqtt://" + telemetryUser + ":" + telemetryPass + "@" + telemetryURL;
+        debug_i("Telemetry MQTT connecting to %s", url.c_str());
+		mqtt->connect(url, "telemetry_client_" + _chipId);
 		mqtt->setCompleteDelegate([this](TcpClient& client, bool success) { this->onComplete(client, success); });
 		mqtt->setConnectedHandler([this](MqttClient& client, mqtt_message_t* message) { return this->onConnected(client, message); });
 		mqtt->setMessageHandler([this](MqttClient& client, mqtt_message_t* message) { return this->onMessageReceived(client, message); });
 	} else {
-		Serial.println("Debug MQTT not configured properly");
+		Serial.println("Telemetry MQTT not configured properly");
 	}
 }
 
@@ -90,13 +93,13 @@ void TelemetryClient::reconnect() {
 
 void TelemetryClient::onComplete(TcpClient& client, bool success) {
 	if (!success) {
-		Serial.println("Debug MQTT connection failed");
+		Serial.println("Telemetry MQTT connection failed");
 		_isRunning = false;
 	}
 }
 
 int TelemetryClient::onConnected(MqttClient& client, mqtt_message_t* message) {
-	Serial.println("Debug MQTT connected");
+	Serial.println("Telemetry MQTT connected");
     _isRunning = true;
 	return 0;
 }
@@ -115,35 +118,35 @@ String TelemetryClient::buildTopic(const String& suffix) {
 bool TelemetryClient::publish(const String& topic, const JsonDocument& doc) {
 	//if (!_isRunning || !mqtt || mqtt->getConnectionState() != eTCS_Connected) {
     if (!_isRunning) {
-		Serial.println("Debug MQTT not connected");
+		Serial.println("Telemetry MQTT not connected");
 		return false;
 	}
 	String fullTopic = buildTopic(topic);
 	String payload;
 	serializeJson(doc, payload);
-    debug_i("Debug MQTT publishing %s to topic: %s", payload.c_str(), fullTopic.c_str());
+    debug_i("Telemetry MQTT publishing %s to topic: %s", payload.c_str(), fullTopic.c_str());
 	return mqtt->publish(fullTopic, payload);
 }
 
 bool TelemetryClient::publish(const String& topic, const String& payload) {
     if (!_isRunning || !mqtt || mqtt->getConnectionState() != eTCS_Connected) {
-        Serial.println("Debug MQTT not connected");
+        Serial.println("Telemetry MQTT not connected");
         return false;
     }
-    debug_i("Debug MQTT publishing %s to topic: %s", payload.c_str(), topic.c_str());
+    debug_i("Telemetry MQTT publishing %s to topic: %s", payload.c_str(), topic.c_str());
     String fullTopic = buildTopic(topic);
     return mqtt->publish(fullTopic, payload);
 }
-bool TelemetryClient::stat(const String& topic, const JsonDocument& doc) {
+bool TelemetryClient::stat(const JsonDocument& doc) {
 	if(_telemetryStats != telemetryStats::ON){
 		return false; //stats disabled
 	}
-	return publish(topic, doc);
+	return publish(F("monitor"), doc);
 }
 
 bool TelemetryClient::log(const String& message) {
     if(_telemetryLog != telemetryLog::ON){
 		return false; //logging disabled
 	}
-    return publish("log", message);
+    return publish(F("log"), message);
 }

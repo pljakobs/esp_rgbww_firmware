@@ -476,7 +476,7 @@
         },
         "password": {
           "type": "string",
-          "default":"rgbww123"
+          "default":"rgbwwdebug"
         },
         "numReboots": {
           "type": "integer",

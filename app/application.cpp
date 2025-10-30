@@ -205,7 +205,7 @@ void Application::checkRam()
 	doc["mDNS"]["replies"] = _mDNS_replies;
 
 	debug_i("Free heap: %d, uptime: %d", system_get_free_heap_size(), millis() / 1000);
-	if (!telemetryClient.stat("monitor", doc))
+	if (!telemetryClient.stat(doc))
 	{
 		debug_i("Failed to publish monitor data to debug MQTT");
 		if (!telemetryClient.isRunning()){
