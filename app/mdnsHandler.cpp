@@ -13,6 +13,7 @@ static LEDControllerAPIService* g_ledControllerAPIService = nullptr;
 
 mdnsHandler::mdnsHandler() {
     // Initialize with default values
+    _currentMdnsTimerInterval = _mdnsTimerInterval;
 }
 
 mdnsHandler::~mdnsHandler() {
@@ -124,7 +125,7 @@ void mdnsHandler::start()
     debug_i("starting mDNS search timer");
     #endif 
     _mdnsSearchTimer.setCallback(mdnsHandler::sendSearchCb, this);
-    _mdnsSearchTimer.setIntervalMs(_mdnsTimerInterval);
+    _mdnsSearchTimer.setIntervalMs(_currentMdnsTimerInterval);
     _mdnsSearchTimer.startOnce();
 
     // Register the main handler
@@ -139,6 +140,20 @@ bool mdnsHandler::onMessage(mDNS::Message& message)
     // update debug counter
     app._mDNS_received++;
     bool msgHasA = false, msgHasTXT = false;
+
+    // Adaptive mDNS interval logic
+    unsigned long now = millis();
+    _messageCount++;
+    if (now - _lastMessageTime > 1000) { // Check every second
+        if (_messageCount > 30) { // High traffic
+            _currentMdnsTimerInterval = min(_mdnsTimerInterval * 4, 300000); // Increase interval, max 300s
+        } else if (_messageCount < 10) { // Low traffic
+            _currentMdnsTimerInterval = max(_mdnsTimerInterval, _currentMdnsTimerInterval - 1000); // Decrease interval
+        }
+        _messageCount = 0;
+        _lastMessageTime = now;
+    }
+
 #ifdef DEBUG_MDNS
     debug_i("onMessage handler called");
 #endif

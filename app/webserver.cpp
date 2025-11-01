@@ -378,7 +378,8 @@ bool ApplicationWebserver::checkHeap(HttpResponse& response)
 	if(fh < _minimumHeap) {
 		setCorsHeaders(response);
 		response.code = HTTP_STATUS_TOO_MANY_REQUESTS;
-		response.setHeader(F("Retry-After"), "2");
+		response.setHeader(F("Retry-After"), "1");
+		debug_i("Not enough heap free, rejecting request. Free heap: %u", fh);
 		return false;
 	}
 	return true;
