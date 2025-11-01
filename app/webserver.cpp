@@ -42,8 +42,7 @@ ApplicationWebserver::ApplicationWebserver()
 	HttpServerSettings settings;
 	settings.maxActiveConnections = 40;
 	settings.minHeapSize = _minimumHeapAccept;
-	settings.keepAliveSeconds =
-		10; // do not close instantly when no transmission occurs. some clients are a bit slow (like FHEM)
+	settings.keepAliveSeconds = 10; // do not close instantly when no transmission occurs. some clients are a bit slow (like FHEM)
 	configure(settings);
 
 	// workaround for bug in Sming 3.5.0
