@@ -55,8 +55,9 @@ namespace Util {
             }
 
             const char* replacement = nullptr;
+            unsigned char u_cp = (unsigned char)cp;
 
-            switch (cp) {
+            switch (u_cp) {
                 case 0xE4: case 0xC4: replacement = "ae"; break; // ä, Ä
                 case 0xF6: case 0xD6: replacement = "oe"; break; // ö, Ö
                 case 0xFC: case 0xDC: replacement = "ue"; break; // ü, Ü
@@ -83,13 +84,13 @@ namespace Util {
                     *write_ptr++ = *replacement++;
                     last_char_was_hyphen = false;
                 }
-            } else if (cp >= 'a' && cp <= 'z' || cp >= '0' && cp <= '9') {
-                *write_ptr++ = cp;
+            } else if (u_cp >= 'a' && u_cp <= 'z' || u_cp >= '0' && u_cp <= '9') {
+                *write_ptr++ = u_cp;
                 last_char_was_hyphen = false;
-            } else if (cp >= 'A' && cp <= 'Z') {
-                *write_ptr++ = tolower(cp);
+            } else if (u_cp >= 'A' && u_cp <= 'Z') {
+                *write_ptr++ = tolower(u_cp);
                 last_char_was_hyphen = false;
-            } else if (cp == ' ' || cp == '_' || cp == '-') {
+            } else if (u_cp == ' ' || u_cp == '_' || u_cp == '-') {
                 if (!last_char_was_hyphen) {
                     *write_ptr++ = '-';
                     last_char_was_hyphen = true;
