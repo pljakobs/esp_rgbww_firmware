@@ -1,4 +1,4 @@
- /*
+/*
  * @author  Patrick Jahns http://github.com/patrickjahns
  *
  * @section LICENSE
@@ -19,8 +19,10 @@
  *
  */
 #pragma once
+#include <RGBWWCtrl.h>
 #include <otaupdate.h>
 #include <controllers.h>
+#include <mdnsHandler.h>
 
 static const char* fw_git_version = GITVERSION;
 static const char* fw_git_date = GITDATE;
@@ -88,6 +90,7 @@ public:
     AppMqttClient mqttclient;
     TelemetryClient telemetryClient;
     JsonProcessor jsonproc;
+    mdnsHandler mdnsService;
     NtpClient* pNtpclient = nullptr;
 
         // debug counters

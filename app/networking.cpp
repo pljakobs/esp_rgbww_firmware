@@ -20,11 +20,8 @@
  *
  */
 #include <RGBWWCtrl.h>
-#include "mdnshandler.cpp"
 
 #define DNS_PORT 53
-
-mdnsHandler mdnsHandler;
 
 DnsServer dnsServer;
 
@@ -146,13 +143,15 @@ void AppWIFI::init()
 	// ConfigDB adapt
 	if(app.isFirstRun()) {
 		debug_i("AppWIFI::init initial run - setting up AP, ssid: ");
-		String SSID = String(DEFAULT_AP_SSIDPREFIX) + String(system_get_chip_id());
+		char ssid_buf[64];
+		snprintf(ssid_buf, sizeof(ssid_buf), "%s%u", DEFAULT_AP_SSIDPREFIX, system_get_chip_id());
+		String SSID = ssid_buf;
 		printf("%s", SSID.c_str());
 
 		AppConfig::Network network(*app.cfg);
 		if(auto networkUpdate = network.update()) {
-			networkUpdate.mdns.setName(String(DEFAULT_AP_SSIDPREFIX) + String(system_get_chip_id()));
-			networkUpdate.ap.setSsid(String(DEFAULT_AP_SSIDPREFIX) + String(system_get_chip_id()));
+			networkUpdate.mdns.setName(SSID);
+			networkUpdate.ap.setSsid(SSID);
 		} //this should never fail as it is during system startup, there are no asynchronous things here. I think
 		WifiAccessPoint.setIP(_ApIP);
 	}
@@ -291,7 +290,9 @@ void AppWIFI::_STAConnected(const String& ssid, MacAddress bssid, uint8_t channe
 			device_name = general.getDeviceName();
 		} // end ConfigDB general context
 		if(device_name == "") {
-			device_name = String(DEFAULT_AP_SSIDPREFIX) + String(system_get_chip_id());
+			char device_name_buf[64];
+			snprintf(device_name_buf, sizeof(device_name_buf), "%s%u", DEFAULT_AP_SSIDPREFIX, system_get_chip_id());
+			device_name = device_name_buf;
 			debug_i("no device name configured, building default name");
 		}
 		debug_i("AppWIFI::connect setting hostname to %s", device_name.c_str());
@@ -339,7 +340,7 @@ void AppWIFI::_STAGotIP(IpAddress ip, IpAddress mask, IpAddress gateway)
 		}
 	} //end ConfigDB general and network context
 
-	mdnsHandler.start();
+	app.mdnsService.start();
 	String ipAddress = ip.toString();
 
 	{
@@ -351,9 +352,8 @@ void AppWIFI::_STAGotIP(IpAddress ip, IpAddress mask, IpAddress gateway)
 			*/
 		uint32_t id;
 		
-		id = system_get_chip_id();	
+		id = (uint32_t)system_get_chip_id();	
 
-		ipAddress=ip.toString();
 		debug_i("adding mdns host %s with ip %s and id %s", network.mdns.getName().c_str(), ipAddress.c_str(), String(id).c_str());
 		app.controllers->addOrUpdate(id, network.mdns.getName(), ipAddress, -1);
 

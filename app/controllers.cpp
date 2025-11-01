@@ -32,11 +32,11 @@ Controllers::~Controllers() {
 }
 
 // Core methods
-void Controllers::addOrUpdate(unsigned int id, const String& hostname, const String& ipAddress, int ttl) {
+void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char* ipAddress, int ttl) {
     #ifdef DEBUG_MDNS
-        debug_i("Controllers::addOrUpdate id=%u, hostname=%s, ip=%s, ttl=%d", id, hostname.c_str(), ipAddress.c_str(), ttl);
+        debug_i("Controllers::addOrUpdate id=%u, hostname=%s, ip=%s, ttl=%d", id, hostname, ipAddress, ttl);
     #endif
-    if(hostname == "" || ipAddress == "") {
+    if(hostname == nullptr || hostname[0] == '\0' || ipAddress == nullptr || ipAddress[0] == '\0') {
         debug_w("Empty hostname or IP address provided, skipping addOrUpdate");
         return;
     }
@@ -67,20 +67,20 @@ void Controllers::addOrUpdate(unsigned int id, const String& hostname, const Str
             if (controllerItem.getId() == String(id)) {
                 foundInConfig = true;
                 #ifdef DEBUG_MDNS
-                debug_i("Hostname %s already in list", hostname.c_str());
+                debug_i("Hostname %s already in list", hostname);
                 #endif
 
                 // Always update IP address
                 if (controllerItem.getIpAddress() != ipAddress) {
                     debug_i("IP address changed from %s to %s", 
-                           controllerItem.getIpAddress().c_str(), ipAddress.c_str());
+                           controllerItem.getIpAddress().c_str(), ipAddress);
                     controllerItem.setIpAddress(ipAddress);
                 }
                 
                 // Only update hostname if this is NOT a group or leader hostname
                 if ( controllerItem.getName() != hostname) {
                     debug_i("Hostname changed from %s to %s", 
-                           controllerItem.getName().c_str(), hostname.c_str());
+                           controllerItem.getName().c_str(), hostname);
                     controllerItem.setName(hostname);
                 }
                 break;
@@ -91,7 +91,7 @@ void Controllers::addOrUpdate(unsigned int id, const String& hostname, const Str
     }
 
     if(!foundInConfig) {
-        debug_i("Hostname %s not in list adding to hostname db", hostname.c_str());
+        debug_i("Hostname %s not in list adding to hostname db", hostname);
 
         if(auto controllersUpdate = controllers.update()) {
             auto newController = controllersUpdate.addItem();
@@ -105,13 +105,17 @@ void Controllers::addOrUpdate(unsigned int id, const String& hostname, const Str
 
 }
 
+void Controllers::addOrUpdate(unsigned int id, const String& hostname, const String& ipAddress, int ttl) {
+    addOrUpdate(id, hostname.c_str(), ipAddress.c_str(), ttl);
+}
+
 void Controllers::updateFromPing(unsigned int id, int ttl) {
     addOrUpdate(id, "", "", ttl);
 }
 
 void Controllers::removeExpired(int elapsedSeconds) {
     for (auto& controller : visibleControllers) {
-        if (controller.id!=system_get_chip_id()){
+        if (controller.id != (unsigned int)system_get_chip_id()){
             controller.ttl = std::max(0, controller.ttl - elapsedSeconds);
             if (controller.ttl <= 0) { // Never set self to OFFLINE
                 controller.state = OFFLINE;
@@ -132,24 +136,52 @@ Controllers::ControllerInfo Controllers::getController(unsigned int id) {
     return findById(id);
 }
 
-String Controllers::getIpAddress(unsigned int id) {
+const char* Controllers::getIpAddress(unsigned int id) {
     auto info = findById(id);
-    return (info.state != NOT_FOUND) ? info.ipAddress : String();
+    if (info.state != NOT_FOUND) {
+        static char ip[CONTROLLER_IP_MAX_SIZE];
+        strncpy(ip, info.ipAddress, CONTROLLER_IP_MAX_SIZE);
+        return ip;
+    }
+    return nullptr;
 }
 
-String Controllers::getHostname(unsigned int id) {
-    auto info = findById(id);
-    return (info.state != NOT_FOUND) ? info.hostname : String();
+String Controllers::getIpAddressString(unsigned int id) {
+    const char* ip = getIpAddress(id);
+    return ip ? String(ip) : String();
 }
 
-unsigned int Controllers::getIdByHostname(const String& hostname) {
+const char* Controllers::getHostname(unsigned int id) {
+    auto info = findById(id);
+    if (info.state != NOT_FOUND) {
+        static char hostname[CONTROLLER_HOSTNAME_MAX_SIZE];
+        strncpy(hostname, info.hostname, CONTROLLER_HOSTNAME_MAX_SIZE);
+        return hostname;
+    }
+    return nullptr;
+}
+
+String Controllers::getHostnameString(unsigned int id) {
+    const char* hostname = getHostname(id);
+    return hostname ? String(hostname) : String();
+}
+
+unsigned int Controllers::getIdByHostname(const char* hostname) {
     auto info = findByHostname(hostname);
     return (info.state != NOT_FOUND) ? info.id : 0;
 }
 
-unsigned int Controllers::getIdByIpAddress(const String& ipAddress) {
+unsigned int Controllers::getIdByHostname(const String& hostname) {
+    return getIdByHostname(hostname.c_str());
+}
+
+unsigned int Controllers::getIdByIpAddress(const char* ipAddress) {
     auto info = findByIpAddress(ipAddress);
     return (info.state != NOT_FOUND) ? info.id : 0;
+}
+
+unsigned int Controllers::getIdByIpAddress(const String& ipAddress) {
+    return getIdByIpAddress(ipAddress.c_str());
 }
 
 uint32_t Controllers::getHighestId() {
@@ -170,14 +202,22 @@ bool Controllers::isVisible(unsigned int id) {
     return index != INVALID_INDEX && visibleControllers[index].state == ONLINE;
 }
 
-bool Controllers::isVisibleByHostname(const String& hostname) {
+bool Controllers::isVisibleByHostname(const char* hostname) {
     unsigned int id = getIdByHostname(hostname);
     return id != 0 && isVisible(id);
 }
 
-bool Controllers::isVisibleByIpAddress(const String& ipAddress) {
+bool Controllers::isVisibleByHostname(const String& hostname) {
+    return isVisibleByHostname(hostname.c_str());
+}
+
+bool Controllers::isVisibleByIpAddress(const char* ipAddress) {
     unsigned int id = getIdByIpAddress(ipAddress);
     return id != 0 && isVisible(id);
+}
+
+bool Controllers::isVisibleByIpAddress(const String& ipAddress) {
+    return isVisibleByIpAddress(ipAddress.c_str());
 }
 
 bool Controllers::isPingPending(unsigned int id) {
@@ -252,8 +292,8 @@ Controllers::ControllerInfo Controllers::Iterator::operator*() {
             auto& configItem = *it;
             Controllers::ControllerInfo info;
             info.id = configItem.getId().toInt();
-            info.hostname = configItem.getName();
-            info.ipAddress = configItem.getIpAddress();
+            strncpy(info.hostname, configItem.getName().c_str(), CONTROLLER_HOSTNAME_MAX_SIZE);
+            strncpy(info.ipAddress, configItem.getIpAddress().c_str(), CONTROLLER_IP_MAX_SIZE);
             info.state = OFFLINE;
             info.ttl = 0;
             info.pingPending = false;
@@ -264,7 +304,7 @@ Controllers::ControllerInfo Controllers::Iterator::operator*() {
                 info.ttl = manager.visibleControllers[visibleIndex].ttl;
                 info.state = (info.ttl > 0) ? ONLINE : OFFLINE;
                 info.pingPending = manager.visibleControllers[visibleIndex].pingPending;
-            } else if (info.hostname.length() == 0 || info.ipAddress.length() == 0) {
+            } else if (strlen(info.hostname) == 0 || strlen(info.ipAddress) == 0) {
                 info.state = INCOMPLETE;
             }
             
@@ -313,8 +353,8 @@ Controllers::ControllerInfo Controllers::findById(unsigned int id) {
         if (controller.getId().toInt() == id) {
             ControllerInfo info;
             info.id = id;
-            info.hostname = controller.getName();
-            info.ipAddress = controller.getIpAddress();
+            strncpy(info.hostname, controller.getName().c_str(), CONTROLLER_HOSTNAME_MAX_SIZE);
+            strncpy(info.ipAddress, controller.getIpAddress().c_str(), CONTROLLER_IP_MAX_SIZE);
             info.state = OFFLINE;
             info.ttl = 0;
             info.pingPending = false;
@@ -325,7 +365,7 @@ Controllers::ControllerInfo Controllers::findById(unsigned int id) {
                 info.ttl = visibleControllers[visibleIndex].ttl;
                 info.state = (info.ttl > 0) ? ONLINE : OFFLINE;
                 info.pingPending = visibleControllers[visibleIndex].pingPending;
-            } else if (info.hostname.length() == 0 || info.ipAddress.length() == 0) {
+            } else if (strlen(info.hostname) == 0 || strlen(info.ipAddress) == 0) {
                 info.state = INCOMPLETE;
             }
             
@@ -336,10 +376,24 @@ Controllers::ControllerInfo Controllers::findById(unsigned int id) {
     return ControllerInfo(); // NOT_FOUND
 }
 
-Controllers::ControllerInfo Controllers::findByIpAddress(const String& ipAddress) {
+Controllers::ControllerInfo Controllers::findByIpAddress(const char* ipAddress) {
     AppData::Root::Controllers controllers(*app.data);
     for (auto& controller : controllers) {
-        if (controller.getIpAddress() == ipAddress) {
+        if (strcmp(controller.getIpAddress().c_str(), ipAddress) == 0) {
+            return findById(controller.getId().toInt());
+        }
+    }
+    return ControllerInfo(); // NOT_FOUND
+}
+
+Controllers::ControllerInfo Controllers::findByIpAddress(const String& ipAddress) {
+    return findByIpAddress(ipAddress.c_str());
+}
+
+Controllers::ControllerInfo Controllers::findByHostname(const char* hostname) {
+    AppData::Root::Controllers controllers(*app.data);
+    for (auto& controller : controllers) {
+        if (strcmp(controller.getName().c_str(), hostname) == 0) {
             return findById(controller.getId().toInt());
         }
     }
@@ -347,13 +401,7 @@ Controllers::ControllerInfo Controllers::findByIpAddress(const String& ipAddress
 }
 
 Controllers::ControllerInfo Controllers::findByHostname(const String& hostname) {
-    AppData::Root::Controllers controllers(*app.data);
-    for (auto& controller : controllers) {
-        if (controller.getName() == hostname) {
-            return findById(controller.getId().toInt());
-        }
-    }
-    return ControllerInfo(); // NOT_FOUND
+    return findByHostname(hostname.c_str());
 }
 
 // JSON output methods
@@ -382,8 +430,8 @@ bool Controllers::JsonPrinter::shouldIncludeController(const Controllers::Contro
 
         case VALID_ONLY:
             result= info.id != 0 && 
-                   info.hostname.length() > 0 && 
-                   info.ipAddress.length() > 0;
+                   strlen(info.hostname) > 0 && 
+                   strlen(info.ipAddress) > 0;
             break;
 
         case VISIBLE_ONLY:
@@ -393,7 +441,7 @@ bool Controllers::JsonPrinter::shouldIncludeController(const Controllers::Contro
         default:
             result = false;
     }
-    debug_i("%s controller: %u, hostname: %s, ip: %s, state: %d, ttl: %d", result?"return": "skip", info.id, info.hostname.c_str(), info.ipAddress.c_str(), info.state, info.ttl);
+    debug_i("%s controller: %u, hostname: %s, ip: %s, state: %d, ttl: %d", result?"return": "skip", info.id, info.hostname, info.ipAddress, info.state, info.ttl);
 
     return result;
 }
@@ -430,8 +478,8 @@ size_t Controllers::JsonPrinter::operator()() {
             if (index == currentIndex) {
                 auto& configItem = *it;
                 info.id = configItem.getId().toInt();
-                info.hostname = configItem.getName();
-                info.ipAddress = configItem.getIpAddress();
+                strncpy(info.hostname, configItem.getName().c_str(), CONTROLLER_HOSTNAME_MAX_SIZE);
+                strncpy(info.ipAddress, configItem.getIpAddress().c_str(), CONTROLLER_IP_MAX_SIZE);
                 info.state = OFFLINE;
                 info.ttl = 0;
                 info.pingPending = false;
@@ -442,7 +490,7 @@ size_t Controllers::JsonPrinter::operator()() {
                     info.ttl = manager.visibleControllers[visibleIndex].ttl;
                     info.state = (info.ttl > 0) ? ONLINE : OFFLINE;
                     info.pingPending = manager.visibleControllers[visibleIndex].pingPending;
-                } else if (info.hostname.length() == 0 || info.ipAddress.length() == 0) {
+                } else if (strlen(info.hostname) == 0 || strlen(info.ipAddress) == 0) {
                     info.state = INCOMPLETE;
                 } else {
                     info.state = OFFLINE;
@@ -469,7 +517,7 @@ size_t Controllers::JsonPrinter::operator()() {
         n += printIndent(2);
         n += p->print('{');
         
-        n += printProperty("id", String(info.id), false, 3);
+        n += printProperty("id", (int)info.id, false, 3);
         n += printProperty("hostname", info.hostname, false, 3);
         n += printProperty("ip_address", info.ipAddress, false, 3);
         n += printProperty("visible", (info.state == ONLINE), true, 3); // Last property
@@ -503,11 +551,11 @@ size_t Controllers::JsonPrinter::printIndent(size_t level) {
     return n;
 }
 
-size_t Controllers::JsonPrinter::printString(const String& str) {
+size_t Controllers::JsonPrinter::printString(const char* str) {
     size_t n = 0;
     n += p->print('"');
     // Escape special characters
-    for (unsigned i = 0; i < str.length(); i++) {
+    for (unsigned i = 0; i < strlen(str); i++) {
         char c = str[i];
         switch (c) {
             case '"': n += p->print("\\\""); break;
@@ -522,7 +570,7 @@ size_t Controllers::JsonPrinter::printString(const String& str) {
     return n;
 }
 
-size_t Controllers::JsonPrinter::printProperty(const String& name, const String& value, bool isLast, size_t indentLevel) {
+size_t Controllers::JsonPrinter::printProperty(const char* name, const char* value, bool isLast, size_t indentLevel) {
     size_t n = 0;
     if (pretty) {
         n += p->print('\n');
@@ -537,7 +585,7 @@ size_t Controllers::JsonPrinter::printProperty(const String& name, const String&
     return n;
 }
 
-size_t Controllers::JsonPrinter::printProperty(const String& name, int value, bool isLast, size_t indentLevel) {
+size_t Controllers::JsonPrinter::printProperty(const char* name, int value, bool isLast, size_t indentLevel) {
     size_t n = 0;
     if (pretty) {
         n += p->print('\n');
@@ -552,7 +600,7 @@ size_t Controllers::JsonPrinter::printProperty(const String& name, int value, bo
     return n;
 }
 
-size_t Controllers::JsonPrinter::printProperty(const String& name, bool value, bool isLast, size_t indentLevel) {
+size_t Controllers::JsonPrinter::printProperty(const char* name, bool value, bool isLast, size_t indentLevel) {
     size_t n = 0;
     if (pretty) {
         n += p->print('\n');
@@ -634,7 +682,7 @@ bool Controllers::JsonStream::isFinished() {
     return streamDone;
 }
 
-Controllers::JsonStream* Controllers::createJsonStream(JsonFilter filter, bool pretty) {
+std::unique_ptr<Controllers::JsonStream> Controllers::createJsonStream(JsonFilter filter, bool pretty) {
     class DummyPrint : public Print {
     public:
         size_t write(uint8_t) override { return 1; }
@@ -642,5 +690,5 @@ Controllers::JsonStream* Controllers::createJsonStream(JsonFilter filter, bool p
     
     static DummyPrint dummyPrint;
     auto printer = printJson(dummyPrint, filter, pretty);
-    return new JsonStream(std::move(printer));
+    return std::make_unique<JsonStream>(std::move(printer));
 }

@@ -109,7 +109,7 @@ void AppMqttClient::init()
 	} else {
 		debug_w("AppMqttClient::init: building MQTT ID from chip id (device name is: '%s')\n",
 				general.getDeviceName().c_str());
-		_id = String("rgbww_") + system_get_chip_id();
+		_id = String("rgbww_") + String(system_get_chip_id());
 		debug_i("AppMqttClient::init: ID: %s\n", _id.c_str());
 	}
 	
@@ -397,7 +397,7 @@ void AppMqttClient::initHomeAssistant() {
     _haNodeId.replace(" ", "_");
     
     // Generate unique_id from chip ID
-    _haUniqueId = String("rgbww_") + system_get_chip_id();
+    _haUniqueId = "rgbww_" + String(system_get_chip_id());
     
     // Object ID for this light entity
     _haObjectId = "1";
