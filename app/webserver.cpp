@@ -260,6 +260,10 @@ void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, c
 void ApplicationWebserver::onFile(HttpRequest& request, HttpResponse& response)
 {
 	debug_i("http onFile");
+	if(!checkHeap(response)) {
+		return;
+	}
+
 	if(!authenticated(request, response)) {
 		return;
 	}
@@ -328,6 +332,9 @@ void ApplicationWebserver::onFile(HttpRequest& request, HttpResponse& response)
 void ApplicationWebserver::onWebapp(HttpRequest& request, HttpResponse& response)
 {
 	debug_i("http onWebapp");
+	if(!checkHeap(response)) {
+		return;
+	}
 	if(!authenticated(request, response)) {
 		return;
 	}
@@ -342,6 +349,9 @@ void ApplicationWebserver::onWebapp(HttpRequest& request, HttpResponse& response
 void ApplicationWebserver::onIndex(HttpRequest& request, HttpResponse& response)
 {
 	debug_i("http onIndex");
+	if(!checkHeap(response)) {
+		return;
+	}
 	if(!authenticated(request, response)) {
 		return;
 	}
@@ -716,6 +726,9 @@ void ApplicationWebserver::onColorGet(HttpRequest& request, HttpResponse& respon
  */
 void ApplicationWebserver::onColorPost(HttpRequest& request, HttpResponse& response)
 {
+	if(!checkHeap(response)) {
+		return;
+	}
 	String body = request.getBody();
 
 	setCorsHeaders(response);
@@ -750,6 +763,9 @@ void ApplicationWebserver::onColorPost(HttpRequest& request, HttpResponse& respo
  * @param response The HTTP response object.
  */
 void ApplicationWebserver::onColor(HttpRequest& request, HttpResponse& response){
+	if(!checkHeap(response)) {
+		return;
+	}
 	if(!authenticated(request, response)) {
 		return;
 	}
@@ -892,6 +908,9 @@ void ApplicationWebserver::onNetworks(HttpRequest& request, HttpResponse& respon
  */
 void ApplicationWebserver::onScanNetworks(HttpRequest& request, HttpResponse& response)
 {
+	if(!checkHeap(response)) {
+		return;
+	}
 	if(!authenticated(request, response)) {
 		return;
 	}
@@ -925,6 +944,9 @@ void ApplicationWebserver::onScanNetworks(HttpRequest& request, HttpResponse& re
  */
 void ApplicationWebserver::onConnect(HttpRequest& request, HttpResponse& response)
 {
+	if(!checkHeap(response)) {
+		return;
+	}
 	if(!authenticated(request, response)) {
 		return;
 	}
@@ -1004,6 +1026,9 @@ void ApplicationWebserver::onConnect(HttpRequest& request, HttpResponse& respons
  */
 void ApplicationWebserver::onSystemReq(HttpRequest& request, HttpResponse& response)
 {
+	if(!checkHeap(response)) {
+		return;
+	}
 	if(!authenticated(request, response)) {
 		return;
 	}
@@ -1075,6 +1100,9 @@ void ApplicationWebserver::onSystemReq(HttpRequest& request, HttpResponse& respo
  */
 void ApplicationWebserver::onUpdate(HttpRequest& request, HttpResponse& response)
 {
+	if(!checkHeap(response)) {
+		return;
+	}
 	if(!authenticated(request, response)) {
 		return;
 	}
@@ -1151,6 +1179,9 @@ void ApplicationWebserver::onUpdate(HttpRequest& request, HttpResponse& response
  */
 void ApplicationWebserver::onPing(HttpRequest& request, HttpResponse& response)
 {
+	if(!checkHeap(response)) {
+		return;
+	}
 	if(request.method != HTTP_GET) {
 		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not HTTP GET");
 		return;
@@ -1163,6 +1194,9 @@ void ApplicationWebserver::onPing(HttpRequest& request, HttpResponse& response)
 
 void ApplicationWebserver::onStop(HttpRequest& request, HttpResponse& response)
 {
+	if(!checkHeap(response)) {
+		return;
+	}
 	if(request.method != HTTP_POST) {
 		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not HTTP POST");
 		return;
@@ -1178,6 +1212,9 @@ void ApplicationWebserver::onStop(HttpRequest& request, HttpResponse& response)
 
 void ApplicationWebserver::onSkip(HttpRequest& request, HttpResponse& response)
 {
+	if(!checkHeap(response)) {
+		return;
+	}
 	if(request.method != HTTP_POST) {
 		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not HTTP POST");
 		return;
@@ -1193,6 +1230,9 @@ void ApplicationWebserver::onSkip(HttpRequest& request, HttpResponse& response)
 
 void ApplicationWebserver::onPause(HttpRequest& request, HttpResponse& response)
 {
+	if(!checkHeap(response)) {
+		return;
+	}
 	if(request.method != HTTP_POST) {
 		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not HTTP POST");
 		return;
@@ -1208,6 +1248,9 @@ void ApplicationWebserver::onPause(HttpRequest& request, HttpResponse& response)
 
 void ApplicationWebserver::onContinue(HttpRequest& request, HttpResponse& response)
 {
+	if(!checkHeap(response)) {
+		return;
+	}
 	if(request.method != HTTP_POST) {
 		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not HTTP POST");
 		return;
@@ -1223,6 +1266,9 @@ void ApplicationWebserver::onContinue(HttpRequest& request, HttpResponse& respon
 
 void ApplicationWebserver::onBlink(HttpRequest& request, HttpResponse& response)
 {
+	if(!checkHeap(response)) {
+		return;
+	}
 	if(request.method != HTTP_POST) {
 		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not HTTP POST");
 		return;
@@ -1238,6 +1284,9 @@ void ApplicationWebserver::onBlink(HttpRequest& request, HttpResponse& response)
 
 void ApplicationWebserver::onToggle(HttpRequest& request, HttpResponse& response)
 {
+	if(!checkHeap(response)) {
+		return;
+	}
 	if(request.method != HTTP_POST) {
 		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not HTTP POST");
 		return;
@@ -1303,6 +1352,9 @@ void ApplicationWebserver::onHosts(HttpRequest& request, HttpResponse& response)
 }
 
 void ApplicationWebserver::onData(HttpRequest& request, HttpResponse& response){
+	if(!checkHeap(response)) {
+		return;
+	}
 	if(request.method != HTTP_POST && request.method != HTTP_GET && request.method != HTTP_OPTIONS) {
 		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not GET or OPTIONS request");
 		return;
@@ -1347,6 +1399,9 @@ void ApplicationWebserver::onData(HttpRequest& request, HttpResponse& response){
 	return;
 }
 void ApplicationWebserver::onSetOn(HttpRequest &request, HttpResponse &response) {
+	if(!checkHeap(response)) {
+		return;
+	}
 	if(request.method == HTTP_OPTIONS) {
 		// probably a CORS request
 		setCorsHeaders(response);
@@ -1371,6 +1426,9 @@ void ApplicationWebserver::onSetOn(HttpRequest &request, HttpResponse &response)
 }
 
 void ApplicationWebserver::onSetOff(HttpRequest &request, HttpResponse &response) {
+	if(!checkHeap(response)) {
+		return;
+	}
 	if(request.method == HTTP_OPTIONS) {
 		// probably a CORS request
 		setCorsHeaders(response);
