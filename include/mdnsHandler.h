@@ -357,7 +357,7 @@ private:
     std::unique_ptr<LEDControllerWebService> deviceWebService;   // For hostname.local
     std::unique_ptr<LEDControllerWebService> leaderWebService;   // For lightinator.local
     // Hostname resolution handling
-    std::map<String, String> _pendingHostnameResolutions;
+    //std::map<String, String> _pendingHostnameResolutions;
 
     // Process different types of mDNS responses
     bool processApiServiceResponse(mDNS::Message& message);
