@@ -325,7 +325,7 @@ bool mdnsHandler::processHostnameARecord(mDNS::Message& message, mDNS::Answer* a
     }
 
     // Save this information for later matching with TXT records
-    _pendingHostnameResolutions[hostname] = ipAddress;
+    //_pendingHostnameResolutions[hostname] = ipAddress;
 
 #ifdef DEBUG_MDNS
     debug_i("Hostname stored for later ID resolution: %s", hostname);
