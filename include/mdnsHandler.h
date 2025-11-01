@@ -307,9 +307,12 @@ private:
     SimpleTimer _pingTimer;
     String searchName;
     const char* service = "_http._tcp.local";
-    int _mdnsTimerInterval = 10000;
+    int _mdnsTimerInterval = 15000; // Increased from 10000
     int _mdnsPingInterval = 10000; // Ping every minute
     int conntrack = 0;
+    int _currentMdnsTimerInterval;
+    unsigned long _lastMessageTime = 0;
+    int _messageCount = 0;
 
     // Global leadership
     bool _isLeader = false;
