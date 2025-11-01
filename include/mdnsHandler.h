@@ -35,21 +35,36 @@ namespace Util {
             uint32_t cp = 0;
             int len = 0;
 
-            if ((unsigned char)read_ptr[0] < 0x80) {
-                cp = read_ptr[0];
+            const unsigned char* p = (const unsigned char*)read_ptr;
+            size_t remaining = (str + bufferSize) - read_ptr;
+
+            if (remaining > 0 && p[0] < 0x80) { // 0xxxxxxx
+                cp = p[0];
                 len = 1;
-            } else if ((unsigned char)read_ptr[0] >= 0xC2 && (unsigned char)read_ptr[0] <= 0xDF) {
-                if ((unsigned char)read_ptr[1] >= 0x80 && (unsigned char)read_ptr[1] <= 0xBF) {
-                    cp = ((read_ptr[0] & 0x1F) << 6) | (read_ptr[1] & 0x3F);
-                    len = 2;
+            } else if (remaining > 1 && (p[0] & 0xE0) == 0xC0) { // 110xxxxx 10xxxxxx
+                if ((p[1] & 0xC0) == 0x80) {
+                    cp = ((p[0] & 0x1F) << 6) | (p[1] & 0x3F);
+                    if (cp >= 0x80) { // Check for overlong encoding
+                        len = 2;
+                    }
                 }
-            } else if ((unsigned char)read_ptr[0] == 0xE1 && (unsigned char)read_ptr[1] == 0xBA && (unsigned char)read_ptr[2] == 0x9E) {
-                cp = 0x1E9E; // ẞ
-                len = 3;
+            } else if (remaining > 2 && (p[0] & 0xF0) == 0xE0) { // 1110xxxx 10xxxxxx 10xxxxxx
+                if ((p[1] & 0xC0) == 0x80 && (p[2] & 0xC0) == 0x80) {
+                    cp = ((p[0] & 0x0F) << 12) | ((p[1] & 0x3F) << 6) | (p[2] & 0x3F);
+                    if (cp >= 0x800) { // Check for overlong encoding
+                        len = 3;
+                    }
+                }
+            } else if (remaining > 3 && (p[0] & 0xF8) == 0xF0) { // 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
+                if ((p[1] & 0xC0) == 0x80 && (p[2] & 0xC0) == 0x80 && (p[3] & 0xC0) == 0x80) {
+                    cp = ((p[0] & 0x07) << 18) | ((p[1] & 0x3F) << 12) | ((p[2] & 0x3F) << 6) | (p[3] & 0x3F);
+                    if (cp >= 0x10000) { // Check for overlong encoding
+                        len = 4;
+                    }
+                }
             }
 
-
-            if (len == 0) { // Invalid UTF-8 sequence
+            if (len == 0) { // Invalid or incomplete UTF-8 sequence
                 read_ptr++;
                 continue;
             }

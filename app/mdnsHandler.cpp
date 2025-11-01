@@ -167,7 +167,8 @@ bool mdnsHandler::onMessage(mDNS::Message& message)
         return false;
     }
 
-    const char* answerName = String(srv_answer->getName()).c_str();
+    const String answerNameString = String(srv_answer->getName());
+    const char* answerName = answerNameString.c_str();
 #ifdef DEBUG_MDNS
     debug_i("answerName: %ssearchName: %s", answerName, searchName.c_str());
 #endif
