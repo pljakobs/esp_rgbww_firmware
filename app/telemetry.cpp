@@ -1,12 +1,13 @@
 #include <RGBWWCtrl.h>
+#include <arduinojson.h>
 
 using telemetryStats = AppConfig::ContainedRoot::telemetryStats;
 using telemetryLog = AppConfig::ContainedRoot::telemetryLog;
 
 TelemetryClient::TelemetryClient() {
-	_chipId = String(system_get_chip_id());
+	snprintf(_chipId, TELEMETRY_CHIPID_MAX_SIZE, "%u", system_get_chip_id());
 	mqtt = new MqttClient();
-    _id = String("rgbww_") + system_get_chip_id();
+    snprintf(_id, TELEMETRY_ID_MAX_SIZE, "rgbww_%s", _chipId);
 }
 
 TelemetryClient::~TelemetryClient() {
@@ -19,9 +20,12 @@ TelemetryClient::~TelemetryClient() {
 void TelemetryClient::start() {
 	
 	AppConfig::Root::Telemetry telemetryCfg(*app.cfg);
-	_telemetryURL=telemetryCfg.getUrl();
-	_telemetryUser=telemetryCfg.getUser();
-	_telemetryPass=telemetryCfg.getPassword();
+	strncpy(_telemetryURL, telemetryCfg.getUrl().c_str(), TELEMETRY_URL_MAX_SIZE);
+    _telemetryURL[TELEMETRY_URL_MAX_SIZE - 1] = '\0';
+	strncpy(_telemetryUser, telemetryCfg.getUser().c_str(), TELEMETRY_USER_MAX_SIZE);
+    _telemetryUser[TELEMETRY_USER_MAX_SIZE - 1] = '\0';
+	strncpy(_telemetryPass, telemetryCfg.getPassword().c_str(), TELEMETRY_PASS_MAX_SIZE);
+    _telemetryPass[TELEMETRY_PASS_MAX_SIZE - 1] = '\0';
 	_telemetryStats=telemetryCfg.getStatsEnabled();
 	_telemetryLog=telemetryCfg.getLogEnabled();
 
@@ -53,10 +57,10 @@ void TelemetryClient::start() {
 	telemetryUpdate.setLogEnabled(_telemetryLog);
 	}
 
-	if(_telemetryStats == telemetryStats::ON or _telemetryLog == telemetryLog::ON){
+	if((_telemetryStats == telemetryStats::ON or _telemetryLog == telemetryLog::ON) && strlen(_telemetryURL) > 0){
 		debug_i("Application::startServices - starting remote telemetry");
 
-		debug_i("Application::startServices - telemetry mqtt server: %s", _telemetryURL.c_str());
+		debug_i("Application::startServices - telemetry mqtt server: %s", _telemetryURL);
 		connect(_telemetryURL, _telemetryUser, _telemetryPass);
 	}
 	else {
@@ -69,20 +73,27 @@ void TelemetryClient::stop() {
 	_isRunning = false;
 }
 
-void TelemetryClient::connect(String telemetryURL, String telemetryUser, String telemetryPass) {
+void TelemetryClient::connect(const char* telemetryURL, const char* telemetryUser, const char* telemetryPass) {
 	// Connect to public MQTT server (example: test.mosquitto.org)
 
-	if(telemetryURL.length()>0 && telemetryUser.length()>0 && telemetryPass.length()>0){
+	if(strlen(telemetryURL)>0 && strlen(telemetryUser)>0 && strlen(telemetryPass)>0){
 		// Build URL: mqtt://user:pass@server:port
-		String url = "mqtt://" + telemetryUser + ":" + telemetryPass + "@" + telemetryURL;
-        debug_i("Telemetry MQTT connecting to %s", url.c_str());
-		mqtt->connect(url, "telemetry_client_" + _chipId);
+		char url[256];
+        snprintf(url, sizeof(url), "mqtt://%s:%s@%s", telemetryUser, telemetryPass, telemetryURL);
+        debug_i("Telemetry MQTT connecting to %s", url);
+        char clientId[64];
+        snprintf(clientId, sizeof(clientId), "telemetry_client_%s", _chipId);
+		mqtt->connect(url, clientId);
 		mqtt->setCompleteDelegate([this](TcpClient& client, bool success) { this->onComplete(client, success); });
 		mqtt->setConnectedHandler([this](MqttClient& client, mqtt_message_t* message) { return this->onConnected(client, message); });
 		mqtt->setMessageHandler([this](MqttClient& client, mqtt_message_t* message) { return this->onMessageReceived(client, message); });
 	} else {
 		Serial.println("Telemetry MQTT not configured properly");
 	}
+}
+
+void TelemetryClient::connect(const String& telemetryURL, const String& telemetryUser, const String& telemetryPass) {
+    connect(telemetryURL.c_str(), telemetryUser.c_str(), telemetryPass.c_str());
 }
 
 void TelemetryClient::reconnect() {
@@ -109,44 +120,56 @@ int TelemetryClient::onMessageReceived(MqttClient& client, mqtt_message_t* messa
 	return 0;
 }
 
-String TelemetryClient::buildTopic(const String& suffix) {
-    String topic = String("rgbww/") + _chipId + "/" + suffix;
-    topic.trim();
-    return topic;
+void TelemetryClient::buildTopic(const char* suffix, char* dest, size_t size) {
+    snprintf(dest, size, "rgbww/%s/%s", _chipId, suffix);
+    dest[size - 1] = '\0';
 }
 
-bool TelemetryClient::publish(const String& topic, const JsonDocument& doc) {
-	//if (!_isRunning || !mqtt || mqtt->getConnectionState() != eTCS_Connected) {
-    if (!_isRunning) {
-		Serial.println("Telemetry MQTT not connected");
-		return false;
-	}
-	String fullTopic = buildTopic(topic);
+bool TelemetryClient::publish(const char* topic, const JsonDocument& doc) {
+    if (!_isRunning || !mqtt || mqtt->getConnectionState() != eTCS_Connected) {
+        // Serial.println("Telemetry MQTT not connected");
+        return false;
+    }
+	char fullTopic[TELEMETRY_TOPIC_MAX_SIZE];
+    buildTopic(topic, fullTopic, sizeof(fullTopic));
 	String payload;
 	serializeJson(doc, payload);
-    debug_i("Telemetry MQTT publishing %s to topic: %s", payload.c_str(), fullTopic.c_str());
+    debug_i("Telemetry MQTT publishing %s to topic: %s", payload.c_str(), fullTopic);
 	return mqtt->publish(fullTopic, payload);
 }
 
-bool TelemetryClient::publish(const String& topic, const String& payload) {
+bool TelemetryClient::publish(const String& topic, const JsonDocument& doc) {
+    return publish(topic.c_str(), doc);
+}
+
+bool TelemetryClient::publish(const char* topic, const char* payload) {
     if (!_isRunning || !mqtt || mqtt->getConnectionState() != eTCS_Connected) {
-        Serial.println("Telemetry MQTT not connected");
+        // Serial.println("Telemetry MQTT not connected");
         return false;
     }
-    debug_i("Telemetry MQTT publishing %s to topic: %s", payload.c_str(), topic.c_str());
-    String fullTopic = buildTopic(topic);
+    debug_i("Telemetry MQTT publishing %s to topic: %s", payload, topic);
+    char fullTopic[TELEMETRY_TOPIC_MAX_SIZE];
+    buildTopic(topic, fullTopic, sizeof(fullTopic));
     return mqtt->publish(fullTopic, payload);
+}
+
+bool TelemetryClient::publish(const String& topic, const String& payload) {
+    return publish(topic.c_str(), payload.c_str());
 }
 bool TelemetryClient::stat(const JsonDocument& doc) {
 	if(_telemetryStats != telemetryStats::ON){
 		return false; //stats disabled
 	}
-	return publish(F("monitor"), doc);
+	return publish("monitor", doc);
 }
 
-bool TelemetryClient::log(const String& message) {
+bool TelemetryClient::log(const char* message) {
     if(_telemetryLog != telemetryLog::ON){
 		return false; //logging disabled
 	}
-    return publish(F("log"), message);
+    return publish("log", message);
+}
+
+bool TelemetryClient::log(const String& message) {
+    return log(message.c_str());
 }
