@@ -187,6 +187,7 @@ void Application::checkRam()
 	doc["firmware"] = fw_git_version;
 	doc["build"] = BUILD_TYPE;
 	doc["soc"] = SOC;
+	doc["neighbours"]=app.controllers->getVisibleCount();
 	
 	if (app.rtc_info->reason!= 0 && !_reboot_reported)
 	{
