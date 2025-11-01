@@ -50,7 +50,7 @@ public:
 
     void wsSendBroadcast(const char* buffer, size_t length);
 
-    String getApiCodeMsg(API_CODES code);
+    const char* getApiCodeMsg(API_CODES code);
 
 private:
 
@@ -95,14 +95,16 @@ private:
     bool onColorPostCmd(JsonObject& root, String& errorMsg);
 
     void sendApiResponse(HttpResponse &response, JsonObjectStream* stream, HttpStatus code = HTTP_STATUS_OK);
-    void sendApiCode(HttpResponse &response, API_CODES code, String msg = "");
+    void sendApiCode(HttpResponse &response, API_CODES code, const char* msg = nullptr);
+    void sendApiCode(HttpResponse &response, API_CODES code, const String& msg);
+    void sendApiCode(HttpResponse &response, API_CODES code, const __FlashStringHelper* msg);
 
     //void onUpload(HttpRequest &request, HttpResponse &response);
     bool checkHeap(HttpResponse &response);
 
     String makeId();
     
-    static bool isPrintable(String& str);
+    static bool isPrintable(const String& str);
 
     void setCorsHeaders(HttpResponse &response);
 
