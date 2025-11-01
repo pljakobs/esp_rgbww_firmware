@@ -20,11 +20,8 @@
  *
  */
 #include <RGBWWCtrl.h>
-#include "mdnshandler.cpp"
 
 #define DNS_PORT 53
-
-mdnsHandler mdnsHandler;
 
 DnsServer dnsServer;
 
@@ -339,7 +336,7 @@ void AppWIFI::_STAGotIP(IpAddress ip, IpAddress mask, IpAddress gateway)
 		}
 	} //end ConfigDB general and network context
 
-	mdnsHandler.start();
+	app.mdnsService.start();
 	String ipAddress = ip.toString();
 
 	{
@@ -353,7 +350,6 @@ void AppWIFI::_STAGotIP(IpAddress ip, IpAddress mask, IpAddress gateway)
 		
 		id = system_get_chip_id();	
 
-		ipAddress=ip.toString();
 		debug_i("adding mdns host %s with ip %s and id %s", network.mdns.getName().c_str(), ipAddress.c_str(), String(id).c_str());
 		app.controllers->addOrUpdate(id, network.mdns.getName(), ipAddress, -1);
 

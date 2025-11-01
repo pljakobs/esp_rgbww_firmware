@@ -98,6 +98,7 @@
 #include <ledctrl.h>
 #include <networking.h>
 #include <webserver.h>
+#include <mdnsHandler.h>
 #include <telemetry.h>
 #include <mqtt.h>
 #include <eventserver.h>

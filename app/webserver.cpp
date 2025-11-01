@@ -526,7 +526,8 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 				network.mdns.setName(app.sanitizeName(newDeviceName));
 				app.wsBroadcast(F("notification"), msg);
 				app.telemetryClient.log(msg);
-				app.delayedCMD(F("restart"),1000);
+				app.mdnsService.setHostname(newDeviceName);
+				//app.delayedCMD(F("restart"),1000);
 			}
 
 			debug_i("ApplicationWebserver::onConfig %i, %i",newColorMode,oldColorMode);
