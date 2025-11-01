@@ -31,30 +31,27 @@ void TelemetryClient::start() {
 
 	// set defaults if undefined
 	// this will only happen once upon first start
-
-	String _buildType=BUILD_TYPE;
-
-	//for this one version, set full debug to ON to allow troubleshooting
-	_telemetryStats = telemetryStats::ON; //enable stats in debug builds by default
-	_telemetryLog = telemetryLog::ON; //enable log in debug builds by default
-
-/*
-	if(_telemetryStats == telemetryStats::UNDEF and _buildType == "debug"){
-		debug_i("TelemetryClient::start - enabling telemetry stats by default for debug build");
-		_telemetryStats = telemetryStats::ON; //enable stats in debug builds by default
-	}else if(_telemetryStats == telemetryStats::UNDEF){
-		debug_i("TelemetryClient::start - disabling telemetry stats by default for release build");
-		_telemetryStats = telemetryStats::OFF; //disable stats in release builds by default
-	}
-
-	if(_telemetryLog == telemetryLog::UNDEF){
-		_telemetryLog = telemetryLog::OFF; //disable log by default
-	}
-*/
 	{
-	auto telemetryUpdate=telemetryCfg.update();
-	telemetryUpdate.setStatsEnabled(_telemetryStats);
-	telemetryUpdate.setLogEnabled(_telemetryLog);
+		auto telemetryUpdate=telemetryCfg.update();
+	
+		#if defined(SMING_RELEASE)
+		if(_telemetryStats == telemetryStats::UNDEF){
+			debug_i("TelemetryClient::start - enabling telemetry stats by default for debug build");
+			_telemetryStats = telemetryStats::ON; //enable stats in debug builds by default
+			telemetryUpdate.setStatsEnabled(_telemetryStats);
+		}
+		#else
+		if(_telemetryStats == telemetryStats::UNDEF ){
+			debug_i("TelemetryClient::start - enabling telemetry stats by default for debug build");
+			_telemetryStats = telemetryStats::ON; //enable stats in debug builds by default	
+			telemetryUpdate.setStatsEnabled(_telemetryStats);
+		}
+		#endif
+		
+		if(_telemetryLog == telemetryLog::UNDEF){
+			_telemetryLog = telemetryLog::OFF; //disable log by default
+			telemetryUpdate.setLogEnabled(_telemetryLog);
+		}
 	}
 
 	if((_telemetryStats == telemetryStats::ON or _telemetryLog == telemetryLog::ON) && strlen(_telemetryURL) > 0){

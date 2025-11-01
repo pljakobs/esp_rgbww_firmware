@@ -115,7 +115,7 @@ void Controllers::updateFromPing(unsigned int id, int ttl) {
 
 void Controllers::removeExpired(int elapsedSeconds) {
     for (auto& controller : visibleControllers) {
-        if (controller.id!=system_get_chip_id()){
+        if (controller.id != (unsigned int)system_get_chip_id()){
             controller.ttl = std::max(0, controller.ttl - elapsedSeconds);
             if (controller.ttl <= 0) { // Never set self to OFFLINE
                 controller.state = OFFLINE;
@@ -682,7 +682,7 @@ bool Controllers::JsonStream::isFinished() {
     return streamDone;
 }
 
-Controllers::JsonStream* Controllers::createJsonStream(JsonFilter filter, bool pretty) {
+std::unique_ptr<Controllers::JsonStream> Controllers::createJsonStream(JsonFilter filter, bool pretty) {
     class DummyPrint : public Print {
     public:
         size_t write(uint8_t) override { return 1; }
@@ -690,5 +690,5 @@ Controllers::JsonStream* Controllers::createJsonStream(JsonFilter filter, bool p
     
     static DummyPrint dummyPrint;
     auto printer = printJson(dummyPrint, filter, pretty);
-    return new JsonStream(std::move(printer));
+    return std::make_unique<JsonStream>(std::move(printer));
 }

@@ -155,7 +155,9 @@ class LEDControllerAPIService : public mDNS::Service {
             txt.add(F("mo=esp32c3"));
             #endif
             txt.add(F("fn=LED Controller API"));
-            txt.add(F("id=") + String(system_get_chip_id()));
+            char idStr[16];
+            snprintf(idStr, sizeof(idStr), "id=%u", system_get_chip_id());
+            txt.add(idStr);
             
             // Add leader status if this is the leader
             if (_isLeader) {
@@ -208,7 +210,9 @@ class LEDControllerWebService : public mDNS::Service {
         void addText(mDNS::Resource::TXT& txt) override {
             txt.add(F("fn=LED Controller"));
             txt.add(F("instance=") + _instance);
-            txt.add("id=" + String(system_get_chip_id()));
+            char idStr[16];
+            snprintf(idStr, sizeof(idStr), "id=%u", system_get_chip_id());
+            txt.add(idStr);
             
             // Add type indicator
             switch (_hostType) {

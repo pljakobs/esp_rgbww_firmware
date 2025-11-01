@@ -96,7 +96,9 @@ void mdnsHandler::start()
         hostName = network.mdns.getName();
         if (hostName.length() == 0) {
             // Generate hostname from MAC if not set
-            hostName = "lightinator-" + String(system_get_chip_id());
+			char hostName_buf[64];
+			snprintf(hostName_buf, sizeof(hostName_buf), "lightinator-%u", system_get_chip_id());
+			hostName = hostName_buf;
         }
     }
     setHostname(hostName);
@@ -679,7 +681,7 @@ void mdnsHandler::relinquishLeadership() {
 
 void mdnsHandler::checkGroupLeadership() {
     // Step 1: Identify which groups we belong to (already implemented)
-    String myId = String(system_get_chip_id()); 
+    uint32_t myId = system_get_chip_id();
     Vector<String> memberGroups;
     Vector<String> groupsToLead;
     
@@ -701,7 +703,7 @@ void mdnsHandler::checkGroupLeadership() {
         
         for (auto controllerIt = currentGroup.controllerIds.begin(); 
              controllerIt != currentGroup.controllerIds.end(); ++controllerIt) {
-            if (*controllerIt == myId) {
+            if (String(*controllerIt).toInt() == myId) {
                 isMember = true;
                 memberGroups.add(groupId);
                 break;
@@ -719,13 +721,12 @@ void mdnsHandler::checkGroupLeadership() {
                 String controllerId = *controllerIt;
                 
                 // Skip ourselves
-                if (controllerId == myId) continue;
+                if (controllerId.toInt() == myId) continue;
                 
                 // Convert string IDs to integers for comparison
                 unsigned int theirId = controllerId.toInt();
-                unsigned int ourId = myId.toInt();
                 
-                if (theirId > ourId) {
+                if (theirId > myId) {
                     hasHighestId = false;
                     break;
                 }
@@ -800,7 +801,7 @@ void mdnsHandler::checkGroupLeadership() {
 void mdnsHandler::updateServiceTxtRecords() {
     // Get our current group memberships
     Vector<String> memberGroups;
-    String myId = String(system_get_chip_id());
+    uint32_t myId = system_get_chip_id();
     AppData::Root::Groups groups(*app.data);
     
     // Build list of groups we're members of
@@ -812,7 +813,7 @@ void mdnsHandler::updateServiceTxtRecords() {
              controllerIt != currentGroup.controllerIds.end(); 
              ++controllerIt) {
             
-            if (*controllerIt == myId) {
+            if (String(*controllerIt).toInt() == myId) {
                 memberGroups.add(currentGroup.getId());
                 break;
             }

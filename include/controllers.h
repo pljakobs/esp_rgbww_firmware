@@ -6,6 +6,8 @@
 #include <Data/Stream/DataSourceStream.h>
 #include <vector>
 #include <algorithm>
+#include <memory>
+
 
 #define CONTROLLER_HOSTNAME_MAX_SIZE 64
 #define CONTROLLER_IP_MAX_SIZE 16
@@ -144,7 +146,7 @@ public:
     
     // JSON output methods
     JsonPrinter printJson(Print& printer, JsonFilter filter = VALID_ONLY, bool pretty = false);
-    JsonStream* createJsonStream(JsonFilter filter = VALID_ONLY, bool pretty = false);
+    std::unique_ptr<JsonStream> createJsonStream(JsonFilter filter = VALID_ONLY, bool pretty = false);
 
 private:
     static const size_t INVALID_INDEX = SIZE_MAX;

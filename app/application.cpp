@@ -179,7 +179,7 @@ void Application::checkRam()
 	// Create JSON object with uptime and free heap
 	StaticJsonDocument<256> doc;
 	time_t now = time(nullptr); // should be unix time if ntp is running
-	doc["id"] = system_get_chip_id();
+	doc["id"] = (uint32_t)system_get_chip_id();
 	doc["time"] = now;	
 	doc["uptime"] = _uptimeMinutes*60;
 	doc["ip"] = WifiStation.getIP().toString();
@@ -418,11 +418,13 @@ debug_i("Application::init - running partition %s", part.name());
 		// this should adapt to the number of hosts detected in earlier boots
 		AppData::Root::Controllers controllers(*app.data);
 		
-		auto myId=system_get_chip_id();
+		auto myId=(uint32_t)system_get_chip_id();
 		AppConfig::General general(*cfg);
 		String myName=general.getDeviceName();
 		if(myName.length()<=0){
-			myName=String("rgbww-")+String(myId, HEX);
+			char myName_buf[64];
+			snprintf(myName_buf, sizeof(myName_buf), "rgbww-%x", myId);
+			myName = myName_buf;
 		}
 		app.controllers->addOrUpdate( myId,myName, WifiStation.getIP().toString(), 1200); // add myself to the list
 	}

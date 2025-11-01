@@ -22,6 +22,7 @@
  */
 #include <RGBWWCtrl.h>
 #include <Data/WebHelpers/base64.h>
+#include <memory>
 
 #include <Network/Http/Websocket/WebsocketResource.h>
 #include <Storage.h>
@@ -224,7 +225,7 @@ void ApplicationWebserver::sendApiResponse(HttpResponse& response, JsonObjectStr
 
 void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, String msg /* = "" */)
 {
-	JsonObjectStream* stream = new JsonObjectStream();
+	auto stream = std::make_unique<JsonObjectStream>();
 	JsonObject json = stream->getRoot();
 
 	setCorsHeaders(response);
@@ -235,10 +236,10 @@ void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, S
 	}
 	if(code == API_CODES::API_SUCCESS) {
 		json[F("success")] = true;
-		sendApiResponse(response, stream, HTTP_STATUS_OK);
+		sendApiResponse(response, stream.release(), HTTP_STATUS_OK);
 	} else {
 		json[F("error")] = msg;
-		sendApiResponse(response, stream, HTTP_STATUS_BAD_REQUEST);
+		sendApiResponse(response, stream.release(), HTTP_STATUS_BAD_REQUEST);
 	}
 }
 
@@ -306,8 +307,8 @@ void ApplicationWebserver::onFile(HttpRequest& request, HttpResponse& response)
 	}
 
 	debug_i("found %s in fileMap", String(v.key()).c_str());
-	auto stream = new FSTR::Stream(v.content());
-	response.sendDataStream(stream, ContentType::fromFullFileName(fileName));
+	auto stream = std::make_unique<FSTR::Stream>(v.content());
+	response.sendDataStream(stream.release(), ContentType::fromFullFileName(fileName));
 
 }
 void ApplicationWebserver::onWebapp(HttpRequest& request, HttpResponse& response)
@@ -603,9 +604,9 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response)
 		return;
 	}
 
-	JsonObjectStream* stream = new JsonObjectStream();
+	auto stream = std::make_unique<JsonObjectStream>();
 	JsonObject data = stream->getRoot();
-	data[F("deviceid")] = String(system_get_chip_id());
+	data[F("deviceid")] = system_get_chip_id();
 #if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
 	data[F("current_rom")] = String(app.ota.getRomPartition().name());
 #endif
@@ -642,7 +643,7 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response)
 	con[F("mac")] = WifiStation.getMAC();
 	//con[F("mdnshostname")] = app.cfg.network.connection.mdnshostname.c_str();
 
-	sendApiResponse(response, stream);
+	sendApiResponse(response, stream.release());
 
 }
 
@@ -661,7 +662,7 @@ void ApplicationWebserver::onColorGet(HttpRequest& request, HttpResponse& respon
 	if(!checkHeap(response))
 		return;
 
-	JsonObjectStream* stream = new JsonObjectStream();
+	auto stream = std::make_unique<JsonObjectStream>();
 	JsonObject json = stream->getRoot();
 
 	JsonObject raw = json.createNestedObject("raw");
@@ -684,7 +685,7 @@ void ApplicationWebserver::onColorGet(HttpRequest& request, HttpResponse& respon
 
 	setCorsHeaders(response);
 
-	sendApiResponse(response, stream);
+	sendApiResponse(response, stream.release());
 
 }
 
@@ -828,7 +829,7 @@ void ApplicationWebserver::onNetworks(HttpRequest& request, HttpResponse& respon
 		return;
 	}
 
-	JsonObjectStream* stream = new JsonObjectStream();
+	auto stream = std::make_unique<JsonObjectStream>();
 	JsonObject json = stream->getRoot();
 
 	bool error = false;
@@ -861,7 +862,7 @@ void ApplicationWebserver::onNetworks(HttpRequest& request, HttpResponse& respon
 		}
 	}
 	setCorsHeaders(response);
-	sendApiResponse(response, stream);
+	sendApiResponse(response, stream.release());
 
 }
 
@@ -949,7 +950,7 @@ void ApplicationWebserver::onConnect(HttpRequest& request, HttpResponse& respons
 			return;
 		}
 	} else {
-		JsonObjectStream* stream = new JsonObjectStream();
+		auto stream = std::make_unique<JsonObjectStream>();
 		JsonObject json = stream->getRoot();
 
 		CONNECTION_STATUS status = app.network.get_con_status();
@@ -970,7 +971,7 @@ void ApplicationWebserver::onConnect(HttpRequest& request, HttpResponse& respons
 			json[F("dhcp")] = network.connection.getDhcp() ? F("True") : F("False");
 			json[F("ssid")] = WifiStation.getSSID();
 		}
-		sendApiResponse(response, stream);
+		sendApiResponse(response, stream.release());
 	}
 }
 
@@ -1113,10 +1114,10 @@ void ApplicationWebserver::onUpdate(HttpRequest& request, HttpResponse& response
 		}
 		return;
 	}
-	JsonObjectStream* stream = new JsonObjectStream();
+	auto stream = std::make_unique<JsonObjectStream>();
 	JsonObject json = stream->getRoot();
 	json[F("status")] = int(app.ota.getStatus());
-	sendApiResponse(response, stream);
+	sendApiResponse(response, stream.release());
 
 #endif
 }
@@ -1140,10 +1141,10 @@ void ApplicationWebserver::onPing(HttpRequest& request, HttpResponse& response)
 		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not HTTP GET");
 		return;
 	}
-	JsonObjectStream* stream = new JsonObjectStream();
+	auto stream = std::make_unique<JsonObjectStream>();
 	JsonObject json = stream->getRoot();
 	json[F("ping")] = "pong";
-	sendApiResponse(response, stream);
+	sendApiResponse(response, stream.release());
 }
 
 void ApplicationWebserver::onStop(HttpRequest& request, HttpResponse& response)
@@ -1282,7 +1283,7 @@ void ApplicationWebserver::onHosts(HttpRequest& request, HttpResponse& response)
 
     // Use the JsonStream for automatic streaming
     auto stream = app.controllers->createJsonStream(filter, false); // Compact format for HTTP
-    response.sendDataStream(stream, MIME_JSON);
+    response.sendDataStream(stream.release(), MIME_JSON);
 
 //todo 
 }
