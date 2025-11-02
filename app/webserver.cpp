@@ -40,10 +40,9 @@ ApplicationWebserver::ApplicationWebserver()
 	// keep some heap space free
 	// value is a good guess and tested to not crash when issuing multiple parallel requests
 	HttpServerSettings settings;
-	settings.maxActiveConnections = 40;
+	settings.maxActiveConnections = 5;
 	settings.minHeapSize = _minimumHeapAccept;
-	settings.keepAliveSeconds =
-		10; // do not close instantly when no transmission occurs. some clients are a bit slow (like FHEM)
+	settings.keepAliveSeconds = 10; // do not close instantly when no transmission occurs. some clients are a bit slow (like FHEM)
 	configure(settings);
 
 	// workaround for bug in Sming 3.5.0
@@ -365,8 +364,16 @@ void ApplicationWebserver::onIndex(HttpRequest& request, HttpResponse& response)
 
 bool ApplicationWebserver::checkHeap(HttpResponse& response)
 {
+	return checkHeap(response, 0);
+}
+
+bool ApplicationWebserver::checkHeap(HttpResponse& response, int minHeap)
+{
+	if (minHeap==0) {
+		minHeap=_minimumHeap;
+	}
 	unsigned fh = system_get_free_heap_size();
-	if(fh < _minimumHeap) {
+	if(fh < minHeap) {
 		setCorsHeaders(response);
 		response.code = HTTP_STATUS_TOO_MANY_REQUESTS;
 		response.setHeader(F("Retry-After"), "1");
@@ -379,7 +386,7 @@ bool ApplicationWebserver::checkHeap(HttpResponse& response)
 void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response)
 {
 	debug_i("onConfig");
-	if(!checkHeap(response))
+	if(!checkHeap(response,12000))
 		return;
 
 	if(!authenticated(request, response)) {
@@ -600,7 +607,7 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response)
 {
 	debug_i("onInfo");
-	if(!checkHeap(response))
+	if(!checkHeap(response,4000))
 		return;
 
 	if(!authenticated(request, response)) {
@@ -674,7 +681,7 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response)
 void ApplicationWebserver::onColorGet(HttpRequest& request, HttpResponse& response)
 {
 	debug_i("onColorGet");
-	if(!checkHeap(response))
+	if(!checkHeap(response,2000))
 		return;
 
 	auto stream = std::make_unique<JsonObjectStream>();
@@ -1316,9 +1323,9 @@ void ApplicationWebserver::onData(HttpRequest& request, HttpResponse& response){
 		debug_i("HTTP_OPTIONS Request, sent API_SUCCESS");
 		return;
 	}
-
-	if(request.method==HTTP_GET){
-
+	if(!checkHeap(response,12000))
+		return;
+	if(request.method==HTTP_GET){	
 		setCorsHeaders(response);
 
 		response.setContentType(F("application/json"));
@@ -1355,7 +1362,8 @@ void ApplicationWebserver::onSetOn(HttpRequest &request, HttpResponse &response)
 		debug_i("HTTP_OPTIONS Request, sent API_SUCCESS");
 		return;
 	}
-
+	if(!checkHeap(response,4000))
+		return;
 	String body = request.getBody();
 	StaticJsonDocument<512> doc;
 	DeserializationError err = deserializeJson(doc, body);
@@ -1379,6 +1387,8 @@ void ApplicationWebserver::onSetOff(HttpRequest &request, HttpResponse &response
 		debug_i("HTTP_OPTIONS Request, sent API_SUCCESS");
 		return;
 	}
+	if(!checkHeap(response,4000))
+		return;
 	String body = request.getBody();
 	StaticJsonDocument<512> doc;
 	DeserializationError err = deserializeJson(doc, body);
