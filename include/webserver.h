@@ -56,8 +56,8 @@ private:
 
     bool _init = false;
     bool _running = false;
-    unsigned _minimumHeap = 12000;
-    unsigned _minimumHeapAccept = 12000;
+    unsigned _minimumHeap = 8000;
+    unsigned _minimumHeapAccept = 8000;
 
     WebsocketResource* wsResource;
     WebsocketList webSockets;
@@ -101,6 +101,7 @@ private:
 
     //void onUpload(HttpRequest &request, HttpResponse &response);
     bool checkHeap(HttpResponse &response);
+    bool checkHeap(HttpResponse &response, int minHeap);
 
     String makeId();
     
