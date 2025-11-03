@@ -568,12 +568,10 @@ void APPLedCtrl::setOn(const RGBWWLed::ChannelList& channels, int direction, con
 	switch(_mode) {
 	case ColorMode::Hsv: {
 		HSVCT current = getCurrentColor();
-		HSVCT target = current;
+		HSVCT target = _lastHsvct;
 		// If v==0, restore last nonzero HSV (toggle logic)
-		if (current.v == 0) {
-			target = _lastHsvct;
-			if (target.v == 0) target.v = 100; // fallback if last was off
-		}
+		if (target.v == 0) 
+			target.v = 100; // fallback if last was off
 		// For HSV mode, direction/ramp/queue/requeue/name are used, but channels are ignored
 		fadeHSV(current, target, ramp, direction, queue, requeue, name);
 		break;
@@ -610,6 +608,7 @@ void APPLedCtrl::setOff(const RGBWWLed::ChannelList& channels, int direction, co
     case ColorMode::Hsv: {
         HSVCT current = getCurrentColor();
         HSVCT target = current;
+		_lastHsvct = current; // save current before turning off
         target.v = 0;
         fadeHSV(current, target, ramp, direction, queue, requeue, name);
         break;

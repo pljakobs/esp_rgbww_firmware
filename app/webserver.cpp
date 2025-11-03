@@ -1419,7 +1419,10 @@ void ApplicationWebserver::onSetOn(HttpRequest &request, HttpResponse &response)
 	}
 	if(!checkHeap(response,4000))
 		return;
-	String body = request.getBody();
+
+  debug_i("onSetOn");
+	
+  String body = request.getBody();
 	StaticJsonDocument<512> doc;
 	DeserializationError err = deserializeJson(doc, body);
 	if (err) {
@@ -1447,7 +1450,10 @@ void ApplicationWebserver::onSetOff(HttpRequest &request, HttpResponse &response
 	}
 	if(!checkHeap(response,4000))
 		return;
-	String body = request.getBody();
+
+  debug_i("onSetOff");
+
+  String body = request.getBody();
 	StaticJsonDocument<512> doc;
 	DeserializationError err = deserializeJson(doc, body);
 	if (err) {
