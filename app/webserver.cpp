@@ -290,12 +290,26 @@ void ApplicationWebserver::onFile(HttpRequest& request, HttpResponse& response)
 		return;
 	}
 
-	String compressed = fileName + ".gz";
-	debug_i("searching file name %s", compressed.c_str());
-	auto v = fileMap[compressed];
+#ifdef ARCH_ESP8266
+	String acceptEncoding = request.getHeader(F("Accept-Encoding"));
+	bool acceptsBrotli = (acceptEncoding == String::nullstr) || (acceptEncoding.indexOf(F("br")) != -1);
+#else
+	bool acceptsBrotli = true;
+#endif
+
+	String brotliName = fileName + ".br";
+
+	auto v = fileMap[brotliName];
 	if(v) {
-		debug_i("found");
-		response.headers[HTTP_HEADER_CONTENT_ENCODING] = _F("gzip");
+		if(!acceptsBrotli) {
+			debug_i("client rejected br for %s", brotliName.c_str());
+			response.setContentType(MIME_TEXT);
+			response.code = HTTP_STATUS_NOT_ACCEPTABLE;
+			response.sendString(F("Brotli encoding required"));
+			return;
+		}
+		debug_i("found %s (br)", brotliName.c_str());
+		response.headers[HTTP_HEADER_CONTENT_ENCODING] = _F("br");
 	} else {
 		debug_i("searching file name %s", fileName.c_str());
 		v = fileMap[fileName];
@@ -307,7 +321,7 @@ void ApplicationWebserver::onFile(HttpRequest& request, HttpResponse& response)
 				response.sendString(F("No filesystem mounted"));
 				return;
 			}
-			if(!fileExist(fileName) && !fileExist(fileName + ".gz") && WifiAccessPoint.isEnabled()) {
+			if(!fileExist(fileName) && !fileExist(fileName + ".br") && WifiAccessPoint.isEnabled()) {
 				//if accesspoint is active and we couldn`t find the file - redirect to index
 				debug_d("ApplicationWebserver::onFile redirecting");
 				response.headers[HTTP_HEADER_LOCATION] = F("http://") + WifiAccessPoint.getIP().toString() + "/";
