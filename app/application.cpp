@@ -537,8 +537,8 @@ void Application::startNetworkServices()
 
 void Application::logRestart(){
 	char msg[128];
-	m_snprintf(msg, sizeof(msg), "restart, reason: %d, exccause: %d", 
-	           app.rtc_info->reason, app.rtc_info->exccause);
+	m_snprintf(msg, sizeof(msg), "restart, reason: %u, exccause: %u", 
+	           (unsigned int)app.rtc_info->reason, (unsigned int)app.rtc_info->exccause);
 	telemetryClient.log(msg);
 }
 void Application::restart()
