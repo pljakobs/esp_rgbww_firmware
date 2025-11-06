@@ -517,7 +517,7 @@ size_t Controllers::JsonPrinter::operator()() {
         n += printIndent(2);
         n += p->print('{');
         
-        n += printProperty("id", String(info.id), false, 3);
+        n += printProperty("id", (int)info.id, false, 3);
         n += printProperty("hostname", info.hostname, false, 3);
         n += printProperty("ip_address", info.ipAddress, false, 3);
         n += printProperty("visible", (info.state == ONLINE), true, 3); // Last property
