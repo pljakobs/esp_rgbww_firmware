@@ -179,31 +179,31 @@ void Application::checkRam()
 	// Create JSON object with uptime and free heap
 	StaticJsonDocument<256> doc;
 	time_t now = time(nullptr); // should be unix time if ntp is running
-	doc["id"] = (uint32_t)system_get_chip_id();
-	doc["time"] = now;	
-	doc["uptime"] = _uptimeMinutes*60;
-	doc["ip"] = WifiStation.getIP().toString();
-	doc["freeHeap"] = system_get_free_heap_size();
-	doc["firmware"] = fw_git_version;
-	doc["build"] = BUILD_TYPE;
-	doc["soc"] = SOC;
-	doc["neighbours"]=app.controllers->getVisibleCount();
+	doc[F("id")] = (uint32_t)system_get_chip_id();
+	doc[F("time")] = now;	
+	doc[F("uptime")] = _uptimeMinutes*60;
+	doc[F("ip")] = WifiStation.getIP().toString();
+	doc[F("freeHeap")] = system_get_free_heap_size();
+	doc[F("firmware")] = fw_git_version;
+	doc[F("build")] = BUILD_TYPE;
+	doc[F("soc")] = SOC;
+	doc[F("neighbours")]=app.controllers->getVisibleCount();
 	
 	if (app.rtc_info->reason!= 0 && !_reboot_reported)
 	{
 		AppConfig::Root::Telemetry telemetryCfg(*cfg);
 
-		doc["reboot"]["number"] = telemetryCfg.getNumReboots();
-		doc["reboot"]["reason"] = app.rtc_info->reason;
-		doc["reboot"]["exccause"] = app.rtc_info->exccause;
-		doc["reboot"]["epc1"] = app.rtc_info->epc1;
-		doc["reboot"]["epc2"] = app.rtc_info->epc2;
-		doc["reboot"]["epc3"] = app.rtc_info->epc3;
-		doc["reboot"]["excvaddr"] = app.rtc_info->excvaddr;
-		doc["reboot"]["depc"] = app.rtc_info->depc;
+		doc[F("reboot")][F("number")] = telemetryCfg.getNumReboots();
+		doc[F("reboot")][F("reason")] = app.rtc_info->reason;
+		doc[F("reboot")][F("exccause")] = app.rtc_info->exccause;
+		doc[F("reboot")][F("epc1")] = app.rtc_info->epc1;
+		doc[F("reboot")][F("epc2")] = app.rtc_info->epc2;
+		doc[F("reboot")][F("epc3")] = app.rtc_info->epc3;
+		doc[F("reboot")][F("excvaddr")] = app.rtc_info->excvaddr;
+		doc[F("reboot")][F("depc")] = app.rtc_info->depc;
 	}
-	doc["mDNS"]["received"] = _mDNS_received;
-	doc["mDNS"]["replies"] = _mDNS_replies;
+	doc[F("mDNS")][F("received")] = _mDNS_received;
+	doc[F("mDNS")][F("replies")] = _mDNS_replies;
 
 	debug_i("Free heap: %d, uptime: %d", system_get_free_heap_size(), millis() / 1000);
 	if (!telemetryClient.stat(doc))
@@ -536,7 +536,9 @@ void Application::startNetworkServices()
 }
 
 void Application::logRestart(){
-	String msg=String("restart, reason: ")+String(app.rtc_info->reason)+String(", exccause: ")+String(app.rtc_info->exccause);
+	char msg[128];
+	m_snprintf(msg, sizeof(msg), "restart, reason: %d, exccause: %d", 
+	           app.rtc_info->reason, app.rtc_info->exccause);
 	telemetryClient.log(msg);
 }
 void Application::restart()
@@ -641,7 +643,7 @@ bool Application::mountfs(int slot)
      * on device file system
      */
 
-	auto part = Storage::findPartition("spiffs" + String(slot));
+	auto part = Storage::findPartition(F("spiffs") + String(slot));
 	if(part) {
 		debug_i("mouting spiffs partition %i at %x, length %d", slot, part.address(), part.size());
 		return spiffs_mount(part);
@@ -739,7 +741,7 @@ int Application::getRomSlot()
 {
 	auto partition = app.ota.getRomPartition();
 	uint8_t slot;
-	if(partition.name() == "rom1") {
+	if(partition.name() == F("rom1")) {
 		slot = 1;
 	} else {
 		slot = 0;
