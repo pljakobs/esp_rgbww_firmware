@@ -21,7 +21,7 @@ on:
 
 jobs:
   build:
-    runs-on: [self-hosted, linux, firmware]
+    runs-on: self-hosted
     strategy:
       fail-fast: true
       matrix:
@@ -142,7 +142,7 @@ jobs:
       - name: Build partition map (ESP8266 only)
         if: ${{ matrix.soc == 'esp8266' }}
         run: |
-          docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace \
+          docker run --rm --privileged -v ${{ github.workspace }}:/workspace -w /workspace \
             docker.io/pjakobs/sming:latest \
             bash -c "git config --global --add safe.directory /workspace && \
                source /opt/Sming/Tools/export.sh && \
@@ -154,7 +154,7 @@ jobs:
           MQTT_USER: ${{ secrets.MQTT_USER }}
         run: |
           if [ "${{ matrix.single }}" = "0" ]; then 
-            docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace \
+            docker run --rm --privileged -v ${{ github.workspace }}:/workspace -w /workspace \
               -e GITHUB_RUN_NUMBER=${{ github.run_number }} \
               -e MQTT_PASS=${{ secrets.MQTT_PASS }} \
               -e MQTT_USER=${{ secrets.MQTT_USER }} \
@@ -164,7 +164,7 @@ jobs:
               make configdb-rebuild && \
               make SMING_SOC=${{ matrix.soc }} SMING_RELEASE=${{ matrix.release }} DISABLE_WERROR=1 COM_SPEED=115200" 
           else 
-            docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace \
+            docker run --rm --privileged -v ${{ github.workspace }}:/workspace -w /workspace \
               -e GITHUB_RUN_NUMBER=${{ github.run_number }} \
               -e MQTT_PASS=${{ secrets.MQTT_PASS }} \
               -e MQTT_USER=${{ secrets.MQTT_USER }} \
