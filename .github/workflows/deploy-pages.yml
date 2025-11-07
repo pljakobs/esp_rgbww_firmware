@@ -75,8 +75,20 @@ jobs:
       - name: Get Latest Successful Workflow Run
         id: get_run
         run: |
-          latest_run_id=$(curl -s -H "Authorization: token ${{ secrets.artifact_download_token }}" \
-          "https://api.github.com/repos/pljakobs/esp_rgbww_firmware/actions/runs?status=success&name=firmwareBuild&per_page=1"|jq -r '.workflow_runs[] | .id');
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            # For manual dispatch, get the latest successful run
+            latest_run_id=$(curl -s -H "Authorization: token ${{ secrets.artifact_download_token }}" \
+              "https://api.github.com/repos/pljakobs/esp_rgbww_firmware/actions/runs?status=success&event=workflow_dispatch&per_page=1" | jq -r '.workflow_runs[0].id // empty')
+            
+            if [ -z "$latest_run_id" ] || [ "$latest_run_id" == "null" ]; then
+              echo "ERROR: No successful workflow runs found"
+              exit 1
+            fi
+          else
+            # For workflow_run trigger, use the run that triggered this workflow
+            latest_run_id="${{ github.event.workflow_run.id }}"
+          fi
+          
           echo "Latest successful run ID: $latest_run_id"
           echo "latest_run_id=$latest_run_id" >> $GITHUB_OUTPUT
           echo "latest_run_id=$latest_run_id" >> $GITHUB_ENV
