@@ -125,11 +125,9 @@ extern "C" void __wrap_user_pre_init(void)
 
 Application app;
 
-// Sming Framework INIT method - called during boot
-void init()
+void onReady()
 {
-	Serial.begin(SERIAL_BAUD_RATE); // 115200 by default
-	Serial.systemDebugOutput(true); // Debug output to serial
+	
 	//System.setCpuFrequencye(CF_160MHz);
 	app.rtc_info = system_get_rst_info();
 	
@@ -146,6 +144,21 @@ void init()
 
 	// Run Services on system ready
 	System.onReady(SystemReadyDelegate(&Application::startServices, &app));
+}
+
+// Sming Framework INIT method - called during boot
+void init(){	
+	Serial.setTxBufferSize(1024);
+	Serial.setTxWait(false); // Make sure debug output doesn't stall
+	Serial.begin(SERIAL_BAUD_RATE);
+	Serial.systemDebugOutput(true);
+
+	// System.setCpuFrequency(CpuCycleClockFast::cpuFrequency());
+
+	Serial.print(_F("Available heap: "));
+	Serial.println(system_get_free_heap_size());
+	Serial.println("===starting cpu profiling===");
+	onReady(); // this is just in preparation for cpu profiling
 }
 
 int32_t getVersion(IDataSourceStream& input)
@@ -225,6 +238,7 @@ void Application::checkRam()
 		}
 	} 
 }
+
 
 
 void Application::init()
