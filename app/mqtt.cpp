@@ -75,8 +75,8 @@ void AppMqttClient::connect()
 	Url url;
 	{
 		AppConfig::Network network(*app.cfg);
-		url = "mqtt://" + network.mqtt.getUsername() + ":" + network.mqtt.getPassword() + "@" +
-				  network.mqtt.getServer() + ":" + String(network.mqtt.getPort());
+		url = F("mqtt://") + network.mqtt.getUsername() + F(":") + network.mqtt.getPassword() + F("@") +
+				  network.mqtt.getServer() + F(":") + String(network.mqtt.getPort());
 		debug_i("mqtt url: %s, id: %s",url.toString().c_str(), _id);
 		
 	} // end ConfigDB network context
@@ -109,7 +109,7 @@ void AppMqttClient::init()
 	} else {
 		debug_w("AppMqttClient::init: building MQTT ID from chip id (device name is: '%s')\n",
 				general.getDeviceName().c_str());
-		_id = String("rgbww_") + system_get_chip_id();
+		_id = String("rgbww_") + String(system_get_chip_id());
 		debug_i("AppMqttClient::init: ID: %s\n", _id.c_str());
 	}
 	
@@ -179,7 +179,7 @@ int AppMqttClient::onMessageReceived(MqttClient& client, mqtt_message_t* msg)
     
     // Check if this is a Home Assistant command
     if (_haEnabled) {
-        String haCommandTopic = _haDiscoveryPrefix + "/light/" + _haNodeId + "/" + _haObjectId + "/set";
+        String haCommandTopic = _haDiscoveryPrefix + F("/light/") + _haNodeId + F("/") + _haObjectId + F("/set");
         if (topic == haCommandTopic) {
             debug_i("HA: Main light command received on topic: %s", topic.c_str());
             handleHomeAssistantCommand(message);
@@ -190,7 +190,7 @@ int AppMqttClient::onMessageReceived(MqttClient& client, mqtt_message_t* msg)
         Vector<String> activeChannels;
         getActiveChannelNames(activeChannels);
         for (unsigned i = 0; i < activeChannels.count(); i++) {
-            String channelCommandTopic = _haDiscoveryPrefix + "/light/" + _haNodeId + "/" + activeChannels[i] + "/set";
+            String channelCommandTopic = _haDiscoveryPrefix + F("/light/") + _haNodeId + F("/") + activeChannels[i] + F("/set");
             if (topic == channelCommandTopic) {
                 debug_i("HA: Channel command received for '%s' on topic: %s", activeChannels[i].c_str(), topic.c_str());
                 handleChannelCommand(activeChannels[i], message);
@@ -255,7 +255,7 @@ void AppMqttClient::publishCurrentRaw(const ChannelOutput& raw)
 
 	StaticJsonDocument<200> doc;
 	JsonObject root = doc.to<JsonObject>();
-	JsonObject rawJson = root.createNestedObject("raw");
+	JsonObject rawJson = root.createNestedObject(F("raw"));
 	rawJson[F("r")] = raw.r;
 	rawJson[F("g")] = raw.g;
 	rawJson[F("b")] = raw.b;
@@ -263,7 +263,7 @@ void AppMqttClient::publishCurrentRaw(const ChannelOutput& raw)
 	rawJson[F("ww")] = raw.ww;
 
 	root[F("t")] = 0;
-	root[F("cmd")] = "solid";
+    root[F("cmd")] = F("solid");
 
 	String jsonMsg = Json::serialize(root);
 	publish(buildTopic(F("color")), jsonMsg, true);
@@ -288,14 +288,14 @@ void AppMqttClient::publishCurrentHsv(const HSVCT& color)
 
 	StaticJsonDocument<200> doc;
 	JsonObject root = doc.to<JsonObject>();
-	JsonObject hsv = root.createNestedObject("hsv");
+	JsonObject hsv = root.createNestedObject(F("hsv"));
 	hsv[F("h")] = h;
 	hsv[F("s")] = s;
 	hsv[F("v")] = v;
 	hsv[F("ct")] = ct;
 
 	root[F("t")] = 0;
-	root[F("cmd")] = "solid";
+    root[F("cmd")] = F("solid");
 
 	String jsonMsg = Json::serialize(root);
 	publish(buildTopic(F("color")), jsonMsg, true);
@@ -310,7 +310,7 @@ String AppMqttClient::buildTopic(const String& suffix)
 {
 	AppConfig::Network network(*app.cfg);
 	String topic = network.mqtt.getTopicBase();
-	topic += _id + "/";
+	topic += _id + F("/");
 	return topic + suffix;
 }
 
@@ -329,7 +329,7 @@ void AppMqttClient::publishClock(uint32_t steps)
 
 void AppMqttClient::publishClockReset()
 {
-	publish(buildTopic(F("clock")), "reset", false);
+	publish(buildTopic(F("clock")), F("reset"), false);
 }
 
 void AppMqttClient::publishClockInterval(uint32_t curInterval)
@@ -394,10 +394,10 @@ void AppMqttClient::initHomeAssistant() {
     
     // Clean up node ID: trim spaces and replace spaces with underscores for MQTT topic compatibility
     _haNodeId.trim();
-    _haNodeId.replace(" ", "_");
+    _haNodeId.replace(F(" "), ("_"));
     
     // Generate unique_id from chip ID
-    _haUniqueId = String("rgbww_") + system_get_chip_id();
+    _haUniqueId = F("rgbww_") + String(system_get_chip_id());
     
     // Object ID for this light entity
     _haObjectId = "1";
@@ -408,7 +408,7 @@ void AppMqttClient::initHomeAssistant() {
     
     // Subscribe to the HA command topic
     if (mqtt && mqtt->getConnectionState() == TcpClientState::eTCS_Connected) {
-        String commandTopic = _haDiscoveryPrefix + "/light/" + _haNodeId + "/" + _haObjectId + "/set";
+        String commandTopic = _haDiscoveryPrefix + F("/light/") + _haNodeId + F("/") + _haObjectId + F("/set");
         mqtt->subscribe(commandTopic);
         debug_i("Subscribed to HA command topic: %s", commandTopic.c_str());
     }
@@ -428,7 +428,7 @@ void AppMqttClient::publishHomeAssistantConfig() {
     // Clean device name for use in MQTT topics (trim spaces and replace with underscores)
     String cleanDeviceName = deviceName;
     cleanDeviceName.trim();
-    cleanDeviceName.replace(" ", "_");
+    cleanDeviceName.replace(F(" "), F("_"));
     
     // Update node_id with clean name if it was auto-generated
     if (_haNodeId == deviceName || _haNodeId.indexOf(' ') >= 0) {
@@ -440,19 +440,19 @@ void AppMqttClient::publishHomeAssistantConfig() {
     StaticJsonDocument<512> doc;
     
     // Basic configuration
-    doc["name"] = deviceName;  // Display name can have spaces
-    doc["unique_id"] = _haUniqueId;  // Use chip-based unique ID
-    doc["state_topic"] = _haDiscoveryPrefix + "/light/" + _haNodeId + "/" + _haObjectId + "/state";
-    doc["command_topic"] = _haDiscoveryPrefix + "/light/" + _haNodeId + "/" + _haObjectId + "/set";
-    doc["schema"] = "json";
+    doc[F("name")] = deviceName;  // Display name can have spaces
+    doc[F("unique_id")] = _haUniqueId;  // Use chip-based unique ID
+    doc[F("state_topic")] = _haDiscoveryPrefix + F("/light/") + _haNodeId + F("/") + _haObjectId + F("/state");
+    doc[F("command_topic")] = _haDiscoveryPrefix + F("/light/") + _haNodeId + F("/") + _haObjectId + F("/set");
+    doc[F("schema")] = F("json");
     
     // Light features - Main light uses HSV scaling
-    doc["brightness"] = true;
-    doc["brightness_scale"] = 100;  // HSV V is 0-100%
-    doc["color_mode"] = true;
+    doc[F("brightness")] = true;
+    doc[F("brightness_scale")] = 100;  // HSV V is 0-100%
+    doc[F("color_mode")] = true;
     
     // Supported color modes - dynamic based on current configuration
-    JsonArray colorModes = doc.createNestedArray("supported_color_modes");
+    JsonArray colorModes = doc.createNestedArray(F("supported_color_modes"));
     Vector<String> supportedModes;
     getSupportedColorModes(supportedModes);
     for (unsigned i = 0; i < supportedModes.count(); i++) {
@@ -462,25 +462,25 @@ void AppMqttClient::publishHomeAssistantConfig() {
     // Add white temperature support for modes with warm white
     int colorMode = getCurrentColorMode();
     if (colorMode == 1 || colorMode == 3) { // RGBWW or RGBWWCW
-        doc["min_mireds"] = 153;  // ~6500K
-        doc["max_mireds"] = 370;  // ~2700K
+        doc[F("min_mireds")] = 153;  // ~6500K
+        doc[F("max_mireds")] = 370;  // ~2700K
     }
     
     // Optimization
-    doc["optimistic"] = false;
-    doc["retain"] = true;
+    doc[F("optimistic")] = false;
+    doc[F("retain")] = true;
     
     // Device info
-    JsonObject device = doc.createNestedObject("device");
-    JsonArray identifiers = device.createNestedArray("identifiers");
+    JsonObject device = doc.createNestedObject(F("device"));
+    JsonArray identifiers = device.createNestedArray(F("identifiers"));
     identifiers.add(_haUniqueId);  // Use chip-based unique ID for device identification
-    device["name"] = deviceName;  // Display name can have spaces
-    device["model"] = "RGBWW Controller";
-    device["manufacturer"] = "ESP RGBWW Firmware";
-    device["sw_version"] = GITVERSION;
+    device[F("name")] = deviceName;  // Display name can have spaces
+    device[F("model")] = F("RGBWW Controller");
+    device[F("manufacturer")] = F("ESP RGBWW Firmware");
+    device[F("sw_version")] = GITVERSION;
     
     // Publish discovery message
-    String configTopic = _haDiscoveryPrefix + "/light/" + _haNodeId + "/" + _haObjectId + "/config";
+    String configTopic = _haDiscoveryPrefix + F("/light/") + _haNodeId + F("/") + _haObjectId + F("/config");
     
     debug_i("Publishing HA config to topic: %s", configTopic.c_str());
     debug_i("Device name: '%s', Node ID: '%s', Unique ID: '%s'", deviceName.c_str(), _haNodeId.c_str(), _haUniqueId.c_str());
@@ -507,37 +507,37 @@ void AppMqttClient::publishChannelConfig(const String& channelName) {
     String deviceName = general.getDeviceName();
     
     // Topic: homeassistant/light/node_id/channel_name/config
-    String configTopic = _haDiscoveryPrefix + "/light/" + _haNodeId + "/" + channelName + "/config";
+    String configTopic = _haDiscoveryPrefix + F("/light/") + _haNodeId + F("/") + channelName + F("/config");
     
     // Create channel discovery JSON
     StaticJsonDocument<512> doc;
     
     // Basic configuration
-    doc["name"] = deviceName + " " + channelName.c_str();  // Display name with channel
-    doc["unique_id"] = _haUniqueId + "_" + channelName;    // Unique ID per channel
-    doc["state_topic"] = _haDiscoveryPrefix + "/light/" + _haNodeId + "/" + channelName + "/state";
-    doc["command_topic"] = _haDiscoveryPrefix + "/light/" + _haNodeId + "/" + channelName + "/set";
-    doc["schema"] = "json";
+    doc[F("name")] = deviceName + F(" ") + channelName;  // Display name with channel
+    doc[F("unique_id")] = _haUniqueId + F("_") + channelName;    // Unique ID per channel
+    doc[F("state_topic")] = _haDiscoveryPrefix + F("/light/") + _haNodeId + F("/") + channelName + F("/state");
+    doc[F("command_topic")] = _haDiscoveryPrefix + F("/light/") + _haNodeId + F("/") + channelName + F("/set");
+    doc[F("schema")] = F("json");
     
     // Channel only supports brightness - use raw channel scaling
-    doc["brightness"] = true;
-    doc["brightness_scale"] = 1023;  // Raw channel scaling 0-1023
-    doc["color_mode"] = false;  // Individual channels don't support color
+    doc[F("brightness")] = true;
+    doc[F("brightness_scale")] = 1023;  // Raw channel scaling 0-1023
+    doc[F("color_mode")] = false;  // Individual channels don't support color
     
     // Device info - link to same device as main light
-    JsonObject device = doc.createNestedObject("device");
-    JsonArray identifiers = device.createNestedArray("identifiers");
+    JsonObject device = doc.createNestedObject(F("device"));
+    JsonArray identifiers = device.createNestedArray(F("identifiers"));
     identifiers.add(_haUniqueId);  // Same device as main light
-    device["name"] = deviceName;
-    device["model"] = "RGBWW Controller";
-    device["manufacturer"] = "ESP RGBWW Firmware";
-    device["sw_version"] = GITVERSION;
+    device[F("name")] = deviceName;
+    device[F("model")] = F("RGBWW Controller");
+    device[F("manufacturer")] = F("ESP RGBWW Firmware");
+    device[F("sw_version")] = GITVERSION;
     
     // Subscribe to channel command topic
     if (mqtt && mqtt->getConnectionState() == TcpClientState::eTCS_Connected) {
-        String commandTopic = _haDiscoveryPrefix + "/light/" + _haNodeId + "/" + channelName + "/set";
+        String commandTopic = _haDiscoveryPrefix + F("/light/") + _haNodeId + F("/") + channelName + F("/set");
         mqtt->subscribe(commandTopic);
-        debug_i("Subscribed to channel command topic: %s", commandTopic.c_str());
+    debug_i("Subscribed to channel command topic: %s", commandTopic.c_str());
     }
     
     // Publish channel discovery message
@@ -571,18 +571,18 @@ void AppMqttClient::publishHAState(const ChannelOutput& raw, const HSVCT* pHsv) 
     debug_i("HA: Converted for HA - H:%.1f°, S:%.1f%%, V:%.1f%%", hue_degrees, sat_percent, val_percent);
     
     // State and brightness - Use 0-100 scale as configured in discovery
-    doc["state"] = v > 0 ? "ON" : "OFF";
-    doc["brightness"] = (uint8_t)val_percent;  // V is already 0-100%, use directly
-    doc["color_mode"] = "hs";  // Always include color_mode
+    doc[F("state")] = v > 0 ? F("ON") : F("OFF");
+    doc[F("brightness")] = (uint8_t)val_percent;  // V is already 0-100%, use directly
+    doc[F("color_mode")] = F("hs");  // Always include color_mode
     
     // Only include color if light is on
     if (v > 0) {
-        JsonObject color_obj = doc.createNestedObject("color");
-        color_obj["h"] = hue_degrees;   // 0-360 degrees
-        color_obj["s"] = sat_percent;   // 0-100 percent
+        JsonObject color_obj = doc.createNestedObject(F("color"));
+        color_obj[F("h")] = hue_degrees;   // 0-360 degrees
+        color_obj[F("s")] = sat_percent;   // 0-100 percent
     }
     
-    String stateTopic = _haDiscoveryPrefix + "/light/" + _haNodeId + "/" + _haObjectId + "/state";
+    String stateTopic = _haDiscoveryPrefix + F("/light/") + _haNodeId + F("/") + _haObjectId + F("/state");
     String statePayload = Json::serialize(doc);
     debug_i("HA: Publishing to topic '%s': %s", stateTopic.c_str(), statePayload.c_str());
     publish(stateTopic, statePayload, true);
@@ -606,25 +606,25 @@ void AppMqttClient::publishChannelState(const String& channelName, const Channel
     
     // Map channel name to raw channel value (0-1023)
     // Check both configured names and standard fallback names
-    if (channelName == "red") {
+    if (channelName == F("red")) {
         channelValue = raw.r;
-    } else if (channelName == "green") {
+    } else if (channelName == F("green")) {
         channelValue = raw.g;
-    } else if (channelName == "blue") {
+    } else if (channelName == F("blue")) {
         channelValue = raw.b;
-    } else if (channelName == "warmwhite" || channelName == "warm_white") {
+    } else if (channelName == F("warmwhite") || channelName == F("warm_white")) {
         channelValue = raw.ww;
-    } else if (channelName == "coldwhite" || channelName == "cool_white" || channelName=="cold_white") {
+    } else if (channelName == F("coldwhite") || channelName == F("cool_white") || channelName == F("cold_white")) {
         channelValue = raw.cw;
     }
     
     debug_i("HA: Publishing channel '%s' state: %d (0-1023 scale)", channelName.c_str(), channelValue);
     
     // Use raw 0-1023 scaling as configured in discovery
-    doc["state"] = channelValue > 0 ? "ON" : "OFF";
-    doc["brightness"] = channelValue;  // Direct 0-1023 value
+    doc[F("state")] = channelValue > 0 ? F("ON") : F("OFF");
+    doc[F("brightness")] = channelValue;  // Direct 0-1023 value
     
-    String stateTopic = _haDiscoveryPrefix + "/light/" + _haNodeId + "/" + channelName + "/state";
+    String stateTopic = _haDiscoveryPrefix + F("/light/") + _haNodeId + F("/") + channelName + F("/state");
     String statePayload = Json::serialize(doc);
     debug_i("HA: Publishing to topic '%s': %s", stateTopic.c_str(), statePayload.c_str());
     publish(stateTopic, statePayload, true);
@@ -647,24 +647,24 @@ void AppMqttClient::handleChannelCommand(const String& channelName, const String
             currentRaw.r, currentRaw.g, currentRaw.b, currentRaw.ww, currentRaw.cw);
     
     // Handle state command
-    if (root.containsKey("state")) {
-        String state = root["state"].as<String>();
+    if (root.containsKey(F("state"))) {
+        String state = root[F("state")].as<String>();
         debug_i("HA: Channel state command: %s", state.c_str());
-        if (state == "OFF") {
+        if (state == F("OFF")) {
             // Turn off this channel
-            if (channelName == "red") {
+            if (channelName == F("red")) {
                 currentRaw.r = 0;
                 debug_i("HA: Setting red channel to 0");
-            } else if (channelName == "green") {
+            } else if (channelName == F("green")) {
                 currentRaw.g = 0;
                 debug_i("HA: Setting green channel to 0");
-            } else if (channelName == "blue") {
+            } else if (channelName == F("blue")) {
                 currentRaw.b = 0;
                 debug_i("HA: Setting blue channel to 0");
-            } else if (channelName == "warmwhite" || channelName == "warm_white") {
+            } else if (channelName == F("warmwhite") || channelName == F("warm_white")) {
                 currentRaw.ww = 0;
                 debug_i("HA: Setting warm white channel to 0");
-            } else if (channelName == "coldwhite" || channelName == "cool_white") {
+            } else if (channelName == F("coldwhite") || channelName == F("cool_white")) {
                 currentRaw.cw = 0;
                 debug_i("HA: Setting cool white channel to 0");
             }
@@ -672,8 +672,8 @@ void AppMqttClient::handleChannelCommand(const String& channelName, const String
     }
     
     // Handle brightness command (0-1023 scale as configured in discovery)
-    if (root.containsKey("brightness")) {
-        int brightness = root["brightness"].as<int>();
+    if (root.containsKey(F("brightness"))) {
+        int brightness = root[F("brightness")].as<int>();
         debug_i("HA: Channel brightness command: %d (0-1023 scale)", brightness);
         
         // Clamp to valid range 0-1023
@@ -683,19 +683,19 @@ void AppMqttClient::handleChannelCommand(const String& channelName, const String
             debug_w("HA: Clamped brightness from %d to %d", originalBrightness, brightness);
         }
         
-        if (channelName == "red") {
+        if (channelName == F("red")) {
             currentRaw.r = brightness;
             debug_i("HA: Setting red channel to %d", brightness);
-        } else if (channelName == "green") {
+        } else if (channelName == F("green")) {
             currentRaw.g = brightness;
             debug_i("HA: Setting green channel to %d", brightness);
-        } else if (channelName == "blue") {
+        } else if (channelName == F("blue")) {
             currentRaw.b = brightness;
             debug_i("HA: Setting blue channel to %d", brightness);
-        } else if (channelName == "warmwhite" || channelName == "warm_white") {
+        } else if (channelName == F("warmwhite") || channelName == F("warm_white")) {
             currentRaw.ww = brightness;
             debug_i("HA: Setting warm white channel to %d", brightness);
-        } else if (channelName == "coldwhite" || channelName == "cool_white") {
+        } else if (channelName == F("coldwhite") || channelName == F("cool_white")) {
             currentRaw.cw = brightness;
             debug_i("HA: Setting cool white channel to %d", brightness);
         }
@@ -731,37 +731,37 @@ void AppMqttClient::handleHomeAssistantCommand(const String& message) {
         return;
     }
     
-    String state = doc["state"];
+    String state = doc[F("state")];
     debug_i("HA: Command state: %s", state.c_str());
     
     // Create a JSON command that works with your existing system
     StaticJsonDocument<256> cmdDoc;
     JsonObject root = cmdDoc.to<JsonObject>();
-    JsonObject hsv = root.createNestedObject("hsv");
+    JsonObject hsv = root.createNestedObject(F("hsv"));
     
-    if (state == "ON") {
+    if (state == F("ON")) {
         // Handle brightness
         float brightness = 100.0f;  // Default to 100%
-        if (doc.containsKey("brightness")) {
-            float brightness_raw = doc["brightness"].as<float>();
+        if (doc.containsKey(F("brightness"))) {
+            float brightness_raw = doc[F("brightness")].as<float>();
             brightness = brightness_raw;  // Now using 0-100 scale directly
             debug_i("HA: Brightness from HA: %.1f (0-100 scale)", brightness);
         }
         
         // Handle color
-        if (doc.containsKey("color")) {
-            float h = doc["color"]["h"];  // HA sends 0-360 degrees
-            float s = doc["color"]["s"];  // HA sends 0-100 percent
+        if (doc.containsKey(F("color"))) {
+            float h = doc[F("color")][F("h")];  // HA sends 0-360 degrees
+            float s = doc[F("color")][F("s")];  // HA sends 0-100 percent
             
             debug_i("HA: Color from HA - H: %.1f°, S: %.1f%%", h, s);
             
             // LED controller expects H: 0-360°, S: 0-100%, V: 0-100%
-            hsv["h"] = h;                 // Keep as 0-360 degrees
-            hsv["s"] = s;                 // Keep as 0-100 percentage
-            hsv["v"] = brightness;        // Keep as 0-100 percentage
+            hsv[F("h")] = h;                 // Keep as 0-360 degrees
+            hsv[F("s")] = s;                 // Keep as 0-100 percentage
+            hsv[F("v")] = brightness;        // Keep as 0-100 percentage
             
             debug_i("HA: Converted to internal - H: %.1f°, S: %.1f%%, V: %.1f%%", 
-                    hsv["h"].as<float>(), hsv["s"].as<float>(), hsv["v"].as<float>());
+                    hsv[F("h")].as<float>(), hsv[F("s")].as<float>(), hsv[F("v")].as<float>());
         } else {
             // Just brightness change - keep current color
             HSVCT currentColor = app.rgbwwctrl.getCurrentColor();
@@ -769,9 +769,9 @@ void AppMqttClient::handleHomeAssistantCommand(const String& message) {
             int cur_ct;
             currentColor.asRadian(cur_h, cur_s, cur_v, cur_ct);
             
-            hsv["h"] = cur_h;             // Keep as 0-360 degrees
-            hsv["s"] = cur_s;             // Keep as 0-100 percentage  
-            hsv["v"] = brightness;        // Use brightness as 0-100 percentage
+            hsv[F("h")] = cur_h;             // Keep as 0-360 degrees
+            hsv[F("s")] = cur_s;             // Keep as 0-100 percentage  
+            hsv[F("v")] = brightness;        // Use brightness as 0-100 percentage
             
             debug_i("HA: Brightness only change - keeping current color, new V: %.1f%%", brightness);
         }
@@ -782,22 +782,22 @@ void AppMqttClient::handleHomeAssistantCommand(const String& message) {
         int cur_ct;
         currentColor.asRadian(cur_h, cur_s, cur_v, cur_ct);
         
-        hsv["h"] = cur_h;             // Keep as 0-360 degrees
-        hsv["s"] = cur_s;             // Keep as 0-100 percentage
-        hsv["v"] = 0;                 // Turn off (0%)
+        hsv[F("h")] = cur_h;             // Keep as 0-360 degrees
+        hsv[F("s")] = cur_s;             // Keep as 0-100 percentage
+        hsv[F("v")] = 0;                 // Turn off (0%)
         
         debug_i("HA: Turning OFF - keeping current color, setting V to 0%%");
     }
     
-    root["cmd"] = "fade";
+    root[F("cmd")] = F("fade");
     
     // Handle transition time (HA sends in seconds, we expect milliseconds)
     int transition_ms = 500;  // Default 500ms
-    if (doc.containsKey("transition")) {
-        transition_ms = doc["transition"].as<int>() * 1000;  // Convert seconds to milliseconds
+    if (doc.containsKey(F("transition"))) {
+        transition_ms = doc[F("transition")].as<int>() * 1000;  // Convert seconds to milliseconds
         debug_i("HA: Transition time: %d ms", transition_ms);
     }
-    root["t"] = transition_ms;
+    root[F("t")] = transition_ms;
     
     String ledCommand = Json::serialize(root);
     debug_i("HA: Sending to LED controller: %s", ledCommand.c_str());
@@ -853,21 +853,21 @@ void AppMqttClient::getActiveChannelNames(Vector<String>& channels) {
         int colorMode = getCurrentColorMode();
 
         // All modes have RGB
-        channels.addElement("red");
-        channels.addElement("green");
-        channels.addElement("blue");
+        channels.addElement(F("red"));
+        channels.addElement(F("green"));
+        channels.addElement(F("blue"));
 
         // Add white channels based on mode
         switch (colorMode) {
             case 1: // RGBWW
-                channels.addElement("warm_white");
+                channels.addElement(F("warm_white"));
                 break;
             case 2: // RGBCW
-                channels.addElement("cool_white");
+                channels.addElement(F("cool_white"));
                 break;
             case 3: // RGBWWCW
-                channels.addElement("warm_white");
-                channels.addElement("cool_white");
+                channels.addElement(F("warm_white"));
+                channels.addElement(F("cool_white"));
                 break;
             default: // RGB
                 break;
@@ -879,12 +879,12 @@ void AppMqttClient::getSupportedColorModes(Vector<String>& modes) {
     modes.clear();
     
     // Primary mode is HSV (hue + saturation)
-    modes.addElement("hs");
+    modes.addElement(F("hs"));
     
     int colorMode = getCurrentColorMode();
     
     // Add white color modes for modes that support white channels
     if (colorMode == 1 || colorMode == 3) { // RGBWW or RGBWWCW
-        modes.addElement("color_temp");
+        modes.addElement(F("color_temp"));
     }
 }

@@ -6,6 +6,11 @@
 #include <Data/Stream/DataSourceStream.h>
 #include <vector>
 #include <algorithm>
+#include <memory>
+
+
+#define CONTROLLER_HOSTNAME_MAX_SIZE 64
+#define CONTROLLER_IP_MAX_SIZE 16
 
 class Controllers {
 public:
@@ -19,8 +24,8 @@ public:
 
     struct ControllerInfo {
         unsigned int id = 0;
-        String hostname;
-        String ipAddress;
+        char hostname[CONTROLLER_HOSTNAME_MAX_SIZE] = {0};
+        char ipAddress[CONTROLLER_IP_MAX_SIZE] = {0};
         ControllerState state = NOT_FOUND;
         int ttl = 0;
         bool pingPending = false;
@@ -62,10 +67,10 @@ public:
         size_t printedCount;
         
         size_t printIndent(size_t level);
-        size_t printString(const String& str);
-        size_t printProperty(const String& name, const String& value, bool isLast = false, size_t indentLevel = 2);
-        size_t printProperty(const String& name, int value, bool isLast = false, size_t indentLevel = 2);
-        size_t printProperty(const String& name, bool value, bool isLast = false, size_t indentLevel = 2);
+        size_t printString(const char* str);
+        size_t printProperty(const char* name, const char* value, bool isLast = false, size_t indentLevel = 2);
+        size_t printProperty(const char* name, int value, bool isLast = false, size_t indentLevel = 2);
+        size_t printProperty(const char* name, bool value, bool isLast = false, size_t indentLevel = 2);
         size_t newline();
         bool shouldIncludeController(const Controllers::ControllerInfo& info);
         
@@ -100,21 +105,28 @@ public:
     ~Controllers();
 
     // Core methods
+    void addOrUpdate(unsigned int id, const char* hostname, const char* ipAddress, int ttl);
     void addOrUpdate(unsigned int id, const String& hostname, const String& ipAddress, int ttl);
     void updateFromPing(unsigned int id, int ttl);
     void removeExpired(int elapsedSeconds);
     
     // Query methods
     ControllerInfo getController(unsigned int id);
-    String getIpAddress(unsigned int id);
-    String getHostname(unsigned int id);
+    const char* getIpAddress(unsigned int id);
+    String getIpAddressString(unsigned int id);
+    const char* getHostname(unsigned int id);
+    String getHostnameString(unsigned int id);
+    unsigned int getIdByHostname(const char* hostname);
     unsigned int getIdByHostname(const String& hostname);
+    unsigned int getIdByIpAddress(const char* ipAddress);
     unsigned int getIdByIpAddress(const String& ipAddress);
     uint32_t getHighestId();
     
     // State checks
     bool isVisible(unsigned int id);
+    bool isVisibleByHostname(const char* hostname);
     bool isVisibleByHostname(const String& hostname);
+    bool isVisibleByIpAddress(const char* ipAddress);
     bool isVisibleByIpAddress(const String& ipAddress);
     bool isPingPending(unsigned int id);
     int getTTL(unsigned int id);
@@ -134,7 +146,7 @@ public:
     
     // JSON output methods
     JsonPrinter printJson(Print& printer, JsonFilter filter = VALID_ONLY, bool pretty = false);
-    JsonStream* createJsonStream(JsonFilter filter = VALID_ONLY, bool pretty = false);
+    std::unique_ptr<JsonStream> createJsonStream(JsonFilter filter = VALID_ONLY, bool pretty = false);
 
 private:
     static const size_t INVALID_INDEX = SIZE_MAX;
@@ -153,6 +165,8 @@ private:
     // Helper methods
     size_t findVisibleControllerIndex(unsigned int id);
     ControllerInfo findById(unsigned int id);
+    ControllerInfo findByIpAddress(const char* ipAddress);
     ControllerInfo findByIpAddress(const String& ipAddress);
+    ControllerInfo findByHostname(const char* hostname);
     ControllerInfo findByHostname(const String& hostname);
 };

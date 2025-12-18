@@ -1,4 +1,4 @@
- /*
+/*
  * @author  Patrick Jahns http://github.com/patrickjahns
  *
  * @section LICENSE
@@ -19,8 +19,10 @@
  *
  */
 #pragma once
+#include <RGBWWCtrl.h>
 #include <otaupdate.h>
 #include <controllers.h>
+#include <mdnsHandler.h>
 
 
 
@@ -39,6 +41,7 @@ public:
     void initButtons();
 
     void startServices();
+    void startNetworkServices();
     void stopServices();
 
     void reset();
@@ -87,8 +90,16 @@ public:
     std::unique_ptr<AppData> data;
     EventServer eventserver;
     AppMqttClient mqttclient;
+    TelemetryClient telemetryClient;
     JsonProcessor jsonproc;
+    mdnsHandler mdnsService;
     NtpClient* pNtpclient = nullptr;
+
+        // debug counters
+    uint32_t _mDNS_received = 0;
+    uint32_t _mDNS_replies = 0;
+    struct rst_info* rtc_info;
+
     
     String sanitizeName(const String& input){
         String result = input;
@@ -108,6 +119,7 @@ public:
 private:
     void loadbootinfo();
     void listFiles();
+    void logRestart();
 
     Timer _systimer;
     int _bootmode = 0;
@@ -127,6 +139,7 @@ private:
 
     int8_t clearPin = 16; //  GPIO16 is the default for the old mrpj boards, newer boards will load from pinconfig 
 
+    bool _reboot_reported=false;
 };
 // forward declaration for global vars
 extern Application app;

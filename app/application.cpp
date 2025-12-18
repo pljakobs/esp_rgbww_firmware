@@ -1,4 +1,4 @@
- /**
+/**
  * @file
  * @author  Patrick Jahns http://github.com/patrickjahns
  *
@@ -129,7 +129,8 @@ void onReady()
 {
 	
 	//System.setCpuFrequencye(CF_160MHz);
-
+	app.rtc_info = system_get_rst_info();
+	
 #ifdef ARCH_ESP8266
 	osMessageInterceptor.begin(onOsMessage);
 	debug_i("starting os message interceptor");
@@ -188,7 +189,54 @@ void Application::uptimeCounter()
 
 void Application::checkRam()
 {
-	debug_i("Free heap: %d", system_get_free_heap_size());
+	// Create JSON object with uptime and free heap
+	StaticJsonDocument<256> doc;
+	time_t now = time(nullptr); // should be unix time if ntp is running
+	doc[F("id")] = (uint32_t)system_get_chip_id();
+	doc[F("time")] = now;	
+	doc[F("uptime")] = _uptimeMinutes*60;
+	doc[F("ip")] = WifiStation.getIP().toString();
+	doc[F("freeHeap")] = system_get_free_heap_size();
+	doc[F("firmware")] = fw_git_version;
+	doc[F("build")] = BUILD_TYPE;
+	doc[F("soc")] = SOC;
+	doc[F("neighbours")]=app.controllers->getVisibleCount();
+	
+	if (app.rtc_info->reason!= 0 && !_reboot_reported)
+	{
+		AppConfig::Root::Telemetry telemetryCfg(*cfg);
+
+		doc[F("reboot")][F("number")] = telemetryCfg.getNumReboots();
+		doc[F("reboot")][F("reason")] = app.rtc_info->reason;
+		doc[F("reboot")][F("exccause")] = app.rtc_info->exccause;
+		doc[F("reboot")][F("epc1")] = app.rtc_info->epc1;
+		doc[F("reboot")][F("epc2")] = app.rtc_info->epc2;
+		doc[F("reboot")][F("epc3")] = app.rtc_info->epc3;
+		doc[F("reboot")][F("excvaddr")] = app.rtc_info->excvaddr;
+		doc[F("reboot")][F("depc")] = app.rtc_info->depc;
+	}
+	doc[F("mDNS")][F("received")] = _mDNS_received;
+	doc[F("mDNS")][F("replies")] = _mDNS_replies;
+
+	debug_i("Free heap: %d, uptime: %d", system_get_free_heap_size(), millis() / 1000);
+	if (!telemetryClient.stat(doc))
+	{
+		debug_i("Failed to publish monitor data to telemetry MQTT");
+		if (!telemetryClient.isRunning()){
+			debug_i("restarting telemetry MQTT client");
+			telemetryClient.reconnect();
+		}
+	}
+	
+	
+	if (app.rtc_info->reason!= 0 && !_reboot_reported){
+		_reboot_reported=true;	
+		AppConfig::Root::Telemetry telemetryCfg(*cfg);
+		auto reboots=telemetryCfg.getNumReboots();
+		if(auto telemetryUpdate = telemetryCfg.update()){
+			telemetryUpdate.setNumReboots(reboots+1);
+		}
+	} 
 }
 
 
@@ -226,7 +274,7 @@ void Application::init()
 
 	//load settings
 	_uptimetimer.initializeMs(60000, TimerDelegate(&Application::uptimeCounter, this)).start();
-	_checkRamTimer.initializeMs(10000, TimerDelegate(&Application::checkRam, this)).start();
+	_checkRamTimer.initializeMs(30000, TimerDelegate(&Application::checkRam, this)).start();
 #ifdef ARCH_ESP8266
 	// load boot information
 	uint8 bootmode, bootslot;
@@ -303,7 +351,7 @@ debug_i("Application::init - running partition %s", part.name());
 		}
 	}
 	{
-    int clearPin = -1;
+    	int clearPin = -1;
 		{
 			AppConfig::General general(*cfg);
 			AppConfig::Hardware hardware(*cfg);
@@ -337,6 +385,7 @@ debug_i("Application::init - running partition %s", part.name());
 
 		#endif
 	}
+
 	debug_i("Application::init - hardware config loaded");
 	
 
@@ -384,11 +433,13 @@ debug_i("Application::init - running partition %s", part.name());
 		// this should adapt to the number of hosts detected in earlier boots
 		AppData::Root::Controllers controllers(*app.data);
 		
-		auto myId=system_get_chip_id();
+		auto myId=(uint32_t)system_get_chip_id();
 		AppConfig::General general(*cfg);
 		String myName=general.getDeviceName();
 		if(myName.length()<=0){
-			myName=String("rgbww-")+String(myId, HEX);
+			char myName_buf[64];
+			snprintf(myName_buf, sizeof(myName_buf), "rgbww-%x", myId);
+			myName = myName_buf;
 		}
 		app.controllers->addOrUpdate( myId,myName, WifiStation.getIP().toString(), 1200); // add myself to the list
 	}
@@ -472,30 +523,38 @@ void Application::startServices()
 			eventserver.start(app.webserver);
 		}
 	} // end of ConfigDB root context
-	if(WifiStation.isConnected())
-	{
-		debug_i("Application::startServices - starting mqtt");
-		AppConfig::Network network(*cfg);
-		AppConfig::General general(*cfg);
-		debug_i("Application::startServices - mqtt enabled: %s", network.mqtt.getEnabled() ? "true" : "false");
-		String mqttClientId = network.mqtt.homeassistant.getNodeId();
-		if(mqttClientId.length() > 0) {
-			debug_i("Application::startServices - mqtt client id: %s", mqttClientId.c_str());
+}
+void Application::startNetworkServices()
+{
+	debug_i("Application::startServices - starting mqtt");
+	AppConfig::Network network(*cfg);
+	AppConfig::General general(*cfg);
+	debug_i("Application::startServices - mqtt enabled: %s", network.mqtt.getEnabled() ? "true" : "false");
+	String mqttClientId = network.mqtt.homeassistant.getNodeId();
+	if(mqttClientId.length() > 0) {
+		debug_i("Application::startServices - mqtt client id: %s", mqttClientId.c_str());
+	} else {
+		if(general.getDeviceName().length() > 0) {
+			mqttClientId = general.getDeviceName();
 		} else {
-			if(general.getDeviceName().length() > 0) {
-				mqttClientId = general.getDeviceName();
-			} else {
-				mqttClientId = String("rgbww_") + WifiStation.getMAC();
-			}
-		}
-		mqttclient.init(); // initialize mqtt client with node name
-		debug_i("Application::startServices - mqtt client initialized");
-		if(network.mqtt.getEnabled()) {
-			mqttclient.start();
+			mqttClientId = String("rgbww_") + WifiStation.getMAC();
 		}
 	}
+	mqttclient.init(); // initialize mqtt client with node name
+	debug_i("Application::startServices - mqtt client initialized");
+	if(network.mqtt.getEnabled()) {
+		mqttclient.start();
+	}
+	telemetryClient.start();
+	
 }
 
+void Application::logRestart(){
+	char msg[128];
+	m_snprintf(msg, sizeof(msg), "restart, reason: %u, exccause: %u", 
+	           (unsigned int)app.rtc_info->reason, (unsigned int)app.rtc_info->exccause);
+	telemetryClient.log(msg);
+}
 void Application::restart()
 {
 	debug_i("Application::restart");
@@ -529,10 +588,12 @@ bool Application::delayedCMD(String cmd, int delay)
 	if(cmd.equals(F("reset"))) {
 		wsBroadcast(F("notification"), F("Controller will reset and restart"));
 		wsBroadcast(F("webapp_cmd"), F("reload"));
+		telemetryClient.log(F("delaycmd reset"));
 		_systimer.initializeMs(delay, TimerDelegate(&Application::reset, this)).startOnce();
 	} else if(cmd.equals(F("restart"))) {
 		wsBroadcast(F("notification"), F("Controller will restart"));
 		wsBroadcast(F("webapp_cmd"), F("reload"));
+		telemetryClient.log(F("delaycmd restart"));
 		_systimer.initializeMs(delay, TimerDelegate(&Application::restart, this)).startOnce();
 	} else if(cmd.equals(F("stopap"))) {
 		wsBroadcast(F("notification"), F("Controller will disable the access point"));
@@ -552,6 +613,7 @@ bool Application::delayedCMD(String cmd, int delay)
 	} else if(cmd.equals(F("switch_rom"))) {
 		wsBroadcast(F("notification"), F("Controller will switch to other rom"));
 		wsBroadcast(F("webapp_cmd"), F("reload"));
+		telemetryClient.log(F("delaycmd switch_rom"));
 //#if ARCH_ESP8266
 		switchRom();
 //_systimer.initializeMs(delay, TimerDelegate(&Application::restart, this)).startOnce();
@@ -595,7 +657,7 @@ bool Application::mountfs(int slot)
      * on device file system
      */
 
-	auto part = Storage::findPartition("spiffs" + String(slot));
+	auto part = Storage::findPartition(F("spiffs") + String(slot));
 	if(part) {
 		debug_i("mouting spiffs partition %i at %x, length %d", slot, part.address(), part.size());
 		return spiffs_mount(part);
@@ -693,7 +755,7 @@ int Application::getRomSlot()
 {
 	auto partition = app.ota.getRomPartition();
 	uint8_t slot;
-	if(partition.name() == "rom1") {
+	if(partition.name() == F("rom1")) {
 		slot = 1;
 	} else {
 		slot = 0;

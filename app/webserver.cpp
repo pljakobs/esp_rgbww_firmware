@@ -1,3 +1,5 @@
+#include <ArduinoJson.h>
+
 /**
  * @file
  * @author  Patrick Jahns http://github.com/patrickjahns
@@ -20,6 +22,7 @@
  */
 #include <RGBWWCtrl.h>
 #include <Data/WebHelpers/base64.h>
+#include <memory>
 
 #include <Network/Http/Websocket/WebsocketResource.h>
 #include <Storage.h>
@@ -37,10 +40,9 @@ ApplicationWebserver::ApplicationWebserver()
 	// keep some heap space free
 	// value is a good guess and tested to not crash when issuing multiple parallel requests
 	HttpServerSettings settings;
-	settings.maxActiveConnections = 40;
+	settings.maxActiveConnections = 5;
 	settings.minHeapSize = _minimumHeapAccept;
-	settings.keepAliveSeconds =
-		10; // do not close instantly when no transmission occurs. some clients are a bit slow (like FHEM)
+	settings.keepAliveSeconds = 10; // do not close instantly when no transmission occurs. some clients are a bit slow (like FHEM)
 	configure(settings);
 
 	// workaround for bug in Sming 3.5.0
@@ -65,13 +67,9 @@ void ApplicationWebserver::init()
 	paths.set(F("/hosts"), HttpPathDelegate(&ApplicationWebserver::onHosts, this));
 	paths.set(F("/data"), HttpPathDelegate(&ApplicationWebserver::onData, this));
 
-	// redirectors for initial configuration
-	paths.set(F("/canonical.html"), HttpPathDelegate(&ApplicationWebserver::onIndex, this)); 
-	paths.set(F("/generate_204"), HttpPathDelegate(&ApplicationWebserver::onIndex, this)); //android
-	paths.set(F("/static/hotspot.txt"), HttpPathDelegate(&ApplicationWebserver::onIndex, this));
-	paths.set(F("/connecttest.txt"), HttpPathDelegate(&ApplicationWebserver::onIndex, this)); //Windows
-	paths.set(F("/hotspot-detect.html"), HttpPathDelegate(&ApplicationWebserver::onIndex, this)); //iOS/macOS
-	paths.set(F("/nmcheck.gnome.org"), HttpPathDelegate(&ApplicationWebserver::onIndex, this)); //Linux (NetworkManager)
+	// basic settings
+	paths.set(F("/on"), HttpPathDelegate(&ApplicationWebserver::onSetOn, this));
+	paths.set(F("/off"), HttpPathDelegate(&ApplicationWebserver::onSetOff, this));
 
 	// animation controls
 	paths.set(F("/stop"), HttpPathDelegate(&ApplicationWebserver::onStop, this));
@@ -80,6 +78,14 @@ void ApplicationWebserver::init()
 	paths.set(F("/continue"), HttpPathDelegate(&ApplicationWebserver::onContinue, this));
 	paths.set(F("/blink"), HttpPathDelegate(&ApplicationWebserver::onBlink, this));
 	paths.set(F("/toggle"), HttpPathDelegate(&ApplicationWebserver::onToggle, this));
+
+	// redirectors for initial configuration
+	paths.set(F("/canonical.html"), HttpPathDelegate(&ApplicationWebserver::onIndex, this)); 
+	paths.set(F("/generate_204"), HttpPathDelegate(&ApplicationWebserver::onIndex, this)); //android
+	paths.set(F("/static/hotspot.txt"), HttpPathDelegate(&ApplicationWebserver::onIndex, this));
+	paths.set(F("/connecttest.txt"), HttpPathDelegate(&ApplicationWebserver::onIndex, this)); //Windows
+	paths.set(F("/hotspot-detect.html"), HttpPathDelegate(&ApplicationWebserver::onIndex, this)); //iOS/macOS
+	paths.set(F("/nmcheck.gnome.org"), HttpPathDelegate(&ApplicationWebserver::onIndex, this)); //Linux (NetworkManager)
 
 	// websocket api
 	wsResource = new WebsocketResource();
@@ -182,17 +188,17 @@ bool ICACHE_FLASH_ATTR ApplicationWebserver::authenticated(HttpRequest& request,
 	return authenticated;
 }
 
-String ApplicationWebserver::getApiCodeMsg(API_CODES code)
+const char* ApplicationWebserver::getApiCodeMsg(API_CODES code)
 {
 	switch(code) {
 	case API_CODES::API_MISSING_PARAM:
-		return String(F("missing param"));
+		return "missing param";
 	case API_CODES::API_UNAUTHORIZED:
-		return String(F("authorization required"));
+		return "authorization required";
 	case API_CODES::API_UPDATE_IN_PROGRESS:
-		return String(F("update in progress"));
+		return "update in progress";
 	default:
-		return String(F("bad request"));
+		return "bad request";
 	}
 }
 
@@ -216,29 +222,47 @@ void ApplicationWebserver::sendApiResponse(HttpResponse& response, JsonObjectStr
 
 }
 
-void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, String msg /* = "" */)
+void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, const String& msg)
 {
-	JsonObjectStream* stream = new JsonObjectStream();
+	sendApiCode(response, code, msg.c_str());
+}
+
+void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, const __FlashStringHelper* msg)
+{
+	if(msg == nullptr) {
+		sendApiCode(response, code, getApiCodeMsg(code));
+		return;
+	}
+	sendApiCode(response, code, String(msg).c_str());
+}
+
+void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, const char* msg)
+{
+	if(msg == nullptr) {
+		msg = getApiCodeMsg(code);
+	}
+	auto stream = std::make_unique<JsonObjectStream>();
 	JsonObject json = stream->getRoot();
 
 	setCorsHeaders(response);
 	response.setHeader(F("accept"), F("GET, POST, OPTIONS"));
 
-	if(msg == "") {
-		msg = getApiCodeMsg(code);
-	}
 	if(code == API_CODES::API_SUCCESS) {
 		json[F("success")] = true;
-		sendApiResponse(response, stream, HTTP_STATUS_OK);
+		sendApiResponse(response, stream.release(), HTTP_STATUS_OK);
 	} else {
 		json[F("error")] = msg;
-		sendApiResponse(response, stream, HTTP_STATUS_BAD_REQUEST);
+		sendApiResponse(response, stream.release(), HTTP_STATUS_BAD_REQUEST);
 	}
 }
 
 void ApplicationWebserver::onFile(HttpRequest& request, HttpResponse& response)
 {
 	debug_i("http onFile");
+	if(!checkHeap(response)) {
+		return;
+	}
+
 	if(!authenticated(request, response)) {
 		return;
 	}
@@ -300,13 +324,16 @@ void ApplicationWebserver::onFile(HttpRequest& request, HttpResponse& response)
 	}
 
 	debug_i("found %s in fileMap", String(v.key()).c_str());
-	auto stream = new FSTR::Stream(v.content());
-	response.sendDataStream(stream, ContentType::fromFullFileName(fileName));
+	auto stream = std::make_unique<FSTR::Stream>(v.content());
+	response.sendDataStream(stream.release(), ContentType::fromFullFileName(fileName));
 
 }
 void ApplicationWebserver::onWebapp(HttpRequest& request, HttpResponse& response)
 {
 	debug_i("http onWebapp");
+	if(!checkHeap(response)) {
+		return;
+	}
 	if(!authenticated(request, response)) {
 		return;
 	}
@@ -321,6 +348,9 @@ void ApplicationWebserver::onWebapp(HttpRequest& request, HttpResponse& response
 void ApplicationWebserver::onIndex(HttpRequest& request, HttpResponse& response)
 {
 	debug_i("http onIndex");
+	if(!checkHeap(response)) {
+		return;
+	}
 	if(!authenticated(request, response)) {
 		return;
 	}
@@ -344,11 +374,20 @@ void ApplicationWebserver::onIndex(HttpRequest& request, HttpResponse& response)
 
 bool ApplicationWebserver::checkHeap(HttpResponse& response)
 {
+	return checkHeap(response, 0);
+}
+
+bool ApplicationWebserver::checkHeap(HttpResponse& response, int minHeap)
+{
+	if (minHeap==0) {
+		minHeap=_minimumHeap;
+	}
 	unsigned fh = system_get_free_heap_size();
-	if(fh < _minimumHeap) {
+	if(fh < minHeap) {
 		setCorsHeaders(response);
 		response.code = HTTP_STATUS_TOO_MANY_REQUESTS;
-		response.setHeader(F("Retry-After"), "2");
+		response.setHeader(F("Retry-After"), "1");
+		debug_i("Not enough heap free, rejecting request. Free heap: %u", fh);
 		return false;
 	}
 	return true;
@@ -357,7 +396,7 @@ bool ApplicationWebserver::checkHeap(HttpResponse& response)
 void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response)
 {
 	debug_i("onConfig");
-	if(!checkHeap(response))
+	if(!checkHeap(response,12000))
 		return;
 
 	if(!authenticated(request, response)) {
@@ -384,13 +423,14 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 		// probably a CORS preflight request
 		setCorsHeaders(response);
 		response.setHeader(F("Access-Control-Allow-Headers"), F("Content-Type"));
-		sendApiCode(response, API_CODES::API_SUCCESS, "");
+		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 		debug_i("HTTP_OPTIONS Request, sent API_SUCCSSS");
 		return;
 	}
 
 	if(request.method == HTTP_POST) {
 		debug_i("======================\nHTTP POST request received, ");
+		app.telemetryClient.log(F("onConfig POST"));
 
 		/* ConfigDB importFomStream */
 		String oldIP, oldSSID, oldDeviceName, oldCurrentPinConfigName;
@@ -398,16 +438,22 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 		int oldColorMode;
 		{
 			debug_i("ApplicationWebserver::onConfig storing old settings");
+			app.telemetryClient.log(F("onConfig storing old settings"));
 			AppConfig::Network network(*app.cfg);
-			AppConfig::General general(*app.cfg);
 			oldIP = network.connection.getIp();
 			oldSSID = network.ap.getSsid();
 			mqttEnabled = network.mqtt.getEnabled();
 			dhcpEnabled=network.connection.getDhcp();
-			AppConfig::Color color(*app.cfg);
-			oldColorMode=color.getColorMode();
+		}
+		{
+			AppConfig::General general(*app.cfg);
 			oldDeviceName=general.getDeviceName();
 			oldCurrentPinConfigName=general.getCurrentPinConfigName();
+		}
+		{
+			AppConfig::Color color(*app.cfg);
+			oldColorMode=color.getColorMode();
+			// TODO: Store other color settings if needed		
 		}
 
 		auto bodyStream = request.getBodyStream();
@@ -427,37 +473,47 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 
 			// bool restart = root[F("restart")] | false;
 
-			String newIP, newSSID,newDeviceName, newCurrentPinConfigName;
+			app.telemetryClient.start();
+			String newIP, newSSID, newDeviceName, newCurrentPinConfigName;
 			bool newMqttEnabled,newDhcpEnabled;
 			int newColorMode;
 			{
-				debug_i("ApplicationWebserver::onConfig geting new ip settings");
+				debug_i("ApplicationWebserver::onConfig getting new settings");
+				app.telemetryClient.log(F("onConfig getting new settings"));
 				AppConfig::Network network(*app.cfg);
-				AppConfig::General general(*app.cfg);
 				newIP = network.connection.getIp();
 				newSSID = network.ap.getSsid();
 				newMqttEnabled = network.mqtt.getEnabled();
 				newDhcpEnabled=network.connection.getDhcp();
-				AppConfig::Color color(*app.cfg);
-				newColorMode=color.getColorMode();
+			}
+			{
+				AppConfig::General general(*app.cfg);
 				newDeviceName=general.getDeviceName();
 				newCurrentPinConfigName=general.getCurrentPinConfigName();
+			}
+			{
+				AppConfig::Color color(*app.cfg);
+				newColorMode=color.getColorMode();
 			}
 			
 			if(oldIP != newIP) {
 				//if (restart) {
 				debug_i("ApplicationWebserver::onConfig ip settings changed - rebooting");
-				app.delayedCMD(F("restart"), 3000); // wait 3s to first send response
+				app.telemetryClient.log(F("onConfig ip settings changed - rebooting"));
 				String msg = F("new IP, ")+newIP;
 				app.wsBroadcast(F("notification"), msg);
+				app.telemetryClient.log(msg);
+				app.delayedCMD(F("restart"), 3000); // wait 3s to first send response
 			}
 			if(oldSSID != newSSID) {
 				//
 				if(WifiAccessPoint.isEnabled()) {
 					debug_i("ApplicationWebserver::onConfig wifiap settings changed - rebooting");
+					app.telemetryClient.log(F("onConfig wifiap settings changed - rebooting"));
 					// report the fact that the system will restart to the frontend
 					String msg = F("new SSID, ")+newSSID;
 					app.wsBroadcast(F("notification"), msg);
+					app.telemetryClient.log(msg);
 					app.delayedCMD(F("restart"), 3000); // wait 3s to first send response
 				}
 			}
@@ -465,11 +521,13 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 				if(newMqttEnabled) {
 					if(!app.mqttclient.isRunning()) {
 						debug_i("ApplicationWebserver::onConfig mqtt settings changed - starting mqtt");
+						app.telemetryClient.log(F("onConfig mqtt settings changed - starting mqtt"));
 						app.mqttclient.start();
 					}
 				} else {
 					if(app.mqttclient.isRunning()) {
 						debug_i("ApplicationWebserver::onConfig mqtt settings changed - stopping mqtt");
+						app.telemetryClient.log(F("onConfig mqtt settings changed - stopping mqtt"));
 						app.mqttclient.stop();
 					} else {
 						debug_i("mqttclient was not running, no need to stop");
@@ -482,30 +540,37 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 					WifiStation.enableDHCP(true);
 				}else{
 					debug_i("ApplicationWebserver::onConfig ip settings changed - rebooting");
+					app.telemetryClient.log(F("onConfig ip settings changed - rebooting"));
 					String msg = F("new IP, ")+newIP;
 					app.wsBroadcast(F("notification"), msg);
+					app.telemetryClient.log(msg);
 					app.delayedCMD(F("restart"), 3000); // wait 3s to first send response
 				}
 			}
 			if(oldCurrentPinConfigName!=newCurrentPinConfigName){
 				String msg = F("Channel config has changed - rebooting ");
 				app.wsBroadcast(F("notification"), msg);
+				app.telemetryClient.log(msg);
 				app.delayedCMD(F("restart"),1000);
 			}
 			if(oldDeviceName!=newDeviceName){
-				String msg = F("new Device Name, ")+newDeviceName;
+				String msg = F("device name change, old Device Name: ")+oldDeviceName+F(", new Device Name: ")+newDeviceName;
 				AppConfig::Network::OuterUpdater network(*app.cfg);
 				network.mdns.setName(app.sanitizeName(newDeviceName));
 				app.wsBroadcast(F("notification"), msg);
-				app.delayedCMD(F("restart"),1000);
+				app.telemetryClient.log(msg);
+				app.mdnsService.setHostname(newDeviceName);
+				//app.delayedCMD(F("restart"),1000);
 			}
 
 			debug_i("ApplicationWebserver::onConfig %i, %i",newColorMode,oldColorMode);
 			if (newColorMode!=oldColorMode){
 				// color Mode has been updated, requires reconfiguration, will restart for now
 				debug_i("ApplicationWebserver::onConfig color settings changed - restarting");
+				app.telemetryClient.log(F("onConfig color settings changed - restarting"));
 				String msg=F("Color Mode changed");
 				app.wsBroadcast(F("notification"), msg);
+				app.telemetryClient.log(msg);
 				app.delayedCMD(F("restart"), 1000); // wait 1s to first send response
 			}
 
@@ -526,7 +591,7 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
             */
 
 			setCorsHeaders(response);
-			sendApiCode(response, API_CODES::API_SUCCESS);
+			sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 		} else {
 			//CofigDB provide correct error message
 
@@ -542,6 +607,8 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
          * /config GET
          */
 		setCorsHeaders(response);
+		app.telemetryClient.log(F("onConfig GET"));
+
 		auto configStream = app.cfg->createExportStream(ConfigDB::Json::format);
 		response.sendDataStream(configStream.release(), MIME_JSON);
 	}
@@ -550,7 +617,7 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response)
 {
 	debug_i("onInfo");
-	if(!checkHeap(response))
+	if(!checkHeap(response,4000))
 		return;
 
 	if(!authenticated(request, response)) {
@@ -569,9 +636,9 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response)
 		return;
 	}
 
-	JsonObjectStream* stream = new JsonObjectStream();
+	auto stream = std::make_unique<JsonObjectStream>();
 	JsonObject data = stream->getRoot();
-	data[F("deviceid")] = String(system_get_chip_id());
+	data[F("deviceid")] = system_get_chip_id();
 #if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
 	data[F("current_rom")] = String(app.ota.getRomPartition().name());
 #endif
@@ -609,7 +676,7 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response)
 	con[F("mac")] = WifiStation.getMAC();
 	//con[F("mdnshostname")] = app.cfg.network.connection.mdnshostname.c_str();
 
-	sendApiResponse(response, stream);
+	sendApiResponse(response, stream.release());
 
 }
 
@@ -625,10 +692,10 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response)
 void ApplicationWebserver::onColorGet(HttpRequest& request, HttpResponse& response)
 {
 	debug_i("onColorGet");
-	if(!checkHeap(response))
+	if(!checkHeap(response,2000))
 		return;
 
-	JsonObjectStream* stream = new JsonObjectStream();
+	auto stream = std::make_unique<JsonObjectStream>();
 	JsonObject json = stream->getRoot();
 
 	JsonObject raw = json.createNestedObject("raw");
@@ -651,7 +718,7 @@ void ApplicationWebserver::onColorGet(HttpRequest& request, HttpResponse& respon
 
 	setCorsHeaders(response);
 
-	sendApiResponse(response, stream);
+	sendApiResponse(response, stream.release());
 
 }
 
@@ -668,6 +735,9 @@ void ApplicationWebserver::onColorGet(HttpRequest& request, HttpResponse& respon
  */
 void ApplicationWebserver::onColorPost(HttpRequest& request, HttpResponse& response)
 {
+	if(!checkHeap(response)) {
+		return;
+	}
 	String body = request.getBody();
 
 	setCorsHeaders(response);
@@ -675,7 +745,7 @@ void ApplicationWebserver::onColorPost(HttpRequest& request, HttpResponse& respo
 	response.setHeader(F("Access-Control-Allow-Credentials"), F("true"));
 
 	if(body == NULL) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, "no body");
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("no body"));
 		return;
 	}
 
@@ -687,7 +757,7 @@ void ApplicationWebserver::onColorPost(HttpRequest& request, HttpResponse& respo
 		sendApiCode(response, API_CODES::API_BAD_REQUEST, msg);
 	} else {
 		debug_i("received color update with message %s", msg.c_str());
-		sendApiCode(response, API_CODES::API_SUCCESS);
+		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 	}
 }
 
@@ -702,6 +772,9 @@ void ApplicationWebserver::onColorPost(HttpRequest& request, HttpResponse& respo
  * @param response The HTTP response object.
  */
 void ApplicationWebserver::onColor(HttpRequest& request, HttpResponse& response){
+	if(!checkHeap(response)) {
+		return;
+	}
 	if(!authenticated(request, response)) {
 		return;
 	}
@@ -726,7 +799,7 @@ void ApplicationWebserver::onColor(HttpRequest& request, HttpResponse& response)
 		response.setHeader(F("Access-Control-Allow-Methods"), F("GET, PUT, POST, OPTIONS"));
 
 		debug_i("OPTIONS");
-		sendApiCode(response, API_CODES::API_SUCCESS);
+		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 		return;
 	}
 
@@ -751,7 +824,7 @@ void ApplicationWebserver::onColor(HttpRequest& request, HttpResponse& response)
  * @param str The string to be checked.
  * @return True if the string is printable, false otherwise.
  */
-bool ApplicationWebserver::isPrintable(String& str)
+bool ApplicationWebserver::isPrintable(const String& str)
 {
 	for(unsigned int i = 0; i < str.length(); ++i) {
 		char c = str[i];
@@ -787,7 +860,7 @@ void ApplicationWebserver::onNetworks(HttpRequest& request, HttpResponse& respon
 	if(request.method == HTTP_OPTIONS) {
 		setCorsHeaders(response);
 
-		sendApiCode(response, API_CODES::API_SUCCESS);
+		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 		return;
 	}
 	if(request.method != HTTP_GET) {
@@ -795,7 +868,7 @@ void ApplicationWebserver::onNetworks(HttpRequest& request, HttpResponse& respon
 		return;
 	}
 
-	JsonObjectStream* stream = new JsonObjectStream();
+	auto stream = std::make_unique<JsonObjectStream>();
 	JsonObject json = stream->getRoot();
 
 	bool error = false;
@@ -828,7 +901,7 @@ void ApplicationWebserver::onNetworks(HttpRequest& request, HttpResponse& respon
 		}
 	}
 	setCorsHeaders(response);
-	sendApiResponse(response, stream);
+	sendApiResponse(response, stream.release());
 
 }
 
@@ -844,6 +917,9 @@ void ApplicationWebserver::onNetworks(HttpRequest& request, HttpResponse& respon
  */
 void ApplicationWebserver::onScanNetworks(HttpRequest& request, HttpResponse& response)
 {
+	if(!checkHeap(response)) {
+		return;
+	}
 	if(!authenticated(request, response)) {
 		return;
 	}
@@ -863,7 +939,7 @@ void ApplicationWebserver::onScanNetworks(HttpRequest& request, HttpResponse& re
 		app.network.scan(false);
 	}
 
-	sendApiCode(response, API_CODES::API_SUCCESS);
+	sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 }
 
 /**
@@ -877,6 +953,9 @@ void ApplicationWebserver::onScanNetworks(HttpRequest& request, HttpResponse& re
  */
 void ApplicationWebserver::onConnect(HttpRequest& request, HttpResponse& response)
 {
+	if(!checkHeap(response)) {
+		return;
+	}
 	if(!authenticated(request, response)) {
 		return;
 	}
@@ -908,7 +987,7 @@ void ApplicationWebserver::onConnect(HttpRequest& request, HttpResponse& respons
 			password = doc[F("password")].as<const char*>();
 			debug_d("ssid %s - pass %s", ssid.c_str(), password.c_str());
 			app.network.connect(ssid, password, true);
-			sendApiCode(response, API_CODES::API_SUCCESS);
+			sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 			return;
 
 		} else {
@@ -916,7 +995,7 @@ void ApplicationWebserver::onConnect(HttpRequest& request, HttpResponse& respons
 			return;
 		}
 	} else {
-		JsonObjectStream* stream = new JsonObjectStream();
+		auto stream = std::make_unique<JsonObjectStream>();
 		JsonObject json = stream->getRoot();
 
 		CONNECTION_STATUS status = app.network.get_con_status();
@@ -937,7 +1016,7 @@ void ApplicationWebserver::onConnect(HttpRequest& request, HttpResponse& respons
 			json[F("dhcp")] = network.connection.getDhcp() ? F("True") : F("False");
 			json[F("ssid")] = WifiStation.getSSID();
 		}
-		sendApiResponse(response, stream);
+		sendApiResponse(response, stream.release());
 	}
 }
 
@@ -956,6 +1035,9 @@ void ApplicationWebserver::onConnect(HttpRequest& request, HttpResponse& respons
  */
 void ApplicationWebserver::onSystemReq(HttpRequest& request, HttpResponse& response)
 {
+	if(!checkHeap(response)) {
+		return;
+	}
 	if(!authenticated(request, response)) {
 		return;
 	}
@@ -970,7 +1052,7 @@ void ApplicationWebserver::onSystemReq(HttpRequest& request, HttpResponse& respo
 	if(request.method == HTTP_OPTIONS) {
 		setCorsHeaders(response);
 
-		sendApiCode(response, API_CODES::API_SUCCESS);
+		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 		return;
 	}
 	if(request.method != HTTP_POST) {
@@ -1010,7 +1092,7 @@ void ApplicationWebserver::onSystemReq(HttpRequest& request, HttpResponse& respo
 	setCorsHeaders(response);
 
 	if(!error) {
-		sendApiCode(response, API_CODES::API_SUCCESS);
+		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 	} else {
 		sendApiCode(response, API_CODES::API_MISSING_PARAM);
 	}
@@ -1027,6 +1109,9 @@ void ApplicationWebserver::onSystemReq(HttpRequest& request, HttpResponse& respo
  */
 void ApplicationWebserver::onUpdate(HttpRequest& request, HttpResponse& response)
 {
+	if(!checkHeap(response)) {
+		return;
+	}
 	if(!authenticated(request, response)) {
 		return;
 	}
@@ -1038,7 +1123,7 @@ void ApplicationWebserver::onUpdate(HttpRequest& request, HttpResponse& response
 	if(request.method == HTTP_OPTIONS) {
 		// probably a CORS request
 		setCorsHeaders(response);
-		sendApiCode(response, API_CODES::API_SUCCESS, "");
+		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 		debug_i("/update HTTP_OPTIONS Request, sent API_SUCCSSS");
 		return;
 	}
@@ -1076,14 +1161,14 @@ void ApplicationWebserver::onUpdate(HttpRequest& request, HttpResponse& response
 		} else {
 			app.ota.start(romurl);
 			setCorsHeaders(response);
-			sendApiCode(response, API_CODES::API_SUCCESS);
+			sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 		}
 		return;
 	}
-	JsonObjectStream* stream = new JsonObjectStream();
+	auto stream = std::make_unique<JsonObjectStream>();
 	JsonObject json = stream->getRoot();
 	json[F("status")] = int(app.ota.getStatus());
-	sendApiResponse(response, stream);
+	sendApiResponse(response, stream.release());
 
 #endif
 }
@@ -1103,18 +1188,24 @@ void ApplicationWebserver::onUpdate(HttpRequest& request, HttpResponse& response
  */
 void ApplicationWebserver::onPing(HttpRequest& request, HttpResponse& response)
 {
+	if(!checkHeap(response)) {
+		return;
+	}
 	if(request.method != HTTP_GET) {
 		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not HTTP GET");
 		return;
 	}
-	JsonObjectStream* stream = new JsonObjectStream();
+	auto stream = std::make_unique<JsonObjectStream>();
 	JsonObject json = stream->getRoot();
 	json[F("ping")] = "pong";
-	sendApiResponse(response, stream);
+	sendApiResponse(response, stream.release());
 }
 
 void ApplicationWebserver::onStop(HttpRequest& request, HttpResponse& response)
 {
+	if(!checkHeap(response)) {
+		return;
+	}
 	if(request.method != HTTP_POST) {
 		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not HTTP POST");
 		return;
@@ -1122,7 +1213,7 @@ void ApplicationWebserver::onStop(HttpRequest& request, HttpResponse& response)
 
 	String msg;
 	if(app.jsonproc.onStop(request.getBody(), msg, true)) {
-		sendApiCode(response, API_CODES::API_SUCCESS);
+		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 	} else {
 		sendApiCode(response, API_CODES::API_BAD_REQUEST);
 	}
@@ -1130,6 +1221,9 @@ void ApplicationWebserver::onStop(HttpRequest& request, HttpResponse& response)
 
 void ApplicationWebserver::onSkip(HttpRequest& request, HttpResponse& response)
 {
+	if(!checkHeap(response)) {
+		return;
+	}
 	if(request.method != HTTP_POST) {
 		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not HTTP POST");
 		return;
@@ -1137,7 +1231,7 @@ void ApplicationWebserver::onSkip(HttpRequest& request, HttpResponse& response)
 
 	String msg;
 	if(app.jsonproc.onSkip(request.getBody(), msg)) {
-		sendApiCode(response, API_CODES::API_SUCCESS);
+		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 	} else {
 		sendApiCode(response, API_CODES::API_BAD_REQUEST);
 	}
@@ -1145,6 +1239,9 @@ void ApplicationWebserver::onSkip(HttpRequest& request, HttpResponse& response)
 
 void ApplicationWebserver::onPause(HttpRequest& request, HttpResponse& response)
 {
+	if(!checkHeap(response)) {
+		return;
+	}
 	if(request.method != HTTP_POST) {
 		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not HTTP POST");
 		return;
@@ -1152,7 +1249,7 @@ void ApplicationWebserver::onPause(HttpRequest& request, HttpResponse& response)
 
 	String msg;
 	if(app.jsonproc.onPause(request.getBody(), msg, true)) {
-		sendApiCode(response, API_CODES::API_SUCCESS);
+		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 	} else {
 		sendApiCode(response, API_CODES::API_BAD_REQUEST);
 	}
@@ -1160,6 +1257,9 @@ void ApplicationWebserver::onPause(HttpRequest& request, HttpResponse& response)
 
 void ApplicationWebserver::onContinue(HttpRequest& request, HttpResponse& response)
 {
+	if(!checkHeap(response)) {
+		return;
+	}
 	if(request.method != HTTP_POST) {
 		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not HTTP POST");
 		return;
@@ -1167,7 +1267,7 @@ void ApplicationWebserver::onContinue(HttpRequest& request, HttpResponse& respon
 
 	String msg;
 	if(app.jsonproc.onContinue(request.getBody(), msg)) {
-		sendApiCode(response, API_CODES::API_SUCCESS);
+		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 	} else {
 		sendApiCode(response, API_CODES::API_BAD_REQUEST);
 	}
@@ -1175,6 +1275,9 @@ void ApplicationWebserver::onContinue(HttpRequest& request, HttpResponse& respon
 
 void ApplicationWebserver::onBlink(HttpRequest& request, HttpResponse& response)
 {
+	if(!checkHeap(response)) {
+		return;
+	}
 	if(request.method != HTTP_POST) {
 		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not HTTP POST");
 		return;
@@ -1182,7 +1285,7 @@ void ApplicationWebserver::onBlink(HttpRequest& request, HttpResponse& response)
 
 	String msg;
 	if(app.jsonproc.onBlink(request.getBody(), msg)) {
-		sendApiCode(response, API_CODES::API_SUCCESS);
+		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 	} else {
 		sendApiCode(response, API_CODES::API_BAD_REQUEST);
 	}
@@ -1190,6 +1293,9 @@ void ApplicationWebserver::onBlink(HttpRequest& request, HttpResponse& response)
 
 void ApplicationWebserver::onToggle(HttpRequest& request, HttpResponse& response)
 {
+	if(!checkHeap(response)) {
+		return;
+	}
 	if(request.method != HTTP_POST) {
 		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not HTTP POST");
 		return;
@@ -1197,7 +1303,7 @@ void ApplicationWebserver::onToggle(HttpRequest& request, HttpResponse& response
 
 	String msg;
 	if(app.jsonproc.onToggle(request.getBody(), msg)) {
-		sendApiCode(response, API_CODES::API_SUCCESS);
+		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 	} else {
 		sendApiCode(response, API_CODES::API_BAD_REQUEST);
 	}
@@ -1222,7 +1328,7 @@ void ApplicationWebserver::onHosts(HttpRequest& request, HttpResponse& response)
 
     if(request.method == HTTP_OPTIONS) {
         setCorsHeaders(response);
-        sendApiCode(response, API_CODES::API_SUCCESS, "");
+        sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
         debug_i("HTTP_OPTIONS Request, sent API_SUCCSSS");
         return;
     }
@@ -1249,12 +1355,15 @@ void ApplicationWebserver::onHosts(HttpRequest& request, HttpResponse& response)
 
     // Use the JsonStream for automatic streaming
     auto stream = app.controllers->createJsonStream(filter, false); // Compact format for HTTP
-    response.sendDataStream(stream, MIME_JSON);
+    response.sendDataStream(stream.release(), MIME_JSON);
 
 //todo 
 }
 
 void ApplicationWebserver::onData(HttpRequest& request, HttpResponse& response){
+	if(!checkHeap(response)) {
+		return;
+	}
 	if(request.method != HTTP_POST && request.method != HTTP_GET && request.method != HTTP_OPTIONS) {
 		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not GET or OPTIONS request");
 		return;
@@ -1267,9 +1376,9 @@ void ApplicationWebserver::onData(HttpRequest& request, HttpResponse& response){
 		debug_i("HTTP_OPTIONS Request, sent API_SUCCESS");
 		return;
 	}
-
-	if(request.method==HTTP_GET){
-
+	if(!checkHeap(response,12000))
+		return;
+	if(request.method==HTTP_GET){	
 		setCorsHeaders(response);
 
 		response.setContentType(F("application/json"));
@@ -1285,10 +1394,10 @@ void ApplicationWebserver::onData(HttpRequest& request, HttpResponse& response){
 			ConfigDB::Status status = app.data->importFromStream(ConfigDB::Json::format, *bodyStream);
 			if(status){
 				debug_i("successfully updated app-data");
-				sendApiCode(response, API_CODES::API_SUCCESS, status.toString());
+				sendApiCode(response, API_CODES::API_SUCCESS, status.toString().c_str());
 			}else{
 				debug_i("could not update app-data");
-				sendApiCode(response, API_CODES::API_BAD_REQUEST, status.toString());
+				sendApiCode(response, API_CODES::API_BAD_REQUEST, status.toString().c_str());
 			}
 		}else{
 			debug_i("could not get bodyStream");
@@ -1297,6 +1406,67 @@ void ApplicationWebserver::onData(HttpRequest& request, HttpResponse& response){
 	}
 
 	return;
+}
+void ApplicationWebserver::onSetOn(HttpRequest &request, HttpResponse &response) {
+	if(!checkHeap(response)) {
+		return;
+	}
+	if(request.method == HTTP_OPTIONS) {
+		// probably a CORS request
+		setCorsHeaders(response);
+		sendApiCode(response, API_CODES::API_SUCCESS, "");
+		debug_i("HTTP_OPTIONS Request, sent API_SUCCESS");
+		return;
+	}
+	if(!checkHeap(response,4000))
+		return;
+
+  debug_i("onSetOn");
+	
+  String body = request.getBody();
+	StaticJsonDocument<512> doc;
+	DeserializationError err = deserializeJson(doc, body);
+	if (err) {
+		sendApiCode(response, API_BAD_REQUEST, "Invalid JSON");
+		return;
+	}
+	String msg;
+		if (app.jsonproc.onSetOn(doc.as<JsonObject>(), msg, true)) {
+		sendApiCode(response, API_SUCCESS, "SetOn OK");
+	} else {
+		sendApiCode(response, API_BAD_REQUEST, msg);
+	}
+}
+
+void ApplicationWebserver::onSetOff(HttpRequest &request, HttpResponse &response) {
+	if(!checkHeap(response)) {
+		return;
+	}
+	if(request.method == HTTP_OPTIONS) {
+		// probably a CORS request
+		setCorsHeaders(response);
+		sendApiCode(response, API_CODES::API_SUCCESS, "");
+		debug_i("HTTP_OPTIONS Request, sent API_SUCCESS");
+		return;
+	}
+	if(!checkHeap(response,4000))
+		return;
+
+  debug_i("onSetOff");
+
+  String body = request.getBody();
+	StaticJsonDocument<512> doc;
+	DeserializationError err = deserializeJson(doc, body);
+	if (err) {
+		sendApiCode(response, API_BAD_REQUEST, "Invalid JSON");
+		return;
+	}
+	String msg;
+		if (app.jsonproc.onSetOff(doc.as<JsonObject>(), msg, true)) {
+		sendApiCode(response, API_SUCCESS, "SetOff OK");
+	} else {
+		sendApiCode(response, API_BAD_REQUEST, msg);
+	}
 }
 
 void ApplicationWebserver::setCorsHeaders(HttpResponse& response)

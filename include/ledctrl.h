@@ -1,3 +1,4 @@
+    
 /**
  * @file
  * @author  Patrick Jahns http://github.com/patrickjahns
@@ -23,6 +24,7 @@
 
 #include "mqtt.h"
 #include "stepsync.h"
+#include "jsonprocessor.h"
 
 #define APP_COLOR_FILE ".color"
 
@@ -52,6 +54,10 @@ public:
     void colorReset();
     void testChannels();
     void toggle();
+
+    // SetOn/SetOff with ramp, queue, and channel support
+    void setOn(const RGBWWLed::ChannelList& channels, int direction, const RampTimeOrSpeed& ramp, QueuePolicy queue, bool requeue, const String& name);
+    void setOff(const RGBWWLed::ChannelList& channels, int direction, const RampTimeOrSpeed& ramp, QueuePolicy queue, bool requeue, const String& name);
 
     void updateLed();
     void onMasterClock(uint32_t steps);

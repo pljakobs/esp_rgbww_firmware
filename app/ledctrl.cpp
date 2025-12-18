@@ -1,3 +1,4 @@
+
 /**
  * @file
  * @author  Patrick Jahns http://github.com/patrickjahns
@@ -558,4 +559,81 @@ void APPLedCtrl::toggle()
 		}
 	}
 	}
+}
+
+
+// SetOn/SetOff implementation (refactored to use plain arguments)
+void APPLedCtrl::setOn(const RGBWWLed::ChannelList& channels, int direction, const RampTimeOrSpeed& ramp, QueuePolicy queue, bool requeue, const String& name)
+{
+	switch(_mode) {
+	case ColorMode::Hsv: {
+		HSVCT current = getCurrentColor();
+		HSVCT target = _lastHsvct;
+		// If v==0, restore last nonzero HSV (toggle logic)
+		if (target.v == 0) 
+			target.v = 100; // fallback if last was off
+		// For HSV mode, direction/ramp/queue/requeue/name are used, but channels are ignored
+		fadeHSV(current, target, ramp, direction, queue, requeue, name);
+		break;
+	}
+	case ColorMode::Raw: {
+		ChannelOutput current = getCurrentOutput();
+		ChannelOutput target = current;
+		// If channels specified, only set those to last or 255, else all
+		if (!channels.isEmpty()) {
+			for (auto ch : channels) {
+				switch (ch) {
+					case CtrlChannel::Red: target.r = 255; break;
+					case CtrlChannel::Green: target.g = 255; break;
+					case CtrlChannel::Blue: target.b = 255; break;
+					case CtrlChannel::WarmWhite: target.ww = 255; break;
+					case CtrlChannel::ColdWhite: target.cw = 255; break;
+					default: break;
+				}
+			}
+		} else {
+			target.r = target.g = target.b = target.cw = target.ww = 255;
+		}
+		fadeRAW(current, target, ramp, queue, requeue, name);
+		break;
+	}
+	default:
+		break;
+	}
+}
+
+void APPLedCtrl::setOff(const RGBWWLed::ChannelList& channels, int direction, const RampTimeOrSpeed& ramp, QueuePolicy queue, bool requeue, const String& name)
+{
+    switch(_mode) {
+    case ColorMode::Hsv: {
+        HSVCT current = getCurrentColor();
+        HSVCT target = current;
+		_lastHsvct = current; // save current before turning off
+        target.v = 0;
+        fadeHSV(current, target, ramp, direction, queue, requeue, name);
+        break;
+    }
+    case ColorMode::Raw: {
+        ChannelOutput current = getCurrentOutput();
+        ChannelOutput target = current;
+        if (!channels.isEmpty()) {
+            for (auto ch : channels) {
+                switch (ch) {
+                    case CtrlChannel::Red: target.r = 0; break;
+                    case CtrlChannel::Green: target.g = 0; break;
+                    case CtrlChannel::Blue: target.b = 0; break;
+                    case CtrlChannel::WarmWhite: target.ww = 0; break;
+                    case CtrlChannel::ColdWhite: target.cw = 0; break;
+                    default: break;
+                }
+            }
+        } else {
+            target.r = target.g = target.b = target.cw = target.ww = 0;
+        }
+        fadeRAW(current, target, ramp, queue, requeue, name);
+        break;
+    }
+    default:
+        break;
+    }
 }

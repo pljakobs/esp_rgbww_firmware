@@ -35,6 +35,8 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             echo "branch=${{ github.event.inputs.branch }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" == "repository_dispatch" ]; then
+            echo "branch=${{ github.event.client_payload.branch }}" >> $GITHUB_OUTPUT
           elif [ "${{ github.event_name }}" == "push" ]; then
             echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
           elif [ "${{ github.event_name }}" == "pull_request" ]; then
@@ -42,6 +44,27 @@ jobs:
           else
             echo "branch=develop" >> $GITHUB_OUTPUT
           fi
+
+      - name: Map firmware branch to webapp branch
+        id: map_webapp_branch
+        run: |
+          FIRMWARE_BRANCH="${{ steps.get_branch.outputs.branch }}"
+          case "$FIRMWARE_BRANCH" in
+            "develop")
+              WEBAPP_BRANCH="devel"
+              ;;
+            "testing")
+              WEBAPP_BRANCH="testing"
+              ;;
+            "stable")
+              WEBAPP_BRANCH="stable"
+              ;;
+            *)
+              WEBAPP_BRANCH="devel"
+              ;;
+          esac
+          echo "webapp_branch=$WEBAPP_BRANCH" >> $GITHUB_OUTPUT
+          echo "Firmware branch: $FIRMWARE_BRANCH -> Webapp branch: $WEBAPP_BRANCH"
 
       - name: Sanitize branch name for artifact
         id: sanitize_branch
@@ -73,7 +96,7 @@ jobs:
       - name: Get firmware version
         id: get_fw_info
         run: |
-          branch="${{ steps.get_branch.outputs.branch }}"
+          branch="${{ steps.sanitize_branch.outputs.sanitized_branch }}"
           build_num=${{ github.run_number }}
           version="V5.0-${build_num}-${branch}"
           echo "fw_version=$version" >> $GITHUB_OUTPUT
@@ -89,22 +112,26 @@ jobs:
 
       - name: Download fileList.h artifact
         run: |
+          WEBAPP_BRANCH="${{ steps.map_webapp_branch.outputs.webapp_branch }}"
           if [ -f ./include/fileList.h ]; then
             echo "removing fileList.h"
             rm ./include/fileList.h
           fi
-          artifact_url=https://pljakobs.github.io/esp_rgb_webapp2/fileList.h
+          artifact_url="https://pljakobs.github.io/esp_rgb_webapp2/${WEBAPP_BRANCH}/fileList.h"
+          echo "Downloading fileList.h from: $artifact_url"
           curl -L -o fileList.h "$artifact_url"
           mv fileList.h ./include
 
       - name: Download webapp files artifact
         run: |
+          WEBAPP_BRANCH="${{ steps.map_webapp_branch.outputs.webapp_branch }}"
           if [ -d ./webapp ]; then
             echo "removing and re-creating webapp directory"
             rm -rf ./webapp
             mkdir ./webapp
           fi
-          artifact_url=https://pljakobs.github.io/esp_rgb_webapp2/spa-files.zip
+          artifact_url="https://pljakobs.github.io/esp_rgb_webapp2/${WEBAPP_BRANCH}/spa-files.zip"
+          echo "Downloading webapp files from: $artifact_url"
           curl -L -o spa-files.zip "$artifact_url"
           unzip spa-files.zip -d ./webapp
           mv ./webapp/dist/spa/* ./webapp
@@ -115,25 +142,32 @@ jobs:
       - name: Build partition map (ESP8266 only)
         if: ${{ matrix.soc == 'esp8266' }}
         run: |
-          docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace \
+          docker run --rm --privileged -v ${{ github.workspace }}:/workspace -w /workspace \
             docker.io/pjakobs/sming:latest \
             bash -c "git config --global --add safe.directory /workspace && \
                source /opt/Sming/Tools/export.sh && \
                make partmap-build SMING_SOC=${{ matrix.soc }} SMING_RELEASE=${{ matrix.release }}"
 
       - name: Run Build in Docker Container
+        env:
+          MQTT_PASS: ${{ secrets.MQTT_PASS }}
+          MQTT_USER: ${{ secrets.MQTT_USER }}
         run: |
           if [ "${{ matrix.single }}" = "0" ]; then 
-            docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace \
+            docker run --rm --privileged -v ${{ github.workspace }}:/workspace -w /workspace \
               -e GITHUB_RUN_NUMBER=${{ github.run_number }} \
+              -e MQTT_PASS=${{ secrets.MQTT_PASS }} \
+              -e MQTT_USER=${{ secrets.MQTT_USER }} \
               docker.io/pjakobs/sming:latest \
               bash -c "git config --global --add safe.directory /workspace && \
               source /opt/Sming/Tools/export.sh && \
               make configdb-rebuild && \
               make SMING_SOC=${{ matrix.soc }} SMING_RELEASE=${{ matrix.release }} DISABLE_WERROR=1 COM_SPEED=115200" 
           else 
-            docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace \
+            docker run --rm --privileged -v ${{ github.workspace }}:/workspace -w /workspace \
               -e GITHUB_RUN_NUMBER=${{ github.run_number }} \
+              -e MQTT_PASS=${{ secrets.MQTT_PASS }} \
+              -e MQTT_USER=${{ secrets.MQTT_USER }} \
               docker.io/pjakobs/sming:latest \
               bash -c "git config --global --add safe.directory /workspace && \
               source /opt/Sming/Tools/export.sh && \
@@ -205,3 +239,15 @@ jobs:
         with:
           name: version-info-${{ steps.sanitize_branch.outputs.sanitized_branch }}
           path: version-info.txt
+
+      - name: Tag release
+        if: |
+          github.event_name == 'push' &&
+          matrix.soc == 'esp8266' &&
+          matrix.release == 0 &&
+          matrix.single == 0
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git tag ${{ steps.get_fw_info.outputs.fw_version }}
+          git push origin ${{ steps.get_fw_info.outputs.fw_version }}

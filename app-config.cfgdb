@@ -450,6 +450,39 @@
           }
         }
       }
+    },
+    "telemetry": {
+      "type": "object",
+      "properties": {
+        "statsEnabled": {
+          "type":"string",
+          "default":"UNDEF",
+          "ctype":"telemetryStats",
+          "enum":[ "UNDEF", "ON", "OFF"]
+        },
+        "logEnabled": {
+          "type":"string",
+          "default":"UNDEF",
+          "ctype":"telemetryLog",
+          "enum":[ "UNDEF", "ON", "OFF"]
+      },
+        "url": {
+          "type": "string",
+          "default":"lightinator.de:1883"
+        },
+        "user": {
+          "type": "string",
+          "default":"rgbww"
+        },
+        "password": {
+          "type": "string",
+          "default":"rgbwwdebug"
+        },
+        "numReboots": {
+          "type": "integer",
+          "default":0
+        }
+      }
     }
   }
 }
