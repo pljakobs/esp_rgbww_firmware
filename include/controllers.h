@@ -15,7 +15,7 @@
 class Controllers {
 public:
     enum ControllerState {
-        NOT_FOUND, INCOMPLETE, OFFLINE, ONLINE
+        NOT_FOUND, INCOMPLETE, OFFLINE, ONLINE, LOCALHOST
     };
 
     enum JsonFilter {

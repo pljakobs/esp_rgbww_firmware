@@ -7,12 +7,10 @@ extern Application app;
 // Constructor
 Controllers::Controllers() : _pingInProgress(false), _pingIndex(0), _pingInterval(10000), _pingTimeout(5000) {
     debug_i("Controllers constructor called");
-    
     if (!app.data) {
         debug_e("app.data is NULL in Controllers constructor!");
         return;
     }
-    
     debug_i("Controllers constructor: accessing ConfigDB...");
     AppData::Root::Controllers controllers(*app.data);
     size_t count = 0;
@@ -21,8 +19,25 @@ Controllers::Controllers() : _pingInProgress(false), _pingIndex(0), _pingInterva
         debug_i("Found controller ID: %s", (*it).getId().c_str());
     }
     debug_i("Controllers constructor: found %d controllers in DB", count);
-    
     visibleControllers.reserve(std::max(count, static_cast<size_t>(10)));
+
+    // Ensure local controller is always present
+    unsigned int localId = (unsigned int)system_get_chip_id();
+    bool foundLocal = false;
+    for (const auto& ctrl : visibleControllers) {
+        if (ctrl.id == localId) {
+            foundLocal = true;
+            break;
+        }
+    }
+    if (!foundLocal) {
+        VisibleController localCtrl;
+        localCtrl.id = localId;
+        localCtrl.ttl = 0;
+        localCtrl.state = LOCALHOST;
+        localCtrl.pingPending = false;
+        visibleControllers.push_back(localCtrl);
+    }
     debug_i("Controllers constructor completed");
 }
 
@@ -115,18 +130,23 @@ void Controllers::updateFromPing(unsigned int id, int ttl) {
 
 void Controllers::removeExpired(int elapsedSeconds) {
     for (auto& controller : visibleControllers) {
-        if (controller.id != (unsigned int)system_get_chip_id()){
-            controller.ttl = std::max(0, controller.ttl - elapsedSeconds);
-            if (controller.ttl <= 0) { // Never set self to OFFLINE
-                controller.state = OFFLINE;
-            }
+        // Never expire or set OFFLINE for the local controller (LOCALHOST)
+        if (controller.id == (unsigned int)system_get_chip_id() || controller.state == LOCALHOST) {
+            continue;
+        }
+        controller.ttl = std::max(0, controller.ttl - elapsedSeconds);
+        if (controller.ttl <= 0) {
+            controller.state = OFFLINE;
         }
     }
-    
-    // Remove controllers that have been offline for too long
+
+    // Remove controllers that have been offline for too long, but never remove LOCALHOST
     visibleControllers.erase(
         std::remove_if(visibleControllers.begin(), visibleControllers.end(),
-            [](const VisibleController& c) { return c.ttl <= -300; }), // Remove after 5 minutes offline
+            [](const VisibleController& c) {
+                if (c.id == (unsigned int)system_get_chip_id() || c.state == LOCALHOST) return false;
+                return c.ttl <= -300;
+            }),
         visibleControllers.end()
     );
 }
@@ -450,9 +470,9 @@ size_t Controllers::JsonPrinter::operator()() {
     if (!p || done) {
         return 0;
     }
-    
+
     size_t n = 0;
-    
+
     // Start of JSON object
     if (currentIndex == 0 && !inObject) {
         n += p->print('{');
@@ -465,15 +485,13 @@ size_t Controllers::JsonPrinter::operator()() {
         inArray = true;
         return n;
     }
-    
-    // Process controllers
+
+    // Process controllers from ConfigDB
     while (currentIndex < totalCount) {
-        // Get controller data from ConfigDB
         AppData::Root::Controllers controllers(*app.data);
         size_t index = 0;
         Controllers::ControllerInfo info;
         bool found = false;
-        
         for (auto it = controllers.begin(); it != controllers.end(); ++it, ++index) {
             if (index == currentIndex) {
                 auto& configItem = *it;
@@ -483,51 +501,80 @@ size_t Controllers::JsonPrinter::operator()() {
                 info.state = OFFLINE;
                 info.ttl = 0;
                 info.pingPending = false;
-                
                 // Check if controller is visible (online)
                 size_t visibleIndex = manager.findVisibleControllerIndex(info.id);
                 if (visibleIndex != INVALID_INDEX) {
                     info.ttl = manager.visibleControllers[visibleIndex].ttl;
-                    info.state = (info.ttl > 0) ? ONLINE : OFFLINE;
+                    if (manager.visibleControllers[visibleIndex].state == LOCALHOST) {
+                        info.state = LOCALHOST;
+                    } else {
+                        info.state = (info.ttl > 0) ? ONLINE : OFFLINE;
+                    }
                     info.pingPending = manager.visibleControllers[visibleIndex].pingPending;
                 } else if (strlen(info.hostname) == 0 || strlen(info.ipAddress) == 0) {
                     info.state = INCOMPLETE;
                 } else {
                     info.state = OFFLINE;
                 }
-                
                 found = true;
                 break;
             }
         }
-        
         currentIndex++;
-        
         if (!found || !shouldIncludeController(info)) {
             continue; // Skip this controller, try next
         }
-        
         // Add comma separator if needed
         if (printedCount > 0) {
             n += p->print(',');
             if (pretty) n += p->print('\n');
         }
-        
         // Print controller object
         n += printIndent(2);
         n += p->print('{');
-        
         n += printProperty("id", (int)info.id, false, 3);
         n += printProperty("hostname", info.hostname, false, 3);
         n += printProperty("ip_address", info.ipAddress, false, 3);
-        n += printProperty("visible", (info.state == ONLINE), true, 3); // Last property
-        
+        n += printProperty("visible", (info.state == ONLINE || info.state == LOCALHOST), false, 3);
+        n += printProperty("state", (int)info.state, true, 3);
         n += p->print('}');
-        
         printedCount++;
         return n; // Return after printing one controller
     }
-    
+
+    // After all config controllers, ensure local controller is present in output
+    if (currentIndex == totalCount) {
+        unsigned int localId = (unsigned int)system_get_chip_id();
+        bool foundLocal = false;
+        AppData::Root::Controllers controllers(*app.data);
+        for (auto it = controllers.begin(); it != controllers.end(); ++it) {
+            if ((*it).getId().toInt() == localId) {
+                foundLocal = true;
+                break;
+            }
+        }
+        if (!foundLocal) {
+            // Add comma separator if needed
+            if (printedCount > 0) {
+                n += p->print(',');
+                if (pretty) n += p->print('\n');
+            }
+            n += printIndent(2);
+            n += p->print('{');
+            n += printProperty("id", (int)localId, false, 3);
+            String localHostname = WifiStation.getHostname();
+            String localIp = WifiStation.getIP().toString();
+            n += printProperty("hostname", localHostname.c_str(), false, 3);
+            n += printProperty("ip_address", localIp.c_str(), false, 3);
+            n += printProperty("visible", true, false, 3);
+            n += printProperty("state", (int)LOCALHOST, true, 3);
+            n += p->print('}');
+            printedCount++;
+        }
+        currentIndex++;
+        return n;
+    }
+
     // End of JSON structure
     if (inArray && !done) {
         if (pretty) {
@@ -538,7 +585,7 @@ size_t Controllers::JsonPrinter::operator()() {
         done = true;
         return n;
     }
-    
+
     return 0;
 }
 
