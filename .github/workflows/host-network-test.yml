@@ -1,3 +1,31 @@
+      - name: Download fileList.h artifact
+        run: |
+          WEBAPP_BRANCH=devel
+          if [ -f ./include/fileList.h ]; then
+            echo "removing fileList.h"
+            rm ./include/fileList.h
+          fi
+          artifact_url="https://pljakobs.github.io/esp_rgb_webapp2/${WEBAPP_BRANCH}/fileList.h"
+          echo "Downloading fileList.h from: $artifact_url"
+          curl -L -o fileList.h "$artifact_url"
+          mv fileList.h ./include
+
+      - name: Download webapp files artifact
+        run: |
+          WEBAPP_BRANCH=devel
+          if [ -d ./webapp ]; then
+            echo "removing and re-creating webapp directory"
+            rm -rf ./webapp
+            mkdir ./webapp
+          fi
+          artifact_url="https://pljakobs.github.io/esp_rgb_webapp2/${WEBAPP_BRANCH}/spa-files.zip"
+          echo "Downloading webapp files from: $artifact_url"
+          curl -L -o spa-files.zip "$artifact_url"
+          unzip spa-files.zip -d ./webapp
+          mv ./webapp/dist/spa/* ./webapp
+          rm -rf ./webapp/dist/spa
+          echo "webapp files version"
+          cat ./webapp/VERSION
 name: Sming Host Build and Network Test
 
 
