@@ -632,7 +632,7 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response)
 #endif
 
 	if(request.method != HTTP_GET) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not GET");
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not GET"));
 		return;
 	}
 
@@ -864,7 +864,7 @@ void ApplicationWebserver::onNetworks(HttpRequest& request, HttpResponse& respon
 		return;
 	}
 	if(request.method != HTTP_GET) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not HTTP GET");
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not HTTP GET"));
 		return;
 	}
 
@@ -932,7 +932,7 @@ void ApplicationWebserver::onScanNetworks(HttpRequest& request, HttpResponse& re
 #endif
 
 	if(request.method != HTTP_POST) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not HTTP POST");
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not HTTP POST"));
 		return;
 	}
 	if(!app.network.isScanning()) {
@@ -968,14 +968,14 @@ void ApplicationWebserver::onConnect(HttpRequest& request, HttpResponse& respons
 #endif
 
 	if(request.method != HTTP_POST && request.method != HTTP_GET) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not HTTP POST or GET");
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not HTTP POST or GET"));
 		return;
 	}
 
 	if(request.method == HTTP_POST) {
 		String body = request.getBody();
 		if(body == NULL) {
-			sendApiCode(response, API_CODES::API_BAD_REQUEST, "could not get HTTP body");
+			sendApiCode(response, API_CODES::API_BAD_REQUEST, F("could not get HTTP body"));
 			return;
 		}
 		// ConfigDB - CONFIG_MAX_LENGTH was no longer defined, what's the right size here?
@@ -1056,14 +1056,14 @@ void ApplicationWebserver::onSystemReq(HttpRequest& request, HttpResponse& respo
 		return;
 	}
 	if(request.method != HTTP_POST) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not HTTP POST");
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not HTTP POST"));
 		return;
 	}
 
 	bool error = false;
 	String body = request.getBody();
 	if(body == NULL) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, "could not get HTTP body");
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("could not get HTTP body"));
 		return;
 	} else {
 		debug_i("ApplicationWebserver::onSystemReq: %s", body.c_str());
@@ -1117,7 +1117,7 @@ void ApplicationWebserver::onUpdate(HttpRequest& request, HttpResponse& response
 	}
 
 #ifdef ARCH_HOST
-	sendApiCode(response, API_CODES::API_BAD_REQUEST, "not supported on Host");
+	sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not supported on Host"));
 	return;
 #else
 	if(request.method == HTTP_OPTIONS) {
@@ -1128,7 +1128,7 @@ void ApplicationWebserver::onUpdate(HttpRequest& request, HttpResponse& response
 		return;
 	}
 	if(request.method != HTTP_POST && request.method != HTTP_GET) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not HTTP POST or GET");
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not HTTP POST or GET"));
 		return;
 	}
 
@@ -1140,7 +1140,7 @@ void ApplicationWebserver::onUpdate(HttpRequest& request, HttpResponse& response
 
 		String body = request.getBody();
 		if(body == NULL) {
-			sendApiCode(response, API_CODES::API_BAD_REQUEST, "could not parse HTTP body");
+			sendApiCode(response, API_CODES::API_BAD_REQUEST, F("could not parse HTTP body"));
 			return;
 		}
 
@@ -1192,7 +1192,7 @@ void ApplicationWebserver::onPing(HttpRequest& request, HttpResponse& response)
 		return;
 	}
 	if(request.method != HTTP_GET) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not HTTP GET");
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not HTTP GET"));
 		return;
 	}
 	auto stream = std::make_unique<JsonObjectStream>();
@@ -1207,7 +1207,7 @@ void ApplicationWebserver::onStop(HttpRequest& request, HttpResponse& response)
 		return;
 	}
 	if(request.method != HTTP_POST) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not HTTP POST");
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not HTTP POST"));
 		return;
 	}
 
@@ -1225,7 +1225,7 @@ void ApplicationWebserver::onSkip(HttpRequest& request, HttpResponse& response)
 		return;
 	}
 	if(request.method != HTTP_POST) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not HTTP POST");
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not HTTP POST"));
 		return;
 	}
 
@@ -1243,7 +1243,7 @@ void ApplicationWebserver::onPause(HttpRequest& request, HttpResponse& response)
 		return;
 	}
 	if(request.method != HTTP_POST) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not HTTP POST");
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not HTTP POST"));
 		return;
 	}
 
@@ -1261,7 +1261,7 @@ void ApplicationWebserver::onContinue(HttpRequest& request, HttpResponse& respon
 		return;
 	}
 	if(request.method != HTTP_POST) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not HTTP POST");
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not HTTP POST"));
 		return;
 	}
 
@@ -1279,7 +1279,7 @@ void ApplicationWebserver::onBlink(HttpRequest& request, HttpResponse& response)
 		return;
 	}
 	if(request.method != HTTP_POST) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not HTTP POST");
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not HTTP POST"));
 		return;
 	}
 
@@ -1297,7 +1297,7 @@ void ApplicationWebserver::onToggle(HttpRequest& request, HttpResponse& response
 		return;
 	}
 	if(request.method != HTTP_POST) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not HTTP POST");
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not HTTP POST"));
 		return;
 	}
 
@@ -1322,7 +1322,7 @@ void ApplicationWebserver::onHosts(HttpRequest& request, HttpResponse& response)
 
     if(request.method != HTTP_GET && request.method != HTTP_OPTIONS) {
         setCorsHeaders(response);
-        sendApiCode(response, API_CODES::API_BAD_REQUEST, "nost GET or OPTIONS request");
+        sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not GET or OPTIONS request"));
         return;
     }
 
@@ -1335,7 +1335,7 @@ void ApplicationWebserver::onHosts(HttpRequest& request, HttpResponse& response)
 
     if(!app.controllers) {
         setCorsHeaders(response);
-        sendApiCode(response, API_CODES::API_BAD_REQUEST, "Controllers not initialized");
+        sendApiCode(response, API_CODES::API_BAD_REQUEST, F("Controllers not initialized"));
         return;
     }
     bool showAll = request.getQueryParameter("all") == "1" || request.getQueryParameter("all") == "true";
@@ -1365,7 +1365,7 @@ void ApplicationWebserver::onData(HttpRequest& request, HttpResponse& response){
 		return;
 	}
 	if(request.method != HTTP_POST && request.method != HTTP_GET && request.method != HTTP_OPTIONS) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not GET or OPTIONS request");
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not GET or OPTIONS request"));
 		return;
 	}
 
@@ -1401,7 +1401,7 @@ void ApplicationWebserver::onData(HttpRequest& request, HttpResponse& response){
 			}
 		}else{
 			debug_i("could not get bodyStream");
-			sendApiCode(response, API_CODES::API_BAD_REQUEST, "could not get bodyStream");
+			sendApiCode(response, API_CODES::API_BAD_REQUEST, F("could not get bodyStream"));
 		}
 	}
 
@@ -1458,12 +1458,12 @@ void ApplicationWebserver::onSetOff(HttpRequest &request, HttpResponse &response
 	StaticJsonDocument<512> doc;
 	DeserializationError err = deserializeJson(doc, body);
 	if (err) {
-		sendApiCode(response, API_BAD_REQUEST, "Invalid JSON");
+		sendApiCode(response, API_BAD_REQUEST, F("Invalid JSON"));
 		return;
 	}
 	String msg;
 		if (app.jsonproc.onSetOff(doc.as<JsonObject>(), msg, true)) {
-		sendApiCode(response, API_SUCCESS, "SetOff OK");
+		sendApiCode(response, API_SUCCESS, F("SetOff OK"));
 	} else {
 		sendApiCode(response, API_BAD_REQUEST, msg);
 	}
