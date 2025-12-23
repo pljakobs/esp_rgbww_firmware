@@ -29,17 +29,13 @@ jobs:
           sudo ip link set tap0 up
           sudo ip addr add 10.0.0.1/24 dev tap0
 
-      - name: Build Sming for Host
+      - name: Build Sming and application for Host (Docker)
         run: |
-          export SMING_HOME=$GITHUB_WORKSPACE/Sming
-          cd $SMING_HOME
-          make PLATFORM=Host
-
-      - name: Build application for Host
-        run: |
-          export SMING_HOME=$GITHUB_WORKSPACE/Sming
-          cd $GITHUB_WORKSPACE
-          make PLATFORM=Host
+          docker run --rm --privileged -v $GITHUB_WORKSPACE:/workspace -w /workspace \
+            docker.io/pjakobs/sming:latest \
+            bash -c "git config --global --add safe.directory /workspace && \
+            source /opt/Sming/Tools/export.sh && \
+            make PLATFORM=Host"
 
       - name: Run application in background
         run: |
