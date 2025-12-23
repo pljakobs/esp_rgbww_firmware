@@ -48,6 +48,11 @@
                 echo "webapp files version"
                 cat ./webapp/VERSION
 
+            - name: Synchronize submodules
+              run: |
+                git submodule sync --recursive
+                git submodule update --init --recursive
+
             - name: Ensure tun module is loaded
               run: sudo modprobe tun
 
