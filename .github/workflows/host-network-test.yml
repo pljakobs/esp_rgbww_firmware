@@ -73,8 +73,7 @@
 
             - name: Run application in background
               run: |
-                cd out/Host/build
-                ./$(ls | grep -m1 -v '\.o$') &
+                make run &
                 sleep 5
 
             - name: Check if port 80 is reachable
