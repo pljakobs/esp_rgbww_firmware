@@ -64,7 +64,7 @@
                   docker.io/pjakobs/sming:latest \
                   bash -c "git config --global --add safe.directory /workspace && \
                   source /opt/Sming/Tools/export.sh && \
-                  make PLATFORM=Host"
+                  make SMING_ARCH=Host"
 
             - name: Run application in background
               run: |
