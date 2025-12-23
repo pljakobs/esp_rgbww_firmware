@@ -58,10 +58,9 @@
 
             - name: Set up tap device
               run: |
-                sudo ip tuntap add dev tap0 mode tap
+                sudo ip tuntap add dev tap0 mode tap user $(whoami)
                 sudo ip link set tap0 up
                 sudo ip addr add 10.0.0.1/24 dev tap0
-
 
             - name: Build Sming and application for Host (Docker)
               run: |
