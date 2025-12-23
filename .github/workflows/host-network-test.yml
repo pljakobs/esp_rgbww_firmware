@@ -69,13 +69,9 @@
                   docker.io/pjakobs/sming:latest \
                   bash -c "git config --global --add safe.directory /workspace && \
                   source /opt/Sming/Tools/export.sh && \
-                  make SMING_ARCH=Host"
-
-            - name: Run application in background
-              run: |
-                make run &
-                sleep 5
+                  make run SMING_ARCH=Host" \
+                  sleep 10
 
             - name: Check if port 80 is reachable
               run: |
-                curl --fail --max-time 5 http://127.0.0.1:80 || (echo 'Port 80 not reachable' && exit 1)
+                curl --fail --max-time 5 http://127.0.0.1:80/info || (echo 'Port 80 not reachable' && exit 1)
