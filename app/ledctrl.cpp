@@ -86,22 +86,22 @@ void APPLedCtrl::init()
 					for (auto channel : pinconfig.channels) {
 						int pin=channel.getPin();
 						if (isPinValid(pin)){
-							if(channel.getName() == "red") {
+							if(channel.getName() == F("red")) {
 								pins.red = channel.getPin();
-							} else if(channel.getName() == "green") {
+							} else if(channel.getName() == F("green")) {
 								pins.green = channel.getPin();
-							} else if(channel.getName() == "blue") {
+							} else if(channel.getName() == F("blue")) {
 								pins.blue = channel.getPin();
-							} else if(channel.getName() == "warmwhite") {
+							} else if(channel.getName() == F("warmwhite")) {
 								pins.warmwhite = channel.getPin();
-							} else if(channel.getName() == "coldwhite") {
+							} else if(channel.getName() == F("coldwhite")) {
 								pins.coldwhite = channel.getPin();
 							}
 						}else{
 							debug_e("APPLedCtrl::init - invalid pin %i for SoC %s", pin, SOC);
 							pins.isValid=false;
 							if(auto generalUpdate = general.update()) {
-								generalUpdate.setCurrentPinConfigName("unconfigured");
+								generalUpdate.setCurrentPinConfigName(F("unconfigured"));
 							} // end AppConfig::General::update context
 						}
 					}

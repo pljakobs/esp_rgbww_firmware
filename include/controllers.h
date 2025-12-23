@@ -68,7 +68,6 @@ public:
         
         size_t printIndent(size_t level);
         size_t printString(const char* str);
-        size_t printString(const __FlashStringHelper* str);
         size_t printProperty(const char* name, const char* value, bool isLast = false, size_t indentLevel = 2);
         size_t printProperty(const char* name, int value, bool isLast = false, size_t indentLevel = 2);
         size_t printProperty(const char* name, bool value, bool isLast = false, size_t indentLevel = 2);
