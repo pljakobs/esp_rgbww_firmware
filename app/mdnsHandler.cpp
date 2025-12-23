@@ -260,7 +260,7 @@ bool mdnsHandler::processApiServiceResponse(mDNS::Message& message)
             mDNS::Resource::TXT txt(*answer);
 
             // Check for leader
-            String isLeaderTxt = txt["isLeader"];
+            String isLeaderTxt = txt[F("isLeader")];
             if (isLeaderTxt == "1") {
                 _leaderDetected = true;
 #ifdef DEBUG_MDNS
@@ -269,15 +269,15 @@ bool mdnsHandler::processApiServiceResponse(mDNS::Message& message)
             }
 
             // Get hostname type
-            String hostnameType = txt["type"];
+            String hostnameType = txt[F("type")];
             if (hostnameType.length() == 0)
-                hostnameType = "undefined";
+                hostnameType = F("undefined");
 #ifdef DEBUG_MDNS
             debug_i("Hostname %s, type: %s", info.hostName, hostnameType.c_str());
 #endif
 
             // Only add to host table if this is a device hostname
-            if (hostnameType == "host") {
+            if (hostnameType == F("host")) {
                 app.controllers->addOrUpdate(info.ID, info.hostName, info.ipAddr.toString(), info.ttl);
             } else {
                 // For leader/group hostnames, just log them
