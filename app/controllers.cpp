@@ -1,3 +1,12 @@
+size_t Controllers::JsonPrinter::printString(const __FlashStringHelper* str) {
+    if (!p) return 0;
+    // No escaping for F() strings, just print as-is
+    size_t n = 0;
+    n += p->print('"');
+    n += p->print(str);
+    n += p->print('"');
+    return n;
+}
 #include <RGBWWCtrl.h>
 #include <controllers.h>
 #include <application.h>
@@ -478,7 +487,7 @@ size_t Controllers::JsonPrinter::operator()() {
         n += p->print('{');
         if (pretty) n += p->print('\n');
         n += printIndent(1);
-        n += printString("hosts");
+        n += printString(F("hosts"));
         n += p->print(pretty ? ": [" : ":[");
         if (pretty) n += p->print('\n');
         inObject = true;
@@ -532,9 +541,9 @@ size_t Controllers::JsonPrinter::operator()() {
         // Print controller object
         n += printIndent(2);
         n += p->print('{');
-        n += printProperty("id", (int)info.id, false, 3);
-        n += printProperty("hostname", info.hostname, false, 3);
-        n += printProperty("ip_address", info.ipAddress, false, 3);
+        n += printProperty(F("id"), (int)info.id, false, 3);
+        n += printProperty(F("hostname"), info.hostname, false, 3);
+        n += printProperty(F("ip_address"), info.ipAddress, false, 3);
         n += printProperty("visible", (info.state == ONLINE || info.state == LOCALHOST), false, 3);
         n += printProperty("state", (int)info.state, true, 3);
         n += p->print('}');

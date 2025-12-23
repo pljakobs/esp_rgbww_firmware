@@ -537,7 +537,7 @@ void Application::startNetworkServices()
 		if(general.getDeviceName().length() > 0) {
 			mqttClientId = general.getDeviceName();
 		} else {
-			mqttClientId = String("rgbww_") + WifiStation.getMAC();
+			mqttClientId = F("rgbww_") + String(WifiStation.getMAC());
 		}
 	}
 	mqttclient.init(); // initialize mqtt client with node name

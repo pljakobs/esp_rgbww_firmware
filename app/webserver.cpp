@@ -662,11 +662,11 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response)
     FS[F("used")] = fsInfo.used;
     FS[F("available")] = fsInfo.freeSpace;
 */
-	JsonObject rgbww = data.createNestedObject("rgbww");
+	JsonObject rgbww = data.createNestedObject(F("rgbww"));
 	rgbww[F("version")] = RGBWW_VERSION;
 	rgbww[F("queuesize")] = RGBWW_ANIMATIONQSIZE;
 
-	JsonObject con = data.createNestedObject("connection");
+	JsonObject con = data.createNestedObject(F("connection"));
 	con[F("connected")] = WifiStation.isConnected();
 	con[F("ssid")] = WifiStation.getSSID();
 	con[F("dhcp")] = WifiStation.isEnabledDHCP();
@@ -877,7 +877,7 @@ void ApplicationWebserver::onNetworks(HttpRequest& request, HttpResponse& respon
 		json[F("scanning")] = true;
 	} else {
 		json[F("scanning")] = false;
-		JsonArray netlist = json.createNestedArray("available");
+		JsonArray netlist = json.createNestedArray(F("available"));
 		BssList networks = app.network.getAvailableNetworks();
 		for(unsigned int i = 0; i < networks.count(); i++) {
 			if(networks[i].hidden)
@@ -1073,7 +1073,7 @@ void ApplicationWebserver::onSystemReq(HttpRequest& request, HttpResponse& respo
 
 		String cmd = doc[F("cmd")].as<const char*>();
 		if(cmd) {
-			if(cmd.equals("debug")) {
+			if(cmd.equals(F("debug"))) {
 				bool enable;
 				if(Json::getValue(doc[F("enable")], enable)) {
 					Serial.systemDebugOutput(enable);
@@ -1338,8 +1338,8 @@ void ApplicationWebserver::onHosts(HttpRequest& request, HttpResponse& response)
         sendApiCode(response, API_CODES::API_BAD_REQUEST, F("Controllers not initialized"));
         return;
     }
-    bool showAll = request.getQueryParameter("all") == "1" || request.getQueryParameter("all") == "true";
-	  bool showDebug= request.getQueryParameter("debug")== "1" || request.getQueryParameter("debug") == "true";
+    bool showAll = request.getQueryParameter(F("all")) == "1" || request.getQueryParameter(F("all")) == "true";
+	  bool showDebug= request.getQueryParameter(F("debug"))== "1" || request.getQueryParameter(F("debug")) == "true";
 
     Controllers::JsonFilter filter;
     if (showAll || showDebug) {
@@ -1427,12 +1427,12 @@ void ApplicationWebserver::onSetOn(HttpRequest &request, HttpResponse &response)
 	StaticJsonDocument<512> doc;
 	DeserializationError err = deserializeJson(doc, body);
 	if (err) {
-		sendApiCode(response, API_BAD_REQUEST, "Invalid JSON");
+		sendApiCode(response, API_BAD_REQUEST, F("Invalid JSON"));
 		return;
 	}
 	String msg;
 		if (app.jsonproc.onSetOn(doc.as<JsonObject>(), msg, true)) {
-		sendApiCode(response, API_SUCCESS, "SetOn OK");
+		sendApiCode(response, API_SUCCESS, F("SetOn OK"));
 	} else {
 		sendApiCode(response, API_BAD_REQUEST, msg);
 	}
