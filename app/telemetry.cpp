@@ -4,10 +4,13 @@
 using telemetryStats = AppConfig::ContainedRoot::telemetryStats;
 using telemetryLog = AppConfig::ContainedRoot::telemetryLog;
 
+
 TelemetryClient::TelemetryClient() {
 	snprintf(_chipId, TELEMETRY_CHIPID_MAX_SIZE, "%u", system_get_chip_id());
 	mqtt = new MqttClient();
-    snprintf(_id, TELEMETRY_ID_MAX_SIZE, "rgbww_%s", _chipId);
+	snprintf(_id, TELEMETRY_ID_MAX_SIZE, "rgbww_%s", _chipId);
+	_lastReconnectAttempt = 0;
+	_reconnectPending = false;
 }
 
 TelemetryClient::~TelemetryClient() {
@@ -123,17 +126,31 @@ void TelemetryClient::buildTopic(const char* suffix, char* dest, size_t size) {
 }
 
 bool TelemetryClient::publish(const char* topic, const JsonDocument& doc) {
-    if (!_isRunning || !mqtt || mqtt->getConnectionState() != eTCS_Connected) {
-        // Serial.println("Telemetry MQTT not connected");
-        return false;
-    }
+	if (!_isRunning || !mqtt || mqtt->getConnectionState() != eTCS_Connected) {
+		// If telemetry is enabled, try to reconnect with gating
+		if ((_telemetryStats == telemetryStats::ON || _telemetryLog == telemetryLog::ON) && !_reconnectPending) {
+			unsigned long now = millis();
+			if (now - _lastReconnectAttempt > 10000) { // 10s gate
+				debug_i("TelemetryClient: attempting reconnect");
+				_reconnectPending = true;
+				_lastReconnectAttempt = now;
+				reconnect();
+				// Schedule to clear the gate after 10s
+				SystemClock.setTimeout([this]() { _reconnectPending = false; }, 10000);
+			}
+		}
+		return false;
+	}
 	char fullTopic[TELEMETRY_TOPIC_MAX_SIZE];
-    buildTopic(topic, fullTopic, sizeof(fullTopic));
+	buildTopic(topic, fullTopic, sizeof(fullTopic));
 	String payload;
 	serializeJson(doc, payload);
-    debug_i("Telemetry MQTT publishing %s to topic: %s", payload.c_str(), fullTopic);
+	debug_i("Telemetry MQTT publishing %s to topic: %s", payload.c_str(), fullTopic);
 	return mqtt->publish(fullTopic, payload);
 }
+// Add to TelemetryClient class definition in telemetry.h:
+// unsigned long _lastReconnectAttempt;
+// bool _reconnectPending;
 
 bool TelemetryClient::publish(const String& topic, const JsonDocument& doc) {
     return publish(topic.c_str(), doc);

@@ -222,10 +222,12 @@ void Application::checkRam()
 	if (!telemetryClient.stat(doc))
 	{
 		debug_i("Failed to publish monitor data to telemetry MQTT");
+		/* 
 		if (!telemetryClient.isRunning()){
 			debug_i("restarting telemetry MQTT client");
 			telemetryClient.reconnect();
 		}
+		*/
 	}
 	
 	
