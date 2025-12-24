@@ -1,5 +1,6 @@
 #include <RGBWWCtrl.h>
 #include <arduinojson.h>
+#include <SimpleTimer.h>
 
 using telemetryStats = AppConfig::ContainedRoot::telemetryStats;
 using telemetryLog = AppConfig::ContainedRoot::telemetryLog;
@@ -11,6 +12,11 @@ TelemetryClient::TelemetryClient() {
 	snprintf(_id, TELEMETRY_ID_MAX_SIZE, "rgbww_%s", _chipId);
 	_lastReconnectAttempt = 0;
 	_reconnectPending = false;
+}
+
+void TelemetryClient::reconnectGateTimeoutCb(void* arg) {
+	TelemetryClient* self = static_cast<TelemetryClient*>(arg);
+	self->_reconnectPending = false;
 }
 
 TelemetryClient::~TelemetryClient() {
@@ -135,8 +141,7 @@ bool TelemetryClient::publish(const char* topic, const JsonDocument& doc) {
 				_reconnectPending = true;
 				_lastReconnectAttempt = now;
 				reconnect();
-				// Schedule to clear the gate after 10s
-				SystemClock.setTimeout([this]() { _reconnectPending = false; }, 10000);
+				_reconnectGateTimer.initializeMs(10000, TelemetryClient::reconnectGateTimeoutCb, this).startOnce();
 			}
 		}
 		return false;
@@ -148,6 +153,9 @@ bool TelemetryClient::publish(const char* topic, const JsonDocument& doc) {
 	debug_i("Telemetry MQTT publishing %s to topic: %s", payload.c_str(), fullTopic);
 	return mqtt->publish(fullTopic, payload);
 }
+// Add to TelemetryClient class definition in telemetry.h:
+// Timer _reconnectGateTimer;
+// static void reconnectGateTimeoutCb(void* arg);
 // Add to TelemetryClient class definition in telemetry.h:
 // unsigned long _lastReconnectAttempt;
 // bool _reconnectPending;

@@ -44,6 +44,11 @@ private:
     telemetryStats _telemetryStats;
     telemetryLog _telemetryLog;
 
+    int _lastReconnectAttempt = 0;
+    bool _reconnectPending = false;
+    SimpleTimer _reconnectGateTimer;
+    static void reconnectGateTimeoutCb(void* arg);
+
     bool _isRunning = false;
     MqttClient* mqtt = nullptr;
     char _chipId[TELEMETRY_CHIPID_MAX_SIZE];
