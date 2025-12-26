@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 import json
 import os
 import sys
@@ -7,6 +5,39 @@ import re
 import shutil
 import requests
 from urllib.parse import urlparse
+
+def update_latest_symlink(data, base_dir='download'):
+    """
+    For each branch (develop, testing, main), create or update a symlink (or copy) in download/latest-<branch>/app_merged.bin
+    pointing to the latest single_image/app_merged.bin for that branch.
+    """
+    branches = ['develop', 'testing', 'main']
+    for branch in branches:
+        # Find all firmware entries for this branch and single_image builds
+        candidates = [e for e in data['firmware'] if e['branch'] == branch and 'single_image' in e['files']['rom']['url']]
+        if not candidates:
+            continue
+        # Sort by version (descending)
+        candidates.sort(key=lambda e: extract_complete_version_number(e['fw_version']), reverse=True)
+        latest = candidates[0]
+        url = latest['files']['rom']['url']
+        # Extract the local path to app_merged.bin
+        parsed = urlparse(url)
+        rel_path = parsed.path.lstrip('/')
+        src_path = os.path.join(base_dir, rel_path) if not rel_path.startswith(base_dir) else rel_path
+        # Target symlink directory
+        link_dir = os.path.join(base_dir, f'latest-{branch}')
+        os.makedirs(link_dir, exist_ok=True)
+        link_path = os.path.join(link_dir, 'app_merged.bin')
+        # Remove old symlink or file if exists
+        if os.path.islink(link_path) or os.path.exists(link_path):
+            os.remove(link_path)
+        try:
+            os.symlink(os.path.abspath(src_path), link_path)
+            print(f"Created symlink: {link_path} -> {src_path}")
+        except Exception as e:
+            print(f"Failed to create symlink for {branch}: {e}")
+
 
 def load_json(file_path_or_url):
     # Check if the input is a URL
@@ -130,7 +161,7 @@ def add_or_update_entry(data, soc, type_, branch, fw_version, url):
             else:
                 # Same combination but different version - move to history
                 print(f"Moving {original_soc}/{original_type}/{original_branch}: {entry['fw_version']} to history")
-                # Create a copy to avoid reference issues
+                # Create a copy to avoid reference is=sues
                 history_entry = dict(entry)
                 data['history'].append(history_entry)
                 
@@ -234,6 +265,9 @@ def delete_entry(data, soc, type_, branch, fw_version=None, delete_files=False):
                                       entry['type'] == type_ and 
                                       entry['branch'] == branch)]
             
+# ...existing code...
+
+# Place this function after all imports, before main()
             entries_to_delete.extend(history_entries_to_delete)
     
     # Delete corresponding directories if requested
@@ -348,6 +382,9 @@ def cull_history(data, dry_run=False):
     print(f"  Total: {len(data['history'])} entries")
     
     entries_to_remove = []
+# ...existing code...
+
+# Place this function after all imports, before main()
     
     # Process each group
     for (soc, type_, branch), entries in grouped_entries.items():
@@ -431,57 +468,9 @@ def main():
     if data is None:
         if not (file_path_or_url.startswith('http://') or file_path_or_url.startswith('https://')):
             # Only create a new file if it's a local path
-            data = prime_json(file_path_or_url)
-        else:
-            print(f"Cannot retrieve data from URL: {file_path_or_url}")
-            return
-    
-    # Ensure history array exists in existing files
-    if "history" not in data:
-        data["history"] = []
-
-    # Handle read-only operations that work with both local files and URLs
-    if action == 'list':
-        if len(sys.argv) < 3:
-            print("Usage: script.py <json_file_or_url> list [soc] [type] [branch] [--history] [--check-urls]")
-            return
-        
-        soc = None
-        type_ = None
-        branch = None
-        include_history = False
-        check_urls = False
-        
-        # Parse arguments
-        for i in range(3, len(sys.argv)):
-            if sys.argv[i] == "--history":
-                include_history = True
-            elif sys.argv[i] == "--check-urls":
-                check_urls = True
-            elif soc is None:
-                soc = sys.argv[i]
-            elif type_ is None:
-                type_ = sys.argv[i]
-            elif branch is None:
-                branch = sys.argv[i]
-        
-        if check_urls:
-            print("Checking URL accessibility (this may take a moment)...")
-        
-        entries = list_entries(data, soc, type_, branch, include_history, check_urls)
-        print(f"Found {len(entries)} entries:")
-        for entry in sorted(entries, key=lambda e: (e['branch'], e['soc'], e['type'], extract_build_number(e['fw_version']), e.get('is_history', False)), reverse=True):
-            history_marker = "[HISTORY] " if entry.get('is_history', False) else ""
-            url_status = " [✓]" if check_urls and entry.get('url_accessible', False) else " [✗]" if check_urls else ""
-            print(f"{history_marker}{entry['soc']}/{entry['type']}/{entry['branch']}: {entry['fw_version']}{url_status} - {entry['files']['rom']['url']}")
-        return  # No need to save for list operation
-
-    # For actions that modify the data, ensure we're not working with a URL
-    if file_path_or_url.startswith('http://') or file_path_or_url.startswith('https://'):
-        print(f"Cannot modify a remote URL. Please download the file first.")
+            pass
         return
 
-    # Handle write operations (only for local files)
     if action == 'add':
         if len(sys.argv) < 8:
             print("Usage: script.py <json_file> add <soc> <type> <branch> <fw_version> <url>")
@@ -492,7 +481,12 @@ def main():
         fw_version = sys.argv[6]
         url = sys.argv[7]
         data = add_or_update_entry(data, soc, type_, branch, fw_version, url)
-    elif action == 'delete':
+        save_json(data, file_path_or_url)
+        update_latest_symlink(data)
+        print(f"Entry added/updated for {soc}/{type_}/{branch} version {fw_version}.")
+        return
+
+    if action == 'delete':
         if len(sys.argv) < 6:
             print("Usage: script.py <json_file> delete <soc> <type> <branch> [fw_version] [--keep-files]")
             return
@@ -500,33 +494,57 @@ def main():
         type_ = sys.argv[4]
         branch = sys.argv[5]
         fw_version = None
-        delete_files = True  # Default to deleting files
-        
-        # Check for optional arguments
-        for i in range(6, len(sys.argv)):
-            if sys.argv[i] == "--keep-files":
+        delete_files = True
+        for arg in sys.argv[6:]:
+            if arg == '--keep-files':
                 delete_files = False
-            elif not fw_version:  # First non-flag argument is fw_version
-                fw_version = sys.argv[i]
-        
+            elif not fw_version:
+                fw_version = arg
         data = delete_entry(data, soc, type_, branch, fw_version, delete_files)
-    elif action == 'cull':
-        # Parse arguments
-        dry_run = False
-        for i in range(3, len(sys.argv)):
-            if sys.argv[i] == "--dry-run":
-                dry_run = True
-                
-        print(f"Culling history entries (dry run: {dry_run})")
-        data = cull_history(data, dry_run)
-    else:
-        print("Invalid action. Use add, delete, list, or cull.")
+        save_json(data, file_path_or_url)
+        update_latest_symlink(data)
+        print(f"Entry deleted for {soc}/{type_}/{branch} version {fw_version}.")
         return
 
-    # Only save if we made changes and not in a dry run
-    if action in ['add', 'delete'] or (action == 'cull' and not dry_run):
-        save_json(data, file_path_or_url)
+    if action == 'cull':
+        dry_run = False
+        for arg in sys.argv[3:]:
+            if arg == '--dry-run':
+                dry_run = True
+        print(f"Culling history entries (dry run: {dry_run})")
+        data = cull_history(data, dry_run)
+        if not dry_run:
+            save_json(data, file_path_or_url)
+            update_latest_symlink(data)
+        return
 
+    if action == 'list':
+        soc = None
+        type_ = None
+        branch = None
+        include_history = False
+        check_urls = False
+        # Parse arguments
+        for arg in sys.argv[3:]:
+            if arg == '--history':
+                include_history = True
+            elif arg == '--check-urls':
+                check_urls = True
+            elif soc is None:
+                soc = arg
+            elif type_ is None:
+                type_ = arg
+            elif branch is None:
+                branch = arg
+        entries = list_entries(data, soc, type_, branch, include_history, check_urls)
+        print(f"Found {len(entries)} entries:")
+        for entry in sorted(entries, key=lambda e: (e['branch'], e['soc'], e['type'], extract_build_number(e['fw_version']), e.get('is_history', False)), reverse=True):
+            history_marker = "[HISTORY] " if entry.get('is_history', False) else ""
+            url_status = " [✓]" if check_urls and entry.get('url_accessible', False) else " [✗]" if check_urls else ""
+            print(f"{history_marker}{entry['soc']}/{entry['type']}/{entry['branch']}: {entry['fw_version']}{url_status} - {entry['files']['rom']['url']}")
+        return
+
+    print("Invalid action. Use add, delete, list, or cull.")
 
 if __name__ == "__main__":
     main()
