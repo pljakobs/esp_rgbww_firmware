@@ -149,8 +149,8 @@ void onReady()
 // Sming Framework INIT method - called during boot
 void init(){	
 
-
-	#ifdef UART_ID_SERIAL_USB_JTAG
+	// use the JTAG-USB serial for debug output if available
+	#ifdef UART_ID_SERIAL_USB_JTAG 
         Serial.setPort(UART_ID_SERIAL_USB_JTAG);
     #endif
 
