@@ -148,11 +148,21 @@ void onReady()
 
 // Sming Framework INIT method - called during boot
 void init(){	
+
+	// use the JTAG-USB serial for debug output if available
+	#ifdef UART_ID_SERIAL_USB_JTAG 
+        Serial.setPort(UART_ID_SERIAL_USB_JTAG);
+    #endif
+
+    Serial.begin(SERIAL_BAUD_RATE);
+    
+	Serial.systemDebugOutput(true);
+    
+	delay(500);
 	Serial.setTxBufferSize(1024);
 	Serial.setTxWait(false); // Make sure debug output doesn't stall
-	Serial.begin(SERIAL_BAUD_RATE);
 	Serial.systemDebugOutput(true);
-
+	
 	// System.setCpuFrequency(CpuCycleClockFast::cpuFrequency());
 
 	Serial.print(_F("Available heap: "));
