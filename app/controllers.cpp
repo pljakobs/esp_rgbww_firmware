@@ -530,6 +530,10 @@ size_t Controllers::JsonPrinter::operator()() {
             n += p->print(',');
             if (pretty) n += p->print('\n');
         }
+        // Ensure local controller always reports state LOCALHOST
+        if (info.id == (unsigned int)system_get_chip_id()) {
+            info.state = LOCALHOST;
+        }
         // Print controller object
         n += printIndent(2);
         n += p->print('{');
