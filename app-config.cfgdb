@@ -36,6 +36,10 @@
         "current_pin_config_name":{
           "type":"string",
           "default":"mrpj"
+        },
+        "allow_web_icons":{
+          "type":"boolean",
+          "default":true
         }
       }
     },
