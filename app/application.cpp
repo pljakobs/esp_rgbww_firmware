@@ -151,7 +151,7 @@ void init(){
 
 	// use the JTAG-USB serial for debug output if available
 	#ifdef UART_ID_SERIAL_USB_JTAG 
-        Serial.setPort(UART_ID_SERIAL_USB_JTAG);
+        //Serial.setPort(UART_ID_SERIAL_USB_JTAG);
     #endif
 
     Serial.begin(SERIAL_BAUD_RATE);
@@ -260,10 +260,6 @@ void Application::init()
 
 	debug_i("Platform: %s\r\n", SOC);
 
-#if defined(ARCH_ESP8266) || defined(ESP32)
-	app.ota.checkAtBoot();
-#endif
-
 #if defined(ARCH_ESP8266) //|| defined(ESP32)
 	/*
     * verify for new partition layout
@@ -326,6 +322,10 @@ debug_i("Application::init - running partition %s", part.name());
 		}
 		Serial << dir.count() << _F(" files found") << endl << endl;
 	}
+
+//#if defined(ARCH_ESP8266) || defined(ESP32)
+	app.ota.checkAtBoot();
+//#endif
 #endif
 #ifdef ARCH_HOST
 	debug_i("mounting host file system");
@@ -829,6 +829,7 @@ void Application::onCommandRelay(const String& method, const JsonObject& params)
 
 void Application::onButtonTogglePressed(int pin)
 {
+	/*
 	uint32_t now = millis();
 	uint32_t diff = now - _lastToggles[pin];
 	debug_i("Application::onButtonTogglePressed");
@@ -840,6 +841,7 @@ void Application::onButtonTogglePressed(int pin)
 	} else {
 		debug_d("Button press ignored by debounce. Diff: %d Debounce: %d", diff, general.getButtonsDebounceMs());
 	}
+	*/
 }
 
 uint32_t Application::getUptime()
