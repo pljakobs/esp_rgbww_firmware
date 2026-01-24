@@ -5,7 +5,8 @@ ifeq ($(SMING_ARCH), Esp32)
 endif
 
 # Set default number of jobs to twice the number of available processors
-NUM_JOBS := $(shell echo $(($(nproc) * 2)))
+#NUM_JOBS := $(shell echo $(($(nproc) * 2)))
+NUM_JOBS := $(shell echo $(($(nproc) + 2)))
 MAKEFLAGS += -j$(NUM_JOBS)
 
 HWCONFIG :=two_roms_two_lfs_$(SMING_ARCH)
