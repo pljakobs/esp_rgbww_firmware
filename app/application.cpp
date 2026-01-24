@@ -384,7 +384,10 @@ debug_i("Application::init - running partition %s", part.name());
 		if(clearPin >= 0) {
 			pinMode(clearPin, INPUT);
 			debug_i("Application::init - clear pin set to input");
-		}
+		
+			_clearPin = clearPin;
+            _resetPinTimer.initializeMs(100, TimerDelegate(&Application::pollResetButton, this)).start();
+        }
 		#if !defined(ARCH_HOST)
 
 			if(clearPin >=0 && digitalRead(clearPin) < 1) {
@@ -842,6 +845,39 @@ void Application::onButtonTogglePressed(int pin)
 		debug_d("Button press ignored by debounce. Diff: %d Debounce: %d", diff, general.getButtonsDebounceMs());
 	}
 	*/
+}
+
+void Application::pollResetButton()
+{
+    // Static counter to keep track of hold duration across function calls
+    static int holdCounter = 0;
+
+    if (_clearPin < 0) return;
+
+    // Check if button is pressed (Active LOW)
+    if (digitalRead(_clearPin) == LOW) {
+        holdCounter++;
+        
+        // 30 ticks * 100ms = 3000ms (3 seconds)
+        if (holdCounter >= 30) {
+            debug_w("Emergency ROM Switch triggered via Reset Pin!");
+
+            // Reset counter to prevent multiple triggers (though we reboot anyway)
+            holdCounter = 0;
+
+            // Visual feedback
+            for(int i = 0; i < 4; i++) {
+                rgbwwctrl.toggle();
+                delay(250);
+            }
+
+            switchRom();
+            delayedCMD(F("restart"),1000);
+        }
+    } else {
+        // Button released, reset counter
+        holdCounter = 0;
+    }
 }
 
 uint32_t Application::getUptime()

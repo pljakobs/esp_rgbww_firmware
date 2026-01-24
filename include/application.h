@@ -120,6 +120,7 @@ private:
     void loadbootinfo();
     void listFiles();
     void logRestart();
+    void pollResetButton();
 
     Timer _systimer;
     int _bootmode = 0;
@@ -132,12 +133,15 @@ private:
 
     Timer _uptimetimer;
     Timer _checkRamTimer;
+    Timer _resetPinTimer;
+
     uint32_t _uptimeMinutes;
     std::array<int, 17> _lastToggles;
 
     uint32_t jsonrpc_id = 0;
 
     int8_t clearPin = 16; //  GPIO16 is the default for the old mrpj boards, newer boards will load from pinconfig 
+    int8_t _clearPin = -1;
 
     bool _reboot_reported=false;
 };
