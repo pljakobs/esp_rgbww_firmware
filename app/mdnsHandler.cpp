@@ -6,7 +6,7 @@
 #include <Network/Http/HttpClient.h>
 
 
-//#define DEBUG_MDNS 
+#define DEBUG_MDNS 
 
 // Global pointer for leader service updates from other components
 static LEDControllerAPIService* g_ledControllerAPIService = nullptr;
@@ -87,7 +87,7 @@ void mdnsHandler::start()
     using namespace mDNS;
 
     debug_i("########################################################");
-    debug_i("# mdns Handler initialized, Port: %d", MDNS_SOURCE_PORT);
+    debug_i("# mdns Handler initialized, Source Port: %d, TARGET Port: %d", MDNS_SOURCE_PORT, MDNS_TARGET_PORT);
     debug_i("########################################################");
     
     // Get device hostname from configuration and set it

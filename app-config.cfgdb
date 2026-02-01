@@ -147,6 +147,36 @@
               "default":0
             }
           }
+        },
+        "calibration":{
+          "type":"object",
+          "properties":{
+             "gamma": {
+              "type": "number",
+              "description": "System output gamma for correction calculation (e.g. 2.2)"
+            },
+            "ct_range": {
+                "type": "object",
+                "description": "Kelvin range normalization bounds",
+                "properties": {
+                    "min": { "type": "integer", "minimum": 1000, "default":1000 },
+                    "max": { "type": "integer", "maximum": 20000, "default": 20000 }
+                }
+            },
+            "hsv": {
+              "type": "array",
+              "description": "12 Parabolic coefficients for 30-degree Hue sectors (0, 30, ... 330)",
+              "minItems": 12,
+              "maxItems": 12,
+              "items": {
+                "$ref": "defs/$defs/parabola"
+              }
+            },
+            "ct": {
+              "description": "Parabolic coefficients for Color Temperature curve",
+              "$ref": "defs/$defs/parabola"
+            }
+          }
         }
       }
     },
