@@ -415,7 +415,7 @@
                   "type":"string",
                   "default":"ON",
                   "ctype":"SpreadSpectrumMode",
-                  "enum":[ "OFF", "ON"]
+                  "enum":[ "ON", "OFF"]
                 },
                 "width":{
                   "type":"integer",
@@ -434,7 +434,7 @@
                   "type":"string",
                   "ctype":"PhaseShiftMode",
                   "default":"ON",
-                  "enum":[ "OFF", "ON"]
+                  "enum":[ "ON", "OFF"]
                 }
               }
             }
