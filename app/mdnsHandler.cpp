@@ -87,7 +87,7 @@ void mdnsHandler::start()
     using namespace mDNS;
 
     debug_i("########################################################");
-    debug_i("# mdns Handler initialized, Port: %d", MDNS_SOURCE_PORT);
+    debug_i("# mdns Handler initialized, Source Port: %d, TARGET Port: %d", MDNS_SOURCE_PORT, MDNS_TARGET_PORT);
     debug_i("########################################################");
     
     // Get device hostname from configuration and set it

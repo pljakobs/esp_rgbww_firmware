@@ -102,7 +102,7 @@ private:
     //void onUpload(HttpRequest &request, HttpResponse &response);
     bool checkHeap(HttpResponse &response);
     bool checkHeap(HttpResponse &response, int minHeap);
-
+    bool preflightRequest(HttpRequest& request, HttpResponse& response, std::initializer_list<HttpMethod> allowedMethods, int minHeap = 0 );
     String makeId();
     
     static bool isPrintable(const String& str);

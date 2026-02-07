@@ -143,7 +143,8 @@ void onReady()
 	app.init();
 
 	// Run Services on system ready
-	System.onReady(SystemReadyDelegate(&Application::startServices, &app));
+	//System.onReady(SystemReadyDelegate(&Application::startServices, &app));
+	app.startServices();
 }
 
 // Sming Framework INIT method - called during boot
@@ -466,10 +467,7 @@ debug_i("Application::init - running partition %s", part.name());
 	Serial <<endl;
 	Serial << "#########################################################################################"<<endl;
 	*/
-	debug_i("start network init");
-	// initialize networking
-	network.init();
-	debug_i("network initizalized, ssid: %s", WifiStation.getSSID().c_str());
+
 	
 	/// initialize led ctrl
 	rgbwwctrl.init();
@@ -484,7 +482,10 @@ debug_i("Application::init - running partition %s", part.name());
 
 	debug_i("pin config string %s", fileMap["pin_config"]);
 
-
+	debug_i("start network init");
+	// initialize networking
+	network.init();
+	debug_i("network initizalized, ssid: %s", WifiStation.getSSID().c_str());
 	
 }
 void Application::initButtons()
