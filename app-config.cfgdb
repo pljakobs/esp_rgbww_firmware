@@ -490,15 +490,15 @@
       "properties": {
         "statsEnabled": {
           "type":"string",
-          "default":"UNDEF",
+          "@default":"'OFF' if SMING_RELEASE else 'ON'",
           "ctype":"telemetryStats",
-          "enum":[ "UNDEF", "ON", "OFF"]
+          "enum":[ "ON", "OFF"]
         },
         "logEnabled": {
           "type":"string",
-          "default":"UNDEF",
+          "@default":"OFF",
           "ctype":"telemetryLog",
-          "enum":[ "UNDEF", "ON", "OFF"]
+          "enum":[ "ON", "OFF"]
       },
         "url": {
           "type": "string",

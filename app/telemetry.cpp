@@ -38,31 +38,6 @@ void TelemetryClient::start() {
 	_telemetryStats=telemetryCfg.getStatsEnabled();
 	_telemetryLog=telemetryCfg.getLogEnabled();
 
-	// set defaults if undefined
-	// this will only happen once upon first start
-	{
-		auto telemetryUpdate=telemetryCfg.update();
-	
-		#if defined(SMING_RELEASE)
-		if(_telemetryStats == telemetryStats::UNDEF){
-			debug_i("TelemetryClient::start - enabling telemetry stats by default for debug build");
-			_telemetryStats = telemetryStats::ON; //enable stats in debug builds by default
-			telemetryUpdate.setStatsEnabled(_telemetryStats);
-		}
-		#else
-		if(_telemetryStats == telemetryStats::UNDEF ){
-			debug_i("TelemetryClient::start - enabling telemetry stats by default for debug build");
-			_telemetryStats = telemetryStats::ON; //enable stats in debug builds by default	
-			telemetryUpdate.setStatsEnabled(_telemetryStats);
-		}
-		#endif
-		
-		if(_telemetryLog == telemetryLog::UNDEF){
-			_telemetryLog = telemetryLog::OFF; //disable log by default
-			telemetryUpdate.setLogEnabled(_telemetryLog);
-		}
-	}
-
 	if((_telemetryStats == telemetryStats::ON or _telemetryLog == telemetryLog::ON) && strlen(_telemetryURL) > 0){
 		debug_i("Application::startServices - starting remote telemetry");
 
