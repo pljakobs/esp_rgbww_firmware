@@ -384,11 +384,18 @@ bool ApplicationWebserver::checkHeap(HttpResponse& response, int minHeap)
  */
 bool ApplicationWebserver::preflightRequest(HttpRequest& request, HttpResponse& response, std::initializer_list<HttpMethod> allowedMethods, int minHeap)
 {
+    // Default to no-cache for API/dynamic checks. 
+    // Static file handler (onFile) will override this if caching is desired.
+    response.setHeader(F("Cache-Control"), F("no-cache, no-store, must-revalidate"));
+    response.setHeader(F("Pragma"), F("no-cache"));
+    response.setHeader(F("Expires"), F("0"));
+
     // 1. Heap Check
     if(!checkHeap(response, minHeap)) {
         return false;
     }
 
+	debug_i("received method: %i", request.method);
     // 2. CORS Preflight (OPTIONS) - Must handle this before method check or Auth
     if(request.method == HttpMethod::OPTIONS) {
         setCorsHeaders(response);
@@ -401,8 +408,13 @@ bool ApplicationWebserver::preflightRequest(HttpRequest& request, HttpResponse& 
     bool methodAllowed = false;
 
     String allowedMethodsStr;
+    bool first = true;
     for(auto m : allowedMethods) {
-        allowedMethodsStr += String((int)m) + ", ";
+        if (!first) {
+             allowedMethodsStr += ", ";
+        }
+        allowedMethodsStr += String((int)m);
+        first = false;
     }
     debug_i("preflightRequest: Request Method=%d, Allowed={%s}", (int)request.method, allowedMethodsStr.c_str());
 
@@ -415,7 +427,11 @@ bool ApplicationWebserver::preflightRequest(HttpRequest& request, HttpResponse& 
 
     if(!methodAllowed) {
         setCorsHeaders(response);
-        sendApiCode(response, API_CODES::API_BAD_REQUEST, F("Method not allowed"));
+        String msg = F("Method not allowed. Allowed: ");
+        msg += allowedMethodsStr;
+        msg += F(". Current: ");
+        msg += String((int)request.method);
+        sendApiCode(response, API_CODES::API_BAD_REQUEST, msg.c_str());
         return false;
     }
 
