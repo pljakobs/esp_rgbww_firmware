@@ -496,7 +496,7 @@
         },
         "logEnabled": {
           "type":"string",
-          "@default":"OFF",
+          "default":"OFF",
           "ctype":"telemetryLog",
           "enum":[ "ON", "OFF"]
       },
