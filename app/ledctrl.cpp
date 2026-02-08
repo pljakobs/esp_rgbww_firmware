@@ -204,22 +204,16 @@ void APPLedCtrl::init()
 bool APPLedCtrl::isPinValid(int currentPin)
 {
 	if (currentPin==-1) return true; // if clear pin is not configured, it will be set to -1, the config is still valid
-			
-	AppConfig::Hardware hardware(*app.cfg);
-	for (auto pinconfig : hardware.availablePins){
-		if (strcmp(pinconfig.getSoc().c_str(),SOC)==0){
-			for (auto pin : pinconfig.pins){
-				if(pin==currentPin){
-					return true;
-				}
-			}
-		debug_e("APPLedCtrl::isPinValid - invalid pin %i for SoC %s", currentPin, SOC);
-		return false;
-		}
-	}
-	debug_e("APPLedCtrl::isPinValid - invalid SoC %s", SOC);
-	return false;
+	
+	const auto& validPins = AppConfig::ContainedHardware::pinConfigEnumType.values();
+    for (uint8_t pin : validPins) {
+        if (pin == (uint8_t)currentPin) {
+            return true;
+        }
+    }
+    return false;
 }
+
 /**
  * @brief read local configuration from ConfigDB
  * 
