@@ -266,49 +266,69 @@ jobs:
         run: |
           ssh-keyscan ${{ env.deploy_server }} >> ~/.ssh/known_hosts
           
-      - name: Deploy to External Server
+      - name: Deploy to External Server (Single Session)
         run: |
-          # Create directories with version in path
-          for soc in esp8266 esp32 esp32c3; do
-            ssh ${{ env.deploy_user }}@${{ env.deploy_server }} "mkdir -p ${{ env.deploy_path }}/download/${{ env.target_branch }}/${{ env.version }}/$soc/debug"
-            ssh ${{ env.deploy_user }}@${{ env.deploy_server }} "mkdir -p ${{ env.deploy_path }}/download/${{ env.target_branch }}/${{ env.version }}/$soc/release"
-            ssh ${{ env.deploy_user }}@${{ env.deploy_server }} "mkdir -p ${{ env.deploy_path }}/download/${{ env.target_branch }}/${{ env.version }}/$soc/debug/single_image"
-            ssh ${{ env.deploy_user }}@${{ env.deploy_server }} "mkdir -p ${{ env.deploy_path }}/download/${{ env.target_branch }}/${{ env.version }}/$soc/release/single_image"
-            
-            # Copy files with version in path
-            scp -r download/${{ env.target_branch }}/${{ env.version }}/$soc/debug/* ${{ env.deploy_user }}@${{ env.deploy_server }}:${{ env.deploy_path }}/download/${{ env.target_branch }}/${{ env.version }}/$soc/debug/ || true
-            scp -r download/${{ env.target_branch }}/${{ env.version }}/$soc/release/* ${{ env.deploy_user }}@${{ env.deploy_server }}:${{ env.deploy_path }}/download/${{ env.target_branch }}/${{ env.version }}/$soc/release/ || true
-            
-            # Copy single image files if they exist
-            if [ -d "download/${{ env.target_branch }}/${{ env.version }}/$soc/debug/single_image" ] && [ "$(ls -A download/${{ env.target_branch }}/${{ env.version }}/$soc/debug/single_image)" ]; then
-              scp -r download/${{ env.target_branch }}/${{ env.version }}/$soc/debug/single_image/* ${{ env.deploy_user }}@${{ env.deploy_server }}:${{ env.deploy_path }}/download/${{ env.target_branch }}/${{ env.version }}/$soc/debug/single_image/ || true
-            fi
-            
-            if [ -d "download/${{ env.target_branch }}/${{ env.version }}/$soc/release/single_image" ] && [ "$(ls -A download/${{ env.target_branch }}/${{ env.version }}/$soc/release/single_image)" ]; then
-              scp -r download/${{ env.target_branch }}/${{ env.version }}/$soc/release/single_image/* ${{ env.deploy_user }}@${{ env.deploy_server }}:${{ env.deploy_path }}/download/${{ env.target_branch }}/${{ env.version }}/$soc/release/single_image/ || true
-            fi
-          done
+          # 1. Prepare Staging Area
+          mkdir -p staging
           
-          # Create version file and redirect instead of symlink
-          ssh ${{ env.deploy_user }}@${{ env.deploy_server }} "mkdir -p ${{ env.deploy_path }}/download/${{ env.target_branch }}/latest && \
-            echo \"${{ env.version }}\" > ${{ env.deploy_path }}/download/${{ env.target_branch }}/latest/version.txt && \
-            echo '<html><head><meta http-equiv=\"refresh\" content=\"0; URL=../${{ env.version }}/\"></head></html>' > ${{ env.deploy_path }}/download/${{ env.target_branch }}/latest/index.html"
+          # Move download directory
+          mv download staging/
           
-          # Replace placeholders and upload version.json
-          sed <version.json -e "s/%host%/http:\/\/${{ env.deploy_server }}/" | ssh ${{ env.deploy_user }}@${{ env.deploy_server }} "cat >${{ env.deploy_path }}/version.json"
+          # Move version.json
+          # Replace placeholders in version.json locally before transfer
+          sed -i "s/%host%/http:\/\/${{ env.deploy_server }}/" version.json
+          mv version.json staging/
           
-      - name: Change ownership of uploaded files
-        run: |
-          ssh ${{ env.deploy_user }}@${{ env.deploy_server }} "chown -R github-deploy:nginx ${{ env.deploy_path }}/*"
- # Upload the manage_version.py script to the server
-      - name: Upload manage_version.py to server
-        run: |
-          # Copy the script to the server
-          scp esp_firmware_repo/manage_version.py ${{ env.deploy_user }}@${{ env.deploy_server }}:${{ env.deploy_path }}/manage_version.py
-          # Make it executable
-          ssh ${{ env.deploy_user }}@${{ env.deploy_server }} "chmod +x ${{ env.deploy_path }}/manage_version.py"
-
-      - name: Cull old versions
-        run: |
-          # Remove old versions from the server
-          ssh ${{ env.deploy_user }}@${{ env.deploy_server }} "python3 ${{ env.deploy_path }}/manage_version.py ${{ env.deploy_path }}/version.json cull"
+          # Move manage_version.py
+          cp esp_firmware_repo/manage_version.py staging/
+          
+          # define remote script to run after extraction
+          cat > remote_script.sh << 'EOF'
+          #!/bin/bash
+          set -e
+          
+          TARGET_DIR="${{ env.deploy_path }}"
+          cd "$TARGET_DIR"
+          
+          # verify staging dir exists (it is part of the tar)
+          if [ -d "staging" ]; then
+              # Sync download folder
+              # using rsync locally on server or just moving/merging? 
+              # Since we untarred 'staging/download', we can move it to proper place
+              # merge staging/download into ./download
+              
+              # Ensure parent dir exists
+              mkdir -p download
+              
+              # Copy/Move new files
+              cp -r staging/download/* download/
+              
+              # Update version.json
+              mv staging/version.json .
+              
+              # Update manage_version.py
+              mv staging/manage_version.py .
+              chmod +x manage_version.py
+              
+              # Cleanup staging
+              rm -rf staging
+          fi
+          
+          # Cull old versions
+          python3 manage_version.py version.json cull
+          
+          # Fix permissions
+          chown -R github-deploy:nginx *
+          EOF
+          
+          # 2. Tar, Transfer, and Execute in one pipe
+          # We tar 'staging' and 'remote_script.sh'
+          # On remote: untar, then run remote_script.sh, then remove it
+          
+          tar czf - staging remote_script.sh | ssh ${{ env.deploy_user }}@${{ env.deploy_server }} "
+            cd ${{ env.deploy_path }} && 
+            tar xzf - && 
+            chmod +x remote_script.sh && 
+            ./remote_script.sh && 
+            rm remote_script.sh
+          "
