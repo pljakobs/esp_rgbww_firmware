@@ -331,6 +331,15 @@ jobs:
           
           chmod +x staging/remote_update.sh
           
+          # 1b. Port Knocking
+          # Explicitly allow the current runner's IP address
+          if [ -n "${{ secrets.DEPLOY_KNOCK_URL }}" ]; then
+            echo "Performing port knock..."
+            curl -s "${{ secrets.DEPLOY_KNOCK_URL }}" || echo "Knock failed, continuing anyway..."
+          else
+            echo "No knock URL configured, skipping..."
+          fi
+          
           # 2. Deploy using rsync
           # -a: archive mode (recursive, preserves permissions/times/etc)
           # -v: verbose
