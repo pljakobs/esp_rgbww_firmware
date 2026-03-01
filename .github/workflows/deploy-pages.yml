@@ -233,7 +233,7 @@ jobs:
         run: |
           # Explicitly allow the current runner's IP address
           if [ -n "${{ secrets.DEPLOY_KNOCK_URL }}" ]; then
-            echo "Performing port knock..."
+            echo "Performing port knock...with ${{ secrets.DEPLOY_KNOCK_URL }}"
             curl -s "${{ secrets.DEPLOY_KNOCK_URL }}" || echo "Knock failed, continuing anyway..."
           else
             echo "No knock URL configured, skipping..."
