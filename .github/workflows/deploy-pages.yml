@@ -219,7 +219,26 @@ jobs:
               echo "No artifact named $artifact_name found"
             fi
           done
-      
+
+      # print the true ip of the current runner to test fail2ban config
+      - name: Identify Runner IP
+        run: |
+          echo "Runner External IPv4:"
+          curl -4 https://ifconfig.me
+          echo -e "\nRunner External IPv6 (if available):"
+          curl -6 https://ifconfig.me || echo "No IPv6"
+
+      # ask server to be put on the allow list
+      - name: knock on the door
+        run: |
+          # Explicitly allow the current runner's IP address
+          if [ -n "${{ secrets.DEPLOY_KNOCK_URL }}" ]; then
+            echo "Performing port knock..."
+            curl -s "${{ secrets.DEPLOY_KNOCK_URL }}" || echo "Knock failed, continuing anyway..."
+          else
+            echo "No knock URL configured, skipping..."
+          fi
+          
       # Download version.json from lightinator.de if it doesn't exist locally
       - name: Get version.json
         run: |
@@ -330,16 +349,7 @@ jobs:
           EOF
           
           chmod +x staging/remote_update.sh
-          
-          # 1b. Port Knocking
-          # Explicitly allow the current runner's IP address
-          if [ -n "${{ secrets.DEPLOY_KNOCK_URL }}" ]; then
-            echo "Performing port knock..."
-            curl -s "${{ secrets.DEPLOY_KNOCK_URL }}" || echo "Knock failed, continuing anyway..."
-          else
-            echo "No knock URL configured, skipping..."
-          fi
-          
+                  
           # 2. Deploy using rsync
           # -a: archive mode (recursive, preserves permissions/times/etc)
           # -v: verbose
