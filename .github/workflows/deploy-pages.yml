@@ -266,49 +266,84 @@ jobs:
         run: |
           ssh-keyscan ${{ env.deploy_server }} >> ~/.ssh/known_hosts
           
-      - name: Deploy to External Server
+      - name: Deploy to External Server (rsync)
         run: |
-          # Create directories with version in path
+          # 1. Prepare Staging Area
+          mkdir -p staging
+          
+          # Move download directory to staging
+          mv download staging/
+          
+          # Copy manage_version.py to staging to be uploaded
+          cp esp_firmware_repo/manage_version.py staging/
+          
+          # Create the remote script that will orchestrate the update on the server
+          # This script handles:
+          # 1. Updating version.json with the new files (using the uploaded manage_version.py)
+          # 2. Culling old versions
+          # 3. Setting permissions
+          cat > staging/remote_update.sh << 'EOF'
+          #!/bin/bash
+          set -e
+          
+          # Variables passed from the workflow env
+          DEPLOY_PATH="${{ env.deploy_path }}"
+          TARGET_BRANCH="${{ env.target_branch }}"
+          VERSION="${{ env.version }}"
+          DEPLOY_SERVER="${{ env.deploy_server }}"
+          
+          cd "$DEPLOY_PATH"
+          
+          echo "Updating version.json on remote..."
+          
+          # Make the uploaded script executable
+          chmod +x manage_version.py
+          
+          # Update version.json for each uploaded artifact
+          # We perform the logic relative to what we know we uploaded
           for soc in esp8266 esp32 esp32c3; do
-            ssh ${{ env.deploy_user }}@${{ env.deploy_server }} "mkdir -p ${{ env.deploy_path }}/download/${{ env.target_branch }}/${{ env.version }}/$soc/debug"
-            ssh ${{ env.deploy_user }}@${{ env.deploy_server }} "mkdir -p ${{ env.deploy_path }}/download/${{ env.target_branch }}/${{ env.version }}/$soc/release"
-            ssh ${{ env.deploy_user }}@${{ env.deploy_server }} "mkdir -p ${{ env.deploy_path }}/download/${{ env.target_branch }}/${{ env.version }}/$soc/debug/single_image"
-            ssh ${{ env.deploy_user }}@${{ env.deploy_server }} "mkdir -p ${{ env.deploy_path }}/download/${{ env.target_branch }}/${{ env.version }}/$soc/release/single_image"
-            
-            # Copy files with version in path
-            scp -r download/${{ env.target_branch }}/${{ env.version }}/$soc/debug/* ${{ env.deploy_user }}@${{ env.deploy_server }}:${{ env.deploy_path }}/download/${{ env.target_branch }}/${{ env.version }}/$soc/debug/ || true
-            scp -r download/${{ env.target_branch }}/${{ env.version }}/$soc/release/* ${{ env.deploy_user }}@${{ env.deploy_server }}:${{ env.deploy_path }}/download/${{ env.target_branch }}/${{ env.version }}/$soc/release/ || true
-            
-            # Copy single image files if they exist
-            if [ -d "download/${{ env.target_branch }}/${{ env.version }}/$soc/debug/single_image" ] && [ "$(ls -A download/${{ env.target_branch }}/${{ env.version }}/$soc/debug/single_image)" ]; then
-              scp -r download/${{ env.target_branch }}/${{ env.version }}/$soc/debug/single_image/* ${{ env.deploy_user }}@${{ env.deploy_server }}:${{ env.deploy_path }}/download/${{ env.target_branch }}/${{ env.version }}/$soc/debug/single_image/ || true
-            fi
-            
-            if [ -d "download/${{ env.target_branch }}/${{ env.version }}/$soc/release/single_image" ] && [ "$(ls -A download/${{ env.target_branch }}/${{ env.version }}/$soc/release/single_image)" ]; then
-              scp -r download/${{ env.target_branch }}/${{ env.version }}/$soc/release/single_image/* ${{ env.deploy_user }}@${{ env.deploy_server }}:${{ env.deploy_path }}/download/${{ env.target_branch }}/${{ env.version }}/$soc/release/single_image/ || true
-            fi
+            for type in debug release; do
+              if [ "$soc" = "esp8266" ]; then
+                file="rom0.bin"
+              else
+                file="app.bin"
+              fi
+              
+              url="http://$DEPLOY_SERVER/download/$TARGET_BRANCH/$VERSION/$soc/$type/$file"
+              python3 manage_version.py version.json add $soc $type $TARGET_BRANCH "$VERSION" "$url"
+            done
           done
           
-          # Create version file and redirect instead of symlink
-          ssh ${{ env.deploy_user }}@${{ env.deploy_server }} "mkdir -p ${{ env.deploy_path }}/download/${{ env.target_branch }}/latest && \
-            echo \"${{ env.version }}\" > ${{ env.deploy_path }}/download/${{ env.target_branch }}/latest/version.txt && \
-            echo '<html><head><meta http-equiv=\"refresh\" content=\"0; URL=../${{ env.version }}/\"></head></html>' > ${{ env.deploy_path }}/download/${{ env.target_branch }}/latest/index.html"
+          # Update 'latest' pointer
+          mkdir -p download/$TARGET_BRANCH/latest
+          echo "$VERSION" > download/$TARGET_BRANCH/latest/version.txt
+          echo "<html><head><meta http-equiv=\"refresh\" content=\"0; URL=../$VERSION/\"></head></html>" > download/$TARGET_BRANCH/latest/index.html
           
-          # Replace placeholders and upload version.json
-          sed <version.json -e "s/%host%/http:\/\/${{ env.deploy_server }}/" | ssh ${{ env.deploy_user }}@${{ env.deploy_server }} "cat >${{ env.deploy_path }}/version.json"
+          echo "Culling old versions..."
+          python3 manage_version.py version.json cull
           
-      - name: Change ownership of uploaded files
-        run: |
-          ssh ${{ env.deploy_user }}@${{ env.deploy_server }} "chown -R github-deploy:nginx ${{ env.deploy_path }}/*"
- # Upload the manage_version.py script to the server
-      - name: Upload manage_version.py to server
-        run: |
-          # Copy the script to the server
-          scp esp_firmware_repo/manage_version.py ${{ env.deploy_user }}@${{ env.deploy_server }}:${{ env.deploy_path }}/manage_version.py
-          # Make it executable
-          ssh ${{ env.deploy_user }}@${{ env.deploy_server }} "chmod +x ${{ env.deploy_path }}/manage_version.py"
+          echo "Fixing permissions..."
+          chown -R github-deploy:nginx *
+          
+          # Self-destruct script
+          rm remote_update.sh
+          EOF
+          
+          chmod +x staging/remote_update.sh
+          
+          # 2. Deploy using rsync
+          # -a: archive mode (recursive, preserves permissions/times/etc)
+          # -v: verbose
+          # -z: compress
+          # --no-o --no-g: don't try to preserve owner/group (we fix it on remote)
+          # The destination is deploy_user@deploy_server:deploy_path/
+          # This will merge 'download/' into the existing 'download/' on remote
+          # and upload manage_version.py and remote_update.sh to the root
+          
+          echo "Syncing files..."
+          rsync -avz --no-o --no-g -e "ssh -o StrictHostKeyChecking=no" staging/ ${{ env.deploy_user }}@${{ env.deploy_server }}:${{ env.deploy_path }}/
+          
+          # 3. Execute the update logic on the remote server and remove it afterwards
+          echo "Running remote update script..."
+          ssh -o StrictHostKeyChecking=no ${{ env.deploy_user }}@${{ env.deploy_server }} "bash ${{ env.deploy_path }}/remote_update.sh && rm ${{ env.deploy_path }}/remote_update.sh"
 
-      - name: Cull old versions
-        run: |
-          # Remove old versions from the server
-          ssh ${{ env.deploy_user }}@${{ env.deploy_server }} "python3 ${{ env.deploy_path }}/manage_version.py ${{ env.deploy_path }}/version.json cull"
