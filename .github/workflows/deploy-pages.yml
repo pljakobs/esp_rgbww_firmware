@@ -266,69 +266,84 @@ jobs:
         run: |
           ssh-keyscan ${{ env.deploy_server }} >> ~/.ssh/known_hosts
           
-      - name: Deploy to External Server (Single Session)
+      - name: Deploy to External Server (rsync)
         run: |
           # 1. Prepare Staging Area
           mkdir -p staging
           
-          # Move download directory
+          # Move download directory to staging
           mv download staging/
           
-          # Move version.json
-          # Replace placeholders in version.json locally before transfer
-          sed -i "s/%host%/http:\/\/${{ env.deploy_server }}/" version.json
-          mv version.json staging/
-          
-          # Move manage_version.py
+          # Copy manage_version.py to staging to be uploaded
           cp esp_firmware_repo/manage_version.py staging/
           
-          # define remote script to run after extraction
-          cat > remote_script.sh << 'EOF'
+          # Create the remote script that will orchestrate the update on the server
+          # This script handles:
+          # 1. Updating version.json with the new files (using the uploaded manage_version.py)
+          # 2. Culling old versions
+          # 3. Setting permissions
+          cat > staging/remote_update.sh << 'EOF'
           #!/bin/bash
           set -e
           
-          TARGET_DIR="${{ env.deploy_path }}"
-          cd "$TARGET_DIR"
+          # Variables passed from the workflow env
+          DEPLOY_PATH="${{ env.deploy_path }}"
+          TARGET_BRANCH="${{ env.target_branch }}"
+          VERSION="${{ env.version }}"
+          DEPLOY_SERVER="${{ env.deploy_server }}"
           
-          # verify staging dir exists (it is part of the tar)
-          if [ -d "staging" ]; then
-              # Sync download folder
-              # using rsync locally on server or just moving/merging? 
-              # Since we untarred 'staging/download', we can move it to proper place
-              # merge staging/download into ./download
-              
-              # Ensure parent dir exists
-              mkdir -p download
-              
-              # Copy/Move new files
-              cp -r staging/download/* download/
-              
-              # Update version.json
-              mv staging/version.json .
-              
-              # Update manage_version.py
-              mv staging/manage_version.py .
-              chmod +x manage_version.py
-              
-              # Cleanup staging
-              rm -rf staging
-          fi
+          cd "$DEPLOY_PATH"
           
-          # Cull old versions
+          echo "Updating version.json on remote..."
+          
+          # Make the uploaded script executable
+          chmod +x manage_version.py
+          
+          # Update version.json for each uploaded artifact
+          # We perform the logic relative to what we know we uploaded
+          for soc in esp8266 esp32 esp32c3; do
+            for type in debug release; do
+              if [ "$soc" = "esp8266" ]; then
+                file="rom0.bin"
+              else
+                file="app.bin"
+              fi
+              
+              url="http://$DEPLOY_SERVER/download/$TARGET_BRANCH/$VERSION/$soc/$type/$file"
+              python3 manage_version.py version.json add $soc $type $TARGET_BRANCH "$VERSION" "$url"
+            done
+          done
+          
+          # Update 'latest' pointer
+          mkdir -p download/$TARGET_BRANCH/latest
+          echo "$VERSION" > download/$TARGET_BRANCH/latest/version.txt
+          echo "<html><head><meta http-equiv=\"refresh\" content=\"0; URL=../$VERSION/\"></head></html>" > download/$TARGET_BRANCH/latest/index.html
+          
+          echo "Culling old versions..."
           python3 manage_version.py version.json cull
           
-          # Fix permissions
+          echo "Fixing permissions..."
           chown -R github-deploy:nginx *
+          
+          # Self-destruct script
+          rm remote_update.sh
           EOF
           
-          # 2. Tar, Transfer, and Execute in one pipe
-          # We tar 'staging' and 'remote_script.sh'
-          # On remote: untar, then run remote_script.sh, then remove it
+          chmod +x staging/remote_update.sh
           
-          tar czf - staging remote_script.sh | ssh ${{ env.deploy_user }}@${{ env.deploy_server }} "
-            cd ${{ env.deploy_path }} && 
-            tar xzf - && 
-            chmod +x remote_script.sh && 
-            ./remote_script.sh && 
-            rm remote_script.sh
-          "
+          # 2. Deploy using rsync
+          # -a: archive mode (recursive, preserves permissions/times/etc)
+          # -v: verbose
+          # -z: compress
+          # --no-o --no-g: don't try to preserve owner/group (we fix it on remote)
+          # The destination is deploy_user@deploy_server:deploy_path/
+          # This will merge 'download/' into the existing 'download/' on remote
+          # and upload manage_version.py and remote_update.sh to the root
+          
+          echo "Syncing files..."
+          rsync -avz --no-o --no-g -e "ssh -o StrictHostKeyChecking=no" staging/ ${{ env.deploy_user }}@${{ env.deploy_server }}:${{ env.deploy_path }}/
+          
+          # 3. Execute the update logic on the remote server and remove it afterwards
+          echo "Running remote update script..."
+          ssh -o StrictHostKeyChecking=no ${{ env.deploy_user }}@${{ env.deploy_server }} "bash ${{ env.deploy_path }}/remote_update.sh && rm ${{ env.deploy_path }}/remote_update.sh"
+
