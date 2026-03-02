@@ -111,7 +111,7 @@ jobs:
 
   publish:
     runs-on: ubuntu-latest
-    needs: get-version
+    needs: get-version.github/workflows/deploy-pages.yml
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
     
     steps:
@@ -335,14 +335,25 @@ jobs:
           
           # Update 'latest' pointer
           mkdir -p download/$TARGET_BRANCH/latest
-          echo "$VERSION" > download/$TARGET_BRANCH/latest/version.txt
-          echo "<html><head><meta http-equiv=\"refresh\" content=\"0; URL=../$VERSION/\"></head></html>" > download/$TARGET_BRANCH/latest/index.html
+          # We need to make sure the target directory structure exists before writing to it
+          # validation: check if the latest version directory actually exists
+          if [ -d "download/$TARGET_BRANCH/$VERSION" ]; then
+              echo "$VERSION" > download/$TARGET_BRANCH/latest/version.txt
+              echo "<html><head><meta http-equiv=\"refresh\" content=\"0; URL=../$VERSION/\"></head></html>" > download/$TARGET_BRANCH/latest/index.html
+          else
+              echo "Warning: Version directory download/$TARGET_BRANCH/$VERSION does not exist on remote"
+          fi
           
           echo "Culling old versions..."
           python3 manage_version.py version.json cull
           
           echo "Fixing permissions..."
+          # Set ownership to deploy user:nginx group
           chown -R github-deploy:nginx *
+          # Ensure directories are 755 and files are 644
+          find download -type d -exec chmod 755 {} \;
+          find download -type f -exec chmod 644 {} \;
+          chmod +x manage_version.py
           
           # Self-destruct script
           rm remote_update.sh
@@ -355,6 +366,8 @@ jobs:
           # -v: verbose
           # -z: compress
           # --no-o --no-g: don't try to preserve owner/group (we fix it on remote)
+          # --no-p --no-t: don't try to preserve permissions or times if they cause issues (though times are usually good)
+          # --chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r: set destination permissions specifically
           # The destination is deploy_user@deploy_server:deploy_path/
           # This will merge 'download/' into the existing 'download/' on remote
           # and upload manage_version.py and remote_update.sh to the root
