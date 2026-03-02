@@ -111,7 +111,7 @@ jobs:
 
   publish:
     runs-on: ubuntu-latest
-    needs: get-version.github/workflows/deploy-pages.yml
+    needs: get-version
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
     
     steps:
@@ -219,56 +219,13 @@ jobs:
               echo "No artifact named $artifact_name found"
             fi
           done
-
-      # print the true ip of the current runner to test fail2ban config
-      - name: Identify Runner IP
-        run: |
-          echo "Runner External IPv4:"
-          curl -4 https://ifconfig.me
-          echo -e "\nRunner External IPv6 (if available):"
-          curl -6 https://ifconfig.me || echo "No IPv6"
-
-      # ask server to be put on the allow list
-      - name: knock on the door
-        run: |
-          # Explicitly allow the current runner's IP address
-          if [ -n "${{ secrets.DEPLOY_KNOCK_URL }}" ]; then
-            echo "Performing port knock...with ${{ secrets.DEPLOY_KNOCK_URL }}"
-            curl -s "${{ secrets.DEPLOY_KNOCK_URL }}" || echo "Knock failed, continuing anyway..."
-          else
-            echo "No knock URL configured, skipping..."
-          fi
-          
-      # Download version.json from lightinator.de if it doesn't exist locally
-      - name: Get version.json
-        run: |
-          echo "Attempting to download version.json from lightinator.de"
-          curl -L -s -o version.json https://lightinator.de/version.json || echo "Could not download version.json"
-    
-          
-      # Update version.json using the manage_version.py script
-      - name: Update version.json
-        run: |
-          deploy_server="lightinator.de"
-          
-          # Define all combinations to update - only for non-single-image builds
-          for soc in esp8266 esp32 esp32c3; do
-            for type in debug release; do
-              # Determine correct file path based on soc
-              if [ "$soc" = "esp8266" ]; then
-                file="rom0.bin"
-              else
-                file="app.bin"
-              fi
-              
-              # Update entry in version.json with versioned path
-              url="http://$deploy_server/download/${{ env.target_branch }}/${{ env.version }}/$soc/$type/$file"
-              python3 esp_firmware_repo/manage_version.py version.json add $soc $type ${{ env.target_branch }} "${{ env.version }}" "$url"
-              
-              # We're not adding single image entries to version.json per requirements
-            done
-          done
-                  
+      
+      # Download version.json from lightinator.de into staging if it exists, to ensure we have a base
+      # But actually, we will be updating the one ON the server, so we don't strictly need to download it 
+      # unless we want to validate something locally.
+      # The previous steps "Get version.json" and "Update version.json" are now redundant 
+      # because we moved the logic to the remote server in the "Deploy" step.
+      
       # Setup and deploy to your external server
       - name: Setup SSH and deploy
         uses: webfactory/ssh-agent@v0.7.0
@@ -360,20 +317,28 @@ jobs:
           EOF
           
           chmod +x staging/remote_update.sh
-                  
+          
+          # 1b. Port Knocking
+          # Explicitly allow the current runner's IP address
+          if [ -n "${{ secrets.DEPLOY_KNOCK_URL }}" ]; then
+            echo "Performing port knock..."
+            curl -s "${{ secrets.DEPLOY_KNOCK_URL }}" || echo "Knock failed, continuing anyway..."
+          else
+            echo "No knock URL configured, skipping..."
+          fi
+          
           # 2. Deploy using rsync
-          # -a: archive mode (recursive, preserves permissions/times/etc)
+          # -r: recursive
+          # -l: copy symlinks as symlinks
           # -v: verbose
           # -z: compress
-          # --no-o --no-g: don't try to preserve owner/group (we fix it on remote)
-          # --no-p --no-t: don't try to preserve permissions or times if they cause issues (though times are usually good)
-          # --chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r: set destination permissions specifically
-          # The destination is deploy_user@deploy_server:deploy_path/
-          # This will merge 'download/' into the existing 'download/' on remote
-          # and upload manage_version.py and remote_update.sh to the root
+          # --chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r: set destination permissions specifically for new files
+          # We avoid -a (archive) because it includes -p (perms), -t (times), -o (owner), -g (group)
+          # which can cause "code 23" errors if the remote user doesn't own the destination files.
           
           echo "Syncing files..."
-          rsync -rlptv --chmod=Du=rwx,Dg=rx,Do=rx,Fu=rw,Fg=r,Fo=r ./staging/ ${{ env.deploy_user }}@${{ env.deploy_server }}:${{ env.deploy_path }}/
+          rsync -rlvz --chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r -e "ssh -o StrictHostKeyChecking=no" staging/ ${{ env.deploy_user }}@${{ env.deploy_server }}:${{ env.deploy_path }}/
+          
           # 3. Execute the update logic on the remote server and remove it afterwards
           echo "Running remote update script..."
           ssh -o StrictHostKeyChecking=no ${{ env.deploy_user }}@${{ env.deploy_server }} "bash ${{ env.deploy_path }}/remote_update.sh && rm ${{ env.deploy_path }}/remote_update.sh"
