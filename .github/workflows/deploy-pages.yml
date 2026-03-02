@@ -360,7 +360,7 @@ jobs:
           # and upload manage_version.py and remote_update.sh to the root
           
           echo "Syncing files..."
-          rsync -rlptv --chmod=Du=rwx,Dg=rx,Do=rx,Fu=rw,Fg=r,Fo=r ./dist/ ${{ env.deploy_user }}@${{ env.deploy_server }}:${{ env.deploy_path }}/          
+          rsync -rlptv --chmod=Du=rwx,Dg=rx,Do=rx,Fu=rw,Fg=r,Fo=r ./staging/ ${{ env.deploy_user }}@${{ env.deploy_server }}:${{ env.deploy_path }}/
           # 3. Execute the update logic on the remote server and remove it afterwards
           echo "Running remote update script..."
           ssh -o StrictHostKeyChecking=no ${{ env.deploy_user }}@${{ env.deploy_server }} "bash ${{ env.deploy_path }}/remote_update.sh && rm ${{ env.deploy_path }}/remote_update.sh"
