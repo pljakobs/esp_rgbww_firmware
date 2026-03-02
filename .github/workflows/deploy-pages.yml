@@ -220,36 +220,12 @@ jobs:
             fi
           done
       
-      # Download version.json from lightinator.de if it doesn't exist locally
-      - name: Get version.json
-        run: |
-          echo "Attempting to download version.json from lightinator.de"
-          curl -L -s -o version.json https://lightinator.de/version.json || echo "Could not download version.json"
-    
-          
-      # Update version.json using the manage_version.py script
-      - name: Update version.json
-        run: |
-          deploy_server="lightinator.de"
-          
-          # Define all combinations to update - only for non-single-image builds
-          for soc in esp8266 esp32 esp32c3; do
-            for type in debug release; do
-              # Determine correct file path based on soc
-              if [ "$soc" = "esp8266" ]; then
-                file="rom0.bin"
-              else
-                file="app.bin"
-              fi
-              
-              # Update entry in version.json with versioned path
-              url="http://$deploy_server/download/${{ env.target_branch }}/${{ env.version }}/$soc/$type/$file"
-              python3 esp_firmware_repo/manage_version.py version.json add $soc $type ${{ env.target_branch }} "${{ env.version }}" "$url"
-              
-              # We're not adding single image entries to version.json per requirements
-            done
-          done
-                  
+      # Download version.json from lightinator.de into staging if it exists, to ensure we have a base
+      # But actually, we will be updating the one ON the server, so we don't strictly need to download it 
+      # unless we want to validate something locally.
+      # The previous steps "Get version.json" and "Update version.json" are now redundant 
+      # because we moved the logic to the remote server in the "Deploy" step.
+      
       # Setup and deploy to your external server
       - name: Setup SSH and deploy
         uses: webfactory/ssh-agent@v0.7.0
@@ -316,14 +292,25 @@ jobs:
           
           # Update 'latest' pointer
           mkdir -p download/$TARGET_BRANCH/latest
-          echo "$VERSION" > download/$TARGET_BRANCH/latest/version.txt
-          echo "<html><head><meta http-equiv=\"refresh\" content=\"0; URL=../$VERSION/\"></head></html>" > download/$TARGET_BRANCH/latest/index.html
+          # We need to make sure the target directory structure exists before writing to it
+          # validation: check if the latest version directory actually exists
+          if [ -d "download/$TARGET_BRANCH/$VERSION" ]; then
+              echo "$VERSION" > download/$TARGET_BRANCH/latest/version.txt
+              echo "<html><head><meta http-equiv=\"refresh\" content=\"0; URL=../$VERSION/\"></head></html>" > download/$TARGET_BRANCH/latest/index.html
+          else
+              echo "Warning: Version directory download/$TARGET_BRANCH/$VERSION does not exist on remote"
+          fi
           
           echo "Culling old versions..."
           python3 manage_version.py version.json cull
           
           echo "Fixing permissions..."
+          # Set ownership to deploy user:nginx group
           chown -R github-deploy:nginx *
+          # Ensure directories are 755 and files are 644
+          find download -type d -exec chmod 755 {} \;
+          find download -type f -exec chmod 644 {} \;
+          chmod +x manage_version.py
           
           # Self-destruct script
           rm remote_update.sh
@@ -345,12 +332,14 @@ jobs:
           # -v: verbose
           # -z: compress
           # --no-o --no-g: don't try to preserve owner/group (we fix it on remote)
+          # --no-p --no-t: don't try to preserve permissions or times if they cause issues (though times are usually good)
+          # --chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r: set destination permissions specifically
           # The destination is deploy_user@deploy_server:deploy_path/
           # This will merge 'download/' into the existing 'download/' on remote
           # and upload manage_version.py and remote_update.sh to the root
           
           echo "Syncing files..."
-          rsync -avz --no-o --no-g -e "ssh -o StrictHostKeyChecking=no" staging/ ${{ env.deploy_user }}@${{ env.deploy_server }}:${{ env.deploy_path }}/
+          rsync -avz --no-o --no-g --no-p --chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r -e "ssh -o StrictHostKeyChecking=no" staging/ ${{ env.deploy_user }}@${{ env.deploy_server }}:${{ env.deploy_path }}/
           
           # 3. Execute the update logic on the remote server and remove it afterwards
           echo "Running remote update script..."
