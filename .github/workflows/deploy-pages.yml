@@ -339,7 +339,7 @@ jobs:
           echo "Syncing files..."
           rsync -rlvz --chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r -e "ssh -o StrictHostKeyChecking=no" staging/ ${{ env.deploy_user }}@${{ env.deploy_server }}:${{ env.deploy_path }}/
           
-          # 3. Execute the update logic on the remote server and remove it afterwards
+          # 3. Execute the update logic on the remote server
           echo "Running remote update script..."
-          ssh -o StrictHostKeyChecking=no ${{ env.deploy_user }}@${{ env.deploy_server }} "bash ${{ env.deploy_path }}/remote_update.sh && rm ${{ env.deploy_path }}/remote_update.sh"
+          ssh -o StrictHostKeyChecking=no ${{ env.deploy_user }}@${{ env.deploy_server }} "bash ${{ env.deploy_path }}/remote_update.sh"
 
