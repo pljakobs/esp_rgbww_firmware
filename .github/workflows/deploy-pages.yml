@@ -236,7 +236,7 @@ jobs:
         run: |
           echo "deploy_user=github-deploy" >> $GITHUB_ENV
           echo "deploy_server=lightinator.de" >> $GITHUB_ENV
-          echo "deploy_path=~/nginx/html" >> $GITHUB_ENV
+          echo "deploy_path=/home/github-deploy/nginx/html" >> $GITHUB_ENV
           
       - name: Add server to known_hosts
         run: |
