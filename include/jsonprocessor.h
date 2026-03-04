@@ -15,6 +15,14 @@
 
 class JsonProcessor {
 public:
+    enum class RequestType { Query, Command };
+
+    struct ApiResponse {
+        int code = 200;
+        String message;
+        JsonObject data;
+    };
+
     struct RequestParameters {
         String target;
 
@@ -75,13 +83,23 @@ public:
     bool onToggle(const String& json, String& msg, bool relay = true);
     bool onToggle(JsonObject root, String& msg, bool relay = true);
 
+    bool onSystemReq(JsonObject root, String& msg);
+
     bool onDirect(const String& json, String& msg, bool relay);
     bool onDirect(JsonObject root, String& msg, bool relay);
 
     bool onJsonRpc(const String& json);
+    bool onJsonRpc(const String& json, String& response);
+    
+    // Serialization methods (moved from Webserver/MQTT)
+    void serializeState(JsonObject root, bool includeRaw = true, bool includeHsv = true);
+    void serializeInfo(JsonObject root);
+    void serializeNetworks(JsonObject root);
 
     void parseRequestParams(JsonObject root, RequestParameters& params);
     void addChannelStatesToCmd(JsonObject root, const RGBWWLed::ChannelList& channels);
 
     bool onSingleColorCommand(JsonObject root, String& errorMsg);
+
+    void handleRequest(String endpoint, RequestType type, JsonObject payload, ApiResponse& resp, bool relay = true);
 };

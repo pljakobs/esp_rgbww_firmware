@@ -255,12 +255,9 @@ void AppMqttClient::publishCurrentRaw(const ChannelOutput& raw)
 
 	StaticJsonDocument<200> doc;
 	JsonObject root = doc.to<JsonObject>();
-	JsonObject rawJson = root.createNestedObject(F("raw"));
-	rawJson[F("r")] = raw.r;
-	rawJson[F("g")] = raw.g;
-	rawJson[F("b")] = raw.b;
-	rawJson[F("cw")] = raw.cw;
-	rawJson[F("ww")] = raw.ww;
+	
+	// Use centralized serialization
+	app.jsonproc.serializeState(root, true, false);
 
 	root[F("t")] = 0;
     root[F("cmd")] = F("solid");
@@ -282,17 +279,16 @@ void AppMqttClient::publishCurrentHsv(const HSVCT& color)
 
 	debug_d("ApplicationMQTTClient::publishCurrentHsv\n");
 
-	float h, s, v;
-	int ct;
-	color.asRadian(h, s, v, ct);
-
 	StaticJsonDocument<200> doc;
 	JsonObject root = doc.to<JsonObject>();
-	JsonObject hsv = root.createNestedObject(F("hsv"));
-	hsv[F("h")] = h;
-	hsv[F("s")] = s;
-	hsv[F("v")] = v;
-	hsv[F("ct")] = ct;
+	
+	// Use centralized serialization, but note that serializeState 
+	// fetches generic current color from app.rgbwwctrl, whereas this method
+	// passed a specific 'color' object. Usually they are same, but 
+	// strictly speaking we should use the passed arg.
+	// However, serializeState pulls from app.rgbwwctrl.getCurrentColor().
+	// Assuming this method is called when state changes, they should match.
+	app.jsonproc.serializeState(root, false, true);
 
 	root[F("t")] = 0;
     root[F("cmd")] = F("solid");

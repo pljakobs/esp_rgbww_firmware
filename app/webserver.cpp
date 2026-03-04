@@ -27,7 +27,6 @@
 #include <Network/Http/Websocket/WebsocketResource.h>
 #include <Storage.h>
 #include <config.h>
-
 #include <fileMap.h>
 
 //#define NOCACHE
@@ -90,10 +89,14 @@ void ApplicationWebserver::init()
 	// websocket api
 	wsResource = new WebsocketResource();
 	wsResource->setConnectionHandler([this](WebsocketConnection& socket) { this->wsConnected(socket); });
+	wsResource->setMessageHandler([this](WebsocketConnection& socket, const String& message) {
+		this->wsMessageReceived(socket, message);
+	});
 	wsResource->setDisconnectionHandler([this](WebsocketConnection& socket) { this->wsDisconnected(socket); });
 	paths.set("/ws", wsResource);
 
 	_init = true;
+
 }
 
 void ApplicationWebserver::wsConnected(WebsocketConnection& socket)
@@ -109,6 +112,22 @@ void ApplicationWebserver::wsDisconnected(WebsocketConnection& socket)
 	webSockets.removeElement(&socket);
 	debug_i("===>nr of websockets: %i", webSockets.size());
 }
+
+void ApplicationWebserver::wsMessageReceived(WebsocketConnection& socket, const String& message)
+{
+	debug_i("WS received: %s", message.c_str());
+
+	String response;
+
+	// Process the JSON-RPC message using JsonProcessor
+	app.jsonproc.onJsonRpc(message, response);
+
+	// If a response was generated, send it back
+	if (response.length() > 0) {
+		socket.sendString(response);
+	}
+}
+
 
 /*
 *	send a websocket broadcast
@@ -672,45 +691,16 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response)
 #endif
 	auto stream = std::make_unique<JsonObjectStream>();
 	JsonObject data = stream->getRoot();
-	data[F("deviceid")] = system_get_chip_id();
-#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
-	data[F("current_rom")] = String(app.ota.getRomPartition().name());
-#endif
-	data[F("git_version")] = fw_git_version;
-	data[F("build_type")] = BUILD_TYPE;
-	data[F("git_date")] = fw_git_date;
-	data[F("webapp_version")] = WEBAPP_VERSION;
-	data[F("sming")] = SMING_VERSION;
-	data[F("event_num_clients")] = app.eventserver.activeClients;
-	data[F("uptime")] = app.getUptime();
-	data[F("cpu_usage_percent")] = app.getCpuPercent();
-	data[F("heap_free")] = system_get_free_heap_size();
-	data[F("soc")]=SOC;
 	
-	/*
-    FileSystem::Info fsInfo;
-    app.getinfo(fsInfo);
-    JsonObject FS=data.createNestedObject("fs");
-    FS[F("mounted")] = fsInfo.partition?"true":"false";
-    FS[F("size")] = fsInfo.total;
-    FS[F("used")] = fsInfo.used;
-    FS[F("available")] = fsInfo.freeSpace;
-*/
-	JsonObject rgbww = data.createNestedObject(F("rgbww"));
-	rgbww[F("version")] = RGBWW_VERSION;
-	rgbww[F("queuesize")] = RGBWW_ANIMATIONQSIZE;
+	JsonProcessor::ApiResponse apiResp;
+	apiResp.data = data;
+	app.jsonproc.handleRequest(F("info"), JsonProcessor::RequestType::Query, JsonObject(), apiResp);
 
-	JsonObject con = data.createNestedObject(F("connection"));
-	con[F("connected")] = WifiStation.isConnected();
-	con[F("ssid")] = WifiStation.getSSID();
-	con[F("dhcp")] = WifiStation.isEnabledDHCP();
-	con[F("ip")] = WifiStation.getIP().toString();
-	con[F("netmask")] = WifiStation.getNetworkMask().toString();
-	con[F("gateway")] = WifiStation.getNetworkGateway().toString();
-	con[F("mac")] = WifiStation.getMAC();
-	//con[F("mdnshostname")] = app.cfg.network.connection.mdnshostname.c_str();
-
-	sendApiResponse(response, stream.release());
+	if (apiResp.code == 200) {
+		sendApiResponse(response, stream.release());
+	} else {
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, apiResp.message);
+	}
 
 }
 
@@ -734,27 +724,16 @@ void ApplicationWebserver::onColorGet(HttpRequest& request, HttpResponse& respon
 	auto stream = std::make_unique<JsonObjectStream>();
 	JsonObject json = stream->getRoot();
 
-	JsonObject raw = json.createNestedObject("raw");
-	ChannelOutput output = app.rgbwwctrl.getCurrentOutput();
-	raw[F("r")] = output.r;
-	raw[F("g")] = output.g;
-	raw[F("b")] = output.b;
-	raw[F("ww")] = output.ww;
-	raw[F("cw")] = output.cw;
+	JsonProcessor::ApiResponse apiResp;
+	apiResp.data = json;
+	app.jsonproc.handleRequest(F("color"), JsonProcessor::RequestType::Query, JsonObject(), apiResp);
 
-	JsonObject hsv = json.createNestedObject("hsv");
-	float h, s, v;
-	int ct;
-	HSVCT c = app.rgbwwctrl.getCurrentColor();
-	c.asRadian(h, s, v, ct);
-	hsv[F("h")] = h;
-	hsv[F("s")] = s;
-	hsv[F("v")] = v;
-	hsv[F("ct")] = ct;
-
-	setCorsHeaders(response);
-
-	sendApiResponse(response, stream.release());
+	if (apiResp.code == 200) {
+		setCorsHeaders(response);
+		sendApiResponse(response, stream.release());
+	} else {
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, apiResp.message);
+	}
 
 }
 
@@ -790,14 +769,23 @@ void ApplicationWebserver::onColorPost(HttpRequest& request, HttpResponse& respo
 	}
 
 	debug_i("received color update with body legth %i and content %s", body.length(),body.c_str());
-	String msg;
+	
+	StaticJsonDocument<512> doc;
+	DeserializationError err = deserializeJson(doc, body);
+	if (err) {
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("Invalid JSON"));
+		return;
+	}
 
-	if(!app.jsonproc.onColor(body, msg)) {
-		debug_i("received color update with message %s", msg.c_str());
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, msg);
-	} else {
-		debug_i("received color update with message %s", msg.c_str());
+	JsonProcessor::ApiResponse apiResp;
+	app.jsonproc.handleRequest(F("color"), JsonProcessor::RequestType::Command, doc.as<JsonObject>(), apiResp);
+
+	if (apiResp.code == 200) {
+		debug_i("received color update success");
 		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
+	} else {
+		debug_i("received color update error: %s", apiResp.message.c_str());
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, apiResp.message);
 	}
 }
 
@@ -845,24 +833,7 @@ void ApplicationWebserver::onColor(HttpRequest& request, HttpResponse& response)
 	}
 }
 
-/**
- * @brief Checks if a string is printable.
- *
- * This function checks if a given string is printable, i.e., if all characters in the string
- * have ASCII values greater than or equal to 0x20 (space character).
- *
- * @param str The string to be checked.
- * @return True if the string is printable, false otherwise.
- */
-bool ApplicationWebserver::isPrintable(const String& str)
-{
-	for(unsigned int i = 0; i < str.length(); ++i) {
-		char c = str[i];
-		if(c < 0x20)
-			return false;
-	}
-	return true;
-}
+
 
 /**
  * @brief Handles the HTTP request for retrieving network information.
@@ -898,39 +869,20 @@ void ApplicationWebserver::onNetworks(HttpRequest& request, HttpResponse& respon
     */
 
 	auto stream = std::make_unique<JsonObjectStream>();
-	JsonObject json = stream->getRoot();
+    JsonProcessor::ApiResponse resp;
+    resp.data = stream->getRoot();
+    
+    StaticJsonDocument<10> doc;
+    JsonObject payload = doc.to<JsonObject>();
 
-	bool error = false;
+    app.jsonproc.handleRequest(F("networks"), JsonProcessor::RequestType::Query, payload, resp);
 
-	if(app.network.isScanning()) {
-		json[F("scanning")] = true;
-	} else {
-		json[F("scanning")] = false;
-		JsonArray netlist = json.createNestedArray(F("available"));
-		BssList networks = app.network.getAvailableNetworks();
-		for(unsigned int i = 0; i < networks.count(); i++) {
-			if(networks[i].hidden)
-				continue;
-
-			// SSIDs may contain any byte values. Some are not printable and will cause the javascript client to fail
-			// on parsing the message. Try to filter those here
-			if(!ApplicationWebserver::isPrintable(networks[i].ssid)) {
-				debug_w("Filtered SSID due to unprintable characters: %s", networks[i].ssid.c_str());
-				continue;
-			}
-
-			JsonObject item = netlist.createNestedObject();
-			item[F("id")] = (int)networks[i].getHashId();
-			item[F("ssid")] = networks[i].ssid;
-			item[F("signal")] = networks[i].rssi;
-			item[F("encryption")] = networks[i].getAuthorizationMethodName();
-			//limit to max 25 networks
-			if(i >= 25)
-				break;
-		}
-	}
 	setCorsHeaders(response);
-	sendApiResponse(response, stream.release());
+    if(resp.code == 200) {
+	    sendApiResponse(response, stream.release());
+    } else {
+        sendApiCode(response, (API_CODES)resp.code, resp.message.c_str());
+    }
 
 }
 
@@ -970,11 +922,15 @@ void ApplicationWebserver::onScanNetworks(HttpRequest& request, HttpResponse& re
 		return;
 	}
     */
-	if(!app.network.isScanning()) {
-		app.network.scan(false);
-	}
+    JsonProcessor::ApiResponse resp;
+    
+    // Empty payload
+    StaticJsonDocument<10> doc;
+    JsonObject payload = doc.to<JsonObject>();
 
-	sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
+    app.jsonproc.handleRequest(F("networks"), JsonProcessor::RequestType::Command, payload, resp);
+
+	sendApiCode(response, (API_CODES)resp.code, resp.message.c_str());
 }
 
 /**
@@ -1087,7 +1043,7 @@ void ApplicationWebserver::onConnect(HttpRequest& request, HttpResponse& respons
  */
 void ApplicationWebserver::onSystemReq(HttpRequest& request, HttpResponse& response)
 {
-    if(!preflightRequest(request, response, {HttpMethod::POST})) return;
+    if(!preflightRequest(request, response, {HttpMethod::GET, HttpMethod::POST})) return;
     
     /*
 	if(!checkHeap(response)) {
@@ -1105,55 +1061,48 @@ void ApplicationWebserver::onSystemReq(HttpRequest& request, HttpResponse& respo
 	}
 #endif
 
-    /*
-	if(request.method == HttpMethod::OPTIONS) {
-		setCorsHeaders(response);
+    JsonProcessor::RequestType type = (request.method == HttpMethod::GET) 
+        ? JsonProcessor::RequestType::Query 
+        : JsonProcessor::RequestType::Command;
+    
+    StaticJsonDocument<512> doc;
+    JsonObject payload;
+    
+    if (type == JsonProcessor::RequestType::Command) {
+        String body = request.getBody();
+        if (body.length() > 0) {
+             if (!Json::deserialize(doc, body)) {
+                 sendApiCode(response, API_CODES::API_BAD_REQUEST, F("Invalid JSON"));
+                 return;
+             }
+             payload = doc.as<JsonObject>();
+        } else {
+             sendApiCode(response, API_CODES::API_BAD_REQUEST, F("could not get HTTP body"));
+             return;
+        }
+    }
 
-		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
-		return;
-	}
-	if(request.method != HttpMethod::POST) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not HTTP POST"));
-		return;
-	}
-    */
+    StaticJsonDocument<512> respDoc;
+    JsonProcessor::ApiResponse resp;
+    resp.data = respDoc.to<JsonObject>();
 
-	bool error = false;
-	String body = request.getBody();
-	if(body == NULL) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("could not get HTTP body"));
-		return;
-	} else {
-		debug_i("ApplicationWebserver::onSystemReq: %s", body.c_str());
-		// ConfigDB - CONFIG_MAX_LENGTH was no longer defined, what's the right size here?
-		StaticJsonDocument<512> doc;
-		Json::deserialize(doc, body);
+    app.jsonproc.handleRequest(F("system"), type, payload, resp);
 
-		String cmd = doc[F("cmd")].as<const char*>();
-		if(cmd) {
-			if(cmd.equals(F("debug"))) {
-				bool enable;
-				if(Json::getValue(doc[F("enable")], enable)) {
-					Serial.systemDebugOutput(enable);
-				} else {
-					error = true;
-				}
+    setCorsHeaders(response);
 
-			} else if(!app.delayedCMD(cmd, 1500)) {
-				error = true;
-			}
-
-		} else {
-			error = true;
-		}
-	}
-	setCorsHeaders(response);
-
-	if(!error) {
-		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
-	} else {
-		sendApiCode(response, API_CODES::API_MISSING_PARAM);
-	}
+    if (resp.code == 200) {
+        if (resp.data.size() > 0) {
+             auto stream = std::make_unique<JsonObjectStream>();
+             JsonObject root = stream->getRoot();
+             root.set(resp.data);
+             sendApiResponse(response, stream.release());
+        } else {
+             sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
+        }
+    } else {
+         if (resp.code == 400) sendApiCode(response, API_CODES::API_BAD_REQUEST, resp.message);
+         else sendApiCode(response, API_CODES::API_BAD_REQUEST, resp.message);
+    }
 }
 
 /**
@@ -1277,11 +1226,16 @@ void ApplicationWebserver::onStop(HttpRequest& request, HttpResponse& response)
 	}
     */
 
-	String msg;
-	if(app.jsonproc.onStop(request.getBody(), msg, true)) {
+	StaticJsonDocument<256> doc;
+	deserializeJson(doc, request.getBody());
+
+	JsonProcessor::ApiResponse apiResp;
+	app.jsonproc.handleRequest(F("stop"), JsonProcessor::RequestType::Command, doc.as<JsonObject>(), apiResp);
+
+	if (apiResp.code == 200) {
 		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 	} else {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST);
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, apiResp.message);
 	}
 }
 
@@ -1299,11 +1253,16 @@ void ApplicationWebserver::onSkip(HttpRequest& request, HttpResponse& response)
 	}
     */
 
-	String msg;
-	if(app.jsonproc.onSkip(request.getBody(), msg)) {
+	StaticJsonDocument<256> doc;
+	deserializeJson(doc, request.getBody());
+
+	JsonProcessor::ApiResponse apiResp;
+	app.jsonproc.handleRequest(F("skip"), JsonProcessor::RequestType::Command, doc.as<JsonObject>(), apiResp);
+
+	if (apiResp.code == 200) {
 		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 	} else {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST);
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, apiResp.message);
 	}
 }
 
@@ -1321,11 +1280,16 @@ void ApplicationWebserver::onPause(HttpRequest& request, HttpResponse& response)
 	}
     */
 
-	String msg;
-	if(app.jsonproc.onPause(request.getBody(), msg, true)) {
+	StaticJsonDocument<256> doc;
+	deserializeJson(doc, request.getBody());
+
+	JsonProcessor::ApiResponse apiResp;
+	app.jsonproc.handleRequest(F("pause"), JsonProcessor::RequestType::Command, doc.as<JsonObject>(), apiResp);
+
+	if (apiResp.code == 200) {
 		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 	} else {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST);
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, apiResp.message);
 	}
 }
 
@@ -1343,11 +1307,16 @@ void ApplicationWebserver::onContinue(HttpRequest& request, HttpResponse& respon
 	}
     */
 
-	String msg;
-	if(app.jsonproc.onContinue(request.getBody(), msg)) {
+	StaticJsonDocument<256> doc;
+	deserializeJson(doc, request.getBody());
+
+	JsonProcessor::ApiResponse apiResp;
+	app.jsonproc.handleRequest(F("continue"), JsonProcessor::RequestType::Command, doc.as<JsonObject>(), apiResp);
+
+	if (apiResp.code == 200) {
 		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 	} else {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST);
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, apiResp.message);
 	}
 }
 
@@ -1365,11 +1334,16 @@ void ApplicationWebserver::onBlink(HttpRequest& request, HttpResponse& response)
 	}
     */
 
-	String msg;
-	if(app.jsonproc.onBlink(request.getBody(), msg)) {
+	StaticJsonDocument<512> doc;
+	deserializeJson(doc, request.getBody());
+
+	JsonProcessor::ApiResponse apiResp;
+	app.jsonproc.handleRequest(F("blink"), JsonProcessor::RequestType::Command, doc.as<JsonObject>(), apiResp);
+
+	if (apiResp.code == 200) {
 		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 	} else {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST);
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, apiResp.message);
 	}
 }
 
@@ -1387,11 +1361,16 @@ void ApplicationWebserver::onToggle(HttpRequest& request, HttpResponse& response
 	}
     */
 
-	String msg;
-	if(app.jsonproc.onToggle(request.getBody(), msg)) {
+	StaticJsonDocument<256> doc;
+	deserializeJson(doc, request.getBody());
+
+	JsonProcessor::ApiResponse apiResp;
+	app.jsonproc.handleRequest(F("toggle"), JsonProcessor::RequestType::Command, doc.as<JsonObject>(), apiResp);
+
+	if (apiResp.code == 200) {
 		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 	} else {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST);
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, apiResp.message);
 	}
 }
 
@@ -1485,72 +1464,52 @@ void ApplicationWebserver::onData(HttpRequest& request, HttpResponse& response){
 	return;
 }
 void ApplicationWebserver::onSetOn(HttpRequest &request, HttpResponse &response) {
-    if(!preflightRequest(request, response, {HttpMethod::POST}, 4000)) return;
-    
-    /*
-	if(!checkHeap(response)) {
-		return;
-	}
-	if(request.method == HttpMethod::OPTIONS) {
-		// probably a CORS request
-		setCorsHeaders(response);
-		sendApiCode(response, API_CODES::API_SUCCESS, "");
-		debug_i("HttpMethod::OPTIONS Request, sent API_SUCCESS");
-		return;
-	}
-	if(!checkHeap(response,4000))
-		return;
-    */
+    if(!preflightRequest(request, response, {HttpMethod::POST, HttpMethod::GET}, 4000)) return;
 
-  debug_i("onSetOn");
-	
-  String body = request.getBody();
+	debug_i("onSetOn");
+
 	StaticJsonDocument<512> doc;
-	DeserializationError err = deserializeJson(doc, body);
-	if (err) {
-		sendApiCode(response, API_BAD_REQUEST, F("Invalid JSON"));
-		return;
+	String body = request.getBody();
+	if (body.length() > 0) {
+		DeserializationError err = deserializeJson(doc, body);
+		if (err) {
+			sendApiCode(response, API_CODES::API_BAD_REQUEST, F("Invalid JSON"));
+			return;
+		}
 	}
-	String msg;
-		if (app.jsonproc.onSetOn(doc.as<JsonObject>(), msg, true)) {
-		sendApiCode(response, API_SUCCESS, F("SetOn OK"));
+
+	JsonProcessor::ApiResponse apiResp;
+	app.jsonproc.handleRequest(F("on"), JsonProcessor::RequestType::Command, doc.as<JsonObject>(), apiResp);
+
+	if (apiResp.code == 200) {
+		sendApiCode(response, API_CODES::API_SUCCESS, F("SetOn OK"));
 	} else {
-		sendApiCode(response, API_BAD_REQUEST, msg);
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, apiResp.message);
 	}
 }
 
 void ApplicationWebserver::onSetOff(HttpRequest &request, HttpResponse &response) {
-    if(!preflightRequest(request, response, {HttpMethod::POST}, 4000)) return;
-    
-    /*
-	if(!checkHeap(response)) {
-		return;
-	}
-	if(request.method == HttpMethod::OPTIONS) {
-		// probably a CORS request
-		setCorsHeaders(response);
-		sendApiCode(response, API_CODES::API_SUCCESS, "");
-		debug_i("HttpMethod::OPTIONS Request, sent API_SUCCESS");
-		return;
-	}
-	if(!checkHeap(response,4000))
-		return;
-    */
+    if(!preflightRequest(request, response, {HttpMethod::POST, HttpMethod::GET}, 4000)) return;
 
-  debug_i("onSetOff");
+	debug_i("onSetOff");
 
-  String body = request.getBody();
 	StaticJsonDocument<512> doc;
-	DeserializationError err = deserializeJson(doc, body);
-	if (err) {
-		sendApiCode(response, API_BAD_REQUEST, F("Invalid JSON"));
-		return;
+	String body = request.getBody();
+	if (body.length() > 0) {
+		DeserializationError err = deserializeJson(doc, body);
+		if (err) {
+			sendApiCode(response, API_CODES::API_BAD_REQUEST, F("Invalid JSON"));
+			return;
+		}
 	}
-	String msg;
-		if (app.jsonproc.onSetOff(doc.as<JsonObject>(), msg, true)) {
-		sendApiCode(response, API_SUCCESS, F("SetOff OK"));
+
+	JsonProcessor::ApiResponse apiResp;
+	app.jsonproc.handleRequest(F("off"), JsonProcessor::RequestType::Command, doc.as<JsonObject>(), apiResp);
+
+	if (apiResp.code == 200) {
+		sendApiCode(response, API_CODES::API_SUCCESS, F("SetOff OK"));
 	} else {
-		sendApiCode(response, API_BAD_REQUEST, msg);
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, apiResp.message);
 	}
 }
 
