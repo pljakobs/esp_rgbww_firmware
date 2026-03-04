@@ -1,0 +1,25 @@
+2026-03-04 13:04:32,554 - INFO - Target Device: 192.168.29.31
+2026-03-04 13:04:32,554 - INFO - --- Testing HTTP Basics ---
+2026-03-04 13:04:32,554 - INFO - GET /info
+2026-03-04 13:04:32,615 - INFO - SUCCESS: /info returned 200
+2026-03-04 13:04:32,615 - INFO - --- Testing HTTP Color ---
+2026-03-04 13:04:32,615 - INFO - GET /color
+2026-03-04 13:04:32,682 - INFO - SUCCESS: GET /color returned {'raw': {'r': 0, 'g': 255, 'b': 0, 'ww': 0, 'cw': 0}, 'hsv': {'h': 0, 's': 0, 'v': 0, 'ct': 0}}
+2026-03-04 13:04:32,682 - INFO - POST /color (Set Red): {'raw': {'r': 255, 'g': 0, 'b': 0, 'cw': 0, 'ww': 0}, 't': 100}
+2026-03-04 13:04:32,786 - INFO - SUCCESS: POST /color (Red)
+2026-03-04 13:04:33,344 - INFO - SUCCESS: Color verification passed (r=255)
+2026-03-04 13:04:33,344 - INFO - --- Testing HTTP Controls ---
+2026-03-04 13:04:33,344 - INFO - POST /on
+2026-03-04 13:04:33,399 - INFO - SUCCESS: POST /on returned 200
+2026-03-04 13:04:34,709 - INFO - POST /off
+2026-03-04 13:04:34,765 - INFO - SUCCESS: POST /off returned 200
+2026-03-04 13:04:36,036 - INFO - POST /toggle
+2026-03-04 13:04:36,116 - INFO - SUCCESS: POST /toggle returned 200
+2026-03-04 13:04:36,373 - INFO - --- Testing WebSocket ---
+2026-03-04 13:04:36,392 - INFO - WebSocket Connected
+2026-03-04 13:04:36,392 - INFO - WS Sending: {'jsonrpc': '2.0', 'method': 'color', 'params': {}, 'id': 1}
+2026-03-04 13:04:36,399 - INFO - WS Received: {"jsonrpc":"2.0","id":1,"error":{"code":-32603,"message":"No color object!"}}
+2026-03-04 13:04:36,399 - INFO - WS Sending: {'jsonrpc': '2.0', 'method': 'color', 'params': {'raw': {'r': 0, 'g': 255, 'b': 0, 'cw': 0, 'ww': 0}, 't': 100}, 'id': 2}
+2026-03-04 13:04:36,407 - INFO - WS Received: {"jsonrpc":"2.0","id":2,"result":"OK"}
+2026-03-04 13:04:36,957 - INFO - SUCCESS: WS Command verified via HTTP (g=255)
+2026-03-04 13:04:36,962 - INFO - WebSocket Closed

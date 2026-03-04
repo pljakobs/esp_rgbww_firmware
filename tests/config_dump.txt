@@ -1,0 +1,1119 @@
+--- CONFIG ---
+{
+  "ota": {
+    "url": "http://lightinator.de/version.json"
+  },
+  "security": {
+    "api_secured": false,
+    "api_password": null
+  },
+  "events": {
+    "color_interval_ms": 500,
+    "color_min_interval_ms": 500,
+    "trans_fin_interval_ms": 1000,
+    "server_enabled": true
+  },
+  "telemetry": {
+    "statsEnabled": "ON",
+    "logEnabled": "OFF",
+    "url": "lightinator.de:1883",
+    "user": "rgbww",
+    "password": "rgbwwdebug",
+    "numReboots": 22
+  },
+  "general": {
+    "supported_color_models": [
+      "RGB",
+      "RGBWW",
+      "RGBCW",
+      "RGBWWCW"
+    ],
+    "is_initialized": true,
+    "device_name": "Antares",
+    "buttons_debounce_ms": 50,
+    "buttons_config": null,
+    "pin_config_url": "https://raw.githubusercontent.com/pljakobs/esp_rgb_webapp2/devel/public/config/pinconfig.json",
+    "current_pin_config_name": "mrpj",
+    "allow_web_icons": true
+  },
+  "color": {
+    "brightness": {
+      "red": 100,
+      "ww": 100,
+      "green": 100,
+      "blue": 100,
+      "cw": 100
+    },
+    "colortemp": {
+      "ww": 2700,
+      "cw": 6000
+    },
+    "hsv": {
+      "red": 0,
+      "magenta": 0,
+      "green": 0,
+      "blue": 0,
+      "yellow": 0,
+      "model": 0,
+      "cyan": 0
+    },
+    "calibration": {
+      "ct_range": {
+        "min": 1000,
+        "max": 20000
+      },
+      "hsv": [],
+      "ct": {
+        "a": 0,
+        "b": 0,
+        "c": 0
+      },
+      "gamma": 0
+    },
+    "startup_color": "last",
+    "color_mode": 3
+  },
+  "sync": {
+    "cmd_master_enabled": false,
+    "color_slave_enabled": true,
+    "color_slave_topic": "home/led1/command",
+    "clock_master_enabled": false,
+    "color_master_interval_ms": 0,
+    "clock_slave_enabled": false,
+    "cmd_slave_enabled": true,
+    "clock_master_interval": 30,
+    "clock_slave_topic": "home/led1/clock",
+    "cmd_slave_topic": "home/led/command",
+    "color_master_enabled": false
+  },
+  "network": {
+    "mqtt": {
+      "homeassistant": {
+        "enable": true,
+        "discovery_prefix": "homeassistant",
+        "node_id": null
+      },
+      "server": "192.168.29.5",
+      "password": null,
+      "port": 1883,
+      "topic_base": "lightinator/",
+      "enabled": true,
+      "username": null
+    },
+    "ntp": {
+      "enabled": false,
+      "server": "pool.ntp.org",
+      "interval": 3600
+    },
+    "connection": {
+      "netmask": "255.255.255.0",
+      "ip": "192.168.1.1",
+      "dhcp": true,
+      "gateway": "192.168.1.255"
+    },
+    "ap": {
+      "password": "configesp",
+      "secured": true,
+      "ssid": "Lightinator_6668181"
+    },
+    "mdns": {
+      "enabled": true,
+      "name": "Antares"
+    }
+  },
+  "hardware": {
+    "pwm": {
+      "timer": {
+        "speed_mode": "LOWSPEED",
+        "frequency": 1000,
+        "resolution": 10,
+        "number": 0
+      },
+      "spreadSpectrum": {
+        "mode": "ON",
+        "width": 15,
+        "subsampling": 4
+      },
+      "phaseShift": {
+        "mode": "ON"
+      }
+    },
+    "available_pins": [
+      {
+        "pins": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          12,
+          13,
+          14,
+          15,
+          16
+        ],
+        "soc": "esp8266"
+      },
+      {
+        "pins": [
+          0,
+          1,
+          2,
+          4,
+          5,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          21,
+          22,
+          23,
+          25,
+          26,
+          27,
+          32,
+          33
+        ],
+        "soc": "esp32"
+      },
+      {
+        "pins": [
+          0,
+          1,
+          3,
+          4,
+          5,
+          6,
+          7,
+          18,
+          19,
+          20,
+          21
+        ],
+        "soc": "esp32c3"
+      }
+    ],
+    "pinconfigs": [
+      {
+        "channels": [
+          {
+            "name": "red",
+            "pin": 13
+          },
+          {
+            "name": "green",
+            "pin": 12
+          },
+          {
+            "name": "blue",
+            "pin": 14
+          },
+          {
+            "name": "warmwhite",
+            "pin": 5
+          },
+          {
+            "name": "coldwhite",
+            "pin": 4
+          }
+        ],
+        "name": "mrpj",
+        "soc": "esp8266",
+        "model": "rgbww",
+        "clear_pin": 16
+      },
+      {
+        "channels": [
+          {
+            "name": "red",
+            "pin": 0
+          },
+          {
+            "name": "green",
+            "pin": 3
+          },
+          {
+            "name": "blue",
+            "pin": 4
+          },
+          {
+            "name": "warmwhite",
+            "pin": 5
+          },
+          {
+            "name": "coldwhite",
+            "pin": 6
+          }
+        ],
+        "name": "Lightinator Mini",
+        "soc": "esp32c3",
+        "model": "rgbww",
+        "clear_pin": 18
+      },
+      {
+        "channels": [
+          {
+            "name": "red",
+            "pin": 3
+          },
+          {
+            "name": "green",
+            "pin": 0
+          },
+          {
+            "name": "blue",
+            "pin": 4
+          },
+          {
+            "name": "warmwhite",
+            "pin": 6
+          },
+          {
+            "name": "coldwhite",
+            "pin": 5
+          }
+        ],
+        "name": "Lightinator Mini (alternative)",
+        "soc": "esp32c3",
+        "model": "rgbww",
+        "clear_pin": 18
+      },
+      {
+        "channels": [
+          {
+            "name": "red",
+            "pin": 3
+          },
+          {
+            "name": "green",
+            "pin": 4
+          },
+          {
+            "name": "blue",
+            "pin": 5
+          },
+          {
+            "name": "warmwhite",
+            "pin": 18
+          },
+          {
+            "name": "coldwhite",
+            "pin": 19
+          }
+        ],
+        "name": "NodeMC esp32c3 01M",
+        "soc": "esp32c3",
+        "model": "rgbww",
+        "clear_pin": 18
+      },
+      {
+        "channels": [
+          {
+            "name": "red",
+            "pin": 14
+          },
+          {
+            "name": "green",
+            "pin": 4
+          },
+          {
+            "name": "blue",
+            "pin": 5
+          },
+          {
+            "name": "warmwhite",
+            "pin": 15
+          },
+          {
+            "name": "coldwhite",
+            "pin": 12
+          }
+        ],
+        "name": "Shojo PCB (WemosD1 mini)",
+        "soc": "esp8266",
+        "model": "rgbww",
+        "clear_pin": 16
+      }
+    ],
+    "version": 18
+  }
+}
+
+--- DATA ---
+{
+  "sync-lock": {
+    "id": null,
+    "ts": 0
+  },
+  "last-color": {
+    "s": 100,
+    "v": 100,
+    "h": 300,
+    "ct": 2700
+  },
+  "presets": [],
+  "controllers": [
+    {
+      "id": "6737456",
+      "name": "led-be",
+      "ip-address": "192.168.29.125",
+      "icon": "https://fonts.gstatic.com/s/i/short-term/release/materialsymbolsoutlined/bed/default/24px.svg",
+      "ts": 1770596150583
+    },
+    {
+      "id": "2827530",
+      "name": "led-bu",
+      "ip-address": "192.168.29.101",
+      "icon": "lights/led-strip-variant",
+      "ts": 0
+    },
+    {
+      "id": "12742997",
+      "name": "led-so2",
+      "ip-address": "192.168.29.115",
+      "icon": "lights/led-strip-variant",
+      "ts": 0
+    },
+    {
+      "id": "390774",
+      "name": "led-te1",
+      "ip-address": "192.168.29.112",
+      "icon": "lights/led-strip-variant",
+      "ts": 0
+    },
+    {
+      "id": "10964518",
+      "name": "lightinator-10964518",
+      "ip-address": "192.168.29.49",
+      "icon": "lights/led-strip-variant",
+      "ts": 0
+    },
+    {
+      "id": "4599343",
+      "name": "led-facelight",
+      "ip-address": "192.168.29.122",
+      "icon": "lights/led-strip-variant",
+      "ts": 0
+    },
+    {
+      "id": "1451258",
+      "name": "led-te2",
+      "ip-address": "192.168.29.111",
+      "icon": "lights/led-strip-variant",
+      "ts": 0
+    },
+    {
+      "id": "2826766",
+      "name": "led-wo",
+      "ip-address": "192.168.29.102",
+      "icon": "lights/led-strip-variant",
+      "ts": 0
+    },
+    {
+      "id": "15603867",
+      "name": "lightinator-15603867",
+      "ip-address": "192.168.29.113",
+      "icon": "lights/led-strip-variant",
+      "ts": 0
+    },
+    {
+      "id": "2827485",
+      "name": "led-ku",
+      "ip-address": "192.168.29.121",
+      "icon": "lights/led-strip-variant",
+      "ts": 0
+    },
+    {
+      "id": "6668181",
+      "name": "Antares",
+      "ip-address": "192.168.29.31",
+      "icon": "lights/led-strip-variant",
+      "ts": 0
+    },
+    {
+      "id": "477228760",
+      "name": "test32",
+      "ip-address": "192.168.29.55",
+      "icon": "lights/led-strip-variant",
+      "ts": 0
+    },
+    {
+      "id": "2147483647",
+      "name": "lightinator-3090114465",
+      "ip-address": "192.168.29.53",
+      "icon": "lights/led-strip-variant",
+      "ts": 0
+    }
+  ],
+  "groups": [
+    {
+      "controller_ids": [
+        "2827530",
+        "4599343"
+      ],
+      "name": "B\u00fcro",
+      "ts": 2147483647,
+      "id": "477228760-883885021",
+      "icon": "light_groups"
+    },
+    {
+      "controller_ids": [
+        "6737456"
+      ],
+      "name": "Schlafzimmer",
+      "ts": 2147483647,
+      "id": "6737456-706129657",
+      "icon": "light_groups"
+    },
+    {
+      "controller_ids": [
+        "390774",
+        "1451258"
+      ],
+      "name": "Terasse",
+      "ts": 2147483647,
+      "id": "4035244248-578276531",
+      "icon": "light_groups"
+    },
+    {
+      "controller_ids": [
+        "15603867",
+        "2826766",
+        "12742997"
+      ],
+      "name": "Wohnzimmer",
+      "ts": 2147483647,
+      "id": "2827530-876452071",
+      "icon": "light_groups"
+    },
+    {
+      "controller_ids": [
+        "2827485"
+      ],
+      "name": "K\u00fcche",
+      "ts": 2147483647,
+      "id": "2826766-821578832",
+      "icon": "light_groups"
+    },
+    {
+      "controller_ids": [
+        "390774",
+        "1451258"
+      ],
+      "name": "Terasse",
+      "ts": 2147483647,
+      "id": "1451258-365585363",
+      "icon": "light_groups"
+    },
+    {
+      "controller_ids": [
+        "15603867",
+        "2826766",
+        "12742997"
+      ],
+      "name": "Wohnzimmer",
+      "ts": 2147483647,
+      "id": "10966439-661872862",
+      "icon": "light_groups"
+    },
+    {
+      "controller_ids": [
+        "2827485"
+      ],
+      "name": "K\u00fcche",
+      "ts": 2147483647,
+      "id": "10966439-714453458",
+      "icon": "light_groups"
+    },
+    {
+      "controller_ids": [
+        "2827530",
+        "4229738372",
+        "3894194052"
+      ],
+      "name": "B\u00fcro",
+      "ts": 2147483647,
+      "id": "10966439-800901917",
+      "icon": "light_groups"
+    },
+    {
+      "controller_ids": [
+        "10964518"
+      ],
+      "name": "Flur",
+      "ts": 2147483647,
+      "id": "10966439-704388484",
+      "icon": "light_groups"
+    },
+    {
+      "controller_ids": [
+        "10966439",
+        "2147483647",
+        "4229738372"
+      ],
+      "name": "test",
+      "ts": 2147483647,
+      "id": "10966439-668115440",
+      "icon": "light_groups"
+    },
+    {
+      "controller_ids": [
+        "6737456"
+      ],
+      "name": "Schlafzimmer",
+      "ts": 2147483647,
+      "id": "10966439-206273324",
+      "icon": "light_groups"
+    },
+    {
+      "controller_ids": [
+        "390774",
+        "1451258"
+      ],
+      "name": "Terasse",
+      "ts": 2147483647,
+      "id": "4229738372-553671184",
+      "icon": "light_groups"
+    },
+    {
+      "controller_ids": [
+        "2147483647",
+        "1286881796"
+      ],
+      "name": "Antares",
+      "ts": 1769283808406,
+      "id": "2619125636-540770521",
+      "icon": "light_groups"
+    }
+  ],
+  "scenes": [
+    {
+      "transition": {
+        "d": 0,
+        "t": 0,
+        "s": 0,
+        "cmd": null,
+        "q": null,
+        "r": false
+      },
+      "settings": [
+        {
+          "transition": {
+            "d": 0,
+            "t": 10000,
+            "s": 0,
+            "cmd": "fade",
+            "q": "single",
+            "r": false
+          },
+          "color": {
+            "hsv": {
+              "s": 0,
+              "v": 0,
+              "h": 0,
+              "ct": 0
+            }
+          },
+          "controller_id": "6737456",
+          "pos": 0
+        }
+      ],
+      "name": "Aus",
+      "ts": 2147483647,
+      "id": "2827530-709189565",
+      "group_id": "6737456-706129657",
+      "favorite": false,
+      "icon": "scene"
+    },
+    {
+      "transition": {
+        "d": 0,
+        "t": 0,
+        "s": 0,
+        "cmd": null,
+        "q": null,
+        "r": false
+      },
+      "settings": [
+        {
+          "transition": {
+            "d": 0,
+            "t": 10000,
+            "s": 0,
+            "cmd": "fade",
+            "q": null,
+            "r": false
+          },
+          "color": {
+            "hsv": {
+              "s": 0,
+              "v": 0,
+              "h": 0,
+              "ct": 0
+            }
+          },
+          "controller_id": "2827530",
+          "pos": 0
+        },
+        {
+          "transition": {
+            "d": 0,
+            "t": 0,
+            "s": 0,
+            "cmd": null,
+            "q": null,
+            "r": false
+          },
+          "color": {
+            "hsv": {
+              "s": 0,
+              "v": 0,
+              "h": 0,
+              "ct": 3620
+            }
+          },
+          "controller_id": "4599343",
+          "pos": 0
+        },
+        {
+          "transition": {
+            "d": 0,
+            "t": 10000,
+            "s": 0,
+            "cmd": "fade",
+            "q": null,
+            "r": true
+          },
+          "color": {
+            "hsv": {
+              "s": 81,
+              "v": 84,
+              "h": 236,
+              "ct": 0
+            }
+          },
+          "controller_id": "2827530",
+          "pos": 2
+        },
+        {
+          "transition": {
+            "d": 0,
+            "t": 0,
+            "s": 10000,
+            "cmd": "fade",
+            "q": null,
+            "r": false
+          },
+          "color": {
+            "hsv": {
+              "s": 96,
+              "v": 87,
+              "h": 0,
+              "ct": 0
+            }
+          },
+          "controller_id": "2827530",
+          "pos": 1
+        },
+        {
+          "transition": {
+            "d": 0,
+            "t": 15000,
+            "s": 0,
+            "cmd": "fade",
+            "q": null,
+            "r": false
+          },
+          "color": {
+            "hsv": {
+              "s": 0,
+              "v": 54,
+              "h": 0,
+              "ct": 0
+            }
+          },
+          "controller_id": "4599343",
+          "pos": 1
+        },
+        {
+          "transition": {
+            "d": 0,
+            "t": 15000,
+            "s": 0,
+            "cmd": "fade",
+            "q": null,
+            "r": false
+          },
+          "color": {
+            "hsv": {
+              "s": 0,
+              "v": 15,
+              "h": 0,
+              "ct": 0
+            }
+          },
+          "controller_id": "4599343",
+          "pos": 2
+        }
+      ],
+      "name": "Testanimation",
+      "ts": 2147483647,
+      "id": "6668181-227004589",
+      "group_id": "477228760-883885021",
+      "favorite": true,
+      "icon": "scene"
+    },
+    {
+      "transition": {
+        "d": 0,
+        "t": 0,
+        "s": 0,
+        "cmd": null,
+        "q": null,
+        "r": false
+      },
+      "settings": [
+        {
+          "transition": {
+            "d": 0,
+            "t": 0,
+            "s": 0,
+            "cmd": null,
+            "q": null,
+            "r": false
+          },
+          "color": {
+            "hsv": {
+              "s": 15,
+              "v": 49,
+              "h": 0,
+              "ct": 0
+            }
+          },
+          "controller_id": "6737456",
+          "pos": 0
+        }
+      ],
+      "name": "An",
+      "ts": 2147483647,
+      "id": "3090114465-796372243",
+      "group_id": "6737456-706129657",
+      "favorite": false,
+      "icon": "scene"
+    },
+    {
+      "transition": {
+        "d": 0,
+        "t": 0,
+        "s": 0,
+        "cmd": null,
+        "q": null,
+        "r": false
+      },
+      "settings": [
+        {
+          "transition": {
+            "d": 0,
+            "t": 10000,
+            "s": 0,
+            "cmd": "fade",
+            "q": "single",
+            "r": false
+          },
+          "color": {
+            "hsv": {
+              "s": 0,
+              "v": 0,
+              "h": 0,
+              "ct": 0
+            }
+          },
+          "controller_id": "6737456",
+          "pos": 0
+        }
+      ],
+      "name": "Aus",
+      "ts": 2147483647,
+      "id": "2827530-877137044",
+      "group_id": "6737456-706129657",
+      "favorite": false,
+      "icon": "scene"
+    },
+    {
+      "transition": {
+        "d": 0,
+        "t": 0,
+        "s": 0,
+        "cmd": null,
+        "q": null,
+        "r": false
+      },
+      "settings": [
+        {
+          "transition": {
+            "d": 0,
+            "t": 0,
+            "s": 0,
+            "cmd": null,
+            "q": null,
+            "r": false
+          },
+          "color": {
+            "hsv": {
+              "s": 0,
+              "v": 0,
+              "h": 0,
+              "ct": 0
+            }
+          },
+          "controller_id": "12742997",
+          "pos": 0
+        },
+        {
+          "transition": {
+            "d": 0,
+            "t": 0,
+            "s": 0,
+            "cmd": null,
+            "q": null,
+            "r": false
+          },
+          "color": {
+            "hsv": {
+              "s": 49,
+              "v": 44,
+              "h": 21,
+              "ct": 0
+            }
+          },
+          "controller_id": "15603867",
+          "pos": 0
+        },
+        {
+          "transition": {
+            "d": 0,
+            "t": 0,
+            "s": 0,
+            "cmd": null,
+            "q": null,
+            "r": false
+          },
+          "color": {
+            "hsv": {
+              "s": 9.775171,
+              "v": 7.917889,
+              "h": 21.055719,
+              "ct": 0
+            }
+          },
+          "controller_id": "2826766",
+          "pos": 0
+        }
+      ],
+      "name": "Snapshot 22:51:58",
+      "ts": 2147483647,
+      "id": "3090114465-422218882",
+      "group_id": "2827530-876452071",
+      "favorite": true,
+      "icon": "scene"
+    },
+    {
+      "transition": {
+        "d": 0,
+        "t": 0,
+        "s": 0,
+        "cmd": null,
+        "q": null,
+        "r": false
+      },
+      "settings": [
+        {
+          "transition": {
+            "d": 0,
+            "t": 0,
+            "s": 0,
+            "cmd": null,
+            "q": null,
+            "r": false
+          },
+          "color": {
+            "hsv": {
+              "s": 0,
+              "v": 0,
+              "h": 0,
+              "ct": 2700
+            }
+          },
+          "controller_id": "4599343",
+          "pos": 0
+        },
+        {
+          "transition": {
+            "d": 0,
+            "t": 40000,
+            "s": 0,
+            "cmd": "fade",
+            "q": null,
+            "r": false
+          },
+          "color": {
+            "hsv": {
+              "s": 0,
+              "v": 20,
+              "h": 0,
+              "ct": 0
+            }
+          },
+          "controller_id": "2827530",
+          "pos": 1
+        },
+        {
+          "transition": {
+            "d": 0,
+            "t": 0,
+            "s": 0,
+            "cmd": null,
+            "q": null,
+            "r": false
+          },
+          "color": {
+            "hsv": {
+              "s": 0,
+              "v": 0,
+              "h": 0,
+              "ct": 0
+            }
+          },
+          "controller_id": "2827530",
+          "pos": 0
+        }
+      ],
+      "name": "Snapshot 13:35:02",
+      "ts": 1768480811418,
+      "id": "4599343-604242165",
+      "group_id": "477228760-883885021",
+      "favorite": false,
+      "icon": "scene"
+    },
+    {
+      "transition": {
+        "d": 0,
+        "t": 0,
+        "s": 0,
+        "cmd": null,
+        "q": null,
+        "r": false
+      },
+      "settings": [
+        {
+          "transition": {
+            "d": 0,
+            "t": 0,
+            "s": 0,
+            "cmd": null,
+            "q": null,
+            "r": false
+          },
+          "color": {
+            "hsv": {
+              "s": 100,
+              "v": 43,
+              "h": 0,
+              "ct": 0
+            }
+          },
+          "controller_id": "2147483647",
+          "pos": 0
+        },
+        {
+          "transition": {
+            "d": 0,
+            "t": 0,
+            "s": 0,
+            "cmd": null,
+            "q": null,
+            "r": false
+          },
+          "color": {
+            "hsv": {
+              "s": 100,
+              "v": 41,
+              "h": 0,
+              "ct": 0
+            }
+          },
+          "controller_id": "1286881796",
+          "pos": 1
+        }
+      ],
+      "name": "Rotlicht",
+      "ts": 1769283933190,
+      "id": "1286881796-997968744",
+      "group_id": "2619125636-540770521",
+      "favorite": false,
+      "icon": "scene"
+    },
+    {
+      "transition": {
+        "d": 0,
+        "t": 15000,
+        "s": 0,
+        "cmd": "fade",
+        "q": null,
+        "r": false
+      },
+      "settings": [
+        {
+          "transition": {
+            "d": 0,
+            "t": 0,
+            "s": 0,
+            "cmd": null,
+            "q": null,
+            "r": false
+          },
+          "color": {
+            "hsv": {
+              "s": 0,
+              "v": 69.01271,
+              "h": 0,
+              "ct": 4259
+            }
+          },
+          "controller_id": "2147483647",
+          "pos": 0
+        },
+        {
+          "transition": {
+            "d": 0,
+            "t": 0,
+            "s": 0,
+            "cmd": null,
+            "q": null,
+            "r": false
+          },
+          "color": {
+            "hsv": {
+              "s": 0,
+              "v": 74.97556,
+              "h": 0,
+              "ct": 3612
+            }
+          },
+          "controller_id": "1286881796",
+          "pos": 1
+        }
+      ],
+      "name": "so mittel",
+      "ts": 1769284055553,
+      "id": "2619125636-227988512",
+      "group_id": "2619125636-540770521",
+      "favorite": false,
+      "icon": "scene"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+[device]
+ip = "192.168.29.31"
+id = "Antares"  # Used for MQTT topic 
+
+[mqtt]
+broker = "192.168.29.5"
+port = 1883
+topic_base = "Lightinator/" # Device topic will be topic_base + id

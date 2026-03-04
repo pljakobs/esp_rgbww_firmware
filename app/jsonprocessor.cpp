@@ -682,7 +682,7 @@ bool JsonProcessor::onJsonRpc(const String& json, String& response)
 
     // Auto-detect Query type for specific methods if params are empty
     if (rpc.getParams().isNull() || rpc.getParams().size() == 0) {
-        if (method == F("info") || method == F("status") || method == F("networks") || method == F("color") || method == F("system") || method == F("config")) {
+        if (method == F("info") || method == F("status") || method == F("networks") || method == F("color") || method == F("system") || method == F("config") || method == F("data")) {
             type = JsonProcessor::RequestType::Query;
         }
     }
@@ -1065,6 +1065,10 @@ void JsonProcessor::handleRequest(String endpoint, RequestType type, JsonObject 
         // Config is too large to buffer in memory - must be handled via streaming at the transport level
         resp.code = 501;
         resp.message = F("Config requires streaming transport");
+    } else if (endpoint == F("data")) {
+        // Data is too large to buffer in memory - must be handled via streaming at the transport level
+        resp.code = 501;
+        resp.message = F("Data requires streaming transport");
     } else {
         resp.code = 404;
         resp.message = F("Endpoint not found");
