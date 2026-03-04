@@ -1,0 +1,1 @@
+.venv/bin/python3: can't open file '/home/pjakobs/devel/esp_rgbww_firmware/tests/tests/test_api.py': [Errno 2] No such file or directory

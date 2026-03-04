@@ -111,11 +111,44 @@ void ApplicationWebserver::wsDisconnected(WebsocketConnection& socket)
 	debug_i("<===wsDisconnected");
 	webSockets.removeElement(&socket);
 	debug_i("===>nr of websockets: %i", webSockets.size());
+	// Abort any in-progress config stream for this socket
+	if(_wsOutSocket == &socket) {
+		_wsStreamTimer.stop();
+		_wsOutStream.reset();
+		_wsOutSocket = nullptr;
+	}
 }
 
 void ApplicationWebserver::wsMessageReceived(WebsocketConnection& socket, const String& message)
 {
 	debug_i("WS received: %s", message.c_str());
+
+	// Intercept "config" method — ConfigDB export size is unknown upfront so we cannot
+	// fit it in a single WS frame.  Use a two-phase streaming protocol instead:
+	//   Phase 1: TEXT {"jsonrpc":"2.0","id":N,"result":{"type":"stream_start","content-type":"application/json"}}
+	//   Phase 2: one or more BINARY frames containing raw config JSON bytes (512-byte chunks)
+	//   Phase 3: TEXT {"jsonrpc":"2.0","method":"stream_end","params":{"id":N}}
+	{
+		StaticJsonDocument<200> doc;
+		if (!deserializeJson(doc, message)) {
+			String method = doc[F("method")] | F("");
+			if ((method == F("config") || method == F("data")) && doc.containsKey(F("id"))) {
+				int id = doc[F("id")];
+				String startMsg = String(F("{\"jsonrpc\":\"2.0\",\"id\":")) + String(id) +
+				                  F(",\"result\":{\"type\":\"stream_start\",\"content-type\":\"application/json\"}}");
+				socket.sendString(startMsg);
+				_wsOutSocket = &socket;
+				_wsOutRequestId = id;
+				if (method == F("data")) {
+					_wsOutStream = app.data->createExportStream(ConfigDB::Json::format);
+				} else {
+					_wsOutStream = app.cfg->createExportStream(ConfigDB::Json::format);
+				}
+				_wsStreamTimer.initializeMs(10, TimerDelegate(&ApplicationWebserver::wsStreamNextChunk, this)).startOnce();
+				return;
+			}
+		}
+	}
 
 	String response;
 
@@ -125,6 +158,43 @@ void ApplicationWebserver::wsMessageReceived(WebsocketConnection& socket, const 
 	// If a response was generated, send it back
 	if (response.length() > 0) {
 		socket.sendString(response);
+	}
+}
+
+void ApplicationWebserver::wsStreamNextChunk()
+{
+	if (!_wsOutSocket || !_wsOutStream) {
+		return;
+	}
+
+	// Pack as much data as possible into one frame before sending.
+	// ReadStream produces one tiny printer-step per readBytes() call (often 1-3 bytes),
+	// so we loop until the buffer is full or the source runs dry.
+	constexpr size_t CHUNK_SIZE = 512;
+	char buf[CHUNK_SIZE];
+	size_t total = 0;
+
+	while (total < CHUNK_SIZE) {
+		int n = _wsOutStream->readBytes(buf + total, CHUNK_SIZE - total);
+		if (n <= 0) {
+			break;
+		}
+		total += n;
+	}
+
+	if (total > 0) {
+		_wsOutSocket->send(buf, total, WS_FRAME_BINARY);
+		_wsStreamTimer.startOnce(); // yield to event loop then send next chunk
+	} else if (_wsOutStream->isFinished()) {
+		// Stream truly exhausted — signal end of stream to client
+		String endMsg = String(F("{\"jsonrpc\":\"2.0\",\"method\":\"stream_end\",\"params\":{\"id\":")) +
+		                String(_wsOutRequestId) + F("}}");
+		_wsOutSocket->sendString(endMsg);
+		_wsOutStream.reset();
+		_wsOutSocket = nullptr;
+	} else {
+		// Source temporarily dry but not finished — yield and retry
+		_wsStreamTimer.startOnce();
 	}
 }
 
@@ -930,7 +1000,7 @@ void ApplicationWebserver::onScanNetworks(HttpRequest& request, HttpResponse& re
 
     app.jsonproc.handleRequest(F("networks"), JsonProcessor::RequestType::Command, payload, resp);
 
-	sendApiCode(response, (API_CODES)resp.code, resp.message.c_str());
+	sendApiCode(response, resp.code == 200 ? API_CODES::API_SUCCESS : API_CODES::API_BAD_REQUEST, resp.message.c_str());
 }
 
 /**

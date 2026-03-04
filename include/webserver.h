@@ -24,6 +24,9 @@
 
 #include <RGBWWLed/RGBWWLedColor.h>
 #include <Network/Http/Websocket/WebsocketResource.h>
+#include <Data/Stream/DataSourceStream.h>
+#include <Timer.h>
+#include <memory>
 
 #define FILE_MAX_SIZE 16384 //max filesize for storage api files.
 #define MAX_LOG_LINE_SIZE 512
@@ -61,6 +64,12 @@ private:
 
     WebsocketResource* wsResource;
     WebsocketList webSockets;
+
+    // WS config outbound streaming state
+    Timer _wsStreamTimer;
+    std::unique_ptr<IDataSourceStream> _wsOutStream;
+    WebsocketConnection* _wsOutSocket = nullptr;
+    int _wsOutRequestId = 0;
 
     bool authenticated(HttpRequest &request, HttpResponse &response);
     bool authenticateExec(HttpRequest &request, HttpResponse &response);
@@ -110,6 +119,7 @@ private:
     void wsConnected(WebsocketConnection& socket);
     void wsDisconnected(WebsocketConnection& socket);
     void wsMessageReceived(WebsocketConnection& socket, const String& message);
+    void wsStreamNextChunk();
 };
 
 #endif // APP_WEBSERVER_H_
