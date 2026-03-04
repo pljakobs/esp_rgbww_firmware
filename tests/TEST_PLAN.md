@@ -100,16 +100,18 @@ python tests/test_api.py --config tests/test_config.toml
 # /color
 - [x] set hsv 
 -- [x] verify color set (get /color)
--- verify color is reflected in websocket message (websocket should send a notification of changed color)
-- set raw
--- verify color set (get /color)
--- verify color is reflected in websocket message
+-- [x] verify color is reflected in websocket message (websocket should send a notification of changed color)
+- [x] set raw
+-- [x] verify color set (get /color)
+-- [x] verify color is reflected in websocket message
 
 # /off
 - [x] verify v set to 0 (get /color and verify v component is 0)
+- [x] GET /off (GET method variant)
 
 # /on
 - [x] verify v is set back to previous value
+- [x] GET /on (GET method variant)
 
 # /info
 - [x] verify complete info structure
@@ -117,15 +119,84 @@ python tests/test_api.py --config tests/test_config.toml
 
 # /config
 - [x] verify configuration can be read
-- verify complete and partial updates can be written (documentation for selectors here https://github.com/mikee47/ConfigDB/)
+- [x] verify partial updates can be written (documentation for selectors here https://github.com/mikee47/ConfigDB/)
 
 # /data
 - [x] verify data can be read
-- [ ] verify complete and partial updates can be written 
+- [x] verify partial updates can be written (sync-lock.id)
+- [x] preset CREATE, field UPDATE, DELETE via array notation
+- [x] group CREATE, field UPDATE, DELETE via array notation
+- [x] controller CREATE, field UPDATE, DELETE via array notation
+- [x] scene CREATE, field UPDATE, DELETE via array notation
+- [x] type-error: float in stored hsv → FormatError::BadType (400)
 
-- [ ] tests for all other endpoints according to the reference linked above
+# /ping
+- [x] verify ping → pong
+
+# /networks
+- [x] verify structure (scanning flag + available list)
+
+# /scan_networks
+- [x] verify POST triggers scan and returns 200
+
+# /hosts
+- [x] GET /hosts (no params) — returns visible controllers list
+- [x] GET /hosts?all=false — explicit visible-only filter, matches default
+- [x] GET /hosts?all=true — returns all controllers (>= visible-only count)
+- [x] GET /hosts?all=1 — numeric alias for all=true accepted by firmware
+
+# /connect
+- [x] GET /connect — status field present, value 0-3
+- [x] POST /connect — missing ssid returns error (no network disruption)
+- [x] POST /connect — empty ssid returns error
+
+# /system
+- [x] POST /system cmd:debug enable/disable
+
+# /stop
+- [x] POST /stop (no channels) — returns 200, device stays responsive
+- [x] POST /stop (specific channels)
+
+# /pause + /continue
+- [x] POST /pause then POST /continue — both return 200
+- [x] POST /pause with specific channels
+
+# /skip
+- [x] POST /skip — skips current animation, device stays responsive
+
+# /blink
+- [x] POST /blink — returns 200, WS color_event received
+
+# /toggle
+- [x] POST /toggle — first call sets v=0, second call restores brightness
+
+# /update
+- [x] GET /update — structure (rom_status, webapp_status) verified
+- [ ] POST /update — NOT tested: any POST /update call (even with an invalid URL)
+      puts the firmware into an "OTA in progress" state that persists until reboot,
+      breaking all subsequent tests. Manual testing only.
 
 ## websocket 
-- [ ] cmd: color - set color and verify using httpb get to /color for both raw and hsv
-- [ ] cmd: info - read info structure and verify it matches /info
-- [ ] cmd: config - read config structure and verify it matches /config
+- [x] cmd: color (HSV) - set color and verify using HTTP GET /color
+- [x] cmd: color (RAW) - set color and verify using HTTP GET /color
+- [x] cmd: color triggers color_event broadcast notification
+- [x] cmd: info - read info structure and verify it matches /info
+- [x] cmd: config - read config structure via streaming and verify it matches /config
+- [x] cmd: data - read data structure via streaming and verify it matches /data
+- [x] cmd: color (Query, empty params) - returns current color state
+- [x] cmd: off - verify v=0 via GET /color
+- [x] cmd: on - verify v>0 via GET /color
+- [x] cmd: on/off sequence - round-trip via WS only
+- [x] cmd: toggle (×2 cycle) - v→0 then v restored
+- [x] cmd: stop (no channels) - device stays responsive
+- [x] cmd: stop (specific channels)
+- [x] cmd: pause + continue - both succeed, device stays alive
+- [x] cmd: pause (specific channels)
+- [x] cmd: skip - animation skipped, device responsive
+- [x] cmd: blink - color_event broadcast received
+- [x] cmd: networks (empty params / Query) - returns scanning + available list
+- [x] cmd: networks (non-empty params / Command) - initiates scan
+- [x] cmd: networks consistency with GET /networks
+- [x] cmd: system {"cmd":"debug","enable":true} - succeeds
+- [x] cmd: system {"cmd":"debug","enable":false} - succeeds
+- [x] cmd: system (empty params) - auto-detected as Query → returns -32601 error

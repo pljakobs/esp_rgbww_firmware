@@ -98,6 +98,78 @@ def test_color_default_response(base_url):
     step("response has 'raw' key", "raw" in data)
 
 
+def test_hosts_default(base_url):
+    """GET /hosts — returns visible controllers list (no query param)
+
+    Matches api.js: getHosts(showAll=false) → hosts?all=false
+    The firmware's VISIBLE_ONLY filter is applied when all is absent/false.
+    """
+    resp = requests.get(f"{base_url}/hosts")
+    step("GET /hosts returns HTTP 200", resp.status_code == 200,
+         f"got {resp.status_code}")
+    data = resp.json()
+    step("response is a JSON object or array", isinstance(data, (dict, list)), str(type(data)))
+    # The response may be a list of controller objects or a wrapping dict
+    entries = data if isinstance(data, list) else data.get("controllers", data.get("hosts", []))
+    step("entries is a list", isinstance(entries, list), str(type(entries)))
+
+
+def test_hosts_all_false(base_url):
+    """GET /hosts?all=false — explicit visible-only filter
+
+    Matches api.js: getHosts(false) → hosts?all=false
+    Should return same result as no param.
+    """
+    resp_default = requests.get(f"{base_url}/hosts")
+    resp_all_false = requests.get(f"{base_url}/hosts", params={"all": "false"})
+
+    step("GET /hosts?all=false returns HTTP 200", resp_all_false.status_code == 200,
+         f"got {resp_all_false.status_code}")
+
+    default_data = resp_default.json()
+    all_false_data = resp_all_false.json()
+
+    default_list = default_data if isinstance(default_data, list) else list(default_data.values())
+    all_false_list = all_false_data if isinstance(all_false_data, list) else list(all_false_data.values())
+
+    step("all=false result has same entry count as default",
+         len(default_list) == len(all_false_list),
+         f"default={len(default_list)} all=false={len(all_false_list)}")
+
+
+def test_hosts_all_true(base_url):
+    """GET /hosts?all=true — show all controllers including incomplete entries
+
+    Matches api.js: getHosts(true) → hosts?all=true
+    Should return >= entries than the default visible-only list.
+    """
+    resp_default = requests.get(f"{base_url}/hosts")
+    resp_all = requests.get(f"{base_url}/hosts", params={"all": "true"})
+
+    step("GET /hosts?all=true returns HTTP 200", resp_all.status_code == 200,
+         f"got {resp_all.status_code}")
+    data = resp_all.json()
+    step("response is a JSON object or array", isinstance(data, (dict, list)), str(type(data)))
+
+    all_list = data if isinstance(data, list) else list(data.values())
+    default_list = resp_default.json()
+    if isinstance(default_list, dict):
+        default_list = list(default_list.values())
+
+    step("all=true returns >= entries than default (visible-only)",
+         len(all_list) >= len(default_list),
+         f"all={len(all_list)} default={len(default_list)}")
+
+
+def test_hosts_all_numeric_true(base_url):
+    """GET /hosts?all=1 — numeric form of all=true also accepted by firmware"""
+    resp = requests.get(f"{base_url}/hosts", params={"all": "1"})
+    step("GET /hosts?all=1 returns HTTP 200", resp.status_code == 200,
+         f"got {resp.status_code}")
+    data = resp.json()
+    step("response is a JSON object or array", isinstance(data, (dict, list)), str(type(data)))
+
+
 def test_system_debug_toggle(base_url):
     """POST /system cmd:debug — toggles debug output (safe, no side effects)"""
     # Enable debug
