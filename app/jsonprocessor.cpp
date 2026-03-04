@@ -1,5 +1,6 @@
 
 #include <RGBWWCtrl.h>
+#include <application.h>
 
 #define MIN_HEAP_FREE 8192
 /**
@@ -275,6 +276,35 @@ bool JsonProcessor::onBlink(const String& json, String& msg, bool relay)
 	StaticJsonDocument<256> doc;
 	Json::deserialize(doc, json);
 	return onBlink(doc.as<JsonObject>(), msg, relay);
+}
+
+/**
+ * @brief Handles system requests.
+ * @param root The JSON object containing the command.
+ * @param msg Error message if any.
+ * @return True on success.
+ */
+bool JsonProcessor::onSystemReq(JsonObject root, String& msg)
+{
+	String cmd = root[F("cmd")].as<const char*>();
+	if(cmd) {
+		if(cmd.equals(F("debug"))) {
+			bool enable;
+			if(Json::getValue(root[F("enable")], enable)) {
+				Serial.systemDebugOutput(enable);
+			} else {
+				msg = F("Missing enable param");
+				return false;
+			}
+		} else if(!app.delayedCMD(cmd, 1500)) {
+			msg = F("Unknown command: ") + cmd;
+			return false;
+		}
+	} else {
+		msg = F("Missing cmd param");
+		return false;
+	}
+	return true;
 }
 
 /**
@@ -631,32 +661,80 @@ int JsonProcessor::RequestParameters::checkParams(String& errorMsg) const
  * This function processes the JSON-RPC request and performs the necessary actions based on the received JSON data.
  *
  * @param json The JSON string containing the request.
+ * @param response The JSON string containing the response.
  * @return True if the request was successfully processed, false otherwise.
  */
-bool JsonProcessor::onJsonRpc(const String& json)
+bool JsonProcessor::onJsonRpc(const String& json, String& response)
 {
 	debug_d("JsonProcessor::onJsonRpc: %s\n", json.c_str());
 	JsonRpcMessageIn rpc(json);
 
 	String msg;
 	String method = rpc.getMethod();
-	if(method == F("color")) {
-		return onColor(rpc.getParams(), msg, false);
-	} else if(method == F("stop")) {
-		return onStop(rpc.getParams(), msg, false);
-	} else if(method == F("blink")) {
-		return onBlink(rpc.getParams(), msg, false);
-	} else if(method == F("skip")) {
-		return onSkip(rpc.getParams(), msg, false);
-	} else if(method == F("pause")) {
-		return onPause(rpc.getParams(), msg, false);
-	} else if(method == F("continue")) {
-		return onContinue(rpc.getParams(), msg, false);
-	} else if(method == F("direct")) {
-		return onDirect(rpc.getParams(), msg, false);
-	} else {
-		return false;
+	bool success = false;
+	int errorCode = 0;
+
+    ApiResponse resp;
+    DynamicJsonDocument doc(4096);
+    resp.data = doc.to<JsonObject>();
+
+    JsonProcessor::RequestType type = JsonProcessor::RequestType::Command;
+
+    // Auto-detect Query type for specific methods if params are empty
+    if (rpc.getParams().isNull() || rpc.getParams().size() == 0) {
+        if (method == F("info") || method == F("status") || method == F("networks") || method == F("color") || method == F("system") || method == F("config")) {
+            type = JsonProcessor::RequestType::Query;
+        }
+    }
+
+    handleRequest(method, type, rpc.getParams(), resp, false);
+
+    if (resp.code == 200) {
+        success = true;
+    } else if (resp.code == 404 || resp.code == 405) {
+        msg = F("Method not found");
+        errorCode = -32601;
+        success = false;
+    } else {
+        msg = resp.message;
+        errorCode = -32603; // Internal error
+        success = false;
+    }
+
+	if (!success && errorCode == 0) {
+		errorCode = -32603; // Internal error
+		if (msg.length() == 0) msg = F("Internal Error");
 	}
+
+	// Check if notification (no id)
+	JsonObject root = rpc.getRoot();
+	if (root.containsKey("id")) {
+		DynamicJsonDocument responseDoc(512);
+		responseDoc[F("jsonrpc")] = F("2.0");
+		responseDoc[F("id")] = root[F("id")];
+		
+		if (success) {
+            // If response data is available (for query), use it. otherwise OK.
+            if (resp.data.size() > 0) {
+			    responseDoc[F("result")] = resp.data;
+            } else {
+                responseDoc[F("result")] = F("OK");
+            }
+		} else {
+			JsonObject error = responseDoc.createNestedObject(F("error"));
+			error[F("code")] = errorCode;
+			error[F("message")] = msg;
+		}
+		serializeJson(responseDoc, response);
+	}
+
+	return success;
+}
+
+bool JsonProcessor::onJsonRpc(const String& json)
+{
+	String response;
+	return onJsonRpc(json, response);
 }
 
 /**
@@ -743,4 +821,252 @@ bool JsonProcessor::onSetOff(JsonObject root, String& msg, bool relay) {
 	);
 	// Optionally relay or set msg
 	return true;
+}
+
+void JsonProcessor::serializeState(JsonObject root, bool includeRaw, bool includeHsv)
+{
+	if (includeRaw) {
+		JsonObject raw = root.createNestedObject(F("raw"));
+		ChannelOutput output = app.rgbwwctrl.getCurrentOutput();
+		raw[F("r")] = output.r;
+		raw[F("g")] = output.g;
+		raw[F("b")] = output.b;
+		raw[F("ww")] = output.ww;
+		raw[F("cw")] = output.cw;
+	}
+
+	if (includeHsv) {
+		JsonObject hsv = root.createNestedObject(F("hsv"));
+		float h, s, v;
+		int ct;
+		HSVCT c = app.rgbwwctrl.getCurrentColor();
+		c.asRadian(h, s, v, ct);
+		hsv[F("h")] = h;
+		hsv[F("s")] = s;
+		hsv[F("v")] = v;
+		hsv[F("ct")] = ct;
+	}
+}
+
+void JsonProcessor::serializeInfo(JsonObject data)
+{
+	data[F("deviceid")] = system_get_chip_id();
+#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
+	data[F("current_rom")] = String(app.ota.getRomPartition().name());
+#endif
+	data[F("git_version")] = fw_git_version;
+	data[F("build_type")] = BUILD_TYPE;
+	data[F("git_date")] = fw_git_date;
+	data[F("webapp_version")] = WEBAPP_VERSION;
+	data[F("sming")] = SMING_VERSION;
+	data[F("event_num_clients")] = app.eventserver.activeClients;
+	data[F("uptime")] = app.getUptime();
+	data[F("cpu_usage_percent")] = app.getCpuPercent();
+	data[F("heap_free")] = system_get_free_heap_size();
+	data[F("soc")]=SOC;
+	
+	JsonObject rgbww = data.createNestedObject(F("rgbww"));
+	rgbww[F("version")] = RGBWW_VERSION;
+	rgbww[F("queuesize")] = RGBWW_ANIMATIONQSIZE;
+
+	JsonObject con = data.createNestedObject(F("connection"));
+	con[F("connected")] = WifiStation.isConnected();
+	con[F("ssid")] = WifiStation.getSSID();
+	con[F("dhcp")] = WifiStation.isEnabledDHCP();
+	con[F("ip")] = WifiStation.getIP().toString();
+	con[F("netmask")] = WifiStation.getNetworkMask().toString();
+	con[F("gateway")] = WifiStation.getNetworkGateway().toString();
+	con[F("mac")] = WifiStation.getMAC();
+}
+
+
+void JsonProcessor::serializeNetworks(JsonObject root)
+{
+	if(app.network.isScanning()) {
+		root[F("scanning")] = true;
+	} else {
+		root[F("scanning")] = false;
+		JsonArray netlist = root.createNestedArray(F("available"));
+		BssList networks = app.network.getAvailableNetworks();
+		for(unsigned int i = 0; i < networks.count(); i++) {
+			if(networks[i].hidden)
+				continue;
+
+			// SSIDs may contain any byte values. Some are not printable and will cause the javascript client to fail
+			// on parsing the message. Try to filter those here
+            bool printable = true;
+            for(unsigned int j = 0; j < networks[i].ssid.length(); ++j) {
+                if(networks[i].ssid[j] < 0x20) {
+                    printable = false;
+                    break;
+                }
+            }
+
+			if(!printable) {
+				debug_w("Filtered SSID due to unprintable characters: %s", networks[i].ssid.c_str());
+				continue;
+			}
+
+			JsonObject item = netlist.createNestedObject();
+			item[F("id")] = (int)networks[i].getHashId();
+			item[F("ssid")] = networks[i].ssid;
+			item[F("signal")] = networks[i].rssi;
+			item[F("encryption")] = networks[i].getAuthorizationMethodName();
+			//limit to max 25 networks
+			if(i >= 25)
+				break;
+		}
+	}
+}
+
+
+void JsonProcessor::handleRequest(String endpoint, RequestType type, JsonObject payload, ApiResponse& resp, bool relay) {
+    if (endpoint == F("color")) {
+        if (type == RequestType::Query) {
+            serializeState(resp.data);
+        } else if (type == RequestType::Command) {
+            String msg;
+            if (!onColor(payload, msg, relay)) {
+                resp.code = 400;
+                resp.message = msg;
+            }
+        }
+    } else if (endpoint == F("info")) {
+        if (type == RequestType::Query) {
+            serializeInfo(resp.data);
+        } else {
+            resp.code = 405;
+            resp.message = F("Method Not Allowed");
+        }
+    } else if (endpoint == F("stop")) {
+        if (type == RequestType::Command) {
+            String msg;
+            if (!onStop(payload, msg, relay)) {
+                resp.code = 400;
+                resp.message = msg;
+            }
+        } else {
+            resp.code = 405;
+            resp.message = F("Method Not Allowed");
+        }
+    } else if (endpoint == F("pause")) {
+        if (type == RequestType::Command) {
+             String msg;
+             if (!onPause(payload, msg, relay)) {
+                 resp.code = 400;
+                 resp.message = msg;
+             }
+        } else {
+            resp.code = 405;
+            resp.message = F("Method Not Allowed");
+        }
+    } else if (endpoint == F("continue")) {
+        if (type == RequestType::Command) {
+            String msg;
+            if (!onContinue(payload, msg, relay)) {
+                resp.code = 400;
+                resp.message = msg;
+            }
+        } else {
+            resp.code = 405;
+            resp.message = F("Method Not Allowed");
+        }
+    } else if (endpoint == F("skip")) {
+         if (type == RequestType::Command) {
+            String msg;
+            if (!onSkip(payload, msg, relay)) {
+                resp.code = 400;
+                resp.message = msg;
+            }
+        } else {
+            resp.code = 405;
+            resp.message = F("Method Not Allowed");
+        }
+     } else if (endpoint == F("blink")) {
+         if (type == RequestType::Command) {
+            String msg;
+            if (!onBlink(payload, msg, relay)) {
+                resp.code = 400;
+                resp.message = msg;
+            }
+        } else {
+            resp.code = 405;
+            resp.message = F("Method Not Allowed");
+        }
+    } else if (endpoint == F("toggle")) {
+         if (type == RequestType::Command) {
+            String msg;
+            if (!onToggle(payload, msg, relay)) {
+                resp.code = 400;
+                resp.message = msg;
+            }
+        } else {
+            resp.code = 405;
+            resp.message = F("Method Not Allowed");
+        }
+    } else if (endpoint == F("on")) {
+         if (type == RequestType::Command) {
+            String msg;
+            if (!onSetOn(payload, msg, relay)) {
+                resp.code = 400;
+                resp.message = msg;
+            }
+        } else {
+            resp.code = 405;
+            resp.message = F("Method Not Allowed");
+        }
+    } else if (endpoint == F("off")) {
+         if (type == RequestType::Command) {
+            String msg;
+            if (!onSetOff(payload, msg, relay)) {
+                resp.code = 400;
+                resp.message = msg;
+            }
+        } else {
+            resp.code = 405;
+            resp.message = F("Method Not Allowed");
+        }
+    } else if (endpoint == F("direct")) {
+         if (type == RequestType::Command) {
+            String msg;
+            if (!onDirect(payload, msg, relay)) {
+                resp.code = 400;
+                resp.message = msg;
+            }
+        } else {
+            resp.code = 405;
+            resp.message = F("Method Not Allowed");
+        }
+    } else if (endpoint == F("networks")) {
+        if (type == RequestType::Query) {
+            serializeNetworks(resp.data);
+            resp.code = 200;
+        } else if (type == RequestType::Command) {
+            if(!app.network.isScanning()) {
+                app.network.scan(false);
+            }
+            resp.code = 200;
+        } else {
+            resp.code = 405;
+            resp.message = F("Method Not Allowed");
+        }
+    } else if (endpoint == F("system")) {
+        if (type == RequestType::Command) {
+             String msg;
+             if (!onSystemReq(payload, msg)) {
+                 resp.code = 400;
+                 resp.message = msg;
+             }
+        } else {
+             resp.code = 405;
+             resp.message = F("Method Not Allowed");
+        }
+    } else if (endpoint == F("config")) {
+        // Config is too large to buffer in memory - must be handled via streaming at the transport level
+        resp.code = 501;
+        resp.message = F("Config requires streaming transport");
+    } else {
+        resp.code = 404;
+        resp.message = F("Endpoint not found");
+    }
 }

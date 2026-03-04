@@ -105,13 +105,12 @@ private:
     bool checkHeap(HttpResponse &response, int minHeap);
     bool preflightRequest(HttpRequest& request, HttpResponse& response, std::initializer_list<HttpMethod> allowedMethods, int minHeap = 0 );
     String makeId();
-    
-    static bool isPrintable(const String& str);
 
     void setCorsHeaders(HttpResponse &response);
 
     void wsConnected(WebsocketConnection& socket);
     void wsDisconnected(WebsocketConnection& socket);
+    void wsMessageReceived(WebsocketConnection& socket, const String& message);
 };
 
 #endif // APP_WEBSERVER_H_
