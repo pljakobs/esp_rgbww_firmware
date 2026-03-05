@@ -537,6 +537,20 @@ bool ApplicationWebserver::preflightRequest(HttpRequest& request, HttpResponse& 
 
 void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response)
 {
+	enum class ConfigFlag {
+		ipChanged,
+		dhcpChanged,
+		apChanged,
+		pinConfigChanged,
+		colorModeChanged,
+		mqttConnChanged,   // broker or clientId changed
+		mqttTopicChanged,  // topic or master changed
+		mqttEnabledChanged,
+		deviceNameChanged,
+	};
+	using ConfigFlags = BitSet<uint16_t, ConfigFlag>;
+	ConfigFlags flags;
+
 	debug_i("onConfig");
 	if(!preflightRequest(request, response, {HttpMethod::POST, HttpMethod::GET}, 12000)) return;
 
@@ -551,36 +565,41 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 		debug_i("======================\nHTTP POST request received, ");
 		app.telemetryClient.log(F("onConfig POST"));
 
-		/* ConfigDB importFomStream */
-		String oldIP, oldSSID, oldDeviceName, oldCurrentPinConfigName;
-		bool mqttEnabled, dhcpEnabled;
-		int oldColorMode;
-		{
-			debug_i("ApplicationWebserver::onConfig storing old settings");
-			app.telemetryClient.log(F("onConfig storing old settings"));
-			AppConfig::Network network(*app.cfg);
-			oldIP = network.connection.getIp();
-			oldSSID = network.ap.getSsid();
-			mqttEnabled = network.mqtt.getEnabled();
-			dhcpEnabled=network.connection.getDhcp();
-		}
-		{
-			AppConfig::General general(*app.cfg);
-			oldDeviceName=general.getDeviceName();
-			oldCurrentPinConfigName=general.getCurrentPinConfigName();
-		}
-		{
-			AppConfig::Color color(*app.cfg);
-			oldColorMode=color.getColorMode();
-			// TODO: Store other color settings if needed		
-		}
+        String oldIP, oldSSID, oldDeviceName, oldPinConfig;
+        String oldMqttServer, oldMqttPassword, oldMqttUsername, oldMqttTopicBase;
+        int32_t oldMqttPort;
+        bool oldDhcp, oldMqttEnabled;
+        int oldColorMode;
 
+        {
+            AppConfig::Network net(*app.cfg);
+            oldIP            = net.connection.getIp();
+            oldDhcp          = net.connection.getDhcp();
+            oldSSID          = net.ap.getSsid();
+            oldMqttEnabled   = net.mqtt.getEnabled();
+            oldMqttServer    = net.mqtt.getServer();
+            oldMqttPort      = net.mqtt.getPort();
+            oldMqttUsername  = net.mqtt.getUsername();
+            oldMqttPassword  = net.mqtt.getPassword();
+            oldMqttTopicBase = net.mqtt.getTopicBase();
+        }
+        {
+            AppConfig::General gen(*app.cfg);
+            oldDeviceName = gen.getDeviceName();
+            oldPinConfig  = gen.getCurrentPinConfigName();
+        }
+        {
+            AppConfig::Color col(*app.cfg);
+            oldColorMode = col.getColorMode();
+        }
+
+        // --- Import ---
 		auto bodyStream = request.getBodyStream();
 		if(bodyStream) {
 			ConfigDB::Status status = app.cfg->importFromStream(ConfigDB::Json::format, *bodyStream);
 
 			/*********************************
-             * TODO
+			 * Handle changes:
              * - if network settings changed (ip config, default gateway, netmask, ssid, hostname(?) ) -> reboot 
              * - if mqtt settings changed to enabled -> start mqtt
              *   - if mqtt broker changed -> reconnect
@@ -592,115 +611,88 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 
 			// bool restart = root[F("restart")] | false;
 
-			app.telemetryClient.start();
-			String newIP, newSSID, newDeviceName, newCurrentPinConfigName;
-			bool newMqttEnabled,newDhcpEnabled;
-			int newColorMode;
-			{
-				debug_i("ApplicationWebserver::onConfig getting new settings");
-				app.telemetryClient.log(F("onConfig getting new settings"));
-				AppConfig::Network network(*app.cfg);
-				newIP = network.connection.getIp();
-				newSSID = network.ap.getSsid();
-				newMqttEnabled = network.mqtt.getEnabled();
-				newDhcpEnabled=network.connection.getDhcp();
+			app.telemetryClient.log(F("Config import finished"));
+        {
+            AppConfig::Network net(*app.cfg);
+            if(net.connection.getDhcp() != oldDhcp)
+                flags += ConfigFlag::dhcpChanged;
+            if(!net.connection.getDhcp() && net.connection.getIp() != oldIP)
+                flags += ConfigFlag::ipChanged;
+            if(net.ap.getSsid() != oldSSID)
+                flags += ConfigFlag::apChanged;
+            if(net.mqtt.getEnabled() != oldMqttEnabled)
+                flags += ConfigFlag::mqttEnabledChanged;
+            if(net.mqtt.getServer()   != oldMqttServer  ||
+               net.mqtt.getPort()     != oldMqttPort    ||
+               net.mqtt.getUsername() != oldMqttUsername ||
+               net.mqtt.getPassword() != oldMqttPassword)
+                flags += ConfigFlag::mqttConnChanged;
+            if(net.mqtt.getTopicBase() != oldMqttTopicBase)
+                flags += ConfigFlag::mqttTopicChanged;
+        }
+        {
+            AppConfig::General gen(*app.cfg);
+            if(gen.getDeviceName()           != oldDeviceName) flags += ConfigFlag::deviceNameChanged;
+            if(gen.getCurrentPinConfigName() != oldPinConfig)  flags += ConfigFlag::pinConfigChanged;
+        }
+        {
+            AppConfig::Color col(*app.cfg);
+            if(col.getColorMode() != oldColorMode) flags += ConfigFlag::colorModeChanged;
+        }
+					
+			bool needReboot = false;
+
+			// Handle changes that require reboot
+			if(flags[ConfigFlag::dhcpChanged] || flags[ConfigFlag::ipChanged]) {
+				debug_i("onConfig: network address changed — rebooting");
+				app.telemetryClient.log(F("Network config changed, rebooting"));
+				needReboot = true;
 			}
-			{
-				AppConfig::General general(*app.cfg);
-				newDeviceName=general.getDeviceName();
-				newCurrentPinConfigName=general.getCurrentPinConfigName();
+			if(flags[ConfigFlag::apChanged] && WifiAccessPoint.isEnabled()) {
+				debug_i("onConfig: AP SSID changed — rebooting");
+				app.telemetryClient.log(F("AP config changed, rebooting"));
+				needReboot = true;
 			}
-			{
-				AppConfig::Color color(*app.cfg);
-				newColorMode=color.getColorMode();
+			if(flags[ConfigFlag::pinConfigChanged]) {
+				debug_i("onConfig: pin config changed — rebooting");
+				app.telemetryClient.log(F("Pin config changed, rebooting"));
+				needReboot = true;
 			}
-			
-			if(oldIP != newIP) {
-				//if (restart) {
-				debug_i("ApplicationWebserver::onConfig ip settings changed - rebooting");
-				app.telemetryClient.log(F("onConfig ip settings changed - rebooting"));
-				String msg = F("new IP, ")+newIP;
-				app.wsBroadcast(F("notification"), msg);
-				app.telemetryClient.log(msg);
-				app.delayedCMD(F("restart"), 3000); // wait 3s to first send response
-			}
-			if(oldSSID != newSSID) {
-				//
-				if(WifiAccessPoint.isEnabled()) {
-					debug_i("ApplicationWebserver::onConfig wifiap settings changed - rebooting");
-					app.telemetryClient.log(F("onConfig wifiap settings changed - rebooting"));
-					// report the fact that the system will restart to the frontend
-					String msg = F("new SSID, ")+newSSID;
-					app.wsBroadcast(F("notification"), msg);
-					app.telemetryClient.log(msg);
-					app.delayedCMD(F("restart"), 3000); // wait 3s to first send response
-				}
-			}
-			if(mqttEnabled != newMqttEnabled) {
-				if(newMqttEnabled) {
-					if(!app.mqttclient.isRunning()) {
-						debug_i("ApplicationWebserver::onConfig mqtt settings changed - starting mqtt");
-						app.telemetryClient.log(F("onConfig mqtt settings changed - starting mqtt"));
-						app.mqttclient.start();
-					}
-				} else {
-					if(app.mqttclient.isRunning()) {
-						debug_i("ApplicationWebserver::onConfig mqtt settings changed - stopping mqtt");
-						app.telemetryClient.log(F("onConfig mqtt settings changed - stopping mqtt"));
-						app.mqttclient.stop();
-					} else {
-						debug_i("mqttclient was not running, no need to stop");
-					}
-				}
-			
-			}
-			if(newDhcpEnabled!=dhcpEnabled){
-				if(newDhcpEnabled){
-					WifiStation.enableDHCP(true);
-				}else{
-					debug_i("ApplicationWebserver::onConfig ip settings changed - rebooting");
-					app.telemetryClient.log(F("onConfig ip settings changed - rebooting"));
-					String msg = F("new IP, ")+newIP;
-					app.wsBroadcast(F("notification"), msg);
-					app.telemetryClient.log(msg);
-					app.delayedCMD(F("restart"), 3000); // wait 3s to first send response
-				}
-			}
-			if(oldCurrentPinConfigName!=newCurrentPinConfigName){
-				String msg = F("Channel config has changed - rebooting ");
-				app.wsBroadcast(F("notification"), msg);
-				app.telemetryClient.log(msg);
-				app.delayedCMD(F("restart"),1000);
-			}
-			if(oldDeviceName!=newDeviceName){
-				String msg = F("device name change, old Device Name: ")+oldDeviceName+F(", new Device Name: ")+newDeviceName;
-				AppConfig::Network::OuterUpdater network(*app.cfg);
-				network.mdns.setName(app.sanitizeName(newDeviceName));
-				app.wsBroadcast(F("notification"), msg);
-				app.telemetryClient.log(msg);
-				app.mdnsService.setHostname(newDeviceName);
-				//app.delayedCMD(F("restart"),1000);
+			if(flags[ConfigFlag::colorModeChanged]) {
+				debug_i("onConfig: color mode changed — rebooting");
+				app.telemetryClient.log(F("Color mode changed, rebooting"));
+				needReboot = true;
 			}
 
-			debug_i("ApplicationWebserver::onConfig %i, %i",newColorMode,oldColorMode);
-			if (newColorMode!=oldColorMode){
-				// color Mode has been updated, requires reconfiguration, will restart for now
-				debug_i("ApplicationWebserver::onConfig color settings changed - restarting");
-				app.telemetryClient.log(F("onConfig color settings changed - restarting"));
-				String msg=F("Color Mode changed");
-				app.wsBroadcast(F("notification"), msg);
-				app.telemetryClient.log(msg);
-				app.delayedCMD(F("restart"), 1000); // wait 1s to first send response
+			if(needReboot) {
+				app.delayedCMD(F("restart"), 3000);
+			}
+
+			// restart mqtt if necessary (try to avoid reboot if we can just restart mqtt client)
+			if(flags[ConfigFlag::mqttEnabledChanged] || flags[ConfigFlag::mqttConnChanged]) {
+				debug_i("onConfig: MQTT connection settings changed or MQTT enabled/disabled — reconfiguring MQTT client");
+				app.telemetryClient.log(F("MQTT config changed, reconfiguring client"));
+				if(app.mqttclient.isRunning()) app.mqttclient.stop();
+				AppConfig::Network net(*app.cfg);
+				if(net.mqtt.getEnabled()) app.mqttclient.start();
+			} else if(flags[ConfigFlag::mqttTopicChanged] && app.mqttclient.isRunning()) {
+				debug_i("onConfig: MQTT topic changed — reconfiguring MQTT client");
+				app.telemetryClient.log(F("MQTT topic changed, reconfiguring client"));
+				app.mqttclient.stop();
+				app.mqttclient.start();
+			}
+
+			// reconfigure mDNS if device name changed
+			if(flags[ConfigFlag::deviceNameChanged]) {
+				debug_i("onConfig: device name changed — reconfiguring mDNS");
+				app.telemetryClient.log(F("Device name changed, reconfiguring mDNS"));
+				AppConfig::General gen(*app.cfg);
+				app.mdnsService.setHostname(gen.getDeviceName());
 			}
 
 			setCorsHeaders(response);
 			sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 		} else {
-			//CofigDB provide correct error message
-
-			//debug_i("config api error %s",error_msg.c_str());
-			//JsonObject root = doc.as<JsonObject>();
-			//sendApiCode(response, API_CODES::API_MISSING_PARAM, error_msg);
 			setCorsHeaders(response);
 			sendApiCode(response, API_CODES::API_MISSING_PARAM);
 		}
@@ -756,10 +748,6 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response)
 void ApplicationWebserver::onColorGet(HttpRequest& request, HttpResponse& response)
 {
 	debug_i("onColorGet");
-    /*
-	if(!checkHeap(response,2000))
-		return;
-    */
 
 	auto stream = std::make_unique<JsonObjectStream>();
 	JsonObject json = stream->getRoot();
