@@ -65,8 +65,6 @@ include/filelist.h
 pullall
 
 #exclude documentation for now
-docs
-docs/*
 html
 html/*
 latex
