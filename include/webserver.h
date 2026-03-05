@@ -94,6 +94,7 @@ private:
     void onColorPost(HttpRequest &request, HttpResponse &response);
     bool onColorPostCmd(JsonObject& root, String& errorMsg);
 
+    void addInfoFields(JsonObject& obj);
     void sendApiResponse(HttpResponse &response, JsonObjectStream* stream, HttpStatus code = HTTP_STATUS_OK);
     void sendApiCode(HttpResponse &response, API_CODES code, const char* msg = nullptr);
     void sendApiCode(HttpResponse &response, API_CODES code, const String& msg);

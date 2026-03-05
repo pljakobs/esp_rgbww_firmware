@@ -236,6 +236,29 @@ void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, c
 	sendApiCode(response, code, String(msg).c_str());
 }
 
+void ApplicationWebserver::addInfoFields(JsonObject& obj)
+{
+	JsonObject dev = obj.createNestedObject(F("device"));
+
+	dev[F("deviceid")] = system_get_chip_id();
+	dev[F("soc")] = SOC;
+#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
+	dev[F("current_rom")] = String(app.ota.getRomPartition().name());
+#endif
+	JsonObject application = obj.createNestedObject(F("app"));
+	application[F("webapp_version")] = WEBAPP_VERSION;
+	application[F("git_version")] = fw_git_version;
+	application[F("build_type")] = BUILD_TYPE;
+	application[F("git_date")] = fw_git_date;
+
+	JsonObject sming = obj.createNestedObject(F("sming"));
+	sming[F("version")] = SMING_VERSION;
+	JsonObject run = obj.createNestedObject(F("runtime"));
+	run[F("uptime")] = app.getUptime();
+	run[F("heap_free")] = system_get_free_heap_size();
+	
+}
+
 void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, const char* msg)
 {
 	if(msg == nullptr) {
@@ -251,6 +274,12 @@ void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, c
 		json[F("success")] = true;
 		sendApiResponse(response, stream.release(), HTTP_STATUS_OK);
 	} else {
+		if(code == API_CODES::API_UPDATE_IN_PROGRESS) {
+			debug_i("API update in progress, adding info to response");
+			JsonObject data = json.createNestedObject(F("info"));
+			addInfoFields(data);
+		}
+
 		json[F("error")] = msg;
 		sendApiResponse(response, stream.release(), HTTP_STATUS_BAD_REQUEST);
 	}
@@ -458,19 +487,7 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 	}
 #endif
 
-	/*
-    / handle HttpMethod::OPTIONS request to check if server is CORS permissive (which this firmware 
-    / has been for years) this is just to reply to that request in order to pass the CORS test
-    
-	if(request.method == HttpMethod::OPTIONS) {
-		// probably a CORS preflight request
-		setCorsHeaders(response);
-		response.setHeader(F("Access-Control-Allow-Headers"), F("Content-Type"));
-		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
-		debug_i("HttpMethod::OPTIONS Request, sent API_SUCCSSS");
-		return;
-	}
-    */
+
 
 	if(request.method == HttpMethod::POST) {
 		debug_i("======================\nHTTP POST request received, ");
@@ -672,30 +689,8 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response)
 #endif
 	auto stream = std::make_unique<JsonObjectStream>();
 	JsonObject data = stream->getRoot();
-	data[F("deviceid")] = system_get_chip_id();
-#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
-	data[F("current_rom")] = String(app.ota.getRomPartition().name());
-#endif
-	data[F("git_version")] = fw_git_version;
-	data[F("build_type")] = BUILD_TYPE;
-	data[F("git_date")] = fw_git_date;
-	data[F("webapp_version")] = WEBAPP_VERSION;
-	data[F("sming")] = SMING_VERSION;
-	data[F("event_num_clients")] = app.eventserver.activeClients;
-	data[F("uptime")] = app.getUptime();
-	data[F("cpu_usage_percent")] = app.getCpuPercent();
-	data[F("heap_free")] = system_get_free_heap_size();
-	data[F("soc")]=SOC;
+	addInfoFields(data);
 	
-	/*
-    FileSystem::Info fsInfo;
-    app.getinfo(fsInfo);
-    JsonObject FS=data.createNestedObject("fs");
-    FS[F("mounted")] = fsInfo.partition?"true":"false";
-    FS[F("size")] = fsInfo.total;
-    FS[F("used")] = fsInfo.used;
-    FS[F("available")] = fsInfo.freeSpace;
-*/
 	JsonObject rgbww = data.createNestedObject(F("rgbww"));
 	rgbww[F("version")] = RGBWW_VERSION;
 	rgbww[F("queuesize")] = RGBWW_ANIMATIONQSIZE;
@@ -708,7 +703,30 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response)
 	con[F("netmask")] = WifiStation.getNetworkMask().toString();
 	con[F("gateway")] = WifiStation.getNetworkGateway().toString();
 	con[F("mac")] = WifiStation.getMAC();
-	//con[F("mdnshostname")] = app.cfg.network.connection.mdnshostname.c_str();
+	
+	{
+		AppConfig::Network network(*app.cfg);
+		JsonObject mqtt=data.createNestedObject(F("mqtt"));
+		if(network.mqtt.getEnabled() && !app.mqttclient.isRunning()) {
+			mqtt[F("status")] = F("configured but not running");
+		} else if(network.mqtt.getEnabled() && app.mqttclient.isRunning()) {
+			mqtt[F("status")] = F("running");
+		} else {
+			mqtt[F("status")] = F("disabled");
+		}
+		mqtt[F("enabled")] = network.mqtt.getEnabled();
+		mqtt[F("broker")] = network.mqtt.getServer();
+		mqtt[F("topic")] = network.mqtt.getTopicBase();
+		if(network.mqtt.homeassistant.getEnable())
+		{
+			JsonObject ha = data.createNestedObject("homeassistant");
+			ha[F("enabled")] = network.mqtt.homeassistant.getEnable();
+			ha[F("discovery_prefix")] = network.mqtt.homeassistant.getDiscoveryPrefix();
+			ha[F("Node ID")]= network.mqtt.homeassistant.getNodeId();
+		}
+	}
+
+	
 
 	sendApiResponse(response, stream.release());
 
