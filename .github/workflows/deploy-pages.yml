@@ -15,6 +15,7 @@ on:
           - stable
           - testing
           - develop
+          - experimental
 
 jobs:
   get-version:
