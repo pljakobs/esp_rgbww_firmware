@@ -547,20 +547,6 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 	}
 #endif
 
-	/*
-    / handle HttpMethod::OPTIONS request to check if server is CORS permissive (which this firmware 
-    / has been for years) this is just to reply to that request in order to pass the CORS test
-    
-	if(request.method == HttpMethod::OPTIONS) {
-		// probably a CORS preflight request
-		setCorsHeaders(response);
-		response.setHeader(F("Access-Control-Allow-Headers"), F("Content-Type"));
-		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
-		debug_i("HttpMethod::OPTIONS Request, sent API_SUCCSSS");
-		return;
-	}
-    */
-
 	if(request.method == HttpMethod::POST) {
 		debug_i("======================\nHTTP POST request received, ");
 		app.telemetryClient.log(F("onConfig POST"));
@@ -707,22 +693,6 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 				app.delayedCMD(F("restart"), 1000); // wait 1s to first send response
 			}
 
-
-			//bodyStream->seekOrigin(0,SeekOrigin::Start);
-			//app.wsBroadcast(F("config"),bodyStream->moveString());
-			/* ConfigDB ToDo
-            if (color_updated) {
-                debug_d("ApplicationWebserver::onConfig color settings changed - refreshing");
-
-                //refresh settings
-                app.rgbwwctrl.setup();
-
-                //refresh current output
-                app.rgbwwctrl.refresh();
-
-            }
-            */
-
 			setCorsHeaders(response);
 			sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 		} else {
@@ -827,12 +797,6 @@ void ApplicationWebserver::onColorPost(HttpRequest& request, HttpResponse& respo
     */
 	String body = request.getBody();
 
-    /*
-	setCorsHeaders(response);
-	response.setHeader(F("Access-Control-Allow-Methods"), F("GET, PUT, POST, OPTIONS"));
-	response.setHeader(F("Access-Control-Allow-Credentials"), F("true"));
-    */
-
 	if(body == NULL) {
 		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("no body"));
 		return;
@@ -878,18 +842,6 @@ void ApplicationWebserver::onColor(HttpRequest& request, HttpResponse& response)
 	}
 #endif
 	debug_i("received /color request");
-    /*
-	setCorsHeaders(response);
-	response.setHeader(F("Access-Control-Allow-Origin"), F("*"));
-
-	if(request.method == HttpMethod::OPTIONS) {
-		response.setHeader(F("Access-Control-Allow-Methods"), F("GET, PUT, POST, OPTIONS"));
-
-		debug_i("OPTIONS");
-		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
-		return;
-	}
-    */
 
 	bool error = false;
 	if(request.method == HttpMethod::POST) {
@@ -925,18 +877,6 @@ void ApplicationWebserver::onNetworks(HttpRequest& request, HttpResponse& respon
 		return;
 	}
 #endif
-    /*
-	if(request.method == HttpMethod::OPTIONS) {
-		setCorsHeaders(response);
-
-		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
-		return;
-	}
-	if(request.method != HttpMethod::GET) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not HTTP GET"));
-		return;
-	}
-    */
 
 	auto stream = std::make_unique<JsonObjectStream>();
     JsonProcessor::ApiResponse resp;
@@ -970,15 +910,6 @@ void ApplicationWebserver::onScanNetworks(HttpRequest& request, HttpResponse& re
 {
     if(!preflightRequest(request, response, {HttpMethod::POST})) return;
 
-    /*
-	if(!checkHeap(response)) {
-		return;
-	}
-	if(!authenticated(request, response)) {
-		return;
-	}
-    */
-
 #ifdef ARCH_ESP8266
 	if(app.ota.isProccessing()) {
 		sendApiCode(response, API_CODES::API_UPDATE_IN_PROGRESS);
@@ -986,12 +917,6 @@ void ApplicationWebserver::onScanNetworks(HttpRequest& request, HttpResponse& re
 	}
 #endif
 
-    /*
-	if(request.method != HttpMethod::POST) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not HTTP POST"));
-		return;
-	}
-    */
     JsonProcessor::ApiResponse resp;
     
     // Empty payload
@@ -1017,22 +942,6 @@ void ApplicationWebserver::onConnect(HttpRequest& request, HttpResponse& respons
 	debug_i("onConnect");
     if(!preflightRequest(request, response, {HttpMethod::POST, HttpMethod::GET})) return;
 
-    /*
-	if(!checkHeap(response)) {
-		return;
-	}
-	debug_i("onConnect request.method: %i", request.method);
-	if(request.method == HttpMethod::OPTIONS) {
-		setCorsHeaders(response);
-		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
-		return;
-	}
-	
-	if(!authenticated(request, response)) {
-		return;
-	}
-    */
-
 	debug_i("passed checks");
 #ifdef ARCH_ESP8266
 	if(app.ota.isProccessing()) {
@@ -1040,14 +949,6 @@ void ApplicationWebserver::onConnect(HttpRequest& request, HttpResponse& respons
 		return;
 	}
 #endif
-
-    /*
-	if(request.method != HttpMethod::POST && request.method != HttpMethod::GET) {
-		debug_i("not HTTP POST or GET");
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not HTTP POST or GET"));
-		return;
-	}
-    */
 
 	if(request.method == HttpMethod::POST) {
 		String body = request.getBody();
@@ -1114,15 +1015,6 @@ void ApplicationWebserver::onConnect(HttpRequest& request, HttpResponse& respons
 void ApplicationWebserver::onSystemReq(HttpRequest& request, HttpResponse& response)
 {
     if(!preflightRequest(request, response, {HttpMethod::GET, HttpMethod::POST})) return;
-    
-    /*
-	if(!checkHeap(response)) {
-		return;
-	}
-	if(!authenticated(request, response)) {
-		return;
-	}
-    */
 
 #ifdef ARCH_ESP8266
 	if(app.ota.isProccessing()) {
@@ -1267,15 +1159,6 @@ void ApplicationWebserver::onPing(HttpRequest& request, HttpResponse& response)
 {
     if(!preflightRequest(request, response, {HttpMethod::GET})) return;
 
-    /*
-	if(!checkHeap(response)) {
-		return;
-	}
-	if(request.method != HttpMethod::GET) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not HTTP GET"));
-		return;
-	}
-    */
 	auto stream = std::make_unique<JsonObjectStream>();
 	JsonObject json = stream->getRoot();
 	json[F("ping")] = "pong";
@@ -1285,16 +1168,6 @@ void ApplicationWebserver::onPing(HttpRequest& request, HttpResponse& response)
 void ApplicationWebserver::onStop(HttpRequest& request, HttpResponse& response)
 {
     if(!preflightRequest(request, response, {HttpMethod::POST})) return;
-    
-    /*
-	if(!checkHeap(response)) {
-		return;
-	}
-	if(request.method != HttpMethod::POST) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not HTTP POST"));
-		return;
-	}
-    */
 
 	StaticJsonDocument<256> doc;
 	deserializeJson(doc, request.getBody());
@@ -1312,16 +1185,6 @@ void ApplicationWebserver::onStop(HttpRequest& request, HttpResponse& response)
 void ApplicationWebserver::onSkip(HttpRequest& request, HttpResponse& response)
 {
     if(!preflightRequest(request, response, {HttpMethod::POST})) return;
-    
-    /*
-	if(!checkHeap(response)) {
-		return;
-	}
-	if(request.method != HttpMethod::POST) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not HTTP POST"));
-		return;
-	}
-    */
 
 	StaticJsonDocument<256> doc;
 	deserializeJson(doc, request.getBody());
@@ -1339,16 +1202,6 @@ void ApplicationWebserver::onSkip(HttpRequest& request, HttpResponse& response)
 void ApplicationWebserver::onPause(HttpRequest& request, HttpResponse& response)
 {
     if(!preflightRequest(request, response, {HttpMethod::POST})) return;
-    
-    /*
-	if(!checkHeap(response)) {
-		return;
-	}
-	if(request.method != HttpMethod::POST) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not HTTP POST"));
-		return;
-	}
-    */
 
 	StaticJsonDocument<256> doc;
 	deserializeJson(doc, request.getBody());
@@ -1366,16 +1219,6 @@ void ApplicationWebserver::onPause(HttpRequest& request, HttpResponse& response)
 void ApplicationWebserver::onContinue(HttpRequest& request, HttpResponse& response)
 {
     if(!preflightRequest(request, response, {HttpMethod::POST})) return;
-    
-    /*
-	if(!checkHeap(response)) {
-		return;
-	}
-	if(request.method != HttpMethod::POST) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not HTTP POST"));
-		return;
-	}
-    */
 
 	StaticJsonDocument<256> doc;
 	deserializeJson(doc, request.getBody());
@@ -1393,16 +1236,7 @@ void ApplicationWebserver::onContinue(HttpRequest& request, HttpResponse& respon
 void ApplicationWebserver::onBlink(HttpRequest& request, HttpResponse& response)
 {
     if(!preflightRequest(request, response, {HttpMethod::POST})) return;
-    
-    /*
-	if(!checkHeap(response)) {
-		return;
-	}
-	if(request.method != HttpMethod::POST) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not HTTP POST"));
-		return;
-	}
-    */
+
 
 	StaticJsonDocument<512> doc;
 	deserializeJson(doc, request.getBody());
@@ -1420,16 +1254,6 @@ void ApplicationWebserver::onBlink(HttpRequest& request, HttpResponse& response)
 void ApplicationWebserver::onToggle(HttpRequest& request, HttpResponse& response)
 {
     if(!preflightRequest(request, response, {HttpMethod::POST})) return;
-    
-    /*
-	if(!checkHeap(response)) {
-		return;
-	}
-	if(request.method != HttpMethod::POST) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not HTTP POST"));
-		return;
-	}
-    */
 
 	StaticJsonDocument<256> doc;
 	deserializeJson(doc, request.getBody());
@@ -1481,29 +1305,8 @@ void ApplicationWebserver::onHosts(HttpRequest& request, HttpResponse& response)
 void ApplicationWebserver::onData(HttpRequest& request, HttpResponse& response){
     if(!preflightRequest(request, response, {HttpMethod::POST, HttpMethod::GET}, 12000)) return;
     
-    /*
-	if(!checkHeap(response)) {
-		return;
-	}
-    */
 	debug_i("http onData request.method %i", request.method);
-    /*
-	if(request.method != HttpMethod::POST && request.method != HttpMethod::GET && request.method != HttpMethod::OPTIONS) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not GET or OPTIONS request"));
-		return;
-	}
 
-	if(request.method == HttpMethod::OPTIONS) {
-		// probably a CORS request
-		setCorsHeaders(response);
-		sendApiCode(response, API_CODES::API_SUCCESS, "");
-		debug_i("HttpMethod::OPTIONS Request, sent API_SUCCESS");
-		return;
-	}
-
-	if(!checkHeap(response,12000))
-		return;
-    */
 	if(request.method==HttpMethod::GET){	
 		setCorsHeaders(response);
 
