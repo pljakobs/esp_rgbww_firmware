@@ -502,6 +502,8 @@ bool ApplicationWebserver::checkHeap(HttpResponse& response, int minHeap)
 	unsigned fh = system_get_free_heap_size();
 	if(fh < minHeap) {
 		setCorsHeaders(response);
+		debug_i("======================\nHTTP POST request received, ");
+		app.telemetryClient.log(F("onConfig POST"));
 		response.code = HTTP_STATUS_TOO_MANY_REQUESTS;
 		response.setHeader(F("Retry-After"), "1");
 		debug_i("Not enough heap free, rejecting request. Free heap: %u", fh);
