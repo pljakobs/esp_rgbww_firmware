@@ -171,7 +171,7 @@
 void ApplicationOTA::start(String romurl)
 {
 	debug_i("ApplicationOTA::start");
-	app.wsBroadcast(F("ota_status"), F("started"));
+	app.wsBroadcast(F("ota_status"), F("starting 1"));
 	otaUpdater.reset(new Ota::Network::HttpUpgrader);
 	status = OTASTATUS::OTA_PROCESSING;
 
@@ -212,12 +212,14 @@ void ApplicationOTA::start(String romurl)
 		debug_i("  ---------");
 	}
 	debug_i("Starting OTA ...");
-
+	app.wsBroadcast(F("ota_status"), F("starting 2"));
+	app.wsBroadcast(F("notification"), F("Starting OTA"));
 	otaUpdater->start();
 }
 
 void ApplicationOTA::doSwitch()
 {
+	app.wsBroadcast(F("notification"), F("Switching ROM"));
 	auto before = ota.getRunningPartition();
 	auto after = ota.getNextBootPartition();
 
@@ -241,6 +243,7 @@ void ApplicationOTA::reset() {reset");
 
 void ApplicationOTA::beforeOTA()
 {
+	app.wsBroadcast(F("notification"), F("preparing OTA"));
 	debug_i("ApplicationOTA::beforeOTA");
 	/*
     * this is being executed before otaUpdater->start
@@ -282,6 +285,7 @@ void ApplicationOTA::afterOTA()
 	 */
 	if(status == OTASTATUS::OTA_SUCCESS_REBOOT) {
 		debug_i("afterOta, rom Slot=%i", app.getRomSlot());
+		app.wsBroadcast(F("notification"), F("OTA successful, rebooting"));
 
 
 // ToDo: so the ota has been successful, now what?
@@ -323,6 +327,7 @@ void ApplicationOTA::afterOTA()
 void ApplicationOTA::upgradeCallback(Ota::Network::HttpUpgrader& client, bool result)
 {
 	debug_i("ApplicationOTA::rBootCallback");
+	app.wsBroadcast(F("notification"), F("OTA finished, processing result"));
 	if(result == true) {
 		ota.end();
 
@@ -334,6 +339,7 @@ void ApplicationOTA::upgradeCallback(Ota::Network::HttpUpgrader& client, bool re
 		debug_i("configured next boot partition");
 		status = OTASTATUS::OTA_SUCCESS_REBOOT;
 		debug_i("OTA callback done, rebooting");
+		app.wsBroadcast(F("notification"), F("OTA successful, rebooting"));
 		System.restart();
 	} else {
 		status = OTASTATUS::OTA_FAILED;
@@ -515,6 +521,7 @@ bool ApplicationOTA::switchPartition(uint8_t slot)
 void ApplicationOTA::saveStatus(OTASTATUS status)
 {
 	debug_i("ApplicationOTA::saveStatus %i to rom partition rom%i\n", status, app.getRomSlot());
+	app.wsBroadcast(F("ota_status"), String((int)status));
 	StaticJsonDocument<128> doc;
 	JsonObject root = doc.to<JsonObject>();
 	root[F("status")] = int(status);
@@ -527,6 +534,7 @@ OTASTATUS ApplicationOTA::loadStatus()
 	StaticJsonDocument<128> doc;
 	if(Json::loadFromFile(doc, OTA_STATUS_FILE)) {
 		OTASTATUS status = (OTASTATUS)doc[F("status")].as<int>();
+		app.wsBroadcast(F("ota_status"), String((int)status));
 		return status;
 	} else {
 		return OTASTATUS::OTA_NOT_UPDATING;
