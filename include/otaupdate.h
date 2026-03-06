@@ -29,6 +29,7 @@
 #include <Ota/Upgrader.h>
 #include <Storage.h>
 #include <Storage/Debug.h>
+#include <Timer.h>
 
 #ifdef ARCH_ESP8266
 #include <Crypto/Md5.h>
@@ -105,6 +106,8 @@ protected:
 protected:
     Storage::Partition dataPartition;
     OtaUpgrader ota;
+    Timer otaWatchdog;
+    void broadcastOtaStatus(int step, const String& message);
     void upgradeCallback(Ota::Network::HttpUpgrader& client, bool result);
     void reset();
     void beforeOTA();

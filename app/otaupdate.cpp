@@ -168,10 +168,18 @@
 #include <otaupdate.h>
 #include <RGBWWCtrl.h>
 
+void ApplicationOTA::broadcastOtaStatus(int step, const String& message)
+{
+	StaticJsonDocument<128> doc;
+	JsonObject params = doc.to<JsonObject>();
+	params[F("status")] = step;
+	params[F("message")] = message;
+	app.wsBroadcast(F("ota_status"), params);
+}
+
 void ApplicationOTA::start(String romurl)
 {
 	debug_i("ApplicationOTA::start");
-	app.wsBroadcast(F("ota_status"), F("starting 1"));
 	otaUpdater.reset(new Ota::Network::HttpUpgrader);
 	status = OTASTATUS::OTA_PROCESSING;
 
@@ -197,6 +205,15 @@ void ApplicationOTA::start(String romurl)
 
 	beforeOTA();
 
+	// Watchdog: if upgradeCallback has not fired within 5 minutes, treat as hung OTA
+	otaWatchdog.initializeMs<5 * 60 * 1000>([this]() {
+		debug_e("ApplicationOTA: watchdog timeout - OTA appears hung, aborting");
+		broadcastOtaStatus(0, F("OTA watchdog timeout - update failed"));
+		otaUpdater.reset();
+		status = OTASTATUS::OTA_FAILED;
+	});
+	otaWatchdog.startOnce();
+
 	unsigned fh = system_get_free_heap_size();
 	debug_i("Free heap before OTA: %i", fh);
 
@@ -212,8 +229,7 @@ void ApplicationOTA::start(String romurl)
 		debug_i("  ---------");
 	}
 	debug_i("Starting OTA ...");
-	app.wsBroadcast(F("ota_status"), F("starting 2"));
-	app.wsBroadcast(F("notification"), F("Starting OTA"));
+	broadcastOtaStatus(2, F("Starting OTA download"));
 	otaUpdater->start();
 }
 
@@ -243,7 +259,7 @@ void ApplicationOTA::reset() {reset");
 
 void ApplicationOTA::beforeOTA()
 {
-	app.wsBroadcast(F("notification"), F("preparing OTA"));
+	broadcastOtaStatus(1, F("Preparing OTA"));
 	debug_i("ApplicationOTA::beforeOTA");
 	/*
     * this is being executed before otaUpdater->start
@@ -327,7 +343,8 @@ void ApplicationOTA::afterOTA()
 void ApplicationOTA::upgradeCallback(Ota::Network::HttpUpgrader& client, bool result)
 {
 	debug_i("ApplicationOTA::rBootCallback");
-	app.wsBroadcast(F("notification"), F("OTA finished, processing result"));
+	otaWatchdog.stop(); // disarm watchdog regardless of outcome
+	broadcastOtaStatus(3, F("OTA download complete, verifying"));
 	if(result == true) {
 		ota.end();
 
@@ -339,11 +356,12 @@ void ApplicationOTA::upgradeCallback(Ota::Network::HttpUpgrader& client, bool re
 		debug_i("configured next boot partition");
 		status = OTASTATUS::OTA_SUCCESS_REBOOT;
 		debug_i("OTA callback done, rebooting");
-		app.wsBroadcast(F("notification"), F("OTA successful, rebooting"));
+		broadcastOtaStatus(4, F("OTA successful, rebooting"));
 		System.restart();
 	} else {
 		status = OTASTATUS::OTA_FAILED;
 		ota.abort();
+		broadcastOtaStatus(0, F("OTA failed"));
 		debug_i("OTA failed");
 	}
 }

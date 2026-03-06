@@ -682,10 +682,7 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response)
 	if(!preflightRequest(request, response, { HttpMethod::GET })) return;
 
 #ifdef ARCH_ESP8266
-	if(app.ota.isProccessing()) {
-		sendApiCode(response, API_CODES::API_UPDATE_IN_PROGRESS);
-		return;
-	}
+	
 #endif
 	auto stream = std::make_unique<JsonObjectStream>();
 	JsonObject data = stream->getRoot();
@@ -724,6 +721,10 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response)
 			ha[F("discovery_prefix")] = network.mqtt.homeassistant.getDiscoveryPrefix();
 			ha[F("Node ID")]= network.mqtt.homeassistant.getNodeId();
 		}
+	}
+	if(app.ota.isProccessing()) {
+		JsonObject ota=data.createNestedObject(F("ota"));
+		ota[F("status")] = F("in progress");
 	}
 
 	
@@ -1107,35 +1108,14 @@ void ApplicationWebserver::onSystemReq(HttpRequest& request, HttpResponse& respo
 {
     if(!preflightRequest(request, response, {HttpMethod::POST})) return;
     
-    /*
-	if(!checkHeap(response)) {
-		return;
-	}
-	if(!authenticated(request, response)) {
-		return;
-	}
-    */
-
+/*
 #ifdef ARCH_ESP8266
 	if(app.ota.isProccessing()) {
 		sendApiCode(response, API_CODES::API_UPDATE_IN_PROGRESS);
 		return;
 	}
 #endif
-
-    /*
-	if(request.method == HttpMethod::OPTIONS) {
-		setCorsHeaders(response);
-
-		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
-		return;
-	}
-	if(request.method != HttpMethod::POST) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not HTTP POST"));
-		return;
-	}
-    */
-
+*/
 	bool error = false;
 	String body = request.getBody();
 	if(body == NULL) {
