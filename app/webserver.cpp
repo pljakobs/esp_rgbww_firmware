@@ -1106,7 +1106,7 @@ void ApplicationWebserver::onSystemReq(HttpRequest& request, HttpResponse& respo
 	}
 	setCorsHeaders(response);
 
-    if (resp.code == 200) {
+    if (response.code == 200) {
         if (resp.data.size() > 0) {
              auto stream = std::make_unique<JsonObjectStream>();
              JsonObject root = stream->getRoot();
