@@ -679,7 +679,8 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response)
 {
 	debug_i("onInfo");
 	debug_i("request method: %i",request.method);
-	if(!preflightRequest(request, response, { HttpMethod::GET })) return;
+	if(!preflightRequest(request, response, { HttpMethod::GET },
+	                     app.ota.isProccessing() ? 4000 : 0)) return;
 
 #ifdef ARCH_ESP8266
 	
@@ -701,7 +702,8 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response)
 	con[F("gateway")] = WifiStation.getNetworkGateway().toString();
 	con[F("mac")] = WifiStation.getMAC();
 	
-	{
+	// Skip ConfigDB reads during OTA — they consume heap and flash I/O we can't afford
+	if(!app.ota.isProccessing()) {
 		AppConfig::Network network(*app.cfg);
 		JsonObject mqtt=data.createNestedObject(F("mqtt"));
 		if(network.mqtt.getEnabled() && !app.mqttclient.isRunning()) {
@@ -722,12 +724,11 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response)
 			ha[F("Node ID")]= network.mqtt.homeassistant.getNodeId();
 		}
 	}
+
 	if(app.ota.isProccessing()) {
 		JsonObject ota=data.createNestedObject(F("ota"));
 		ota[F("status")] = F("in progress");
 	}
-
-	
 
 	sendApiResponse(response, stream.release());
 
