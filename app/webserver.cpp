@@ -1076,49 +1076,50 @@ void ApplicationWebserver::onSystemReq(HttpRequest& request, HttpResponse& respo
 #endif
 */
 	bool error = false;
-	String body = request.getBody();
-	if(body == NULL) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("could not get HTTP body"));
-		return;
-	} else {
-		debug_i("ApplicationWebserver::onSystemReq: %s", body.c_str());
-		// ConfigDB - CONFIG_MAX_LENGTH was no longer defined, what's the right size here?
-		StaticJsonDocument<512> doc;
-		Json::deserialize(doc, body);
 
-		String cmd = doc[F("cmd")].as<const char*>();
-		if(cmd) {
-			if(cmd.equals(F("debug"))) {
-				bool enable;
-				if(Json::getValue(doc[F("enable")], enable)) {
-					Serial.systemDebugOutput(enable);
-				} else {
+	if(request.method == HttpMethod::POST) {
+		String body = request.getBody();
+		if(body == NULL) {
+			sendApiCode(response, API_CODES::API_BAD_REQUEST, F("could not get HTTP body"));
+			return;
+		} else {
+			debug_i("ApplicationWebserver::onSystemReq: %s", body.c_str());
+			StaticJsonDocument<512> doc;
+			Json::deserialize(doc, body);
+
+			String cmd = doc[F("cmd")].as<const char*>();
+			if(cmd) {
+				if(cmd.equals(F("debug"))) {
+					bool enable;
+					if(Json::getValue(doc[F("enable")], enable)) {
+						Serial.systemDebugOutput(enable);
+					} else {
+						error = true;
+					}
+				} else if(!app.delayedCMD(cmd, 1500)) {
 					error = true;
 				}
-
-			} else if(!app.delayedCMD(cmd, 1500)) {
+			} else {
 				error = true;
 			}
-
-		} else {
-			error = true;
 		}
+	} else {
+		// GET — return current system status
+		auto stream = std::make_unique<JsonObjectStream>();
+		JsonObject json = stream->getRoot();
+		json[F("uptime")] = app.getUptime();
+		json[F("heap_free")] = system_get_free_heap_size();
+		setCorsHeaders(response);
+		sendApiResponse(response, stream.release());
+		return;
 	}
 	setCorsHeaders(response);
 
-    if (response.code == 200) {
-        if (resp.data.size() > 0) {
-             auto stream = std::make_unique<JsonObjectStream>();
-             JsonObject root = stream->getRoot();
-             root.set(resp.data);
-             sendApiResponse(response, stream.release());
-        } else {
-             sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
-        }
-    } else {
-         if (resp.code == 400) sendApiCode(response, API_CODES::API_BAD_REQUEST, resp.message);
-         else sendApiCode(response, API_CODES::API_BAD_REQUEST, resp.message);
-    }
+	if(!error) {
+		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
+	} else {
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("invalid command"));
+	}
 }
 
 /**
