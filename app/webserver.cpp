@@ -1,21 +1,3 @@
-pjakobs@ThinkpadL14 ~/d/esp_rgbww_firmware (experimental|REBASE-i 4/12) [1]> git commit --amend --no-edit
-                                                                             git rebase --continue
-[losgelöster HEAD 2a28bcd] major refactor\mtrying to unify the api across http, mqtt and ws transport. Currently, the streaming ConfigDB updates are broken
- Date: Wed Mar 4 15:35:26 2026 +0100
- 7 files changed, 537 insertions(+), 448 deletions(-)
- delete mode 100644 tests/rgbww_test.py
-automatischer Merge von app/webserver.cpp
-KONFLIKT (Inhalt): Merge-Konflikt in app/webserver.cpp
-Fehler: Konnte 9c860f1... (removed dead code from webserver) nicht anwenden
-Hinweis: Resolve all conflicts manually, mark them as resolved with
-Hinweis: "git add/rm <conflicted_files>", then run "git rebase --continue".
-Hinweis: You can instead skip this commit: run "git rebase --skip".
-Hinweis: To abort and get back to the state before "git rebase", run "git rebase --abort".
-Hinweis: Disable this message with "git config set advice.mergeConflict false"
-Konnte 9c860f1... (# removed dead code from webserver) nicht anwenden
-pjakobs@ThinkpadL14 ~/d/esp_rgbww_firmware (experimental|REBASE-i 9/12) [1]> 
-#include <ArduinoJson.h>
-
 /**
  * @file
  * @author  Patrick Jahns http://github.com/patrickjahns
