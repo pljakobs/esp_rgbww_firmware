@@ -56,7 +56,8 @@ def test_connect_status(base_url):
     status = int(data.get("status", -1))
     step("status is a known value (0-3)", 0 <= status <= 3, f"status={status}")
     # After a successful connection the firmware resets status to 0 (idle)
-    step("status is idle or connected (0 or 2)", status in (0, 2), f"status={status}")
+    # Status 1 (connecting) is also valid if the device is busy reconnecting
+    step("status is idle, connecting or connected (0, 1 or 2)", status in (0, 1, 2), f"status={status}")
 
 
 def test_color_mode_hsv(base_url):

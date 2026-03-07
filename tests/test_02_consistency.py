@@ -62,7 +62,7 @@ def test_data_consistency(ws_client, base_url):
 
 
 def test_info_consistency(ws_client, base_url):
-    """Verify /info (HTTP) matches cmd:info (WS) keys and static fields"""
+    """Verify /info (HTTP) matches cmd:info (WS) keys and static fields (New Nested Structure)"""
 
     http_info = requests.get(f"{base_url}/info").json()
     step("GET /info returns a JSON object", isinstance(http_info, dict))
@@ -74,16 +74,28 @@ def test_info_consistency(ws_client, base_url):
     ws_info = response.get("result", {})
     step("WS result is a non-empty object", isinstance(ws_info, dict) and len(ws_info) > 0)
 
-    for key in ("deviceid", "build_type", "git_version", "sming"):
-        if key in http_info:
-            step(
-                f"static field '{key}' matches",
-                http_info[key] == ws_info.get(key),
-                f"HTTP={http_info[key]!r}  WS={ws_info.get(key)!r}",
-            )
+    # Check top-level structure
+    for section in ("device", "app", "sming", "runtime", "rgbww", "connection"):
+        step(f"Section '{section}' in HTTP", section in http_info)
+        step(f"Section '{section}' in WS", section in ws_info)
 
-    uptime_diff = abs(int(http_info.get("uptime", 0)) - int(ws_info.get("uptime", 0)))
-    step("uptime values are within 10 s of each other", uptime_diff < 10, f"diff={uptime_diff}")
+    # Check static fields inside nested objects
+    paths = [
+        ("device", "deviceid"),
+        ("app", "git_version"),
+        ("sming", "version")
+    ]
+    
+    for section, key in paths:
+        h_val = http_info.get(section, {}).get(key)
+        w_val = ws_info.get(section, {}).get(key)
+        if h_val is not None:
+            step(f"{section}.{key} matches", h_val == w_val, f"H={h_val} W={w_val}")
+
+    # Uptime check
+    h_uptime = int(http_info.get("runtime", {}).get("uptime", 0))
+    w_uptime = int(ws_info.get("runtime", {}).get("uptime", 0))
+    step("uptime matches within 10s", abs(h_uptime - w_uptime) < 10, f"diff={abs(h_uptime - w_uptime)}")
 
 
 def test_color_consistency(ws_client, base_url):

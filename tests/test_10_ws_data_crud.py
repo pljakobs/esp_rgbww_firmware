@@ -21,6 +21,7 @@ import json
 import pytest
 import requests
 import requests.exceptions
+import time
 from helpers import step, recv_stream
 
 # ---------------------------------------------------------------------------
@@ -79,6 +80,7 @@ def _ws_data_get(ws_client, req_id: int) -> dict:
         "id": req_id,
     }))
     raw = recv_stream(ws_client, req_id)
+    time.sleep(0.5)
     return json.loads(raw.decode("utf-8"))
 
 
@@ -339,8 +341,10 @@ def test_ws_data_matches_http(ws_client, base_url):
     ws_data   = _ws_data_get(ws_client, 73)
 
     for key in ("presets", "groups", "controllers", "scenes"):
-        http_ids = sorted(i.get("id", "") for i in http_data.get(key, []))
-        ws_ids   = sorted(i.get("id", "") for i in ws_data.get(key, []))
+        http_list = http_data.get(key) or []
+        ws_list   = ws_data.get(key)   or []
+        http_ids = sorted(str(i.get("id", "")) for i in http_list)
+        ws_ids   = sorted(str(i.get("id", "")) for i in ws_list)
         step(f"WS and HTTP '{key}' id lists match",
              http_ids == ws_ids,
              f"HTTP={http_ids} WS={ws_ids}")

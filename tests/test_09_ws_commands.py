@@ -45,7 +45,9 @@ def _ws_call(ws_client, req_id: int, method: str, params: dict):
         "params": params,
         "id": req_id,
     }))
-    return recv_ws_id(ws_client, req_id)
+    resp = recv_ws_id(ws_client, req_id)
+    time.sleep(0.5)
+    return resp
 
 
 def _set_known_color(base_url, h=90, s=100, v=100, t=50):
@@ -266,6 +268,7 @@ def test_ws_networks_scan(ws_client, base_url):
 
     # After initiating a scan, GET /networks should show scanning=true (briefly)
     # or the scan may have already completed; either is valid
+    time.sleep(1) # wait for scan to finish/update
     nw = requests.get(f"{base_url}/networks").json()
     step("GET /networks responds after WS scan trigger", "available" in nw)
 

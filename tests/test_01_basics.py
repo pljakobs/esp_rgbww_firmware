@@ -5,28 +5,46 @@ from helpers import step
 
 
 def test_info_structure(base_url):
-    """GET /info — structure and sanity"""
+    """GET /info — structure and sanity (New Nested Structure)"""
     resp = requests.get(f"{base_url}/info")
     step("returns HTTP 200", resp.status_code == 200, f"got {resp.status_code}")
     data = resp.json()
     step("body is a JSON object", isinstance(data, dict))
-    for key in ("uptime", "heap_free", "deviceid"):
-        step(f"has '{key}' field", key in data)
-    step("uptime is non-negative", int(data["uptime"]) >= 0, str(data["uptime"]))
+
+    # Check top-level sections
+    for section in ("device", "app", "sming", "runtime", "rgbww", "connection"):
+        step(f"has '{section}' section", section in data)
+
+    # Check device section
+    dev = data.get("device", {})
+    step("device/deviceid present", "deviceid" in dev)
+
+    # Check runtime section
+    run = data.get("runtime", {})
+    for key in ("uptime", "heap_free"):
+        step(f"runtime/{key} present", key in run)
+    
+    if "uptime" in run:
+        step("uptime is non-negative", int(run["uptime"]) >= 0, str(run["uptime"]))
 
 
 def test_info_update(base_url):
     """GET /info — uptime advances between two calls"""
     resp1 = requests.get(f"{base_url}/info").json()
-    step("first call returns uptime", "uptime" in resp1)
+    uptime1 = resp1.get("runtime", {}).get("uptime")
+    step("first call returns uptime", uptime1 is not None)
+
     time.sleep(2)
     resp2 = requests.get(f"{base_url}/info").json()
-    step("second call returns uptime", "uptime" in resp2)
-    step(
-        "uptime does not decrease",
-        int(resp2["uptime"]) >= int(resp1["uptime"]),
-        f"{resp1['uptime']} -> {resp2['uptime']}",
-    )
+    uptime2 = resp2.get("runtime", {}).get("uptime")
+    step("second call returns uptime", uptime2 is not None)
+
+    if uptime1 is not None and uptime2 is not None:
+        step(
+            "uptime does not decrease",
+            int(uptime2) >= int(uptime1),
+            f"{uptime1} -> {uptime2}",
+        )
 
 
 def test_config_read(base_url):
