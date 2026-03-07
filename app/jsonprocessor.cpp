@@ -674,9 +674,45 @@ bool JsonProcessor::onJsonRpc(const String& json, String& response)
 	bool success = false;
 	int errorCode = 0;
 
+    // Determine document size based on method and request type
+    size_t docSize = 768; // Default for commands (small) to save memory
+    bool hasParams = !rpc.getParams().isNull() && rpc.getParams().size() > 0;
+
+    if (method == F("data")) {
+        docSize = 512; // 512B - just enough for error message as data is streamed
+    } else if (method == F("info")) {
+        docSize = 2560; // Medium buffer for info
+    } else if (method == F("networks")) {
+        if (!hasParams) {
+             docSize = 4096; // 4KB for network list
+        }
+    } else if (method == F("config")) {
+        docSize = 512; // 512B - just enough for error message as config is streamed
+    } else if (method == F("system")) {
+        docSize = 2048;
+    }
+
+    // Use a single document for both processing and response to save memory.
+    // Dynamically sized to avoid OOM.
+    DynamicJsonDocument doc(docSize);
+    JsonObject responseRoot = doc.to<JsonObject>();
+
     ApiResponse resp;
-    DynamicJsonDocument doc(4096);
-    resp.data = doc.to<JsonObject>();
+    
+    // Check if notification (no id)
+    JsonObject rpcRoot = rpc.getRoot();
+    bool isNotification = !rpcRoot.containsKey("id");
+
+    if (!isNotification) {
+        responseRoot[F("jsonrpc")] = F("2.0");
+        responseRoot[F("id")] = rpcRoot[F("id")];
+        // Create 'result' object for handleRequest to fill. 
+        // We will remove or overwrite it later if error or empty.
+        resp.data = responseRoot.createNestedObject(F("result"));
+    } else {
+        // For notification, create a temporary object in the doc
+        resp.data = responseRoot.createNestedObject(F("params"));
+    }
 
     JsonProcessor::RequestType type = JsonProcessor::RequestType::Command;
 
@@ -706,26 +742,20 @@ bool JsonProcessor::onJsonRpc(const String& json, String& response)
 		if (msg.length() == 0) msg = F("Internal Error");
 	}
 
-	// Check if notification (no id)
-	JsonObject root = rpc.getRoot();
-	if (root.containsKey("id")) {
-		DynamicJsonDocument responseDoc(512);
-		responseDoc[F("jsonrpc")] = F("2.0");
-		responseDoc[F("id")] = root[F("id")];
-		
+	if (!isNotification) {
 		if (success) {
-            // If response data is available (for query), use it. otherwise OK.
-            if (resp.data.size() > 0) {
-			    responseDoc[F("result")] = resp.data;
-            } else {
-                responseDoc[F("result")] = F("OK");
+            // If response data is empty (Command success), replace object with "OK"
+            if (resp.data.size() == 0) {
+                responseRoot[F("result")] = F("OK");
             }
 		} else {
-			JsonObject error = responseDoc.createNestedObject(F("error"));
+            // Error: Remove the partial result object and add error object
+            responseRoot.remove(F("result"));
+			JsonObject error = responseRoot.createNestedObject(F("error"));
 			error[F("code")] = errorCode;
 			error[F("message")] = msg;
 		}
-		serializeJson(responseDoc, response);
+		serializeJson(doc, response);
 	}
 
 	return success;
@@ -850,21 +880,26 @@ void JsonProcessor::serializeState(JsonObject root, bool includeRaw, bool includ
 
 void JsonProcessor::serializeInfo(JsonObject data)
 {
-	data[F("deviceid")] = system_get_chip_id();
+	JsonObject dev = data.createNestedObject(F("device"));
+	dev[F("deviceid")] = system_get_chip_id();
+	dev[F("soc")] = SOC;
 #if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
-	data[F("current_rom")] = String(app.ota.getRomPartition().name());
+	dev[F("current_rom")] = String(app.ota.getRomPartition().name());
 #endif
-	data[F("git_version")] = fw_git_version;
-	data[F("build_type")] = BUILD_TYPE;
-	data[F("git_date")] = fw_git_date;
-	data[F("webapp_version")] = WEBAPP_VERSION;
-	data[F("sming")] = SMING_VERSION;
-	data[F("event_num_clients")] = app.eventserver.activeClients;
-	data[F("uptime")] = app.getUptime();
-	data[F("cpu_usage_percent")] = app.getCpuPercent();
-	data[F("heap_free")] = system_get_free_heap_size();
-	data[F("soc")]=SOC;
-	
+
+	JsonObject application = data.createNestedObject(F("app"));
+	application[F("webapp_version")] = WEBAPP_VERSION;
+	application[F("git_version")] = fw_git_version;
+	application[F("build_type")] = BUILD_TYPE;
+	application[F("git_date")] = fw_git_date;
+
+	JsonObject sming = data.createNestedObject(F("sming"));
+	sming[F("version")] = SMING_VERSION;
+
+	JsonObject run = data.createNestedObject(F("runtime"));
+	run[F("uptime")] = app.getUptime();
+	run[F("heap_free")] = system_get_free_heap_size();
+
 	JsonObject rgbww = data.createNestedObject(F("rgbww"));
 	rgbww[F("version")] = RGBWW_VERSION;
 	rgbww[F("queuesize")] = RGBWW_ANIMATIONQSIZE;
@@ -877,6 +912,31 @@ void JsonProcessor::serializeInfo(JsonObject data)
 	con[F("netmask")] = WifiStation.getNetworkMask().toString();
 	con[F("gateway")] = WifiStation.getNetworkGateway().toString();
 	con[F("mac")] = WifiStation.getMAC();
+
+	if(!app.ota.isProccessing()) {
+		AppConfig::Network network(*app.cfg);
+		JsonObject mqtt=data.createNestedObject(F("mqtt"));
+		if(network.mqtt.getEnabled() && !app.mqttclient.isRunning()) {
+			mqtt[F("status")] = F("configured but not running");
+		} else if(network.mqtt.getEnabled() && app.mqttclient.isRunning()) {
+			mqtt[F("status")] = F("running");
+		} else {
+			mqtt[F("status")] = F("disabled");
+		}
+		mqtt[F("enabled")] = network.mqtt.getEnabled();
+		mqtt[F("broker")] = network.mqtt.getServer();
+		mqtt[F("topic")] = network.mqtt.getTopicBase();
+		if(network.mqtt.homeassistant.getEnable())
+		{
+			JsonObject ha = data.createNestedObject("homeassistant");
+			ha[F("enabled")] = network.mqtt.homeassistant.getEnable();
+			ha[F("discovery_prefix")] = network.mqtt.homeassistant.getDiscoveryPrefix();
+			ha[F("Node ID")]= network.mqtt.homeassistant.getNodeId();
+		}
+	} else {
+		JsonObject ota=data.createNestedObject(F("ota"));
+		ota[F("status")] = F("in progress");
+	}
 }
 
 

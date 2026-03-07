@@ -750,50 +750,9 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response)
 #ifdef ARCH_ESP8266
 	
 #endif
-	auto stream = std::make_unique<JsonObjectStream>();
+	auto stream = std::make_unique<JsonObjectStream>(2048);
 	JsonObject data = stream->getRoot();
-	addInfoFields(data);
-	
-	JsonObject rgbww = data.createNestedObject(F("rgbww"));
-	rgbww[F("version")] = RGBWW_VERSION;
-	rgbww[F("queuesize")] = RGBWW_ANIMATIONQSIZE;
-
-	JsonObject con = data.createNestedObject(F("connection"));
-	con[F("connected")] = WifiStation.isConnected();
-	con[F("ssid")] = WifiStation.getSSID();
-	con[F("dhcp")] = WifiStation.isEnabledDHCP();
-	con[F("ip")] = WifiStation.getIP().toString();
-	con[F("netmask")] = WifiStation.getNetworkMask().toString();
-	con[F("gateway")] = WifiStation.getNetworkGateway().toString();
-	con[F("mac")] = WifiStation.getMAC();
-	
-	// Skip ConfigDB reads during OTA — they consume heap and flash I/O we can't afford
-	if(!app.ota.isProccessing()) {
-		AppConfig::Network network(*app.cfg);
-		JsonObject mqtt=data.createNestedObject(F("mqtt"));
-		if(network.mqtt.getEnabled() && !app.mqttclient.isRunning()) {
-			mqtt[F("status")] = F("configured but not running");
-		} else if(network.mqtt.getEnabled() && app.mqttclient.isRunning()) {
-			mqtt[F("status")] = F("running");
-		} else {
-			mqtt[F("status")] = F("disabled");
-		}
-		mqtt[F("enabled")] = network.mqtt.getEnabled();
-		mqtt[F("broker")] = network.mqtt.getServer();
-		mqtt[F("topic")] = network.mqtt.getTopicBase();
-		if(network.mqtt.homeassistant.getEnable())
-		{
-			JsonObject ha = data.createNestedObject("homeassistant");
-			ha[F("enabled")] = network.mqtt.homeassistant.getEnable();
-			ha[F("discovery_prefix")] = network.mqtt.homeassistant.getDiscoveryPrefix();
-			ha[F("Node ID")]= network.mqtt.homeassistant.getNodeId();
-		}
-	}
-
-	if(app.ota.isProccessing()) {
-		JsonObject ota=data.createNestedObject(F("ota"));
-		ota[F("status")] = F("in progress");
-	}
+	app.jsonproc.serializeInfo(data);
 
 	sendApiResponse(response, stream.release());
 
@@ -929,7 +888,7 @@ void ApplicationWebserver::onNetworks(HttpRequest& request, HttpResponse& respon
 	}
 #endif
 
-	auto stream = std::make_unique<JsonObjectStream>();
+	auto stream = std::make_unique<JsonObjectStream>(3072);
     JsonProcessor::ApiResponse resp;
     resp.data = stream->getRoot();
     
