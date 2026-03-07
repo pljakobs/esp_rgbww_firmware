@@ -98,12 +98,12 @@ perf.data perf.data.old
 output.log
 tests/__pycache__/
 tests/__pycache__/*
-build_benchmarks_ThinkpadL14.log 
-build_benchmarks_ThinkpadL14-without_mitigation.log 
+build_benchmarks_ThinkpadL14.log
+build_benchmarks_ThinkpadL14-without_mitigation.log
 build_benchmarks_ThinkpadL14-with_mitigation.log
 api_test_results.log
-env_state 
-perf.data 
+env_state
+perf.data
 perf.data.old
 api-schemas
 .continue
