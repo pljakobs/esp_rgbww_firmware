@@ -25,21 +25,6 @@
             "type": "string"
           },
           "color": {
-            "d":{
-              "type":"integer"
-            },
-            "t":{
-              "type":"integer"
-            },
-            "s":{
-              "type":"integer"
-            },
-            "cmd":{
-              "type":"string"
-            },
-            "q":{
-              "type":"string"
-            },
             "$ref":"defs/$defs/color"
           },
           "id":{
@@ -185,11 +170,28 @@
                   }
                 },
                 "color": {
+                  "type": "object",
                   "oneOf": [
-                    {"$ref": "#/$defs/Preset"},
-                    {"$ref":"defs/$defs/hsv"},
-                    {"$ref":"defs/$defs/hsvct"},
-                    {"$ref":"defs/$defs/raw"}
+                    {
+                      "required":["Preset"],
+                      "properties":{ "Preset": {"$ref": "#/$defs/Preset"} },
+                      "additionalProperties": false
+                    },
+                    {
+                      "required":["hsv"],
+                      "properties":{ "hsv": {"$ref":"defs/$defs/hsv"} },
+                      "additionalProperties": false
+                    },
+                    {
+                      "required":["hsvct"],
+                      "properties":{ "hsvct": {"$ref":"defs/$defs/hsvct"} },
+                      "additionalProperties": false
+                    },
+                    {
+                      "required":["raw"],
+                      "properties":{ "raw": {"$ref":"defs/$defs/raw"} },
+                      "additionalProperties": false
+                    }
                   ]
                 }
               }

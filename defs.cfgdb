@@ -12,6 +12,7 @@
     },
     "raw": {
       "type": "object",
+      "required":["r","g","b","ww","cw"],
       "properties": {
         "ww": {
             "type": "integer",
@@ -47,6 +48,7 @@
     },
     "hsv": {
       "type": "object",
+      "required":["h","s","v"],
       "properties": {
         "s": {
             "type": "number",
@@ -76,6 +78,7 @@
     },
     "hsvct": {
       "type": "object",
+      "required":["ct"],
       "properties": {
         "s": {
             "type": "integer",
@@ -104,11 +107,24 @@
       }
     },
     "color":{
+      "type":"object",
       "oneOf":
       [
-        {"$ref":"#/$defs/hsv"},
-        {"$ref":"#/$defs/hsvct"},
-        {"$ref":"#/$defs/raw"}
+        {
+          "required":["hsv"],
+          "properties":{ "hsv": {"$ref":"#/$defs/hsv"} },
+          "additionalProperties": false
+        },
+        {
+          "required":["hsvct"],
+          "properties":{ "hsvct": {"$ref":"#/$defs/hsvct"} },
+          "additionalProperties": false
+        },
+        {
+          "required":["raw"],
+          "properties":{ "raw": {"$ref":"#/$defs/raw"} },
+          "additionalProperties": false
+        }
       ]
     },
     "pin":{
