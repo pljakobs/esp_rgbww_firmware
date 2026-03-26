@@ -111,16 +111,19 @@
       "oneOf":
       [
         {
+          "type":"object",
           "required":["hsv"],
           "properties":{ "hsv": {"$ref":"#/$defs/hsv"} },
           "additionalProperties": false
         },
         {
+          "type":"object",
           "required":["hsvct"],
           "properties":{ "hsvct": {"$ref":"#/$defs/hsvct"} },
           "additionalProperties": false
         },
         {
+          "type":"object",
           "required":["raw"],
           "properties":{ "raw": {"$ref":"#/$defs/raw"} },
           "additionalProperties": false
