@@ -523,7 +523,7 @@ void APPLedCtrl::onAnimationFinished(const String& name, bool requeued)
 
 void APPLedCtrl::toggle()
 {
-	static const int toggleFadeTime = 1000;
+	static const int toggleFadeTime = 300;
 	switch(_mode) {
 	case ColorMode::Hsv: {
 		HSVCT current = getCurrentColor();
