@@ -173,21 +173,25 @@
                   "type": "object",
                   "oneOf": [
                     {
+                      "type":"object",
                       "required":["Preset"],
                       "properties":{ "Preset": {"$ref": "#/$defs/Preset"} },
                       "additionalProperties": false
                     },
                     {
+                      "type":"object",
                       "required":["hsv"],
                       "properties":{ "hsv": {"$ref":"defs/$defs/hsv"} },
                       "additionalProperties": false
                     },
                     {
+                      "type":"object",
                       "required":["hsvct"],
                       "properties":{ "hsvct": {"$ref":"defs/$defs/hsvct"} },
                       "additionalProperties": false
                     },
                     {
+                      "type":"object",
                       "required":["raw"],
                       "properties":{ "raw": {"$ref":"defs/$defs/raw"} },
                       "additionalProperties": false

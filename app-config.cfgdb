@@ -72,6 +72,21 @@
           "type": "string",
           "default": "last"
         },
+        "startup": {
+          "description":"modern startup color selection",
+          "type":"object",
+          "properties":{  
+            "mode":{
+              "type":"string",
+              "default":"LAST",
+              "ctype":"ColorStartupMode",
+              "enum":[ "LAST", "SET"]
+            },
+            "color":{
+              "type":"string"
+            }
+          }
+        },
         "brightness": {
           "type": "object",
           "properties": {
