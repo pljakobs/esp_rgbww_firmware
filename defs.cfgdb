@@ -106,24 +106,37 @@
         }
       }
     },
+    "Preset": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      }
+    },
     "color":{
       "type":"object",
       "oneOf":
       [
         {
           "type":"object",
-          "properties":{ "hsv": {"$ref":"#/$defs/hsv"} },
-          "additionalProperties": false
+          "required":["Preset"],
+          "properties":{ "Preset": {"$ref": "#/$defs/Preset"} }
         },
         {
           "type":"object",
-          "properties":{ "hsvct": {"$ref":"#/$defs/hsvct"} },
-          "additionalProperties": false
+          "required":["hsv"],
+          "properties":{ "hsv": {"$ref":"#/$defs/hsv"} }
         },
         {
           "type":"object",
-          "properties":{ "raw": {"$ref":"#/$defs/raw"} },
-          "additionalProperties": false
+          "required":["hsvct"],
+          "properties":{ "hsvct": {"$ref":"#/$defs/hsvct"} }
+        },
+        {
+          "type":"object",
+          "required":["raw"],
+          "properties":{ "raw": {"$ref":"#/$defs/raw"} }
         }
       ]
     },
