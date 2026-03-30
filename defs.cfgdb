@@ -111,32 +111,14 @@
         }
       }
     },
-    "color":{
-      "type":"object",
-      "oneOf":
-      [
-        {
-          "type":"object",
-          "required":["Preset"],
-          "properties":{ "Preset": {"$ref": "#/$defs/Preset"} }
-        },
-        {
-          "type":"object",
-          "required":["hsv"],
-          "properties":{ "hsv": {"$ref":"#/$defs/hsv"} }
-        },
-        {
-          "type":"object",
-          "required":["hsvct"],
-          "properties":{ "hsvct": {"$ref":"#/$defs/hsvct"} }
-        },
-        {
-          "type":"object",
-          "required":["raw"],
-          "properties":{ "raw": {"$ref":"#/$defs/raw"} }
-        }
-      ]
-    },
+ "color": {
+  "oneOf": [
+    { "properties": { "Preset": { "$ref": "#/$defs/Preset" } }, "type": "object" },
+    { "properties": { "hsv": { "$ref": "#/$defs/hsv" } }, "type": "object" },
+    { "properties": { "hsvct": { "$ref": "#/$defs/hsvct" } }, "type": "object" },
+    { "properties": { "raw": { "$ref": "#/$defs/raw" } }, "type": "object" }
+  ]
+},
     "pin":{
         "type":"integer",
         "minimum":0,
