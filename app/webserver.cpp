@@ -676,74 +676,109 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 	}
 }
 
-void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response)
-{
+void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response){
 	debug_i("onInfo");
-	debug_i("request method: %i",request.method);
-	if(!preflightRequest(request, response, { HttpMethod::GET },
-	                     app.ota.isProccessing() ? 4000 : 0)) return;
+	if(!preflightRequest(request, response, { HttpMethod::GET },app.ota.isProccessing() ? 4000 : 0)) return;
 
-#ifdef ARCH_ESP8266
-	
-#endif
 	auto stream = std::make_unique<JsonObjectStream>();
 	JsonObject data = stream->getRoot();
-	addInfoFields(data);
-	
-	JsonObject rgbww = data.createNestedObject(F("rgbww"));
-	rgbww[F("version")] = RGBWW_VERSION;
-	rgbww[F("queuesize")] = RGBWW_ANIMATIONQSIZE;
+	debug_i("onInfo request v=%s", request.getQueryParameter(F("V")).c_str());
+	if(request.getQueryParameter(F("V")) == "2"||request.getQueryParameter(F("v")) == "2"  ){
+		debug_i("onInfo v2");
+		addInfoFields(data);
+		
+		JsonObject rgbww = data.createNestedObject(F("rgbww"));
+		rgbww[F("version")] = RGBWW_VERSION;
+		rgbww[F("queuesize")] = RGBWW_ANIMATIONQSIZE;
 
-	JsonObject con = data.createNestedObject(F("connection"));
-	con[F("connected")] = WifiStation.isConnected();
-	con[F("ssid")] = WifiStation.getSSID();
-	con[F("dhcp")] = WifiStation.isEnabledDHCP();
-	con[F("ip")] = WifiStation.getIP().toString();
-	con[F("netmask")] = WifiStation.getNetworkMask().toString();
-	con[F("gateway")] = WifiStation.getNetworkGateway().toString();
-	con[F("mac")] = WifiStation.getMAC();
-	
-	// Skip ConfigDB reads during OTA — they consume heap and flash I/O we can't afford
-	if(!app.ota.isProccessing()) {
-		AppConfig::Network network(*app.cfg);
-		JsonObject mqtt=data.createNestedObject(F("mqtt"));
-		if(network.mqtt.getEnabled() && !app.mqttclient.isRunning()) {
-			mqtt[F("status")] = F("configured but not running");
-		} else if(network.mqtt.getEnabled() && app.mqttclient.isRunning()) {
-			mqtt[F("status")] = F("running");
-		} else {
-			mqtt[F("status")] = F("disabled");
+		JsonObject con = data.createNestedObject(F("connection"));
+		con[F("connected")] = WifiStation.isConnected();
+		con[F("ssid")] = WifiStation.getSSID();
+		con[F("dhcp")] = WifiStation.isEnabledDHCP();
+		con[F("ip")] = WifiStation.getIP().toString();
+		con[F("netmask")] = WifiStation.getNetworkMask().toString();
+		con[F("gateway")] = WifiStation.getNetworkGateway().toString();
+		con[F("mac")] = WifiStation.getMAC();
+		
+		// Skip ConfigDB reads during OTA — they consume heap and flash I/O we can't afford
+		if(!app.ota.isProccessing()) {
+			AppConfig::Network network(*app.cfg);
+			JsonObject mqtt=data.createNestedObject(F("mqtt"));
+			if(network.mqtt.getEnabled() && !app.mqttclient.isRunning()) {
+				mqtt[F("status")] = F("configured but not running");
+			} else if(network.mqtt.getEnabled() && app.mqttclient.isRunning()) {
+				mqtt[F("status")] = F("running");
+			} else {
+				mqtt[F("status")] = F("disabled");
+			}
+			mqtt[F("enabled")] = network.mqtt.getEnabled();
+			mqtt[F("broker")] = network.mqtt.getServer();
+			mqtt[F("topic")] = network.mqtt.getTopicBase();
+			if(network.mqtt.homeassistant.getEnable())
+			{
+				JsonObject ha = data.createNestedObject("homeassistant");
+				ha[F("enabled")] = network.mqtt.homeassistant.getEnable();
+				ha[F("discovery_prefix")] = network.mqtt.homeassistant.getDiscoveryPrefix();
+				ha[F("Node ID")]= network.mqtt.homeassistant.getNodeId();
+			}
 		}
-		mqtt[F("enabled")] = network.mqtt.getEnabled();
-		mqtt[F("broker")] = network.mqtt.getServer();
-		mqtt[F("topic")] = network.mqtt.getTopicBase();
-		if(network.mqtt.homeassistant.getEnable())
-		{
-			JsonObject ha = data.createNestedObject("homeassistant");
-			ha[F("enabled")] = network.mqtt.homeassistant.getEnable();
-			ha[F("discovery_prefix")] = network.mqtt.homeassistant.getDiscoveryPrefix();
-			ha[F("Node ID")]= network.mqtt.homeassistant.getNodeId();
+
+		if(app.ota.isProccessing()) {
+			JsonObject ota=data.createNestedObject(F("ota"));
+			ota[F("status")] = F("in progress");
 		}
-	}
 
-	if(app.ota.isProccessing()) {
-		JsonObject ota=data.createNestedObject(F("ota"));
-		ota[F("status")] = F("in progress");
-	}
+	}else{
+		debug_i("old style onInfo");	
+		#ifdef ARCH_ESP8266
+			if(app.ota.isProccessing()) {
+				sendApiCode(response, API_CODES::API_UPDATE_IN_PROGRESS);
+				return;
+			}
+		#endif
 
-	sendApiResponse(response, stream.release());
+			data[F("deviceid")] = system_get_chip_id();
+		#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
+			data[F("current_rom")] = String(app.ota.getRomPartition().name());
+		#endif
+			data[F("git_version")] = fw_git_version;
+			data[F("build_type")] = BUILD_TYPE;
+			data[F("git_date")] = fw_git_date;
+			data[F("webapp_version")] = WEBAPP_VERSION;
+			data[F("sming")] = SMING_VERSION;
+			data[F("event_num_clients")] = app.eventserver.activeClients;
+			data[F("uptime")] = app.getUptime();
+			data[F("heap_free")] = system_get_free_heap_size();
+			data[F("soc")]=SOC;
+			
+			/*
+			FileSystem::Info fsInfo;
+			app.getinfo(fsInfo);
+			JsonObject FS=data.createNestedObject("fs");
+			FS[F("mounted")] = fsInfo.partition?"true":"false";
+			FS[F("size")] = fsInfo.total;
+			FS[F("used")] = fsInfo.used;
+			FS[F("available")] = fsInfo.freeSpace;
+		*/
+			JsonObject rgbww = data.createNestedObject("rgbww");
+			rgbww[F("version")] = RGBWW_VERSION;
+			rgbww[F("queuesize")] = RGBWW_ANIMATIONQSIZE;
+
+			JsonObject con = data.createNestedObject("connection");
+			con[F("connected")] = WifiStation.isConnected();
+			con[F("ssid")] = WifiStation.getSSID();
+			con[F("dhcp")] = WifiStation.isEnabledDHCP();
+			con[F("ip")] = WifiStation.getIP().toString();
+			con[F("netmask")] = WifiStation.getNetworkMask().toString();
+			con[F("gateway")] = WifiStation.getNetworkGateway().toString();
+			con[F("mac")] = WifiStation.getMAC();
+			//con[F("mdnshostname")] = app.cfg.network.connection.mdnshostname.c_str();
+
+		}
+		sendApiResponse(response, stream.release());
 
 }
 
-/**
- * @brief Handles the HTTP GET request for retrieving the current color information.
- *
- * This function is responsible for handling the HTTP GET request and returning the current color information
- * in JSON format. The color information includes the raw RGBWW values and the corresponding HSV values.
- *
- * @param request The HTTP request object.
- * @param response The HTTP response object.
- */
 void ApplicationWebserver::onColorGet(HttpRequest& request, HttpResponse& response)
 {
 	debug_i("onColorGet");
@@ -1289,15 +1324,6 @@ void ApplicationWebserver::onSkip(HttpRequest& request, HttpResponse& response)
 {
     if(!preflightRequest(request, response, {HttpMethod::POST})) return;
     
-    /*
-	if(!checkHeap(response)) {
-		return;
-	}
-	if(request.method != HttpMethod::POST) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not HTTP POST"));
-		return;
-	}
-    */
 
 	String msg;
 	if(app.jsonproc.onSkip(request.getBody(), msg)) {
@@ -1311,16 +1337,6 @@ void ApplicationWebserver::onPause(HttpRequest& request, HttpResponse& response)
 {
     if(!preflightRequest(request, response, {HttpMethod::POST})) return;
     
-    /*
-	if(!checkHeap(response)) {
-		return;
-	}
-	if(request.method != HttpMethod::POST) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not HTTP POST"));
-		return;
-	}
-    */
-
 	String msg;
 	if(app.jsonproc.onPause(request.getBody(), msg, true)) {
 		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
@@ -1333,16 +1349,6 @@ void ApplicationWebserver::onContinue(HttpRequest& request, HttpResponse& respon
 {
     if(!preflightRequest(request, response, {HttpMethod::POST})) return;
     
-    /*
-	if(!checkHeap(response)) {
-		return;
-	}
-	if(request.method != HttpMethod::POST) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not HTTP POST"));
-		return;
-	}
-    */
-
 	String msg;
 	if(app.jsonproc.onContinue(request.getBody(), msg)) {
 		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
@@ -1354,16 +1360,6 @@ void ApplicationWebserver::onContinue(HttpRequest& request, HttpResponse& respon
 void ApplicationWebserver::onBlink(HttpRequest& request, HttpResponse& response)
 {
     if(!preflightRequest(request, response, {HttpMethod::POST})) return;
-    
-    /*
-	if(!checkHeap(response)) {
-		return;
-	}
-	if(request.method != HttpMethod::POST) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not HTTP POST"));
-		return;
-	}
-    */
 
 	String msg;
 	if(app.jsonproc.onBlink(request.getBody(), msg)) {
@@ -1377,16 +1373,6 @@ void ApplicationWebserver::onToggle(HttpRequest& request, HttpResponse& response
 {
     if(!preflightRequest(request, response, {HttpMethod::POST})) return;
     
-    /*
-	if(!checkHeap(response)) {
-		return;
-	}
-	if(request.method != HttpMethod::POST) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not HTTP POST"));
-		return;
-	}
-    */
-
 	String msg;
 	if(app.jsonproc.onToggle(request.getBody(), msg)) {
 		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
@@ -1432,29 +1418,6 @@ void ApplicationWebserver::onHosts(HttpRequest& request, HttpResponse& response)
 void ApplicationWebserver::onData(HttpRequest& request, HttpResponse& response){
     if(!preflightRequest(request, response, {HttpMethod::POST, HttpMethod::GET}, 12000)) return;
     
-    /*
-	if(!checkHeap(response)) {
-		return;
-	}
-    */
-	debug_i("http onData request.method %i", request.method);
-    /*
-	if(request.method != HttpMethod::POST && request.method != HttpMethod::GET && request.method != HttpMethod::OPTIONS) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not GET or OPTIONS request"));
-		return;
-	}
-
-	if(request.method == HttpMethod::OPTIONS) {
-		// probably a CORS request
-		setCorsHeaders(response);
-		sendApiCode(response, API_CODES::API_SUCCESS, "");
-		debug_i("HttpMethod::OPTIONS Request, sent API_SUCCESS");
-		return;
-	}
-
-	if(!checkHeap(response,12000))
-		return;
-    */
 	if(request.method==HttpMethod::GET){	
 		setCorsHeaders(response);
 
@@ -1487,24 +1450,10 @@ void ApplicationWebserver::onData(HttpRequest& request, HttpResponse& response){
 void ApplicationWebserver::onSetOn(HttpRequest &request, HttpResponse &response) {
     if(!preflightRequest(request, response, {HttpMethod::POST}, 4000)) return;
     
-    /*
-	if(!checkHeap(response)) {
-		return;
-	}
-	if(request.method == HttpMethod::OPTIONS) {
-		// probably a CORS request
-		setCorsHeaders(response);
-		sendApiCode(response, API_CODES::API_SUCCESS, "");
-		debug_i("HttpMethod::OPTIONS Request, sent API_SUCCESS");
-		return;
-	}
-	if(!checkHeap(response,4000))
-		return;
-    */
 
-  debug_i("onSetOn");
-	
-  String body = request.getBody();
+	debug_i("onSetOn");
+		
+	String body = request.getBody();
 	StaticJsonDocument<512> doc;
 	DeserializationError err = deserializeJson(doc, body);
 	if (err) {
@@ -1522,24 +1471,9 @@ void ApplicationWebserver::onSetOn(HttpRequest &request, HttpResponse &response)
 void ApplicationWebserver::onSetOff(HttpRequest &request, HttpResponse &response) {
     if(!preflightRequest(request, response, {HttpMethod::POST}, 4000)) return;
     
-    /*
-	if(!checkHeap(response)) {
-		return;
-	}
-	if(request.method == HttpMethod::OPTIONS) {
-		// probably a CORS request
-		setCorsHeaders(response);
-		sendApiCode(response, API_CODES::API_SUCCESS, "");
-		debug_i("HttpMethod::OPTIONS Request, sent API_SUCCESS");
-		return;
-	}
-	if(!checkHeap(response,4000))
-		return;
-    */
+	debug_i("onSetOff");
 
-  debug_i("onSetOff");
-
-  String body = request.getBody();
+	String body = request.getBody();
 	StaticJsonDocument<512> doc;
 	DeserializationError err = deserializeJson(doc, body);
 	if (err) {
