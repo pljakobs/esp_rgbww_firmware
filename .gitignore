@@ -93,3 +93,5 @@ buildtime.sh
 build_benchmarks_ThinkpadL14-with_mitigation.log build_benchmarks_ThinkpadL14-without_mitigation.log build_benchmarks_ThinkpadL14.log
 perf.data perf.data.old
 output.log
+__pycache__
+test/__pycache__
