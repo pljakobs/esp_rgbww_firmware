@@ -94,6 +94,7 @@
 
 #include "app-config.h"
 #include "app-data.h"
+#include "app-log.h"
 
 #include <ledctrl.h>
 #include <networking.h>

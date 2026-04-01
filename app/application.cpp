@@ -125,6 +125,13 @@ extern "C" void __wrap_user_pre_init(void)
 
 Application app;
 
+MultiOutputStream debugStream;
+
+size_t debugStreamOutputCallback(const char* buffer, unsigned int length)
+{
+       return debugStream.write((const uint8_t*)buffer, length);
+}
+
 void onReady()
 {
 	
@@ -139,6 +146,11 @@ void onReady()
 #ifdef ARCH_ESP32
 	esp_wifi_set_ps (WIFI_PS_NONE);
 #endif
+	Serial.printf("redirecting log output to ConfigDB-based logStream");
+	auto oldCallback = m_setPuts(&debugStreamOutputCallback);
+	debugStream.addStream(&Serial, false);
+	debugStream.addStream(&logStream, true);
+
 	// seperated application init
 	app.init();
 
@@ -336,6 +348,7 @@ debug_i("Application::init - running partition %s", part.name());
 	// initialize config and data
 	cfg =  std::make_unique<AppConfig>(configDB_PATH);
 	data = std::make_unique<AppData>(dataDB_PATH);
+	log = std::make_unique<AppLog>(logDB_PATH);
 	controllers = std::make_unique<Controllers>();
 
 	// verify if there is a new version of the hardware config
