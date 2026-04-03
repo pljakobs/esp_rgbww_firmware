@@ -63,7 +63,7 @@
 #define DEFAULT_CONNECTION_RETRIES 10
 #define DEFAULT_OTA_URL "https://lightinator.de/version.json"
 
-// RGBWW relatedssh 192.
+// RGBWW related
 #define DEFAULT_COLORTEMP_WW 2700
 #define DEFAULT_COLORTEMP_CW 6000
 

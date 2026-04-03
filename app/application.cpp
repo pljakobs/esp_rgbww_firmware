@@ -1,6 +1,7 @@
 /**
  * @file
  * @author  Patrick Jahns http://github.com/patrickjahns
+ * 			Peter Jakobs http://github.com/pljakobs
  *
  * @section LICENSE
  *
@@ -32,6 +33,9 @@
 #include <VersionListener.h>
 #include <FlashString/Stream.hpp>
 #include <fileMap.h>
+#include <MultiOutputStream.h>
+#include <udpSyslogStream.h>
+
 
 #if ARCH_ESP8266
 #define PART0 "lfs0"
@@ -129,7 +133,7 @@ MultiOutputStream debugStream;
 
 size_t debugStreamOutputCallback(const char* buffer, unsigned int length)
 {
-       return debugStream.write((const uint8_t*)buffer, length);
+	return debugStream.write((const uint8_t*)buffer, length);
 }
 
 void onReady()
@@ -146,10 +150,11 @@ void onReady()
 #ifdef ARCH_ESP32
 	esp_wifi_set_ps (WIFI_PS_NONE);
 #endif
-	Serial.printf("redirecting log output to ConfigDB-based logStream");
+	Serial.systemDebugOutput(false); // disable direct Serial hook; output now goes through debugStreamOutputCallback only
+
 	auto oldCallback = m_setPuts(&debugStreamOutputCallback);
 	debugStream.addStream(&Serial, false);
-	debugStream.addStream(&logStream, true);
+	debugStream.addStream(&app.udpSyslogStream, false);
 
 	// seperated application init
 	app.init();
@@ -296,6 +301,7 @@ void Application::init()
 	//load settings
 	_uptimetimer.initializeMs(60000, TimerDelegate(&Application::uptimeCounter, this)).start();
 	_checkRamTimer.initializeMs(30000, TimerDelegate(&Application::checkRam, this)).start();
+
 #ifdef ARCH_ESP8266
 	// load boot information
 	uint8 bootmode, bootslot;
@@ -314,14 +320,7 @@ void Application::init()
 debug_i("Application::init - check running partition");
 auto part=app.ota.ota.getRunningPartition();
 debug_i("Application::init - running partition %s", part.name());
-// list spiffs partitions
-//listSpiffsPartitions();
 
-// mount filesystem
-//auto romPartition=app.ota.getRomPartition();
-
-//debug_i("Application::init - got rom partition %s @0x%#08x", romPartition.name(),romPartition.address());
-//auto spiffsPartition=app.ota.findSpiffsPartition(romPartition);
 #if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
 	mountfs(getRomSlot());
 	// ToDo - rework mounting filesystem
@@ -348,7 +347,7 @@ debug_i("Application::init - running partition %s", part.name());
 	// initialize config and data
 	cfg =  std::make_unique<AppConfig>(configDB_PATH);
 	data = std::make_unique<AppData>(dataDB_PATH);
-	log = std::make_unique<AppLog>(logDB_PATH);
+	//log = std::make_unique<AppLog>(logDB_PATH);
 	controllers = std::make_unique<Controllers>();
 
 	// verify if there is a new version of the hardware config
@@ -499,6 +498,18 @@ debug_i("Application::init - running partition %s", part.name());
 	// initialize networking
 	network.init();
 	debug_i("network initizalized, ssid: %s", WifiStation.getSSID().c_str());
+	{
+		AppConfig::Network network(*cfg);
+		if(network.rsyslog.getEnabled()) {
+			String host = network.rsyslog.getHost();
+			uint16_t port = network.rsyslog.getPort();
+			AppConfig::General general(*cfg);
+			String myName=general.getDeviceName();
+			debug_i("Initializing remote syslog with host %s and port %d", host.c_str(), port);
+			app.udpSyslogStream.begin(host, port, myName, F("Lightinator"));
+		}
+	}
+	
 	
 }
 void Application::initButtons()
@@ -556,22 +567,26 @@ void Application::startServices()
 void Application::startNetworkServices()
 {
 	debug_i("Application::startServices - starting mqtt");
-	AppConfig::Network network(*cfg);
-	AppConfig::General general(*cfg);
-	debug_i("Application::startServices - mqtt enabled: %s", network.mqtt.getEnabled() ? "true" : "false");
-	String mqttClientId = network.mqtt.homeassistant.getNodeId();
-	if(mqttClientId.length() > 0) {
-		debug_i("Application::startServices - mqtt client id: %s", mqttClientId.c_str());
-	} else {
-		if(general.getDeviceName().length() > 0) {
-			mqttClientId = general.getDeviceName();
+	bool mqttEnabled = false;
+	{
+		AppConfig::Network network(*cfg);
+		AppConfig::General general(*cfg);
+		debug_i("Application::startServices - mqtt enabled: %s", network.mqtt.getEnabled() ? "true" : "false");
+		String mqttClientId = network.mqtt.homeassistant.getNodeId();
+		if(mqttClientId.length() > 0) {
+			debug_i("Application::startServices - mqtt client id: %s", mqttClientId.c_str());
 		} else {
-			mqttClientId = F("rgbww_") + String(WifiStation.getMAC());
+			if(general.getDeviceName().length() > 0) {
+				mqttClientId = general.getDeviceName();
+			} else {
+				mqttClientId = F("rgbww_") + String(WifiStation.getMAC());
+			}
 		}
-	}
+		mqttEnabled = network.mqtt.getEnabled();
+	} // close ConfigDB contexts before mqttclient.init() opens its own
 	mqttclient.init(); // initialize mqtt client with node name
 	debug_i("Application::startServices - mqtt client initialized");
-	if(network.mqtt.getEnabled()) {
+	if(mqttEnabled) {
 		mqttclient.start();
 	}
 	telemetryClient.start();

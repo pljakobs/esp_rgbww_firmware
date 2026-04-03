@@ -382,6 +382,22 @@
               "type":"string"
             }
           }
+        },
+        "rsyslog":{
+          "type":"object",
+          "properties":{
+            "enabled":{
+              "type":"boolean",
+              "default": false
+            },
+            "host":{
+              "type":"string"
+            },
+            "port":{
+              "type":"integer",
+              "default":514
+            }
+          }
         }
       }
     },

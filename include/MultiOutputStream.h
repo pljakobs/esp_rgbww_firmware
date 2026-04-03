@@ -16,7 +16,7 @@ private:
     static const size_t MAX_BUFFERED_STREAMS = 8; // Bitmap supports up to 8 streams
 
 public:
-    MultiOutputStream() : minFreeHeap(10000), bufferFilePath("/tmp/stream_buffer.fifo"), 
+    MultiOutputStream() : minFreeHeap(8000), bufferFilePath("/tmp/stream_buffer.fifo"), 
                          flushIntervalMs(100), flushCounter(0), isFileOpen(false)
     {
         Serial.println("MultiOutputStream: Initializing file-based buffering...");
@@ -24,11 +24,11 @@ public:
         // Initialize file header info without loading messages
         initializeBufferFile();
         
-        Serial.printf("MultiOutputStream: Buffer file ready, timer interval: %ums\n", flushIntervalMs);
+        Serial.printf("MultiOutputStream: Buffer file ready, timer interval: %lums\n", flushIntervalMs);
         
         // Start periodic flush timer
-        flushTimer.initializeMs(flushIntervalMs, TimerDelegate(&MultiOutputStream::flushBufferedData, this));
-        flushTimer.start();
+        //flushTimer.initializeMs(flushIntervalMs, TimerDelegate(&MultiOutputStream::flushBufferedData, this));
+        //flushTimer.start();
         
         Serial.println("MultiOutputStream: All buffered streams use file-based delivery");
     }
@@ -139,8 +139,8 @@ public:
             
             if (freeHeap > minFreeHeap) {
                 // Plenty of memory - write directly to all buffered streams
-                Serial.printf("MultiOutputStream: Direct write to %u buffered streams (free: %u > %u)\n", 
-                             bufferedStreams.size(), freeHeap, minFreeHeap);
+                // Serial.printf("MultiOutputStream: Direct write to %u buffered streams (free: %u > %u)\n", 
+                //             bufferedStreams.size(), freeHeap, minFreeHeap);
                 for (auto stream : bufferedStreams) {
                     if (system_get_free_heap_size() < 3500) break; // Stop if memory drops during writes
                     stream->write(buffer, size);
@@ -270,7 +270,7 @@ private:
         
         // Debug timer activity every few calls
         if (flushCounter % 50 == 0) {
-            Serial.printf("MultiOutputStream: Flush timer tick %u (free: %u)\n", flushCounter, freeHeap);
+            //Serial.printf("MultiOutputStream: Flush timer tick %u (free: %u)\n", flushCounter, freeHeap);
         }
         
         // During low memory, be more aggressive about flushing

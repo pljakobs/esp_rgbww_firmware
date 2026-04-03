@@ -23,6 +23,7 @@
 #include <otaupdate.h>
 #include <controllers.h>
 #include <mdnsHandler.h>
+#include <udpSyslogStream.h>
 
 
 
@@ -82,6 +83,7 @@ public:
 public:
     AppWIFI network;
     ApplicationWebserver webserver;
+    UdpSyslogStream udpSyslogStream;
     APPLedCtrl rgbwwctrl;
     std::unique_ptr<Controllers> controllers;
     

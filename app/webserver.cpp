@@ -496,7 +496,7 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 
 		/* ConfigDB importFomStream */
 		String oldIP, oldSSID, oldDeviceName, oldCurrentPinConfigName;
-		bool mqttEnabled, dhcpEnabled;
+		bool mqttEnabled, dhcpEnabled,rSyslogEnabled;
 		int oldColorMode;
 		{
 			debug_i("ApplicationWebserver::onConfig storing old settings");
@@ -505,6 +505,7 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 			oldIP = network.connection.getIp();
 			oldSSID = network.ap.getSsid();
 			mqttEnabled = network.mqtt.getEnabled();
+			rSyslogEnabled=network.rsyslog.getEnabled();
 			dhcpEnabled=network.connection.getDhcp();
 		}
 		{
@@ -537,7 +538,7 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 
 			app.telemetryClient.start();
 			String newIP, newSSID, newDeviceName, newCurrentPinConfigName;
-			bool newMqttEnabled,newDhcpEnabled;
+			bool newMqttEnabled,newDhcpEnabled,newRsyslogEnabled;
 			int newColorMode;
 			{
 				debug_i("ApplicationWebserver::onConfig getting new settings");
@@ -547,6 +548,8 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 				newSSID = network.ap.getSsid();
 				newMqttEnabled = network.mqtt.getEnabled();
 				newDhcpEnabled=network.connection.getDhcp();
+				newRsyslogEnabled=network.rsyslog.getEnabled();
+
 			}
 			{
 				AppConfig::General general(*app.cfg);
@@ -615,6 +618,7 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 				app.telemetryClient.log(msg);
 				app.delayedCMD(F("restart"),1000);
 			}
+
 			if(oldDeviceName!=newDeviceName){
 				String msg = F("device name change, old Device Name: ")+oldDeviceName+F(", new Device Name: ")+newDeviceName;
 				AppConfig::Network::OuterUpdater network(*app.cfg);
@@ -623,6 +627,11 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 				app.telemetryClient.log(msg);
 				app.mdnsService.setHostname(newDeviceName);
 				//app.delayedCMD(F("restart"),1000);
+			}
+
+			if(rSyslogEnabled!=newRsyslogEnabled){
+				String msg = F("rsyslog settings changed - rebooting ");
+				app.udpSyslogStream.setStatus(newRsyslogEnabled);
 			}
 
 			debug_i("ApplicationWebserver::onConfig %i, %i",newColorMode,oldColorMode);
@@ -1447,6 +1456,7 @@ void ApplicationWebserver::onData(HttpRequest& request, HttpResponse& response){
 
 	return;
 }
+
 void ApplicationWebserver::onSetOn(HttpRequest &request, HttpResponse &response) {
     if(!preflightRequest(request, response, {HttpMethod::POST}, 4000)) return;
     

@@ -3,14 +3,17 @@
   "type": "object",
   "store":true,
   "properties": {
-     "sync-lock":{
+    "sync-lock":{
       "type": "object",
       "properties": {
         "id": {
           "type": "string",
           "default":""
         },
-        "ts": { "$ref": "defs/$defs/timestamp" }
+        "ts": {
+          "type": "integer",
+          "default":0
+        }
       }
     },
     "last-color":{
@@ -25,6 +28,21 @@
             "type": "string"
           },
           "color": {
+            "d":{
+              "type":"integer"
+            },
+            "t":{
+              "type":"integer"
+            },
+            "s":{
+              "type":"integer"
+            },
+            "cmd":{
+              "type":"string"
+            },
+            "q":{
+              "type":"string"
+            },
             "$ref":"defs/$defs/color"
           },
           "id":{
@@ -34,7 +52,9 @@
             "type":"boolean",
             "default":false
           },
-          "ts": { "$ref": "defs/$defs/timestamp" },
+          "ts":{
+            "type":"integer"
+          },
           "icon":{
             "type":"string",
             "default":"palette"
@@ -58,9 +78,8 @@
           },
           "icon":{
             "type":"string",
-            "default":"lights/led-strip-variant"
-          }, 
-          "ts": { "$ref": "defs/$defs/timestamp" }
+            "default":"led-strip-variant"
+          }
         }
       }
     },
@@ -72,7 +91,9 @@
           "name":{
             "type":"string"
           },
-          "ts": { "$ref": "defs/$defs/timestamp" },
+          "ts":{
+            "type":"integer"
+          },
           "id":{
             "type":"string"
           },
@@ -97,7 +118,9 @@
           "name":{
             "type":"string"
           },
-          "ts": { "$ref": "defs/$defs/timestamp" },
+          "ts":{
+            "type":"integer"
+          },
           "id":{
             "type":"string"
           },
@@ -118,6 +141,7 @@
               "d":{
                 "type":"integer"
               },
+      
               "t":{
                 "type":"integer"
               },
@@ -151,12 +175,14 @@
                   "properties":{
                     "d":{
                       "type":"integer"
-                    },           
+                    },
+            
                     "t":{
                       "type":"integer"
                     },
                     "s":{
-                      "type":"integer"                      
+                      "type":"integer"
+                      
                     },
                     "cmd":{
                       "type":"string"
@@ -170,11 +196,26 @@
                   }
                 },
                 "color": {
-                  "$ref":"defs/$defs/color"
+                  "oneOf": [
+                    { "$ref": "#/$defs/Preset" },
+                    {"$ref":"defs/$defs/hsv"},
+                    {"$ref":"defs/$defs/hsvct"},
+                    {"$ref":"defs/$defs/raw"}
+                  ]
                 }
               }
             }
           }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "Preset": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
         }
       }
     }
