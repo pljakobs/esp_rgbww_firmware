@@ -495,9 +495,9 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 		app.telemetryClient.log(F("onConfig POST"));
 
 		/* ConfigDB importFomStream */
-		String oldIP, oldSSID, oldDeviceName, oldCurrentPinConfigName;
-		bool mqttEnabled, dhcpEnabled,rSyslogEnabled;
-		int oldColorMode;
+		String oldIP, oldSSID, oldDeviceName, oldCurrentPinConfigName, oldRsyslogHost;
+		bool mqttEnabled, dhcpEnabled,oldRSyslogEnabled;
+		int oldColorMode,oldRSyslogPort;
 		{
 			debug_i("ApplicationWebserver::onConfig storing old settings");
 			app.telemetryClient.log(F("onConfig storing old settings"));
@@ -505,7 +505,9 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 			oldIP = network.connection.getIp();
 			oldSSID = network.ap.getSsid();
 			mqttEnabled = network.mqtt.getEnabled();
-			rSyslogEnabled=network.rsyslog.getEnabled();
+			oldRSyslogEnabled=network.rsyslog.getEnabled();
+			oldRSyslogPort=network.rsyslog.getPort();
+			oldRsyslogHost=network.rsyslog.getHost();
 			dhcpEnabled=network.connection.getDhcp();
 		}
 		{
@@ -537,9 +539,9 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 			// bool restart = root[F("restart")] | false;
 
 			app.telemetryClient.start();
-			String newIP, newSSID, newDeviceName, newCurrentPinConfigName;
-			bool newMqttEnabled,newDhcpEnabled,newRsyslogEnabled;
-			int newColorMode;
+			String newIP, newSSID, newDeviceName, newCurrentPinConfigName, newRSyslogHost;
+			bool newMqttEnabled,newDhcpEnabled,newRSyslogEnabled;
+			int newColorMode,newRSyslogPort;
 			{
 				debug_i("ApplicationWebserver::onConfig getting new settings");
 				app.telemetryClient.log(F("onConfig getting new settings"));
@@ -548,8 +550,9 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 				newSSID = network.ap.getSsid();
 				newMqttEnabled = network.mqtt.getEnabled();
 				newDhcpEnabled=network.connection.getDhcp();
-				newRsyslogEnabled=network.rsyslog.getEnabled();
-
+				newRSyslogEnabled=network.rsyslog.getEnabled();
+				newRSyslogHost=network.rsyslog.getHost();
+				newRSyslogPort=network.rsyslog.getPort();
 			}
 			{
 				AppConfig::General general(*app.cfg);
@@ -629,9 +632,12 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 				//app.delayedCMD(F("restart"),1000);
 			}
 
-			if(rSyslogEnabled!=newRsyslogEnabled){
-				String msg = F("rsyslog settings changed - rebooting ");
-				app.udpSyslogStream.setStatus(newRsyslogEnabled);
+			if(oldRsyslogHost!=newRsyslogHost || oldRSyslogPort!=newRSyslogPort){
+				app.udpSyslogStream.begin(newRsyslogHost,newRSyslogPort);
+			}
+
+			if(oldRSyslogEnabled!=newRSyslogEnabled){
+				app.udpSyslogStream.setStatus(newRSyslogEnabled);
 			}
 
 			debug_i("ApplicationWebserver::onConfig %i, %i",newColorMode,oldColorMode);
