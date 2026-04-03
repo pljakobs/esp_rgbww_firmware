@@ -85,7 +85,7 @@ private:
     void onBlink(HttpRequest &request, HttpResponse &response);
     void onToggle(HttpRequest &request, HttpResponse &response);
     void onData(HttpRequest &request, HttpResponse &response);
-    
+ 
         // SetOn/SetOff endpoints
     void onSetOn(HttpRequest &request, HttpResponse &response);
     void onSetOff(HttpRequest &request, HttpResponse &response);

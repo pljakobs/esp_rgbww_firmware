@@ -23,6 +23,7 @@
 #include <otaupdate.h>
 #include <controllers.h>
 #include <mdnsHandler.h>
+#include <udpSyslogStream.h>
 
 
 
@@ -82,12 +83,14 @@ public:
 public:
     AppWIFI network;
     ApplicationWebserver webserver;
+    UdpSyslogStream udpSyslogStream;
     APPLedCtrl rgbwwctrl;
     std::unique_ptr<Controllers> controllers;
     
     ApplicationOTA ota;
     std::unique_ptr<AppConfig> cfg;
     std::unique_ptr<AppData> data;
+    
     EventServer eventserver;
     AppMqttClient mqttclient;
     TelemetryClient telemetryClient;
