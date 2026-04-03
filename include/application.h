@@ -90,7 +90,6 @@ public:
     ApplicationOTA ota;
     std::unique_ptr<AppConfig> cfg;
     std::unique_ptr<AppData> data;
-    std::unique_ptr<AppLog> log;
     
     EventServer eventserver;
     AppMqttClient mqttclient;
