@@ -43,14 +43,15 @@ public:
     void begin(const String& host, uint16_t port = SYSLOG_PORT,
                const String& hostname = "rgbww",
                const String& tag = "app",
-               uint8_t priority = 191)
+               uint8_t priority = 191,
+               bool enabled=true)
     {
         _host     = host;
         _port     = port;
         _hostname = hostname;
         _tag      = tag;
         _priority = priority;
-        _enabled  = true;
+        _enabled  = enabled;
         _udp.connect(IpAddress(_host), _port);
 
         // Flush anything captured before begin().
