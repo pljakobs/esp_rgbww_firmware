@@ -632,7 +632,7 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 				//app.delayedCMD(F("restart"),1000);
 			}
 
-			if(oldRsyslogHost!=newRsyslogHost || oldRSyslogPort!=newRSyslogPort){
+			if(oldRSyslogHost!=newRsyslogHost || oldRSyslogPort!=newRSyslogPort){
 				app.udpSyslogStream.begin(newRsyslogHost,newRSyslogPort);
 			}
 
