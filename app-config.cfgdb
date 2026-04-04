@@ -398,6 +398,35 @@
               "default":514
             }
           }
+        },
+        "telemetry": {
+          "type": "object",
+          "properties": {
+            "statsEnabled": {
+              "type":"boolean",
+              "@default":"False if SMING_RELEASE else True"
+            },
+            "logEnabled": {
+              "type":"boolean",
+              "default":false
+          },
+            "url": {
+              "type": "string",
+              "default":"lightinator.de:1883"
+            },
+            "user": {
+              "type": "string",
+              "default":"rgbww"
+            },
+            "password": {
+              "type": "string",
+              "default":"rgbwwdebug"
+            },
+            "numReboots": {
+              "type": "integer",
+              "default":0
+            }
+          }
         }
       }
     },
@@ -513,39 +542,6 @@
               }
             }
           }
-        }
-      }
-    },
-    "telemetry": {
-      "type": "object",
-      "properties": {
-        "statsEnabled": {
-          "type":"string",
-          "@default":"'OFF' if SMING_RELEASE else 'ON'",
-          "ctype":"telemetryStats",
-          "enum":[ "ON", "OFF"]
-        },
-        "logEnabled": {
-          "type":"string",
-          "default":"OFF",
-          "ctype":"telemetryLog",
-          "enum":[ "ON", "OFF"]
-      },
-        "url": {
-          "type": "string",
-          "default":"lightinator.de:1883"
-        },
-        "user": {
-          "type": "string",
-          "default":"rgbww"
-        },
-        "password": {
-          "type": "string",
-          "default":"rgbwwdebug"
-        },
-        "numReboots": {
-          "type": "integer",
-          "default":0
         }
       }
     }

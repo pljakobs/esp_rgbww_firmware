@@ -232,7 +232,7 @@ void Application::checkRam()
 	
 	if (app.rtc_info->reason!= 0 && !_reboot_reported)
 	{
-		AppConfig::Root::Telemetry telemetryCfg(*cfg);
+		AppConfig::Network::Telemetry telemetryCfg(*cfg);
 
 		doc[F("reboot")][F("number")] = telemetryCfg.getNumReboots();
 		doc[F("reboot")][F("reason")] = app.rtc_info->reason;
@@ -261,7 +261,7 @@ void Application::checkRam()
 	
 	if (app.rtc_info->reason!= 0 && !_reboot_reported){
 		_reboot_reported=true;	
-		AppConfig::Root::Telemetry telemetryCfg(*cfg);
+		AppConfig::Network::Telemetry telemetryCfg(*cfg);
 		auto reboots=telemetryCfg.getNumReboots();
 		if(auto telemetryUpdate = telemetryCfg.update()){
 			telemetryUpdate.setNumReboots(reboots+1);

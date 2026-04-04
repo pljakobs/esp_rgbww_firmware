@@ -33,6 +33,7 @@
 
 //#define NOCACHE
 
+
 // ToDo: think about implementing a parameterized API to read objects from appData by id
 
 ApplicationWebserver::ApplicationWebserver()
@@ -445,8 +446,7 @@ bool ApplicationWebserver::preflightRequest(HttpRequest& request, HttpResponse& 
         allowedMethodsStr += String((int)m);
         first = false;
     }
-    debug_i("preflightRequest: Request Method=%d, Allowed={%s}", (int)request.method, allowedMethodsStr.c_str());
-
+    
     for(auto m : allowedMethods) {
         if(request.method == m) {
             methodAllowed = true;
@@ -505,7 +505,7 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 			oldSSID = network.ap.getSsid();
 			mqttEnabled = network.mqtt.getEnabled();
 			oldSyslogEnabled=network.rsyslog.getEnabled();
-			oldTelemetryEnabled=network.telemetry.getEnabled();
+			oldTelemetryEnabled=network.telemetry.getStatsEnabled();
 			oldSyslogPort=network.rsyslog.getPort();
 			oldSyslogHost=network.rsyslog.getHost();
 			dhcpEnabled=network.connection.getDhcp();
@@ -515,6 +515,7 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 			oldDeviceName=general.getDeviceName();
 			oldCurrentPinConfigName=general.getCurrentPinConfigName();
 		}
+		
 		{
 			AppConfig::Color color(*app.cfg);
 			oldColorMode=color.getColorMode();
@@ -551,11 +552,10 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 				newMqttEnabled = network.mqtt.getEnabled();
 				newDhcpEnabled=network.connection.getDhcp();
 				newSyslogEnabled=network.rsyslog.getEnabled();
+				newTelemetryEnabled=network.telemetry.getStatsEnabled();
 				newSyslogHost=network.rsyslog.getHost();
-				newTelemetryEnabled=network.telemetry.getEnabled();
 				newSyslogPort=network.rsyslog.getPort();
 			}
-
 			{
 				AppConfig::General general(*app.cfg);
 				newDeviceName=general.getDeviceName();
@@ -1432,8 +1432,6 @@ void ApplicationWebserver::onHosts(HttpRequest& request, HttpResponse& response)
     } else {
         filter = Controllers::VISIBLE_ONLY; // Show only visible/online controllers
     }
-
-    debug_i("show all controllers %s", showAll ? "true" : "false");
 
     setCorsHeaders(response);
     response.setContentType(MIME_JSON);

@@ -10,9 +10,6 @@
 #define TELEMETRY_ID_MAX_SIZE 32
 #define TELEMETRY_TOPIC_MAX_SIZE 128
 
-using telemetryStats = AppConfig::ContainedRoot::telemetryStats;
-using telemetryLog = AppConfig::ContainedRoot::telemetryLog;
-
 class TelemetryClient {
 public:
     TelemetryClient();
@@ -41,8 +38,8 @@ private:
     char _telemetryURL[TELEMETRY_URL_MAX_SIZE];
     char _telemetryUser[TELEMETRY_USER_MAX_SIZE];
     char _telemetryPass[TELEMETRY_PASS_MAX_SIZE];
-    telemetryStats _telemetryStats;
-    telemetryLog _telemetryLog;
+    bool _telemetryStats;
+    bool _telemetryLog;
 
     int _lastReconnectAttempt = 0;
     bool _reconnectPending = false;

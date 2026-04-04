@@ -2,9 +2,6 @@
 #include <arduinojson.h>
 #include <SimpleTimer.h>
 
-using telemetryStats = AppConfig::ContainedRoot::telemetryStats;
-using telemetryLog = AppConfig::ContainedRoot::telemetryLog;
-
 
 TelemetryClient::TelemetryClient() {
 	snprintf(_chipId, TELEMETRY_CHIPID_MAX_SIZE, "%u", system_get_chip_id());
@@ -28,17 +25,17 @@ TelemetryClient::~TelemetryClient() {
 
 void TelemetryClient::start() {
 	
-	AppConfig::Root::Telemetry telemetryCfg(*app.cfg);
-	strncpy(_telemetryURL, telemetryCfg.getUrl().c_str(), TELEMETRY_URL_MAX_SIZE);
+	AppConfig::Network network(*app.cfg);
+	strncpy(_telemetryURL, network.telemetry.getUrl().c_str(), TELEMETRY_URL_MAX_SIZE);
     _telemetryURL[TELEMETRY_URL_MAX_SIZE - 1] = '\0';
-	strncpy(_telemetryUser, telemetryCfg.getUser().c_str(), TELEMETRY_USER_MAX_SIZE);
+	strncpy(_telemetryUser, network.telemetry.getUser().c_str(), TELEMETRY_USER_MAX_SIZE);
     _telemetryUser[TELEMETRY_USER_MAX_SIZE - 1] = '\0';
-	strncpy(_telemetryPass, telemetryCfg.getPassword().c_str(), TELEMETRY_PASS_MAX_SIZE);
+	strncpy(_telemetryPass, network.telemetry.getPassword().c_str(), TELEMETRY_PASS_MAX_SIZE);
     _telemetryPass[TELEMETRY_PASS_MAX_SIZE - 1] = '\0';
-	_telemetryStats=telemetryCfg.getStatsEnabled();
-	_telemetryLog=telemetryCfg.getLogEnabled();
+	_telemetryStats=network.telemetry.getStatsEnabled();
+	_telemetryLog=network.telemetry.getLogEnabled();
 
-	if((_telemetryStats == telemetryStats::ON or _telemetryLog == telemetryLog::ON) && strlen(_telemetryURL) > 0){
+	if((_telemetryStats  or _telemetryLog ) && strlen(_telemetryURL) > 0){
 		debug_i("Application::startServices - starting remote telemetry");
 
 		debug_i("Application::startServices - telemetry mqtt server: %s", _telemetryURL);
@@ -109,7 +106,7 @@ void TelemetryClient::buildTopic(const char* suffix, char* dest, size_t size) {
 bool TelemetryClient::publish(const char* topic, const JsonDocument& doc) {
 	if (!_isRunning || !mqtt || mqtt->getConnectionState() != eTCS_Connected) {
 		// If telemetry is enabled, try to reconnect with gating
-		if ((_telemetryStats == telemetryStats::ON || _telemetryLog == telemetryLog::ON) && !_reconnectPending) {
+		if ((_telemetryStats || _telemetryLog ) && !_reconnectPending) {
 			unsigned long now = millis();
 			if (now - _lastReconnectAttempt > 10000) { // 10s gate
 				debug_i("TelemetryClient: attempting reconnect");
@@ -154,14 +151,14 @@ bool TelemetryClient::publish(const String& topic, const String& payload) {
     return publish(topic.c_str(), payload.c_str());
 }
 bool TelemetryClient::stat(const JsonDocument& doc) {
-	if(_telemetryStats != telemetryStats::ON){
+	if(!_telemetryStats ){
 		return false; //stats disabled
 	}
 	return publish("monitor", doc);
 }
 
 bool TelemetryClient::log(const char* message) {
-    if(_telemetryLog != telemetryLog::ON){
+    if(!_telemetryLog ){
 		return false; //logging disabled
 	}
     return publish("log", message);
