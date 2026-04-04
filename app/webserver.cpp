@@ -261,7 +261,8 @@ void ApplicationWebserver::addInfoFields(JsonObject& obj)
 	run[F("heap_free")] = app.getFreeHeapSize();
 	run[F("minimumfreeHeapRuntime")]=app.getMinimumHeapUptime();
 	run[F("minimumfreeHeap10min")]=app.getMinimumHeap10min();
-	
+	run[F("heapLowErrUptime")]=app.getHeapLowErrUptime();
+	run[F("heapLowErr10min")]=app.getHeapLowErr10min();
 }
 
 void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, const char* msg)
@@ -404,8 +405,8 @@ bool ApplicationWebserver::checkHeap(HttpResponse& response, int minHeap)
 	if(!app.checkHeap(minHeap) ) {
 		setCorsHeaders(response);
 		response.code = HTTP_STATUS_TOO_MANY_REQUESTS;
-		response.setHeader(F("Retry-After"), "1");
-		debug_i("Not enough heap free, rejecting request. Free heap: %u", system_get_free_heap_size());
+		response.setHeader(F("Retry-After"), "4");
+		debug_i("Not enough heap free, rejecting request. Free heap: %u", app.getFreeHeapSize());
 		return false;
 	}
 	return true;
@@ -782,7 +783,7 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response){
 			data[F("sming")] = SMING_VERSION;
 			data[F("event_num_clients")] = app.eventserver.activeClients;
 			data[F("uptime")] = app.getUptime();
-			data[F("heap_free")] = system_get_free_heap_size();
+			data[F("heap_free")] = app.getFreeHeapSize();
 			data[F("soc")]=SOC;
 			
 			/*

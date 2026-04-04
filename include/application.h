@@ -84,6 +84,8 @@ public:
     bool checkHeap(size_t minHeap);
     size_t getMinimumHeapUptime() { return _minimumHeapUptime; }
     size_t getMinimumHeap10min() { return _minimumHeap10min; }
+    size_t getHeapLowErrUptime() { return _HeapLowErrUptime; }
+    size_t getHeapLowErr10min() { return _HeapLowErr10min;}
 
 public:
     AppWIFI network;
@@ -147,6 +149,8 @@ private:
     uint32_t _uptimeMinutes;
     size_t _minimumHeapUptime = 32768;
     size_t _minimumHeap10min=32768;
+    size_t _HeapLowErrUptime=0;
+    size_t _HeapLowErr10min=0;
 
     std::array<int, 17> _lastToggles;
 

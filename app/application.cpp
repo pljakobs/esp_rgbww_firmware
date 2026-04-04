@@ -212,8 +212,10 @@ Application::~Application()
 void Application::uptimeCounter()
 {
 	++_uptimeMinutes;
-	if (_uptimeMinutes % 10 ==0)
-	_minimumHeap10min=system_get_free_heap_size();
+	if (_uptimeMinutes % 10 ==0){
+		_minimumHeap10min=system_get_free_heap_size();
+		_HeapLowErr10min=0;
+	}
 	
 }
 
@@ -229,6 +231,8 @@ void Application::checkRam()
 	doc[F("freeHeap")] = getFreeHeapSize();
 	doc[F("minimumfreeHeapRuntime")]=_minimumHeapUptime;
 	doc[F("minimumfreeHeap10min")]=_minimumHeap10min;
+	doc[F("heapLowErrUptime")]=_HeapLowErrUptime;
+	doc[F("heapLowErr10min")]=_HeapLowErr10min;
 	doc[F("firmware")] = fw_git_version;
 	doc[F("build")] = BUILD_TYPE;
 	doc[F("soc")] = SOC;
@@ -277,11 +281,18 @@ size_t Application::getFreeHeapSize(){
 	size_t fh = system_get_free_heap_size();
 	if (fh<_minimumHeapUptime ) _minimumHeapUptime=fh;
 	if (fh<_minimumHeap10min) _minimumHeap10min=fh;
+	
 	return fh;
 }
+
 bool Application::checkHeap( size_t minHeap)
 {
-	return getFreeHeapSize()>minHeap;
+	if(getFreeHeapSize()<minHeap){
+		_HeapLowErrUptime++;
+		_HeapLowErr10min++;
+		return false;
+	}
+	return true;
 }
 
 void Application::init()
