@@ -392,21 +392,17 @@ void ApplicationWebserver::onIndex(HttpRequest& request, HttpResponse& response)
 
 bool ApplicationWebserver::checkHeap(HttpResponse& response)
 {
-	return checkHeap(response, 0);
+	return checkHeap(response, _minimumHeap);
 }
 
 bool ApplicationWebserver::checkHeap(HttpResponse& response, int minHeap)
 {
-	
-	if (minHeap==0) {
-		minHeap=_minimumHeap;
-	}
 
 	if(!app.checkHeap(minHeap) ) {
 		setCorsHeaders(response);
 		response.code = HTTP_STATUS_TOO_MANY_REQUESTS;
 		response.setHeader(F("Retry-After"), "4");
-		debug_i("Not enough heap free, rejecting request. Free heap: %u", app.getFreeHeapSize());
+		debug_e("Not enough heap free, rejecting request. Free heap: %u", app.getFreeHeapSize());
 		return false;
 	}
 	return true;
@@ -422,6 +418,7 @@ bool ApplicationWebserver::preflightRequest(HttpRequest& request, HttpResponse& 
 {
     // Default to no-cache for API/dynamic checks. 
     // Static file handler (onFile) will override this if caching is desired.
+    debug_i("preflightRequest: %s %s", String((int)request.method).c_str(), request.uri.Path.c_str());
     response.setHeader(F("Cache-Control"), F("no-cache, no-store, must-revalidate"));
     response.setHeader(F("Pragma"), F("no-cache"));
     response.setHeader(F("Expires"), F("0"));
