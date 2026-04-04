@@ -425,8 +425,7 @@ bool ApplicationWebserver::preflightRequest(HttpRequest& request, HttpResponse& 
         return false;
     }
 
-	debug_i("received method: %i", request.method);
-    // 2. CORS Preflight (OPTIONS) - Must handle this before method check or Auth
+   // 2. CORS Preflight (OPTIONS) - Must handle this before method check or Auth
     if(request.method == HttpMethod::OPTIONS) {
         setCorsHeaders(response);
         sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
