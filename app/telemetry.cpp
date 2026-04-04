@@ -49,6 +49,10 @@ void TelemetryClient::start() {
 
 void TelemetryClient::stop() {
 	_isRunning = false;
+	// Replace the MqttClient instance so the next connect() gets a fresh TCP PCB.
+	// MqttClient::close() is inaccessible (protected base), so we recreate instead.
+	delete mqtt;
+	mqtt = new MqttClient();
 }
 
 void TelemetryClient::connect(const char* telemetryURL, const char* telemetryUser, const char* telemetryPass) {

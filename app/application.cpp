@@ -36,7 +36,6 @@
 #include <MultiOutputStream.h>
 #include <udpSyslogStream.h>
 
-
 #if ARCH_ESP8266
 #define PART0 "lfs0"
 #elif ARCH_ESP32
