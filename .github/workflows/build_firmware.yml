@@ -255,3 +255,53 @@ jobs:
           git config user.email github-actions@github.com
           git tag ${{ steps.get_fw_info.outputs.fw_version }}
           git push origin ${{ steps.get_fw_info.outputs.fw_version }}
+
+      - name: Notify webapp of schema update
+        # Runs once per push (same matrix guard as Tag release).
+        # Requires secrets.WEBAPP_DISPATCH_TOKEN with scopes: repo + workflow
+        # on the pljakobs/esp_rgb_webapp2 repository.
+        if: |
+          github.event_name == 'push' &&
+          matrix.soc == 'esp8266' &&
+          matrix.release == 0 &&
+          matrix.single == 0
+        run: |
+          FIRMWARE_REF="${{ steps.get_fw_info.outputs.fw_version }}"
+          FIRMWARE_SHA="${{ github.sha }}"
+          FIRMWARE_BRANCH="${{ steps.get_branch.outputs.branch }}"
+
+          # Map firmware branch to webapp base branch
+          case "$FIRMWARE_BRANCH" in
+            develop)     WEBAPP_BASE="devel"   ;;
+            testing)     WEBAPP_BASE="testing" ;;
+            stable|main) WEBAPP_BASE="stable"  ;;
+            *)           WEBAPP_BASE="devel"   ;;
+          esac
+
+          echo "Dispatching firmware-schema-update to esp_rgb_webapp2 (base: $WEBAPP_BASE)"
+
+          HTTP_CODE=$(curl -sS -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.WEBAPP_DISPATCH_TOKEN }}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -H "Content-Type: application/json" \
+            -w "\n%{http_code}" \
+            -o /tmp/dispatch_response.json \
+            https://api.github.com/repos/pljakobs/esp_rgb_webapp2/dispatches \
+            -d "$(jq -nc \
+              --arg et firmware-schema-update \
+              --arg ref "$FIRMWARE_REF" \
+              --arg sha "$FIRMWARE_SHA" \
+              --arg branch "$FIRMWARE_BRANCH" \
+              '{event_type:$et,client_payload:{firmware_ref:$ref,firmware_sha:$sha,branch:$branch}}')" \
+            | tail -1)
+
+          echo "HTTP status: $HTTP_CODE"
+          if [ -s /tmp/dispatch_response.json ]; then cat /tmp/dispatch_response.json; fi
+
+          if [ "$HTTP_CODE" -ne "204" ]; then
+            echo "WARNING: schema-update dispatch failed (HTTP $HTTP_CODE). Verify WEBAPP_DISPATCH_TOKEN."
+            # Non-fatal: firmware build succeeded; schema sync can be done manually.
+          else
+            echo "✓ Webapp schema-update dispatched for $FIRMWARE_REF"
+          fi
