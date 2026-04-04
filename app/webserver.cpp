@@ -394,15 +394,16 @@ bool ApplicationWebserver::checkHeap(HttpResponse& response)
 
 bool ApplicationWebserver::checkHeap(HttpResponse& response, int minHeap)
 {
+	
 	if (minHeap==0) {
 		minHeap=_minimumHeap;
 	}
-	unsigned fh = system_get_free_heap_size();
-	if(fh < minHeap) {
+
+	if(!app.checkHeap(minHeap) ) {
 		setCorsHeaders(response);
 		response.code = HTTP_STATUS_TOO_MANY_REQUESTS;
 		response.setHeader(F("Retry-After"), "1");
-		debug_i("Not enough heap free, rejecting request. Free heap: %u", fh);
+		debug_i("Not enough heap free, rejecting request. Free heap: %u", system_get_free_heap_size());
 		return false;
 	}
 	return true;

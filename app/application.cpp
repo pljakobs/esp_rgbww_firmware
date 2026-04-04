@@ -212,6 +212,9 @@ Application::~Application()
 void Application::uptimeCounter()
 {
 	++_uptimeMinutes;
+	if (_uptimeMinutes % 10 ==0)
+	_minimumHeap10min=system_get_free_heap_size();
+	
 }
 
 void Application::checkRam()
@@ -224,6 +227,8 @@ void Application::checkRam()
 	doc[F("uptime")] = _uptimeMinutes*60;
 	doc[F("ip")] = WifiStation.getIP().toString();
 	doc[F("freeHeap")] = system_get_free_heap_size();
+	doc[F("minimumfreeHeapRuntime")]=_minimumHeapUptime;
+	doc[F("minimumfreeHeap10min")]=_minimumHeap10min;
 	doc[F("firmware")] = fw_git_version;
 	doc[F("build")] = BUILD_TYPE;
 	doc[F("soc")] = SOC;
@@ -268,7 +273,15 @@ void Application::checkRam()
 	} 
 }
 
+bool Application::checkHeap( size_t minHeap)
+{
+	size_t fh = system_get_free_heap_size();
+	if (fh<_minimumHeapUptime ) _minimumHeapUptime=fh;
+	if (fh<_minimumHeap10min) _minimumHeap10min=fh;
 
+	
+	return fh<minHeap;
+}
 
 void Application::init()
 {

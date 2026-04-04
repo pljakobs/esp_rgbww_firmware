@@ -80,6 +80,7 @@ public:
 
     uint32_t getUptime();
     void uptimeCounter();
+    bool checkHeap(size_t minHeap);
 
 public:
     AppWIFI network;
@@ -91,6 +92,8 @@ public:
     ApplicationOTA ota;
     std::unique_ptr<AppConfig> cfg;
     std::unique_ptr<AppData> data;
+
+
     
     EventServer eventserver;
     AppMqttClient mqttclient;
@@ -104,7 +107,6 @@ public:
     uint32_t _mDNS_replies = 0;
     struct rst_info* rtc_info;
 
-    
     String sanitizeName(const String& input){
         String result = input;
         for (int i = 0; i < result.length(); i++) {
@@ -140,6 +142,9 @@ private:
     Timer _resetPinTimer;
 
     uint32_t _uptimeMinutes;
+    size_t _minimumHeapUptime = 32768;
+    size_t _minimumHeap10min=32768;
+
     std::array<int, 17> _lastToggles;
 
     uint32_t jsonrpc_id = 0;
