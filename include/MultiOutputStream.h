@@ -69,7 +69,7 @@ public:
     size_t write(uint8_t c) override
     {
         // EMERGENCY: Completely disable if memory is critically low
-        if (system_get_free_heap_size() < 3000) {
+        if (!app.checkHeap( 3000)) {
             return 1; // Pretend success but do nothing
         }
         
@@ -84,7 +84,7 @@ public:
     
     size_t ICACHE_FLASH_ATTR write(const uint8_t* buffer, size_t size) override
     {
-        size_t freeHeap = system_get_free_heap_size();
+        size_t freeHeap = app.getFreeHeapSize();
         
         // EMERGENCY: Completely disable if memory is critically low
         if (freeHeap < 3000) {
@@ -94,7 +94,7 @@ public:
         // Always write to unbuffered streams (like Serial)
         for (auto stream : unbufferedStreams)
         {
-            if (system_get_free_heap_size() < 3500) break; // Stop if memory drops during writes
+            if (!app.checkHeap( 3500)) break; // Stop if memory drops during writes
             stream->write(buffer, size);
         }
         

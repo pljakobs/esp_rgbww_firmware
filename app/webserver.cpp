@@ -258,7 +258,9 @@ void ApplicationWebserver::addInfoFields(JsonObject& obj)
 	sming[F("version")] = SMING_VERSION;
 	JsonObject run = obj.createNestedObject(F("runtime"));
 	run[F("uptime")] = app.getUptime();
-	run[F("heap_free")] = system_get_free_heap_size();
+	run[F("heap_free")] = app.getFreeHeapSize();
+	run[F("minimumfreeHeapRuntime")]=app.getMinimumHeapUptime();
+	run[F("minimumfreeHeap10min")]=app.getMinimumHeap10min();
 	
 }
 

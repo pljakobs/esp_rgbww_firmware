@@ -215,8 +215,7 @@ void ApplicationOTA::start(String romurl)
 	});
 	otaWatchdog.startOnce();
 
-	unsigned fh = system_get_free_heap_size();
-	debug_i("Free heap before OTA: %i", fh);
+	debug_i("Free heap before OTA: %i", app.getFreeHeapSize());
 
 	debug_i("Current running partition: %s", ota.getRunningPartition().name());
 	debug_i("OTA target partition: %s", part.name().c_str());

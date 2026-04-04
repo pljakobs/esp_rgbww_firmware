@@ -183,7 +183,7 @@ void init(){
 	// System.setCpuFrequency(CpuCycleClockFast::cpuFrequency());
 
 	Serial.print(_F("Available heap: "));
-	Serial.println(system_get_free_heap_size());
+	Serial.println(app.getFreeHeapSize());
 	Serial.println("===starting cpu profiling===");
 	onReady(); // this is just in preparation for cpu profiling
 }
@@ -226,7 +226,7 @@ void Application::checkRam()
 	doc[F("time")] = now;	
 	doc[F("uptime")] = _uptimeMinutes*60;
 	doc[F("ip")] = WifiStation.getIP().toString();
-	doc[F("freeHeap")] = system_get_free_heap_size();
+	doc[F("freeHeap")] = getFreeHeapSize();
 	doc[F("minimumfreeHeapRuntime")]=_minimumHeapUptime;
 	doc[F("minimumfreeHeap10min")]=_minimumHeap10min;
 	doc[F("firmware")] = fw_git_version;
@@ -250,7 +250,7 @@ void Application::checkRam()
 	doc[F("mDNS")][F("received")] = _mDNS_received;
 	doc[F("mDNS")][F("replies")] = _mDNS_replies;
 
-	debug_i("Free heap: %d, uptime: %d", system_get_free_heap_size(), millis() / 1000);
+	debug_i("Free heap: %d, uptime: %d", getFreeHeapSize(), millis() / 1000);
 	if (!telemetryClient.stat(doc))
 	{
 		debug_i("Failed to publish monitor data to telemetry MQTT");
@@ -273,14 +273,15 @@ void Application::checkRam()
 	} 
 }
 
-bool Application::checkHeap( size_t minHeap)
-{
+size_t Application::getFreeHeapSize(){
 	size_t fh = system_get_free_heap_size();
 	if (fh<_minimumHeapUptime ) _minimumHeapUptime=fh;
 	if (fh<_minimumHeap10min) _minimumHeap10min=fh;
-
-	
-	return fh<minHeap;
+	return fh;
+}
+bool Application::checkHeap( size_t minHeap)
+{
+	return getFreeHeapSize()>minHeap;
 }
 
 void Application::init()

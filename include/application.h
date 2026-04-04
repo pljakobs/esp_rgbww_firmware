@@ -80,7 +80,10 @@ public:
 
     uint32_t getUptime();
     void uptimeCounter();
+    size_t getFreeHeapSize();
     bool checkHeap(size_t minHeap);
+    size_t getMinimumHeapUptime() { return _minimumHeapUptime; }
+    size_t getMinimumHeap10min() { return _minimumHeap10min; }
 
 public:
     AppWIFI network;

@@ -59,7 +59,7 @@ bool JsonProcessor::onColor(const String& json, String& msg, bool relay)
 bool JsonProcessor::onColor(JsonObject root, String& msg, bool relay)
 {
 	bool result = false;
-	if(system_get_free_heap_size()<MIN_HEAP_FREE) {
+	if(app.getFreeHeapSize()<MIN_HEAP_FREE) {
 		debug_i("out of memory in processing onColor");
 		msg = F("out of memory in processing onColor");
 		return false;
