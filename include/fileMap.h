@@ -1,3 +1,7 @@
+/**
+ * @author  Peter Jakobs http://github.com/pljakobs
+ */
+
 #pragma once
 
 #include <FlashString/Map.hpp>

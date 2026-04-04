@@ -1,6 +1,7 @@
 /**
  * @file
  * @author  Patrick Jahns http://github.com/patrickjahns
+ *          Peter Jakobs http://github.com/pljakobs
  *
  * @section LICENSE
  *
@@ -18,18 +19,6 @@
  * @section DESCRIPTION
  *
  * @section PLAN
- * holding the config struct in RAM seems wasteful. Also, having two entirely different
- * sets of code to serialize/deserialize the config struct for the API and load store 
- * is less than ideal. 
- * Also, the json representation of the base struct can outgrow the 1370Bytes allowed 
- * in a single http request and there may not be enough RAM to assemble multiple fragents 
- * or tcp packets.
- * 
- * ConfigDB (https://github.com/mikee47/ConfigDB) is a library that can store and retrieve
- * json based configuration data. It requires a filesystem to store the data, ideally LittleFS 
- * to leveage the copy on write feature.
- * 
- * this will be a major change as the config struct will be replaced by ConfigDB 
  * 
  */
 #pragma once

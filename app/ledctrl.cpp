@@ -2,6 +2,8 @@
 /**
  * @file
  * @author  Patrick Jahns http://github.com/patrickjahns
+ *          Peter Jakobs http://github.com/pljakobs
+ * 
  *
  * @section LICENSE
  *
@@ -20,6 +22,7 @@
  *
  *
  */
+
 #include <RGBWWCtrl.h>
 
 #include <Wiring/WVector.h>

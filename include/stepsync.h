@@ -1,3 +1,7 @@
+/**
+ * @author  Patrick  http://github.com/pljakobs
+ */
+
 #pragma once
 
 #include <limits>

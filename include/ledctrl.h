@@ -2,6 +2,7 @@
 /**
  * @file
  * @author  Patrick Jahns http://github.com/patrickjahns
+ *          Peter Jakobs http://github.com/pljakobs
  *
  * @section LICENSE
  *
