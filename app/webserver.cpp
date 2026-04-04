@@ -496,7 +496,7 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 
 		/* ConfigDB importFomStream */
 		String oldIP, oldSSID, oldDeviceName, oldCurrentPinConfigName, oldSyslogHost;
-		bool mqttEnabled, dhcpEnabled,oldSyslogEnabled;
+		bool mqttEnabled, dhcpEnabled,oldSyslogEnabled,oldTelemetryEnabled;
 		int oldColorMode,oldSyslogPort;
 		{
 			debug_i("ApplicationWebserver::onConfig storing old settings");
@@ -506,6 +506,7 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 			oldSSID = network.ap.getSsid();
 			mqttEnabled = network.mqtt.getEnabled();
 			oldSyslogEnabled=network.rsyslog.getEnabled();
+			oldTelemetryEnabled=network.telemetry.getEnabled();
 			oldSyslogPort=network.rsyslog.getPort();
 			oldSyslogHost=network.rsyslog.getHost();
 			dhcpEnabled=network.connection.getDhcp();
@@ -538,9 +539,9 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 
 			// bool restart = root[F("restart")] | false;
 
-			app.telemetryClient.start();
+			
 			String newIP, newSSID, newDeviceName, newCurrentPinConfigName, newSyslogHost;
-			bool newMqttEnabled,newDhcpEnabled,newSyslogEnabled;
+			bool newMqttEnabled,newDhcpEnabled,newSyslogEnabled, newTelemetryEnabled;
 			int newColorMode,newSyslogPort;
 			{
 				debug_i("ApplicationWebserver::onConfig getting new settings");
@@ -552,8 +553,10 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 				newDhcpEnabled=network.connection.getDhcp();
 				newSyslogEnabled=network.rsyslog.getEnabled();
 				newSyslogHost=network.rsyslog.getHost();
+				newTelemetryEnabled=network.telemetry.getEnabled();
 				newSyslogPort=network.rsyslog.getPort();
 			}
+
 			{
 				AppConfig::General general(*app.cfg);
 				newDeviceName=general.getDeviceName();
@@ -573,6 +576,7 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 				app.telemetryClient.log(msg);
 				app.delayedCMD(F("restart"), 3000); // wait 3s to first send response
 			}
+
 			if(oldSSID != newSSID) {
 				//
 				if(WifiAccessPoint.isEnabled()) {
@@ -603,6 +607,17 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 				}
 			
 			}
+
+			if(newTelemetryEnabled!=oldTelemetryEnabled){
+				if(newTelemetryEnabled){
+					debug_i("ApplicationWebserver::onConfig telemetry settings changed - starting telemetry");
+					app.telemetryClient.start();
+				}else{
+					debug_i("ApplicationWebserver::onConfig telemetry settings changed - stopping telemetry");
+					app.telemetryClient.stop();
+				}
+			}
+			
 			if(newDhcpEnabled!=dhcpEnabled){
 				if(newDhcpEnabled){
 					WifiStation.enableDHCP(true);
@@ -615,6 +630,7 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 					app.delayedCMD(F("restart"), 3000); // wait 3s to first send response
 				}
 			}
+			
 			if(oldCurrentPinConfigName!=newCurrentPinConfigName){
 				String msg = F("Channel config has changed - rebooting ");
 				app.wsBroadcast(F("notification"), msg);
