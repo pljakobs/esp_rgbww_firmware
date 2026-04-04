@@ -21,6 +21,7 @@
  * @section DESCRIPTION
  *
  */
+
 #include <RGBWWCtrl.h>
 #include <Data/WebHelpers/base64.h>
 #include <memory>

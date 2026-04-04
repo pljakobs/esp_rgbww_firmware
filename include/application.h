@@ -18,7 +18,6 @@
  *
  * @section DESCRIPTION
  *
- *
  */
 #pragma once
 #include <RGBWWCtrl.h>

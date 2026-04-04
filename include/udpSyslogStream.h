@@ -17,7 +17,7 @@
  * @section DESCRIPTION
  *
  *
- */*/
+ */
 
 #pragma once
 #include <SmingCore.h>
