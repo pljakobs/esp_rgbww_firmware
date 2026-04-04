@@ -92,7 +92,7 @@ jobs:
           echo "sanitized_branch=$SANITIZED_BRANCH" >> $GITHUB_OUTPUT
 
       - name: Checkout Repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v6
         with:
           ref: ${{ steps.get_branch.outputs.branch }}
           fetch-depth: 0
@@ -226,7 +226,7 @@ jobs:
 
       - name: Upload firmware artifact
         if: ${{ steps.set_firmware_path.outputs.path != '' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.set_artifact_name.outputs.artifact_name }}
           path: ${{ steps.set_firmware_path.outputs.path }}
@@ -239,7 +239,7 @@ jobs:
       - name: Save version info
         # Only upload version info from one specific matrix combination to avoid conflicts
         if: ${{ matrix.soc == 'esp8266' && matrix.release == 0 && matrix.single == 0 }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: version-info-${{ steps.sanitize_branch.outputs.sanitized_branch }}
           path: version-info.txt

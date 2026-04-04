@@ -95,7 +95,7 @@ jobs:
           echo "latest_run_id=$latest_run_id" >> $GITHUB_ENV
           
       - name: Download version info
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: version-info-${{ env.source_branch }}
           path: ./version-info
@@ -138,7 +138,7 @@ jobs:
    
       # Checkout main repository to get manage_version.py
       - name: Checkout main repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v6
         with:
           path: esp_firmware_repo
               
