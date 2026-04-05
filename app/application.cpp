@@ -127,10 +127,12 @@ extern "C" void __wrap_user_pre_init(void)
 // ─── Crash-dump capture via RTC user memory ──────────────────────────────────
 // RTC user area: slots 64-127, each 4 bytes → 256 bytes total.
 // Layout: magic(4) + reason(4) + exccause(4) + epc1(4) + epc2(4) + epc3(4)
-//         + excvaddr(4) + depc(4) + stackCount(4) + stackWords[54](216) = 252 bytes
+//         + excvaddr(4) + depc(4) + stackBase(4) + stackCount(4)
+//         + stackWords[53](212) = 256 bytes exactly
+// Output format is compatible with Sming decode-stacktrace.py.
 #define CRASH_RTC_SLOT    64
 #define CRASH_RTC_MAGIC   0xDEADC0DEu
-#define CRASH_STACK_WORDS 54
+#define CRASH_STACK_WORDS 53
 
 struct CrashDump {
 	uint32_t magic;
@@ -138,10 +140,11 @@ struct CrashDump {
 	uint32_t exccause;
 	uint32_t epc1, epc2, epc3;
 	uint32_t excvaddr, depc;
+	uint32_t stackBase;   // sp at crash time — needed for decode-stacktrace address column
 	uint32_t stackCount;
 	uint32_t stackWords[CRASH_STACK_WORDS];
 };
-static_assert(sizeof(CrashDump) <= 256, "CrashDump exceeds RTC user memory");
+static_assert(sizeof(CrashDump) == 256, "CrashDump must fit exactly in RTC user memory");
 
 static CrashDump g_crashDump;
 static bool g_crashDumpValid = false;
@@ -159,6 +162,7 @@ extern "C" void custom_crash_callback(struct rst_info* ri, uint32_t stack, uint3
 	dump.epc3     = ri->epc3;
 	dump.excvaddr = ri->excvaddr;
 	dump.depc     = ri->depc;
+	dump.stackBase = stack;
 
 	uint32_t count = 0;
 	for(uint32_t addr = stack; addr < stack_end && count < CRASH_STACK_WORDS; addr += 4) {
@@ -690,21 +694,24 @@ void Application::reportCrashDump()
 	if(g_crashDumpValid) {
 		g_crashDumpValid = false;
 		fullDumpReported = true;
-		debug_w("*** CRASH DUMP: reason=%u exccause=%u epc1=0x%08x epc2=0x%08x epc3=0x%08x excvaddr=0x%08x depc=0x%08x",
-		        g_crashDump.reason, g_crashDump.exccause,
-		        g_crashDump.epc1, g_crashDump.epc2, g_crashDump.epc3,
-		        g_crashDump.excvaddr, g_crashDump.depc);
-		for(uint32_t i = 0; i < g_crashDump.stackCount; i += 4) {
-			uint32_t rem = g_crashDump.stackCount - i;
-			if(rem >= 4) {
-				debug_w("  stack[%2u-%2u]: 0x%08x 0x%08x 0x%08x 0x%08x", i, i + 3,
-				        g_crashDump.stackWords[i], g_crashDump.stackWords[i + 1],
-				        g_crashDump.stackWords[i + 2], g_crashDump.stackWords[i + 3]);
-			} else {
-				for(uint32_t j = 0; j < rem; j++) {
-					debug_w("  stack[%2u]:     0x%08x", i + j, g_crashDump.stackWords[i + j]);
-				}
-			}
+		// Emit in the format that Sming decode-stacktrace.py recognises.
+		// "pc=" line puts the tool into IN_REGISTERS state.
+		debug_w("pc=0x%08x sp=0x%08x excvaddr=0x%08x",
+		        g_crashDump.epc1, g_crashDump.stackBase, g_crashDump.excvaddr);
+		// Emit remaining exception registers on a separate line
+		// (the tool picks these up as generic r00/r01 style or passes them through)
+		debug_w("epc2=0x%08x epc3=0x%08x exccause=%u depc=0x%08x reason=%u",
+		        g_crashDump.epc2, g_crashDump.epc3,
+		        g_crashDump.exccause, g_crashDump.depc, g_crashDump.reason);
+		// Stack dump in the format "xxxxxxxx:  XXXXXXXX XXXXXXXX XXXXXXXX XXXXXXXX"
+		debug_w("Stack dump:");
+		uint32_t addr = g_crashDump.stackBase;
+		for(uint32_t i = 0; i < g_crashDump.stackCount; i += 4, addr += 16) {
+			uint32_t w0 = g_crashDump.stackWords[i];
+			uint32_t w1 = (i + 1 < g_crashDump.stackCount) ? g_crashDump.stackWords[i + 1] : 0;
+			uint32_t w2 = (i + 2 < g_crashDump.stackCount) ? g_crashDump.stackWords[i + 2] : 0;
+			uint32_t w3 = (i + 3 < g_crashDump.stackCount) ? g_crashDump.stackWords[i + 3] : 0;
+			debug_w("%08x:  %08x %08x %08x %08x", addr, w0, w1, w2, w3);
 		}
 	}
 #endif
