@@ -281,13 +281,24 @@ jobs:
           for soc in esp8266 esp32 esp32c3; do
             for type in debug release; do
               if [ "$soc" = "esp8266" ]; then
-                file="rom0.bin"
+                bin_file="rom0.bin"
+                elf_file="app_0.out"
+                map_file="app_0.map"
               else
-                file="app.bin"
+                bin_file="app.bin"
+                elf_file="app.out"
+                map_file="app.map"
               fi
               
-              url="http://$DEPLOY_SERVER/download/$TARGET_BRANCH/$VERSION/$soc/$type/$file"
+              url="http://$DEPLOY_SERVER/download/$TARGET_BRANCH/$VERSION/$soc/$type/$bin_file"
               python3 manage_version.py version.json add $soc $type $TARGET_BRANCH "$VERSION" "$url"
+              
+              # ELF and map are deployed as sibling files in the same directory.
+              # URL pattern: /download/{branch}/{version}/{soc}/{type}/{elf_file}
+              # The log service can derive these URLs from the rom URL without
+              # any version.json changes.
+              echo "ELF deployed at: http://$DEPLOY_SERVER/download/$TARGET_BRANCH/$VERSION/$soc/$type/$elf_file"
+              echo "MAP deployed at: http://$DEPLOY_SERVER/download/$TARGET_BRANCH/$VERSION/$soc/$type/$map_file"
             done
           done
           
