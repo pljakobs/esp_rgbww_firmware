@@ -1263,6 +1263,14 @@ void ApplicationWebserver::onSystemReq(HttpRequest& request, HttpResponse& respo
 					error = true;
 				}
 
+			} else if(cmd.equals(F("restart"))) {
+				bool clearOta = false;
+				Json::getValue(doc[F("clearOTA")], clearOta);
+				String restartCmd = clearOta ? F("clear_ota_restart") : F("restart");
+				if(!app.delayedCMD(restartCmd, 1500)) {
+					error = true;
+				}
+
 			} else if(!app.delayedCMD(cmd, 1500)) {
 				error = true;
 			}

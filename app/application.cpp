@@ -766,6 +766,13 @@ bool Application::delayedCMD(String cmd, int delay)
 		wsBroadcast(F("webapp_cmd"), F("reload"));
 		telemetryClient.log(F("delaycmd restart"));
 		_systimer.initializeMs(delay, TimerDelegate(&Application::restart, this)).startOnce();
+	} else if(cmd.equals(F("clear_ota_restart"))) {
+		debug_i("Application::delayedCMD: clearing OTA status before restart");
+		ota.saveStatus(OTASTATUS::OTA_NOT_UPDATING);
+		wsBroadcast(F("notification"), F("Controller will restart (OTA status cleared)"));
+		wsBroadcast(F("webapp_cmd"), F("reload"));
+		telemetryClient.log(F("delaycmd clear_ota_restart"));
+		_systimer.initializeMs(delay, TimerDelegate(&Application::restart, this)).startOnce();
 	} else if(cmd.equals(F("stopap"))) {
 		wsBroadcast(F("notification"), F("Controller will disable the access point"));
 		network.stopAp(2000);
