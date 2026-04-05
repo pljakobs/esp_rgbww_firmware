@@ -132,7 +132,7 @@ extern "C" void __wrap_user_pre_init(void)
 // Output format is compatible with Sming decode-stacktrace.py.
 #define CRASH_RTC_SLOT    64
 #define CRASH_RTC_MAGIC   0xDEADC0DEu
-#define CRASH_STACK_WORDS 53
+#define CRASH_STACK_WORDS 54
 
 struct CrashDump {
 	uint32_t magic;
