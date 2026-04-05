@@ -403,6 +403,7 @@ void ApplicationOTA::checkAtBoot()
 	// clear the flag so the controller doesn't stay in a degraded state.
 	if(status == OTASTATUS::OTA_FAILED || status == OTASTATUS::OTA_PROCESSING) {
 		debug_w("checkAtBoot: boot after interrupted OTA (status=%i) — cleared, running normally", (int)status);
+		status = OTASTATUS::OTA_NOT_UPDATING;
 	}
 
 	if(app.isTempBoot()) {
@@ -558,13 +559,14 @@ bool ApplicationOTA::switchPartition(uint8_t slot)
 }
 #endif
 
-void ApplicationOTA::saveStatus(OTASTATUS status)
+void ApplicationOTA::saveStatus(OTASTATUS newStatus)
 {
-	debug_i("ApplicationOTA::saveStatus %i to rom partition rom%i\n", status, app.getRomSlot());
-	app.wsBroadcast(F("ota_status"), String((int)status));
+	debug_i("ApplicationOTA::saveStatus %i to rom partition rom%i\n", newStatus, app.getRomSlot());
+	status = newStatus;
+	app.wsBroadcast(F("ota_status"), String((int)newStatus));
 	StaticJsonDocument<128> doc;
 	JsonObject root = doc.to<JsonObject>();
-	root[F("status")] = int(status);
+	root[F("status")] = int(newStatus);
 	Json::saveToFile(root, OTA_STATUS_FILE);
 }
 
