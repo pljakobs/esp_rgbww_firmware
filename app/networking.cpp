@@ -346,11 +346,6 @@ void AppWIFI::_STAGotIP(IpAddress ip, IpAddress mask, IpAddress gateway)
 
 	{
 		AppConfig::Network network(*app.cfg);
-		/*
-		if(network.connection.getDhcp()) {
-			ipAddress = "dhcp";
-		}
-			*/
 		uint32_t id;
 		
 		id = (uint32_t)system_get_chip_id();	
@@ -364,6 +359,9 @@ void AppWIFI::_STAGotIP(IpAddress ip, IpAddress mask, IpAddress gateway)
 			app.mqttclient.start();
 		}
 	} // end ConfigDB network context
+
+	// After network is up, report any crash/watchdog reboot to the syslog target
+	app.reportCrashDump();
 }
 
 /**
