@@ -1,5 +1,11 @@
 name: firmwareBuild
 
+# Single source of truth for supported SOCs.
+# Update here when adding an SOC; the deploy workflow reads this from version-info.txt.
+env:
+  SUPPORTED_SOCS_JSON: '["esp8266","esp32","esp32c3"]'
+  SUPPORTED_SOCS_CSV: "esp8266,esp32,esp32c3"
+
 on:
   push:
     branches: [stable, testing, develop, experimental]
@@ -26,7 +32,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        soc: [esp8266, esp32, esp32c3]
+        soc: ${{ fromJson(env.SUPPORTED_SOCS_JSON) }}
         release: [0, 1]
         single: [0, 1]
 
@@ -263,6 +269,7 @@ jobs:
         run: |
           echo "fw_version=${{ steps.get_fw_info.outputs.fw_version }}" > version-info.txt
           echo "fw_branch=${{ steps.sanitize_branch.outputs.sanitized_branch }}" >> version-info.txt
+          echo "supported_socs=${{ env.SUPPORTED_SOCS_CSV }}" >> version-info.txt
         
       - name: Save version info
         # Only upload version info from one specific matrix combination to avoid conflicts
