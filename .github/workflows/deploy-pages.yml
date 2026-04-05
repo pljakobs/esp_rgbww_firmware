@@ -25,6 +25,7 @@ jobs:
       fw_version: ${{ steps.version.outputs.fw_version }}
       fw_branch: ${{ steps.version.outputs.fw_branch }}
       latest_run_id: ${{ steps.get_run.outputs.latest_run_id }}  
+      supported_socs: ${{ steps.version.outputs.supported_socs }}
       
     steps:
       - name: Disable Jekyll processing
@@ -109,6 +110,8 @@ jobs:
           source ./version-info/version-info.txt
           echo "fw_version=$fw_version" >> $GITHUB_OUTPUT
           echo "fw_branch=$fw_branch" >> $GITHUB_OUTPUT
+          # Fall back to current known list for artifacts built before this change
+          echo "supported_socs=${supported_socs:-esp8266,esp32,esp32c3}" >> $GITHUB_OUTPUT
 
   publish:
     runs-on: ubuntu-latest
@@ -135,6 +138,7 @@ jobs:
           echo "source_branch=$source_branch" >> $GITHUB_ENV
           echo "target_branch=$target_branch" >> $GITHUB_ENV
           echo "version=${{ needs.get-version.outputs.fw_version }}" >> $GITHUB_ENV
+          echo "supported_socs=${{ needs.get-version.outputs.supported_socs }}" >> $GITHUB_ENV
    
       # Checkout main repository to get manage_version.py
       - name: Checkout main repository
@@ -142,11 +146,11 @@ jobs:
         with:
           path: esp_firmware_repo
               
-      # Create download directories for all branches (with version)
       - name: Create directories
         run: |
-          # Create versioned directory structure
-          for soc in esp8266 esp32 esp32c3; do
+          IFS=',' read -ra soc_list <<< "${{ env.supported_socs }}"
+          for soc in "${soc_list[@]}"; do
+            soc=$(echo "$soc" | tr -d ' ')
             mkdir -p download/${{ env.target_branch }}/${{ env.version }}/$soc/debug
             mkdir -p download/${{ env.target_branch }}/${{ env.version }}/$soc/release
             mkdir -p download/${{ env.target_branch }}/${{ env.version }}/$soc/debug/single_image
@@ -161,21 +165,22 @@ jobs:
       # Download artifacts for the current branch
       - name: Download artifacts
         run: |
-          # Define all combinations for artifact downloads with version in path
-          combinations=(
-            "esp8266 debug 0 download/${{ env.target_branch }}/${{ env.version }}/esp8266/debug"
-            "esp8266 release 0 download/${{ env.target_branch }}/${{ env.version }}/esp8266/release"
-            "esp32 debug 0 download/${{ env.target_branch }}/${{ env.version }}/esp32/debug"
-            "esp32 release 0 download/${{ env.target_branch }}/${{ env.version }}/esp32/release"
-            "esp32c3 debug 0 download/${{ env.target_branch }}/${{ env.version }}/esp32c3/debug"
-            "esp32c3 release 0 download/${{ env.target_branch }}/${{ env.version }}/esp32c3/release"
-            "esp8266 debug 1 download/${{ env.target_branch }}/${{ env.version }}/esp8266/debug/single_image"
-            "esp8266 release 1 download/${{ env.target_branch }}/${{ env.version }}/esp8266/release/single_image"
-            "esp32 debug 1 download/${{ env.target_branch }}/${{ env.version }}/esp32/debug/single_image"
-            "esp32 release 1 download/${{ env.target_branch }}/${{ env.version }}/esp32/release/single_image"
-            "esp32c3 debug 1 download/${{ env.target_branch }}/${{ env.version }}/esp32c3/debug/single_image"
-            "esp32c3 release 1 download/${{ env.target_branch }}/${{ env.version }}/esp32c3/release/single_image"
-          )
+          # Build combinations dynamically from supported_socs
+          IFS=',' read -ra soc_list <<< "${{ env.supported_socs }}"
+          combinations=()
+          for soc in "${soc_list[@]}"; do
+            soc=$(echo "$soc" | tr -d ' ')
+            for build_type in debug release; do
+              for single_img in 0 1; do
+                if [ "$single_img" = "1" ]; then
+                  path="download/${{ env.target_branch }}/${{ env.version }}/$soc/$build_type/single_image"
+                else
+                  path="download/${{ env.target_branch }}/${{ env.version }}/$soc/$build_type"
+                fi
+                combinations+=("$soc $build_type $single_img $path")
+              done
+            done
+          done
           
           for combo in "${combinations[@]}"; do
             read -r soc build_type single_img path <<< "$combo"
@@ -268,6 +273,7 @@ jobs:
           TARGET_BRANCH="${{ env.target_branch }}"
           VERSION="${{ env.version }}"
           DEPLOY_SERVER="${{ env.deploy_server }}"
+          SUPPORTED_SOCS="${{ env.supported_socs }}"
           
           cd "$DEPLOY_PATH"
           
@@ -277,8 +283,9 @@ jobs:
           chmod +x manage_version.py
           
           # Update version.json for each uploaded artifact
-          # We perform the logic relative to what we know we uploaded
-          for soc in esp8266 esp32 esp32c3; do
+          IFS=',' read -ra soc_list <<< "$SUPPORTED_SOCS"
+          for soc in "${soc_list[@]}"; do
+            soc=$(echo "$soc" | tr -d ' ')
             for type in debug release; do
               if [ "$soc" = "esp8266" ]; then
                 bin_file="rom0.bin"
@@ -293,10 +300,7 @@ jobs:
               url="http://$DEPLOY_SERVER/download/$TARGET_BRANCH/$VERSION/$soc/$type/$bin_file"
               python3 manage_version.py version.json add $soc $type $TARGET_BRANCH "$VERSION" "$url"
               
-              # ELF and map are deployed as sibling files in the same directory.
-              # URL pattern: /download/{branch}/{version}/{soc}/{type}/{elf_file}
-              # The log service can derive these URLs from the rom URL without
-              # any version.json changes.
+              # ELF and map are sibling files — URL predictable by replacing bin filename.
               echo "ELF deployed at: http://$DEPLOY_SERVER/download/$TARGET_BRANCH/$VERSION/$soc/$type/$elf_file"
               echo "MAP deployed at: http://$DEPLOY_SERVER/download/$TARGET_BRANCH/$VERSION/$soc/$type/$map_file"
             done

@@ -21,12 +21,27 @@ on:
           - experimental
 
 jobs:
+  # Single source of truth for supported SOCs.
+  # Update soc_json/soc_csv here when adding an SOC.
+  generate-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      soc_json: ${{ steps.set.outputs.soc_json }}
+      soc_csv: ${{ steps.set.outputs.soc_csv }}
+    steps:
+      - name: Define supported SOCs
+        id: set
+        run: |
+          echo 'soc_json=["esp8266","esp32","esp32c3"]' >> $GITHUB_OUTPUT
+          echo 'soc_csv=esp8266,esp32,esp32c3' >> $GITHUB_OUTPUT
+
   build:
+    needs: generate-matrix
     runs-on: ubuntu-latest
     strategy:
       fail-fast: true
       matrix:
-        soc: [esp8266, esp32, esp32c3]
+        soc: ${{ fromJson(needs.generate-matrix.outputs.soc_json) }}
         release: [0, 1]
         single: [0, 1]
 
@@ -263,6 +278,7 @@ jobs:
         run: |
           echo "fw_version=${{ steps.get_fw_info.outputs.fw_version }}" > version-info.txt
           echo "fw_branch=${{ steps.sanitize_branch.outputs.sanitized_branch }}" >> version-info.txt
+          echo "supported_socs=${{ needs.generate-matrix.outputs.soc_csv }}" >> version-info.txt
         
       - name: Save version info
         # Only upload version info from one specific matrix combination to avoid conflicts
