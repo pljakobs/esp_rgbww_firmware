@@ -193,6 +193,8 @@ void ApplicationOTA::start(String romurl)
 	 */
 	if(part == ota.getRunningPartition()) {
 		Serial << F("May be running in temporary mode. Please reboot and try again.") << endl;
+		broadcastOtaStatus(0, F("OTA failed: target partition is currently running, please reboot and try again"));
+		status = OTASTATUS::OTA_FAILED;
 		return;
 	}
 
@@ -206,12 +208,13 @@ void ApplicationOTA::start(String romurl)
 
 	beforeOTA();
 
-	// Watchdog: if upgradeCallback has not fired within 5 minutes, treat as hung OTA
-	otaWatchdog.initializeMs<5 * 60 * 1000>([this]() {
-		debug_e("ApplicationOTA: watchdog timeout - OTA appears hung, aborting");
-		broadcastOtaStatus(0, F("OTA watchdog timeout - update failed"));
+	// Watchdog: if upgradeCallback has not fired within 2 minutes, reboot to recover
+	otaWatchdog.initializeMs<2 * 60 * 1000>([this]() {
+		debug_e("ApplicationOTA: watchdog timeout - OTA appears hung, rebooting to recover");
+		broadcastOtaStatus(0, F("OTA watchdog timeout - rebooting to recover"));
 		otaUpdater.reset();
 		status = OTASTATUS::OTA_FAILED;
+		System.restart();
 	});
 	otaWatchdog.startOnce();
 
