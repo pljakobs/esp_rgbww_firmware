@@ -224,12 +224,40 @@ jobs:
             echo "artifact_name=lightinator-${{ matrix.soc }}-debug${tag}-${{ steps.sanitize_branch.outputs.sanitized_branch }}" >> $GITHUB_OUTPUT
           fi
 
+      - name: Set ELF path
+        id: set_elf_path
+        # Only for non-single-image builds: single images share the same ELF as their counterpart
+        if: ${{ matrix.single == 0 }}
+        run: |
+          if [ "${{ matrix.soc }}" = "esp8266" ] && [ "${{ matrix.release }}" = "0" ]; then
+            echo "elf=out/Esp8266/debug/build/app_0.out" >> $GITHUB_OUTPUT
+            echo "map=out/Esp8266/debug/build/app_0.map" >> $GITHUB_OUTPUT
+          elif [ "${{ matrix.soc }}" = "esp8266" ] && [ "${{ matrix.release }}" = "1" ]; then
+            echo "elf=out/Esp8266/release/build/app_0.out" >> $GITHUB_OUTPUT
+            echo "map=out/Esp8266/release/build/app_0.map" >> $GITHUB_OUTPUT
+          elif [ "${{ matrix.soc }}" = "esp32" ] && [ "${{ matrix.release }}" = "0" ]; then
+            echo "elf=out/Esp32/esp32/debug/build/app.out" >> $GITHUB_OUTPUT
+            echo "map=out/Esp32/esp32/debug/build/app.map" >> $GITHUB_OUTPUT
+          elif [ "${{ matrix.soc }}" = "esp32" ] && [ "${{ matrix.release }}" = "1" ]; then
+            echo "elf=out/Esp32/esp32/release/build/app.out" >> $GITHUB_OUTPUT
+            echo "map=out/Esp32/esp32/release/build/app.map" >> $GITHUB_OUTPUT
+          elif [ "${{ matrix.soc }}" = "esp32c3" ] && [ "${{ matrix.release }}" = "0" ]; then
+            echo "elf=out/Esp32/esp32c3/debug/build/app.out" >> $GITHUB_OUTPUT
+            echo "map=out/Esp32/esp32c3/debug/build/app.map" >> $GITHUB_OUTPUT
+          elif [ "${{ matrix.soc }}" = "esp32c3" ] && [ "${{ matrix.release }}" = "1" ]; then
+            echo "elf=out/Esp32/esp32c3/release/build/app.out" >> $GITHUB_OUTPUT
+            echo "map=out/Esp32/esp32c3/release/build/app.map" >> $GITHUB_OUTPUT
+          fi
+
       - name: Upload firmware artifact
         if: ${{ steps.set_firmware_path.outputs.path != '' }}
         uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.set_artifact_name.outputs.artifact_name }}
-          path: ${{ steps.set_firmware_path.outputs.path }}
+          path: |
+            ${{ steps.set_firmware_path.outputs.path }}
+            ${{ steps.set_elf_path.outputs.elf }}
+            ${{ steps.set_elf_path.outputs.map }}
           
       - name: Create version info file
         run: |

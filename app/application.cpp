@@ -124,7 +124,56 @@ extern "C" void __wrap_user_pre_init(void)
 	__real_user_pre_init();
 }
 
-#endif
+// ─── Crash-dump capture via RTC user memory ──────────────────────────────────
+// RTC user area: slots 64-127, each 4 bytes → 256 bytes total.
+// Layout: magic(4) + reason(4) + exccause(4) + epc1(4) + epc2(4) + epc3(4)
+//         + excvaddr(4) + depc(4) + stackBase(4) + stackCount(4)
+//         + stackWords[53](212) = 256 bytes exactly
+// Output format is compatible with Sming decode-stacktrace.py.
+#define CRASH_RTC_SLOT    64
+#define CRASH_RTC_MAGIC   0xDEADC0DEu
+#define CRASH_STACK_WORDS 54
+
+struct CrashDump {
+	uint32_t magic;
+	uint32_t reason;
+	uint32_t exccause;
+	uint32_t epc1, epc2, epc3;
+	uint32_t excvaddr, depc;
+	uint32_t stackBase;   // sp at crash time — needed for decode-stacktrace address column
+	uint32_t stackCount;
+	uint32_t stackWords[CRASH_STACK_WORDS];
+};
+static_assert(sizeof(CrashDump) == 256, "CrashDump must fit exactly in RTC user memory");
+
+static CrashDump g_crashDump;
+static bool g_crashDumpValid = false;
+
+// Overrides the weak alias in crash_handler.c — runs before the reset.
+// Keep it minimal: only SDK primitive writes are safe here.
+extern "C" void custom_crash_callback(struct rst_info* ri, uint32_t stack, uint32_t stack_end)
+{
+	CrashDump dump{};
+	dump.magic    = CRASH_RTC_MAGIC;
+	dump.reason   = ri->reason;
+	dump.exccause = ri->exccause;
+	dump.epc1     = ri->epc1;
+	dump.epc2     = ri->epc2;
+	dump.epc3     = ri->epc3;
+	dump.excvaddr = ri->excvaddr;
+	dump.depc     = ri->depc;
+	dump.stackBase = stack;
+
+	uint32_t count = 0;
+	for(uint32_t addr = stack; addr < stack_end && count < CRASH_STACK_WORDS; addr += 4) {
+		dump.stackWords[count++] = *reinterpret_cast<const uint32_t*>(addr);
+	}
+	dump.stackCount = count;
+
+	system_rtc_mem_write(CRASH_RTC_SLOT, &dump, sizeof(dump));
+}
+
+#endif // ARCH_ESP8266
 
 Application app;
 
@@ -142,6 +191,7 @@ void onReady()
 	app.rtc_info = system_get_rst_info();
 	
 #ifdef ARCH_ESP8266
+	app.readCrashDump();
 	osMessageInterceptor.begin(onOsMessage);
 	debug_i("starting os message interceptor");
 #endif
@@ -265,7 +315,6 @@ void Application::checkRam()
 		}
 		*/
 	}
-	
 	
 	if (app.rtc_info->reason!= 0 && !_reboot_reported){
 		_reboot_reported=true;	
@@ -621,6 +670,61 @@ void Application::logRestart(){
 	m_snprintf(msg, sizeof(msg), "restart, reason: %u, exccause: %u", 
 	           (unsigned int)app.rtc_info->reason, (unsigned int)app.rtc_info->exccause);
 	telemetryClient.log(msg);
+}
+
+#ifdef ARCH_ESP8266
+void Application::readCrashDump()
+{
+	CrashDump dump{};
+	system_rtc_mem_read(CRASH_RTC_SLOT, &dump, sizeof(dump));
+	if(dump.magic == CRASH_RTC_MAGIC) {
+		g_crashDump = dump;
+		g_crashDumpValid = true;
+		// clear magic so we don't re-report on the next boot
+		dump.magic = 0;
+		system_rtc_mem_write(CRASH_RTC_SLOT, &dump, sizeof(dump));
+	}
+}
+#endif
+
+void Application::reportCrashDump()
+{
+	bool fullDumpReported = false;
+#ifdef ARCH_ESP8266
+	if(g_crashDumpValid) {
+		g_crashDumpValid = false;
+		fullDumpReported = true;
+		// Emit in the format that Sming decode-stacktrace.py recognises.
+		// "pc=" line puts the tool into IN_REGISTERS state.
+		debug_w("pc=0x%08x sp=0x%08x excvaddr=0x%08x",
+		        g_crashDump.epc1, g_crashDump.stackBase, g_crashDump.excvaddr);
+		// Emit remaining exception registers on a separate line
+		// (the tool picks these up as generic r00/r01 style or passes them through)
+		debug_w("epc2=0x%08x epc3=0x%08x exccause=%u depc=0x%08x reason=%u",
+		        g_crashDump.epc2, g_crashDump.epc3,
+		        g_crashDump.exccause, g_crashDump.depc, g_crashDump.reason);
+		// Stack dump in the format "xxxxxxxx:  XXXXXXXX XXXXXXXX XXXXXXXX XXXXXXXX"
+		debug_w("Stack dump:");
+		uint32_t addr = g_crashDump.stackBase;
+		for(uint32_t i = 0; i < g_crashDump.stackCount; i += 4, addr += 16) {
+			uint32_t w0 = g_crashDump.stackWords[i];
+			uint32_t w1 = (i + 1 < g_crashDump.stackCount) ? g_crashDump.stackWords[i + 1] : 0;
+			uint32_t w2 = (i + 2 < g_crashDump.stackCount) ? g_crashDump.stackWords[i + 2] : 0;
+			uint32_t w3 = (i + 3 < g_crashDump.stackCount) ? g_crashDump.stackWords[i + 3] : 0;
+			debug_w("%08x:  %08x %08x %08x %08x", addr, w0, w1, w2, w3);
+		}
+	}
+#endif
+	// Fallback: emit reason/registers if we didn't already emit a full dump above.
+	// On ESP32 this is always the path (no crash callback available).
+	// On ESP8266 this fires only if the RTC magic was invalid (rare: RTC scrambled on hard reset).
+	if(!fullDumpReported && rtc_info != nullptr &&
+	   (rtc_info->reason == REASON_EXCEPTION_RST ||
+	    rtc_info->reason == REASON_SOFT_WDT_RST  ||
+	    rtc_info->reason == REASON_WDT_RST)) {
+		debug_w("*** CRASH REBOOT: reason=%u exccause=%u epc1=0x%08x excvaddr=0x%08x",
+		        rtc_info->reason, rtc_info->exccause, rtc_info->epc1, rtc_info->excvaddr);
+	}
 }
 void Application::restart()
 {
