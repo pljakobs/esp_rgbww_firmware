@@ -568,6 +568,14 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 				newColorMode=color.getColorMode();
 			}
 			
+			/*
+			*
+			* handle ip address change - this will require the controller to reboot 
+			* this only happens if the user configures a new fixed ip address, so they
+			* are expectd to know that and reconnect to the new address (or the old
+			* dns / mDNS name, once updated )
+			* 
+			*/
 			if(oldIP != newIP) {
 				//if (restart) {
 				debug_i("ApplicationWebserver::onConfig ip settings changed - rebooting");
@@ -578,6 +586,17 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 				app.delayedCMD(F("restart"), 3000); // wait 3s to first send response
 			}
 
+			/*
+			*
+			* handle wifi ssid change - this will require the controller to reboot 
+			* this is a bit more tricky than the ip address change as we don't know
+			* what new ip address the controller will get once connecting to a new 
+			* wifi network.
+			* not sure if much can be done about it - maybe
+			* todo: see if we can connect to the new wifi, record the ip -address, go back to
+			* the old wifi, send the new address to the frontend using websocket and then reboot. This would allow the frontend to automatically reconnect to the new address after the controller has rebooted and connected to the new wifi. But it is a bit of a hassle to implement and test, so for now we just reboot and expect the user to reconnect manually using the new ip address or dns / mDNS name.
+			* 
+			*/
 			if(oldSSID != newSSID) {
 				//
 				if(WifiAccessPoint.isEnabled()) {
@@ -590,6 +609,12 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 					app.delayedCMD(F("restart"), 3000); // wait 3s to first send response
 				}
 			}
+
+			/*
+			*
+			* mqtt changes - those will be handled on the fly 
+			*
+			*/
 			if(mqttEnabled != newMqttEnabled) {
 				if(newMqttEnabled) {
 					if(!app.mqttclient.isRunning()) {
@@ -608,7 +633,12 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 				}
 			
 			}
-
+			
+			/*
+			* 
+			* telemetry changes - those will be handled on the fly 
+			*
+			*/
 			if(newTelemetryEnabled!=oldTelemetryEnabled){
 				if(newTelemetryEnabled){
 					debug_i("ApplicationWebserver::onConfig telemetry settings changed - starting telemetry");
@@ -619,6 +649,12 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 				}
 			}
 			
+			/*
+			* 
+			* DHCP changes - if DHCP is enabled we can just switch to DHCP, 
+			* if DHCP is disabled we need to reboot to apply the new static ip settings
+			*
+			*/
 			if(newDhcpEnabled!=dhcpEnabled){
 				if(newDhcpEnabled){
 					WifiStation.enableDHCP(true);
@@ -632,6 +668,11 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 				}
 			}
 			
+			/*
+			*
+			* pin config changes - those will require a reboot
+			*
+			*/
 			if(oldCurrentPinConfigName!=newCurrentPinConfigName){
 				String msg = F("Channel config has changed - rebooting ");
 				app.wsBroadcast(F("notification"), msg);
@@ -639,6 +680,12 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 				app.delayedCMD(F("restart"),1000);
 			}
 
+			/*
+			*
+			* device name changes - change all necessary services on the fly and send notification 
+			* to frontend, no reboot required
+			*
+			*/
 			if(oldDeviceName!=newDeviceName){
 				String msg = F("device name change, old Device Name: ")+oldDeviceName+F(", new Device Name: ")+newDeviceName;
 				AppConfig::Network::OuterUpdater network(*app.cfg);
@@ -649,10 +696,20 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 				//app.delayedCMD(F("restart"),1000);
 			}
 
+			/*
+			*
+			* syslog changes - those will be handled on the fly 
+			*
+			*/
 			if(oldSyslogHost!=newSyslogHost || oldSyslogPort!=newSyslogPort){
 				app.udpSyslogStream.begin(newSyslogHost,newSyslogPort);
 			}
 
+			/*
+			*
+			* syslog enable/disable changes - those will be handled on the fly 
+			*
+			*/
 			if(oldSyslogEnabled!=newSyslogEnabled){
 				app.udpSyslogStream.setStatus(newSyslogEnabled);
 			}

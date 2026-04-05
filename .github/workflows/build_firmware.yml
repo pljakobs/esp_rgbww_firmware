@@ -264,15 +264,23 @@ jobs:
             echo "map=out/Esp32/esp32c3/release/build/app.map" >> $GITHUB_OUTPUT
           fi
 
+      - name: Stage artifacts for upload
+        id: stage
+        if: ${{ steps.set_firmware_path.outputs.path != '' }}
+        run: |
+          mkdir -p _upload
+          cp "${{ steps.set_firmware_path.outputs.path }}" _upload/
+          if [ "${{ matrix.single }}" = "0" ]; then
+            [ -f "${{ steps.set_elf_path.outputs.elf }}" ] && cp "${{ steps.set_elf_path.outputs.elf }}" _upload/ || true
+            [ -f "${{ steps.set_elf_path.outputs.map }}" ] && cp "${{ steps.set_elf_path.outputs.map }}" _upload/ || true
+          fi
+
       - name: Upload firmware artifact
         if: ${{ steps.set_firmware_path.outputs.path != '' }}
         uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.set_artifact_name.outputs.artifact_name }}
-          path: |
-            ${{ steps.set_firmware_path.outputs.path }}
-            ${{ steps.set_elf_path.outputs.elf }}
-            ${{ steps.set_elf_path.outputs.map }}
+          path: _upload/
           
       - name: Create version info file
         run: |

@@ -114,6 +114,7 @@
       "type":"array",
       "items":{
         "type":"object",
+        "required":["id","name"],
         "properties":{
           "name":{
             "type":"string"

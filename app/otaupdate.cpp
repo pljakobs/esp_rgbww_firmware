@@ -193,6 +193,8 @@ void ApplicationOTA::start(String romurl)
 	 */
 	if(part == ota.getRunningPartition()) {
 		Serial << F("May be running in temporary mode. Please reboot and try again.") << endl;
+		broadcastOtaStatus(0, F("OTA failed: target partition is currently running, please reboot and try again"));
+		status = OTASTATUS::OTA_FAILED;
 		return;
 	}
 
@@ -206,12 +208,13 @@ void ApplicationOTA::start(String romurl)
 
 	beforeOTA();
 
-	// Watchdog: if upgradeCallback has not fired within 5 minutes, treat as hung OTA
-	otaWatchdog.initializeMs<5 * 60 * 1000>([this]() {
-		debug_e("ApplicationOTA: watchdog timeout - OTA appears hung, aborting");
-		broadcastOtaStatus(0, F("OTA watchdog timeout - update failed"));
+	// Watchdog: if upgradeCallback has not fired within 2 minutes, reboot to recover
+	otaWatchdog.initializeMs<2 * 60 * 1000>([this]() {
+		debug_e("ApplicationOTA: watchdog timeout - OTA appears hung, rebooting to recover");
+		broadcastOtaStatus(0, F("OTA watchdog timeout - rebooting to recover"));
 		otaUpdater.reset();
 		status = OTASTATUS::OTA_FAILED;
+		System.restart();
 	});
 	otaWatchdog.startOnce();
 
@@ -361,8 +364,18 @@ void ApplicationOTA::upgradeCallback(Ota::Network::HttpUpgrader& client, bool re
 	} else {
 		status = OTASTATUS::OTA_FAILED;
 		ota.abort();
-		broadcastOtaStatus(0, F("OTA failed"));
-		debug_i("OTA failed");
+		otaUpdater.reset();
+		broadcastOtaStatus(0, F("OTA failed - rebooting to recover"));
+		debug_i("OTA failed, rebooting in 5s to recover network stack");
+		// Rearm the watchdog as a reboot timer: gives the WS message time to
+		// be delivered over the websocket before the restart, and ensures the
+		// controller always recovers from a failed download without physical
+		// intervention (dirty TCP/lwIP state after a large failed download
+		// can prevent the next OTA attempt from working).
+		otaWatchdog.initializeMs<5000>([this]() {
+			System.restart();
+		});
+		otaWatchdog.startOnce();
 	}
 }
 
@@ -383,6 +396,15 @@ void ApplicationOTA::checkAtBoot()
 #if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
 	Storage::Debug::listDevices(Serial);
 #endif
+
+	// If we booted with OTA_FAILED or OTA_PROCESSING persisted, that means
+	// a previous OTA was interrupted (power loss, hard crash, watchdog reboot
+	// mid-flash).  We survived into a running image, so the ROM is good —
+	// clear the flag so the controller doesn't stay in a degraded state.
+	if(status == OTASTATUS::OTA_FAILED || status == OTASTATUS::OTA_PROCESSING) {
+		debug_w("checkAtBoot: boot after interrupted OTA (status=%i) — cleared, running normally", (int)status);
+	}
+
 	if(app.isTempBoot()) {
 		debug_i("ApplicationOTA::checkAtBoot permanently enabling rom %i", app.getRomSlot());
 #ifdef ESP8266
