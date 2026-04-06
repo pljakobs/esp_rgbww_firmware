@@ -1,5 +1,5 @@
 COMPONENT_SEARCH_DIRS := $(PROJECT_DIR)/Components
-COMPONENT_DEPENDS += MDNS RGBWWLed LittleFS ConfigDB ArduinoJson6 OtaNetwork 
+COMPONENT_DEPENDS += MDNS RGBWWLed LittleFS ConfigDB ArduinoJson6 OtaNetwork HuffmanCodec 
 ifeq ($(SMING_ARCH), Esp32)
     COMPONENT_DEPENDS += Esp32HardwarePwm
 endif

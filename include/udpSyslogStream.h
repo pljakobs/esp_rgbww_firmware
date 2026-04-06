@@ -22,6 +22,10 @@
 #pragma once
 #include <SmingCore.h>
 #include <Network/UdpConnection.h>
+#include <HuffmanRingBuffer.h>
+#include <HuffmanEncoder.h>
+#include <HuffmanDecoder.h>
+#include <memory>
 
 /**
  * UdpSyslogStream — RFC 3164 UDP syslog stream.
@@ -35,8 +39,14 @@
  * Format: "<priority>hostname tag: message\n"
  * Priority = facility*8 + severity (default: LOCAL0 | DEBUG = 184 | 7 = 191)
  *
- * Before begin(), completed messages are retained in a 2-buffer ring queue.
- * On begin(), queued buffers are sent, then normal streaming continues.
+ * Before begin() is called, all writes are compressed (Huffman + n-gram tokens)
+ * into a heap-allocated 2 KB ring buffer.  On begin(), the ring buffer is drained:
+ * each compressed frame is decoded and sent as a normal syslog packet, then the
+ * ring buffer and codec are freed — reclaiming ~3 KB of heap for normal operation.
+ * This preserves boot-time log messages that arrive before the network is ready.
+ *
+ * huffman_table.h (PROGMEM encode/decode tables) must be pre-generated:
+ *   python3 huffman_analysis.py --ngrams --emit --out huffman_table.h
  */
 class UdpSyslogStream : public Stream
 {
@@ -52,6 +62,17 @@ public:
         _active = 0;
         _pending[0] = false;
         _pending[1] = false;
+
+        // Allocate pre-network codec on the heap.
+        // If allocation fails we simply won't buffer pre-network messages.
+        auto* mem = new(std::nothrow) uint8_t[PRE_NET_BUF_SIZE];
+        if(mem) {
+            _ringMem.reset(mem);
+            _preNetBuf.reset(new(std::nothrow) HuffmanRingBuffer(mem, PRE_NET_BUF_SIZE));
+            if(_preNetBuf) {
+                _encoder.reset(new(std::nothrow) HuffmanEncoder(*_preNetBuf));
+            }
+        }
     }
 
     /**
@@ -65,7 +86,7 @@ public:
                const String& hostname = "rgbww",
                const String& tag = "app",
                uint8_t priority = 191,
-               bool enabled=true)
+               bool enabled = true)
     {
         _host     = host;
         _port     = port;
@@ -74,9 +95,35 @@ public:
         _priority = priority;
         _enabled  = enabled;
         _udp.connect(IpAddress(_host), _port);
+        _ready    = true;
 
-        // Flush anything captured before begin().
-        if (_buf[_active].length() > 0) {
+        // Drain pre-network ring buffer: decode each compressed frame and
+        // send it through the normal UDP syslog path.
+        if(_preNetBuf) {
+            uint8_t  frame[HuffmanEncoder::OUTPUT_BUF_SIZE];
+            char     msg[MAX_MSG_LEN + 1];
+            uint16_t frameLen, msgLen;
+            while(_preNetBuf->read(frame, sizeof(frame), frameLen)) {
+                msgLen = HuffmanDecoder::decodeFrame(frame, frameLen, msg, MAX_MSG_LEN);
+                for(uint16_t i = 0; i < msgLen; i++) {
+                    if(_buf[_active].length() < MAX_MSG_LEN) {
+                        _buf[_active] += msg[i];
+                    }
+                }
+                if(_buf[_active].length() > 0) {
+                    queueActiveBuf();
+                    flushPending();
+                }
+            }
+
+            // Reclaim ~3 KB: ring buffer backing store + encoder buffers
+            _encoder.reset();
+            _preNetBuf.reset();
+            _ringMem.reset();
+        }
+
+        // Flush anything left in the double-buffer (normally empty at this point).
+        if(_buf[_active].length() > 0) {
             queueActiveBuf();
         }
         flushPending();
@@ -93,37 +140,42 @@ public:
 
     IRAM_ATTR size_t write(uint8_t c) override
     {
-        if(!_enabled) {
-            return 1; // Drop data silently when not enabled
-        }
-        if (c == '\r') {
-            return 1;
-        }
-        if (c == '\n') {
-            queueActiveBuf();
-            if (_enabled) {
-                flushPending();
+        // Before begin(): compress into pre-network ring buffer regardless of
+        // _enabled — we don't know the final rsyslog config yet.
+        if(!_ready) {
+            if(c != '\r' && _encoder) {
+                if(c == '\n') {
+                    _encoder->flush();
+                } else {
+                    _encoder->write(c);
+                }
             }
             return 1;
         }
-        if (_buf[_active].length() < MAX_MSG_LEN) {
+        if(!_enabled) {
+            return 1; // rsyslog disabled — drop
+        }
+        if(c == '\r') {
+            return 1;
+        }
+        if(c == '\n') {
+            queueActiveBuf();
+            flushPending();
+            return 1;
+        }
+        if(_buf[_active].length() < MAX_MSG_LEN) {
             _buf[_active] += (char)c;
         }
-        if (_buf[_active].length() >= MAX_MSG_LEN) {
+        if(_buf[_active].length() >= MAX_MSG_LEN) {
             queueActiveBuf();
-            if (_enabled) {
-                flushPending();
-            }
+            flushPending();
         }
         return 1;
     }
 
     IRAM_ATTR size_t write(const uint8_t* buffer, size_t size) override
     {
-        if(!_enabled) {
-            return size; // Drop data silently when not enabled
-        }
-        for (size_t i = 0; i < size; i++) {
+        for(size_t i = 0; i < size; i++) {
             write(buffer[i]);
         }
         return size;
@@ -221,6 +273,7 @@ private:
     String        _tag{"app"};
     uint8_t       _priority{191};
     bool          _enabled{false};
+    bool          _ready{false};   ///< true once begin() has been called
 
     String _buf[2];
     int    _active{0};
@@ -228,4 +281,11 @@ private:
     int    _pendingOrder[2]{0, 1};
     int    _pendingHead{0};
     int    _pendingCount{0};
+
+    // Pre-network compressed ring buffer — heap-allocated before begin(),
+    // freed after drain so the ~3 KB is returned to the heap.
+    static constexpr uint16_t PRE_NET_BUF_SIZE = 2048;
+    std::unique_ptr<uint8_t[]>        _ringMem;
+    std::unique_ptr<HuffmanRingBuffer> _preNetBuf;
+    std::unique_ptr<HuffmanEncoder>    _encoder;
 };
