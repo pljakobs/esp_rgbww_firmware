@@ -40,6 +40,12 @@
     #define SOC "unknown"
 #endif
 
+#if defined(ARCH_ESP32)
+    #define HTTP_MAX_CONNECTIONS 10
+#else
+    #define HTTP_MAX_CONNECTIONS 5
+#endif
+
 #if defined(SMING_RELEASE)
     #define BUILD_TYPE "release"
 #else

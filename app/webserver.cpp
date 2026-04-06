@@ -43,8 +43,8 @@ ApplicationWebserver::ApplicationWebserver()
 	// keep some heap space free
 	// value is a good guess and tested to not crash when issuing multiple parallel requests
 	HttpServerSettings settings;
-	settings.maxActiveConnections = 5;
-	settings.minHeapSize = _minimumHeapAccept;
+	settings.maxActiveConnections = HTTP_MAX_CONNECTIONS;
+	settings.minHeapSize = MINIMUM_HEAP_ACCEPT;
 	settings.keepAliveSeconds = 10; // do not close instantly when no transmission occurs. some clients are a bit slow (like FHEM)
 	configure(settings);
 
@@ -392,7 +392,7 @@ void ApplicationWebserver::onIndex(HttpRequest& request, HttpResponse& response)
 
 bool ApplicationWebserver::checkHeap(HttpResponse& response)
 {
-	return checkHeap(response, _minimumHeap);
+	return checkHeap(response, MINIMUM_HEAP);
 }
 
 bool ApplicationWebserver::checkHeap(HttpResponse& response, int minHeap)

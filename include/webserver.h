@@ -29,6 +29,9 @@
 #define FILE_MAX_SIZE 16384 //max filesize for storage api files.
 #define MAX_LOG_LINE_SIZE 512
 
+#define MINIMUM_HEAP_ACCEPT 8000
+#define MINIMUM_HEAP 8000
+
 enum API_CODES {
     API_SUCCESS = 0,
     API_BAD_REQUEST = 1,
@@ -57,8 +60,7 @@ private:
 
     bool _init = false;
     bool _running = false;
-    unsigned _minimumHeap = 8000;
-    unsigned _minimumHeapAccept = 8000;
+    
 
     WebsocketResource* wsResource;
     WebsocketList webSockets;
