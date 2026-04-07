@@ -156,7 +156,11 @@ private:
             pkt += _hostname.length() ? _hostname : F("device");
             pkt += ' ';
             pkt += _tag;
-            pkt += F(": 0 ===== system restart ===== nonce:");
+            // Include nonce in header position too so the per-line nonce parser
+            // on the server can detect the boot transition from the sentinel packet.
+            pkt += F(": nonce:");
+            pkt += String(_sentinelNonce);
+            pkt += F(" 0 ===== system restart ===== nonce:");
             pkt += String(_sentinelNonce);
             pkt += '\n';
             for(int repeat = 0; repeat < 3; ++repeat) {
@@ -312,6 +316,13 @@ private:
             hdr += ' ';
             hdr += _tag;
             hdr += ": ";
+            // Embed the boot nonce in every packet so the log service can
+            // assign lines to the correct boot without waiting for the sentinel.
+            if (_sentinelNonce != 0) {
+                hdr += F("nonce:");
+                hdr += String(_sentinelNonce);
+                hdr += ' ';
+            }
 
             msg = hdr + msg + '\n';
 
