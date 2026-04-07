@@ -702,7 +702,9 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 			*
 			*/
 			if(oldSyslogHost!=newSyslogHost || oldSyslogPort!=newSyslogPort){
+#ifndef SMING_RELEASE
 				app.udpSyslogStream.begin(newSyslogHost,newSyslogPort);
+#endif
 			}
 
 			/*
@@ -711,7 +713,9 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 			*
 			*/
 			if(oldSyslogEnabled!=newSyslogEnabled){
+#ifndef SMING_RELEASE
 				app.udpSyslogStream.setStatus(newSyslogEnabled);
+#endif
 			}
 
 			debug_i("ApplicationWebserver::onConfig %i, %i",newColorMode,oldColorMode);

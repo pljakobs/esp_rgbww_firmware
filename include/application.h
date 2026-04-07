@@ -24,7 +24,9 @@
 #include <otaupdate.h>
 #include <controllers.h>
 #include <mdnsHandler.h>
+#ifndef SMING_RELEASE
 #include <udpSyslogStream.h>
+#endif
 
 
 
@@ -92,7 +94,9 @@ public:
 public:
     AppWIFI network;
     ApplicationWebserver webserver;
+#ifndef SMING_RELEASE
     UdpSyslogStream udpSyslogStream;
+#endif
     APPLedCtrl rgbwwctrl;
     std::unique_ptr<Controllers> controllers;
     
@@ -134,6 +138,9 @@ private:
     void listFiles();
     void logRestart();
     void pollResetButton();
+#if defined(ARCH_ESP8266) && !defined(SMING_RELEASE)
+    void pollCrashTestPin();
+#endif
 
     Timer _systimer;
     int _bootmode = 0;
@@ -147,6 +154,9 @@ private:
     Timer _uptimetimer;
     Timer _checkRamTimer;
     Timer _resetPinTimer;
+#if defined(ARCH_ESP8266) && !defined(SMING_RELEASE)
+    Timer _crashTestTimer;
+#endif
 
     uint32_t _uptimeMinutes;
     size_t _minimumHeapUptime = 32768;

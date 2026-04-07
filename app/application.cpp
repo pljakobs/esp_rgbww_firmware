@@ -33,8 +33,10 @@
 #include <VersionListener.h>
 #include <FlashString/Stream.hpp>
 #include <fileMap.h>
+#ifndef SMING_RELEASE
 #include <MultiOutputStream.h>
 #include <udpSyslogStream.h>
+#endif
 
 #if ARCH_ESP8266
 #define PART0 "lfs0"
@@ -177,12 +179,14 @@ extern "C" void custom_crash_callback(struct rst_info* ri, uint32_t stack, uint3
 
 Application app;
 
+#ifndef SMING_RELEASE
 MultiOutputStream debugStream;
 
 size_t debugStreamOutputCallback(const char* buffer, unsigned int length)
 {
 	return debugStream.write((const uint8_t*)buffer, length);
 }
+#endif
 
 void onReady()
 {
@@ -199,11 +203,12 @@ void onReady()
 #ifdef ARCH_ESP32
 	esp_wifi_set_ps (WIFI_PS_NONE);
 #endif
+#ifndef SMING_RELEASE
 	Serial.systemDebugOutput(false); // disable direct Serial hook; output now goes through debugStreamOutputCallback only
-
 	auto oldCallback = m_setPuts(&debugStreamOutputCallback);
 	debugStream.addStream(&Serial, false);
 	debugStream.addStream(&app.udpSyslogStream, false);
+#endif
 
 	// seperated application init
 	app.init();
@@ -412,6 +417,7 @@ debug_i("Application::init - running partition %s", part.name());
 	app.ota.checkAtBoot();
 //#endif
 #endif
+	(void)getFreeHeapSize(); // sample heap after fs mount + OTA check
 #ifdef ARCH_HOST
 	debug_i("mounting host file system");
 	fileSetFileSystem(&IFS::Host::getFileSystem());
@@ -421,6 +427,7 @@ debug_i("Application::init - running partition %s", part.name());
 	cfg =  std::make_unique<AppConfig>(configDB_PATH);
 	data = std::make_unique<AppData>(dataDB_PATH);
 	controllers = std::make_unique<Controllers>();
+	(void)getFreeHeapSize(); // sample heap after ConfigDB + Controllers construction
 
 	// verify if there is a new version of the hardware config
 	
@@ -556,13 +563,23 @@ debug_i("Application::init - running partition %s", part.name());
 	/// initialize led ctrl
 	rgbwwctrl.init();
 	debug_i("ledctrl initialized");
+	(void)getFreeHeapSize(); // sample heap after LED ctrl init (PWM + color config)
 
 	initButtons();
 	debug_i("buttons initialized");
+#if defined(ARCH_ESP8266) && !defined(SMING_RELEASE)
+	// GPIO0 (FLASH button) held low for 3 s triggers a deliberate null-pointer
+	// store (exccause 29 / StoreProhibited) so the crash-dump path produces a
+	// real, decode-stacktrace-compatible stack trace on demand.
+	pinMode(0, INPUT);
+	_crashTestTimer.initializeMs(100, TimerDelegate(&Application::pollCrashTestPin, this)).start();
+	debug_i("crash-test trigger armed on GPIO0 (hold 3s to trigger StoreProhibited)");
+#endif
 
 	// initialize webserver
 	app.webserver.init();
 	debug_i("webserver initialized");
+	(void)getFreeHeapSize(); // sample heap after route registration
 
 	debug_i("pin config string %s", fileMap["pin_config"]);
 
@@ -570,6 +587,7 @@ debug_i("Application::init - running partition %s", part.name());
 	// initialize networking
 	network.init();
 	debug_i("network initizalized, ssid: %s", WifiStation.getSSID().c_str());
+	(void)getFreeHeapSize(); // sample heap after WiFi init
 	{
 		AppConfig::Network network(*cfg);
 		if(network.rsyslog.getEnabled()) {
@@ -578,7 +596,9 @@ debug_i("Application::init - running partition %s", part.name());
 			AppConfig::General general(*cfg);
 			String myName=general.getDeviceName();
 			debug_i("Initializing remote syslog with host %s and port %d", host.c_str(), port);
+#ifndef SMING_RELEASE
 			app.udpSyslogStream.begin(host, port, myName, F("Lightinator"));
+#endif
 		}
 	}
 	
@@ -658,6 +678,7 @@ void Application::startNetworkServices()
 	} // close ConfigDB contexts before mqttclient.init() opens its own
 	mqttclient.init(); // initialize mqtt client with node name
 	debug_i("Application::startServices - mqtt client initialized");
+	(void)getFreeHeapSize(); // sample heap after MQTT client init
 	if(mqttEnabled) {
 		mqttclient.start();
 	}
@@ -1047,3 +1068,28 @@ uint32_t Application::getUptime()
 {
 	return _uptimeMinutes * 60u;
 }
+
+#if defined(ARCH_ESP8266) && !defined(SMING_RELEASE)
+void Application::pollCrashTestPin()
+{
+	static int holdCounter = 0;
+	static int tickCounter = 0;
+	// Heartbeat every 5 s so we can confirm the timer is actually firing.
+	if(++tickCounter >= 50) {
+		tickCounter = 0;
+		debug_i("crash-test poll alive, GPIO0=%d", digitalRead(0));
+	}
+	if(digitalRead(0) == LOW) {
+		debug_i("crash-test GPIO0 LOW, holdCounter=%d", holdCounter);
+		if(++holdCounter >= 30) { // 30 × 100 ms = 3 s
+			holdCounter = 0;
+			debug_w("*** CRASH TEST: illegal instruction via GPIO0 hold — generating stack trace ***");
+			// 'ill' is the Xtensa illegal-instruction opcode; it always raises
+			// exccause 0 (ILLEGAL_INSTRUCTION) regardless of memory mapping.
+			asm volatile("ill");
+		}
+	} else {
+		holdCounter = 0;
+	}
+}
+#endif
