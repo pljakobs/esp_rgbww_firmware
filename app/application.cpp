@@ -417,6 +417,7 @@ debug_i("Application::init - running partition %s", part.name());
 	app.ota.checkAtBoot();
 //#endif
 #endif
+	(void)getFreeHeapSize(); // sample heap after fs mount + OTA check
 #ifdef ARCH_HOST
 	debug_i("mounting host file system");
 	fileSetFileSystem(&IFS::Host::getFileSystem());
@@ -426,6 +427,7 @@ debug_i("Application::init - running partition %s", part.name());
 	cfg =  std::make_unique<AppConfig>(configDB_PATH);
 	data = std::make_unique<AppData>(dataDB_PATH);
 	controllers = std::make_unique<Controllers>();
+	(void)getFreeHeapSize(); // sample heap after ConfigDB + Controllers construction
 
 	// verify if there is a new version of the hardware config
 	
@@ -561,6 +563,7 @@ debug_i("Application::init - running partition %s", part.name());
 	/// initialize led ctrl
 	rgbwwctrl.init();
 	debug_i("ledctrl initialized");
+	(void)getFreeHeapSize(); // sample heap after LED ctrl init (PWM + color config)
 
 	initButtons();
 	debug_i("buttons initialized");
@@ -568,6 +571,7 @@ debug_i("Application::init - running partition %s", part.name());
 	// initialize webserver
 	app.webserver.init();
 	debug_i("webserver initialized");
+	(void)getFreeHeapSize(); // sample heap after route registration
 
 	debug_i("pin config string %s", fileMap["pin_config"]);
 
@@ -575,6 +579,7 @@ debug_i("Application::init - running partition %s", part.name());
 	// initialize networking
 	network.init();
 	debug_i("network initizalized, ssid: %s", WifiStation.getSSID().c_str());
+	(void)getFreeHeapSize(); // sample heap after WiFi init
 	{
 		AppConfig::Network network(*cfg);
 		if(network.rsyslog.getEnabled()) {
@@ -665,6 +670,7 @@ void Application::startNetworkServices()
 	} // close ConfigDB contexts before mqttclient.init() opens its own
 	mqttclient.init(); // initialize mqtt client with node name
 	debug_i("Application::startServices - mqtt client initialized");
+	(void)getFreeHeapSize(); // sample heap after MQTT client init
 	if(mqttEnabled) {
 		mqttclient.start();
 	}
