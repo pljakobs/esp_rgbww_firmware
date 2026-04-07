@@ -39,10 +39,10 @@
  * Format: "<priority>hostname tag: message\n"
  * Priority = facility*8 + severity (default: LOCAL0 | DEBUG = 184 | 7 = 191)
  *
- * Before begin() is called, all writes are compressed (Huffman + n-gram tokens)
- * into a heap-allocated 2 KB ring buffer.  On begin(), the ring buffer is drained:
- * each compressed frame is decoded and sent as a normal syslog packet, then the
- * ring buffer and codec are freed — reclaiming ~3 KB of heap for normal operation.
+ * Before begin() is called, all writes are Huffman-compressed into a heap-allocated
+ * ring buffer.  On drainPreNetBuffer() (called from the GotIP callback once the UDP
+ * route exists) each compressed frame is decoded and sent as a normal syslog packet,
+ * then the ring buffer and codec are freed, reclaiming heap for normal operation.
  * This preserves boot-time log messages that arrive before the network is ready.
  *
  * huffman_table.h (PROGMEM encode/decode tables) must be pre-generated:
@@ -63,16 +63,11 @@ public:
         _pending[0] = false;
         _pending[1] = false;
 
-        // Allocate pre-network codec on the heap.
-        // If allocation fails we simply won't buffer pre-network messages.
-        auto* mem = new(std::nothrow) uint8_t[PRE_NET_BUF_SIZE];
-        if(mem) {
-            _ringMem.reset(mem);
-            _preNetBuf.reset(new(std::nothrow) HuffmanRingBuffer(mem, PRE_NET_BUF_SIZE));
-            if(_preNetBuf) {
-                _encoder.reset(new(std::nothrow) HuffmanEncoder(*_preNetBuf));
-            }
-        }
+        // Allocate pre-network Huffman codec on the heap.
+        auto* mem = new uint8_t[PRE_NET_BUF_SIZE];
+        _ringMem.reset(mem);
+        _preNetBuf.reset(new HuffmanRingBuffer(mem, PRE_NET_BUF_SIZE));
+        _encoder.reset(new HuffmanEncoder(*_preNetBuf));
     }
 
     /**
@@ -96,37 +91,53 @@ public:
         _enabled  = enabled;
         _udp.connect(IpAddress(_host), _port);
         _ready    = true;
+        // Ring buffer is intentionally NOT drained here: begin() is typically called
+        // before the network has an IP address, so sendTo() would fail silently.
+        // Call drainPreNetBuffer() once the station has received an IP (GotIP callback).
+    }
 
-        // Drain pre-network ring buffer: decode each compressed frame and
-        // send it through the normal UDP syslog path.
-        if(_preNetBuf) {
-            uint8_t  frame[HuffmanEncoder::OUTPUT_BUF_SIZE];
-            char     msg[MAX_MSG_LEN + 1];
-            uint16_t frameLen, msgLen;
-            while(_preNetBuf->read(frame, sizeof(frame), frameLen)) {
-                msgLen = HuffmanDecoder::decodeFrame(frame, frameLen, msg, MAX_MSG_LEN);
-                for(uint16_t i = 0; i < msgLen; i++) {
-                    if(_buf[_active].length() < MAX_MSG_LEN) {
-                        _buf[_active] += msg[i];
-                    }
-                }
-                if(_buf[_active].length() > 0) {
-                    queueActiveBuf();
-                    flushPending();
-                }
+    /**
+     * Replay all messages stored in the pre-network ring buffer through the normal
+     * UDP syslog path and then free the buffer.  Must be called after the station
+     * has obtained an IP address so that UDP packets can actually be routed.
+     * Safe to call multiple times; does nothing if the buffer has already been freed.
+     */
+    void drainPreNetBuffer()
+    {
+        if(!_preNetBuf) {
+            return;
+        }
+
+        debug_i("drainPreNetBuffer: %u messages, %u/%u bytes used",
+                _preNetBuf->count(), _preNetBuf->used(), _preNetBuf->capacity());
+        // Send restart sentinel 3× to survive UDP packet loss.
+        // Build the RFC 3164 packet directly and call sendTo() instead of
+        // routing through write() — the write() path calls _udp.sendTo() in
+        // the GotIP callback context where lwIP may silently drop the packet
+        // (network stack mid-transition).  By the first _drainStep() tick the
+        // stack is fully ready, so drained messages route fine via write().
+        // A per-boot random nonce lets the log service deduplicate the copies.
+        const uint32_t nonce = static_cast<uint32_t>(os_random());
+        {
+            String pkt;
+            pkt.reserve(80);
+            pkt += '<';
+            pkt += String(_priority);
+            pkt += '>';
+            pkt += _hostname.length() ? _hostname : F("device");
+            pkt += ' ';
+            pkt += _tag;
+            pkt += F(": 0 ===== system restart ===== nonce:");
+            pkt += String(nonce);
+            pkt += '\n';
+            for(int repeat = 0; repeat < 3; ++repeat) {
+                _udp.sendTo(IpAddress(_host), _port, pkt.c_str(), pkt.length());
             }
-
-            // Reclaim ~3 KB: ring buffer backing store + encoder buffers
-            _encoder.reset();
-            _preNetBuf.reset();
-            _ringMem.reset();
         }
-
-        // Flush anything left in the double-buffer (normally empty at this point).
-        if(_buf[_active].length() > 0) {
-            queueActiveBuf();
-        }
-        flushPending();
+        // Drain one frame per OS tick so lwIP's TX queue can drain between sends.
+        // Sending all 120 frames in one tight loop exhausts the pbuf pool and
+        // silently drops all but the first ~3 packets.
+        System.queueCallback([this]() { _drainStep(); });
     }
 
     void end()
@@ -136,12 +147,51 @@ public:
         _udp.close();
     }
 
-    // --- Stream interface ---
+private:
+    /**
+     * Send one decoded frame over UDP and re-queue itself until the ring buffer
+     * is exhausted.  Called via System.queueCallback so the OS (and lwIP TX
+     * queue) gets a chance to run between every packet, preventing pbuf pool
+     * exhaustion that silently drops all but the first few frames.
+     */
+    void _drainStep()
+    {
+        if(!_preNetBuf) {
+            return;
+        }
+
+        uint8_t  frame[HuffmanEncoder::OUTPUT_BUF_SIZE];
+        char     msg[MAX_MSG_LEN + 1];
+        uint16_t frameLen, msgLen;
+        if(!_preNetBuf->read(frame, sizeof(frame), frameLen)) {
+            // Ring buffer exhausted — reclaim heap.
+            _encoder.reset();
+            _preNetBuf.reset();
+            _ringMem.reset();
+            if(_buf[_active].length() > 0) {
+                queueActiveBuf();
+            }
+            flushPending();
+            return;
+        }
+
+        msgLen = HuffmanDecoder::decodeFrame(frame, frameLen, msg, MAX_MSG_LEN);
+        for(uint16_t i = 0; i < msgLen; i++) {
+            write((uint8_t)msg[i]);
+        }
+        if(_buf[_active].length() > 0) {
+            queueActiveBuf();
+            flushPending();
+        }
+        // Yield to OS, then send next frame.
+        System.queueCallback([this]() { _drainStep(); });
+    }
+
+public:
 
     IRAM_ATTR size_t write(uint8_t c) override
     {
-        // Before begin(): compress into pre-network ring buffer regardless of
-        // _enabled — we don't know the final rsyslog config yet.
+        // Before begin(): compress into pre-network Huffman ring buffer.
         if(!_ready) {
             if(c != '\r' && _encoder) {
                 if(c == '\n') {
@@ -199,6 +249,7 @@ public:
     void disable() { _enabled = false; }
     void setStatus(bool status) {_enabled=status;}
     bool isEnabled() { return _enabled; }
+    void setHostname(const String& hostname) { _hostname = hostname; }
 private:
     /**
      * Append a completed buffer into the pending ring queue.
@@ -282,10 +333,10 @@ private:
     int    _pendingHead{0};
     int    _pendingCount{0};
 
-    // Pre-network compressed ring buffer — heap-allocated before begin(),
-    // freed after drain so the ~3 KB is returned to the heap.
-    static constexpr uint16_t PRE_NET_BUF_SIZE = 2048;
-    std::unique_ptr<uint8_t[]>        _ringMem;
+    // Pre-network Huffman ring buffer — heap-allocated before begin(),
+    // freed after drainPreNetBuffer() so the ~6 KB is returned to the heap.
+    static constexpr uint16_t PRE_NET_BUF_SIZE = 6144;
+    std::unique_ptr<uint8_t[]>         _ringMem;
     std::unique_ptr<HuffmanRingBuffer> _preNetBuf;
     std::unique_ptr<HuffmanEncoder>    _encoder;
 };

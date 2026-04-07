@@ -30,7 +30,25 @@ public:
 
     explicit HuffmanEncoder(HuffmanRingBuffer& rb);
 
+    /**
+     * @brief Buffer one character for encoding.
+     *
+     * Characters are accumulated until flush() is called.  Writing a NUL (0x00)
+     * triggers flush() automatically.  Input silently truncated if the buffer is
+     * full (INPUT_BUF_SIZE bytes).
+     * @param c  Byte to buffer
+     * @return   Always 1
+     */
     size_t write(uint8_t c) override;
+
+    /**
+     * @brief Buffer a block of bytes for encoding.
+     *
+     * Calls write(uint8_t) for each byte in [data, data+size).
+     * @param data  Source bytes
+     * @param size  Number of bytes to buffer
+     * @return      Always `size`
+     */
     size_t write(const uint8_t* data, size_t size) override;
     using Print::write;
 
@@ -45,18 +63,29 @@ public:
     void discard() { _inLen = 0; }
 
 private:
+    /// @brief Underlying ring buffer reference.
     HuffmanRingBuffer& _rb;
 
-    uint8_t  _inBuf[INPUT_BUF_SIZE];
-    uint16_t _inLen;
+    uint8_t  _inBuf[INPUT_BUF_SIZE];  ///< Unencoded input staging area.
+    uint16_t _inLen;                   ///< Number of bytes currently in _inBuf.
 
-    uint8_t  _outBuf[OUTPUT_BUF_SIZE];
-    uint16_t _outLen;
+    uint8_t  _outBuf[OUTPUT_BUF_SIZE]; ///< Bit-packed compressed output staging area.
+    uint16_t _outLen;                  ///< Number of bytes written into _outBuf.
     uint8_t  _bitBuf;  ///< partial output byte being assembled (MSB first)
     uint8_t  _bitPos;  ///< bits filled in _bitBuf (0 = empty)
 
-    /// Encode one token byte via HUFFMAN_TABLE and push its bits to _outBuf.
+    /**
+     * @brief Encode one token byte via HUFFMAN_TABLE and append its bits to _outBuf.
+     * @param sym  Token byte: 0x01-0x7E = ASCII, 0x80-0xFE = n-gram, 0x00 = EOM
+     */
     void _encodeSymbol(uint8_t sym);
-    /// Push a single bit into _outBuf (MSB first packing).
+
+    /**
+     * @brief Append a single bit to _outBuf (MSB-first packing).
+     *
+     * Flushes the current byte to _outBuf and resets _bitBuf/_bitPos whenever
+     * 8 bits have been accumulated.
+     * @param bit  Bit value (only LSB is used)
+     */
     void _pushBit(uint8_t bit);
 };

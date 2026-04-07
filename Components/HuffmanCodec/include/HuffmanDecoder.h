@@ -53,10 +53,23 @@ public:
                                 char* out, uint16_t outMax);
 
     // ── IDataSourceStream ─────────────────────────────────────────────────────
+    /**
+     * @brief Copy up to `bufSize` decoded plaintext bytes into `data`.
+     * @return Number of bytes written; 0 if no data is available.
+     */
     uint16_t readMemoryBlock(char* data, int bufSize) override;
-    bool     seek(int len) override;
-    bool     isFinished() override;
-    int      available() override;
+
+    /**
+     * @brief Advance the read cursor by `len` bytes.
+     * @return true on success, false if `len` exceeded available bytes.
+     */
+    bool seek(int len) override;
+
+    /** @return true when the ring buffer is empty and the current message has been fully read. */
+    bool isFinished() override;
+
+    /** @return Number of decoded bytes remaining in the current message, or -1 if nothing loaded. */
+    int available() override;
 
     // ── ReadWriteStream — write side intentionally not implemented ────────────
     size_t write(const uint8_t*, size_t) override { return 0; }
@@ -64,21 +77,43 @@ public:
 private:
     HuffmanRingBuffer& _rb;
 
-    uint8_t  _decodedBuf[DECODE_BUF_SIZE];
-    uint16_t _decodedLen;  ///< bytes in decoded buffer
-    uint16_t _decodedPos;  ///< read cursor within decoded buffer
+    uint8_t  _decodedBuf[DECODE_BUF_SIZE]; ///< Plaintext staging area for the current message.
+    uint16_t _decodedLen;  ///< Bytes in decoded buffer.
+    uint16_t _decodedPos;  ///< Read cursor within decoded buffer.
 
-    uint8_t  _compBuf[COMP_BUF_SIZE]; ///< staging buffer for one compressed message
+    uint8_t  _compBuf[COMP_BUF_SIZE]; ///< Staging buffer for one compressed message.
 
-    // ── Bit-level decode state (valid during _decodeMessage) ─────────────────
-    const uint8_t* _bits;    ///< pointer to compressed bytes being decoded
-    uint16_t       _bitLen;  ///< total bits available
-    uint16_t       _bitPos;  ///< current bit position (MSB of byte 0 = bit 0)
+    // ── Bit-level decode state (valid only during _decodeMessage) ─────────────
+    const uint8_t* _bits;    ///< Pointer to compressed bytes being decoded.
+    uint16_t       _bitLen;  ///< Total bits available (lenBytes * 8).
+    uint16_t       _bitPos;  ///< Current bit position (bit 7 of byte 0 = position 0).
 
+    /** @return true if more bits remain in the current compressed frame. */
     bool     _hasBit()        const;
+
+    /**
+     * @brief Consume and return the next bit from the compressed bitstream.
+     * @pre _hasBit() must be true.
+     */
     uint8_t  _nextBit();
+
+    /**
+     * @brief Decode one symbol from the current bitstream using the canonical Huffman table.
+     * @return Decoded symbol byte, or 0xFFFF on decode error / exhausted input.
+     */
     uint16_t _decodeSymbol();
 
+    /**
+     * @brief Load, decode, and cache the next compressed message from the ring buffer.
+     * @return true if a non-empty message was decoded; false if the buffer is empty.
+     */
     bool     _loadNextMessage();
+
+    /**
+     * @brief Decode a raw compressed frame into _decodedBuf.
+     * @param data      Compressed bytes.
+     * @param lenBytes  Number of compressed bytes.
+     * @return          Number of decoded bytes written to _decodedBuf.
+     */
     uint16_t _decodeMessage(const uint8_t* data, uint16_t lenBytes);
 };

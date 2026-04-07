@@ -3,13 +3,51 @@
 #include <stdint.h>
 
 /**
- * @brief Ring buffer of compressed log messages backed by a caller-supplied memory block.
+ * @brief Ring buffer of Huffman-compressed log lines backed by a caller-supplied memory block.
  *
- * Each message is stored as:
- *   [uint16_t compressed_byte_len (LE)] [compressed bytes ...]
+ * ## Concept
  *
- * When the buffer is full, the oldest message is evicted automatically to make room.
- * Not ISR-safe; add external locking if called from multiple contexts.
+ * Each entry in the buffer stores one complete log line — i.e. the bytes that arrived
+ * between two successive newline characters on the debug output stream.  Before being
+ * stored, each line is n-gram tokenised and Huffman-encoded by HuffmanEncoder::flush();
+ * the resulting compressed bitstream (padded to a byte boundary) is what this buffer holds.
+ * HuffmanDecoder::decodeFrame() reverses the process, producing the original plaintext line.
+ *
+ * ## Memory layout
+ *
+ * The backing store is a flat byte array used as a circular/wrap-around queue.
+ * `_head` points to the oldest entry; `_tail` points to where the next entry will be written.
+ * Each entry is a self-describing length-prefixed record:
+ *
+ * @code
+ * Byte offset (relative to entry start):
+ *   [0]      low byte  of compressed_len  (uint16_t little-endian)
+ *   [1]      high byte of compressed_len
+ *   [2 .. 2+compressed_len-1]   Huffman-compressed bytes (bit-packed, MSB first)
+ *
+ * Example — two entries, capacity = 32 bytes, _head = 0, _tail = 20, _used = 20:
+ *
+ *  offset:  0    1    2    3 ..  8    9   10   11   12 .. 19   20  21 ..
+ *           [len_lo][len_hi][  compressed bytes  ][len_lo][len_hi][ comp ] <- _tail
+ *            <------- entry 0, len=6 ------------>  <---- entry 1,len=8 ->
+ *             ^_head                                                        ^_tail
+ * @endcode
+ *
+ * The buffer wraps: when `_tail + new_entry_size > capacity`, bytes are stored modulo
+ * `capacity` (i.e. the header or payload may straddle the end of the array).
+ *
+ * ## Eviction policy
+ *
+ * When a push() would overflow the buffer, the oldest entry (at `_head`) is silently
+ * evicted — its length is read, `_head` and `_used` are updated, and `_count` is
+ * decremented.  This is repeated **in a loop** until there is enough cumulative space
+ * for the new entry.  A single incoming message can therefore cause multiple older
+ * messages to be evicted if it is longer than any one of them.  A push() fails only
+ * if the new entry is larger than the entire capacity (checked upfront).
+ *
+ * ## Thread / ISR safety
+ *
+ * Not ISR-safe.  Access must be serialised externally if called from multiple contexts.
  */
 class HuffmanRingBuffer
 {
@@ -53,6 +91,16 @@ public:
     uint16_t count()    const { return _count; }
     uint16_t used()     const { return _used; }
     uint16_t capacity() const { return _capacity; }
+
+    /**
+     * @brief Return the compressed byte length of the message at the given index.
+     *
+     * Index 0 is the oldest (next to be read) message.  O(index) traversal —
+     * suitable for diagnostic iteration over a small number of messages.
+     * @param index  0-based message index.
+     * @return       Compressed byte count, or 0 if @p index >= count().
+     */
+    uint16_t messageLen(uint16_t index) const;
 
 private:
     uint8_t*  _buf;

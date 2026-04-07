@@ -323,7 +323,14 @@ void AppWIFI::_STAConnected(const String& ssid, MacAddress bssid, uint8_t channe
  */
 void AppWIFI::_STAGotIP(IpAddress ip, IpAddress mask, IpAddress gateway)
 {
+	// Set hostname immediately so every debug_i() in this callback and onwards
+	// carries the correct name — not the empty string from begin().
+	{
+		AppConfig::Network network(*app.cfg);
+		app.udpSyslogStream.setHostname(network.mdns.getName());
+	}
 	debug_i("AppWIFI::_STAGotIP");
+
 	if(_new_connection) {
 		stopAp(90000);
 	} else {
@@ -362,6 +369,9 @@ void AppWIFI::_STAGotIP(IpAddress ip, IpAddress mask, IpAddress gateway)
 
 	// After network is up, report any crash/watchdog reboot to the syslog target
 	app.reportCrashDump();
+	// Now that we have an IP address, drain any log messages that were compressed
+	// into the pre-network ring buffer before the UDP socket was routable.
+	app.udpSyslogStream.drainPreNetBuffer();
 }
 
 /**
@@ -466,7 +476,6 @@ void AppWIFI::broadcastWifiStatus(String message)
 		ap[F("ip")] = WifiAccessPoint.getIP().toString();
 
 		debug_i("rpc: root =%s", Json::serialize(root).c_str());
-		debug_i("rpc: msg =%s", Json::serialize(msg.getRoot()).c_str());
 
 		String jsonStr = Json::serialize(msg.getRoot());
 

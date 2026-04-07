@@ -99,3 +99,16 @@ bool HuffmanRingBuffer::read(uint8_t* out, uint16_t maxLen, uint16_t& outLen)
     _evictOldest();
     return true;
 }
+
+uint16_t HuffmanRingBuffer::messageLen(uint16_t index) const
+{
+    if(index >= _count) return 0;
+    uint16_t pos = _head;
+    for(uint16_t i = 0; i < index; i++) {
+        uint16_t len = _readU16(pos);
+        uint16_t next = pos + 2u + len;
+        if(next >= _capacity) next -= _capacity;
+        pos = next;
+    }
+    return _readU16(pos);
+}
