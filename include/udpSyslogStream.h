@@ -108,10 +108,12 @@ public:
             return;
         }
 
-        // From this point new writes go directly to UDP (GotIP has happened, so
-        // sendTo() is routed).  Messages written between begin() and here were
-        // kept in the ring buffer because _ready was still false.
-        _ready = true;
+        // Keep _ready = false: all app writes during the drain still go into the
+        // ring buffer so they are delivered in order.  _ready is set true when the
+        // ring buffer is exhausted at the end of _drainStep().
+        // _draining = true lets write() know that drain-internal replays (guarded
+        // by _replayingFrame) must bypass the ring buffer path and go to UDP.
+        _draining = true;
 
         debug_i("drainPreNetBuffer: %u messages, %u/%u bytes used, %u evicted",
                 _preNetBuf->count(), _preNetBuf->used(), _preNetBuf->capacity(),
@@ -178,10 +180,13 @@ private:
         char     msg[MAX_MSG_LEN + 1];
         uint16_t frameLen, msgLen;
         if(!_preNetBuf->read(frame, sizeof(frame), frameLen)) {
-            // Ring buffer exhausted — reclaim heap.
+            // Ring buffer exhausted — drain complete.  From now on writes go
+            // directly to UDP via the normal path.
             _encoder.reset();
             _preNetBuf.reset();
             _ringMem.reset();
+            _draining = false;
+            _ready    = true;
             if(_buf[_active].length() > 0) {
                 queueActiveBuf();
             }
@@ -198,9 +203,13 @@ private:
         }
 
         msgLen = HuffmanDecoder::decodeFrame(frame, frameLen, msg, MAX_MSG_LEN);
+        // _replayingFrame = true makes write() bypass the ring buffer path so
+        // these decoded bytes go to UDP instead of looping back into the encoder.
+        _replayingFrame = true;
         for(uint16_t i = 0; i < msgLen; i++) {
             write((uint8_t)msg[i]);
         }
+        _replayingFrame = false;
         if(_buf[_active].length() > 0) {
             queueActiveBuf();
             flushPending();
@@ -214,8 +223,11 @@ public:
 
     IRAM_ATTR size_t write(uint8_t c) override
     {
-        // Before begin(): compress into pre-network Huffman ring buffer.
-        if(!_ready) {
+        // Pre-GotIP or app write during drain: compress into the ring buffer so
+        // messages are delivered in chronological order.  _replayingFrame gates
+        // the exception: when _drainStep() replays a decoded frame it must bypass
+        // this path (or the bytes would loop back into the encoder).
+        if(!_ready && !_replayingFrame) {
             if(c != '\r' && _encoder) {
                 if(c == '\n') {
                     _encoder->flush();
@@ -354,10 +366,12 @@ private:
     String        _tag{"app"};
     uint8_t       _priority{191};
     bool          _enabled{false};
-    bool          _ready{false};   ///< true once begin() has been called
-    bool          _needsSentinel{false}; ///< send restart sentinel at start of next _drainStep()
-    uint32_t      _sentinelNonce{0};     ///< nonce to stamp on the sentinel packet
-    uint16_t      _drainEvicted{0};      ///< evicted count captured at drain start, for syslog emit
+    bool          _ready{false};          ///< true after drain completes; direct UDP path active
+    bool          _draining{false};       ///< true while pre-net buffer is being drained
+    bool          _replayingFrame{false}; ///< true inside _drainStep() replay loop — bypasses ring buffer in write()
+    bool          _needsSentinel{false};  ///< send restart sentinel at start of next _drainStep()
+    uint32_t      _sentinelNonce{0};      ///< nonce to stamp on the sentinel packet
+    uint16_t      _drainEvicted{0};       ///< evicted count captured at drain start, for syslog emit
 
     /// Inter-packet delay during pre-net buffer drain (ms).
     /// 10 ms gives lwIP time to hand each UDP packet to the WiFi chip before the
