@@ -2,7 +2,7 @@
 #include <string.h>
 
 HuffmanRingBuffer::HuffmanRingBuffer(uint8_t* mem, uint16_t capacity)
-    : _buf(mem), _capacity(capacity), _head(0), _tail(0), _used(0), _count(0)
+    : _buf(mem), _capacity(capacity), _head(0), _tail(0), _used(0), _count(0), _evictedCount(0)
 {
 }
 
@@ -48,6 +48,7 @@ void HuffmanRingBuffer::_evictOldest()
     if(_head >= _capacity) _head -= _capacity;
     _used -= total;
     _count--;
+    _evictedCount++;
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────

@@ -87,10 +87,11 @@ public:
      */
     bool read(uint8_t* out, uint16_t maxLen, uint16_t& outLen);
 
-    bool     empty()    const { return _count == 0; }
-    uint16_t count()    const { return _count; }
-    uint16_t used()     const { return _used; }
-    uint16_t capacity() const { return _capacity; }
+    bool     empty()        const { return _count == 0; }
+    uint16_t count()        const { return _count; }
+    uint16_t used()         const { return _used; }
+    uint16_t capacity()     const { return _capacity; }
+    uint16_t evictedCount() const { return _evictedCount; }
 
     /**
      * @brief Return the compressed byte length of the message at the given index.
@@ -105,10 +106,11 @@ public:
 private:
     uint8_t*  _buf;
     uint16_t  _capacity;
-    uint16_t  _head;   ///< byte offset of oldest message header
-    uint16_t  _tail;   ///< byte offset where next write begins
-    uint16_t  _used;   ///< bytes currently occupied
-    uint16_t  _count;  ///< number of messages stored
+    uint16_t  _head;         ///< byte offset of oldest message header
+    uint16_t  _tail;         ///< byte offset where next write begins
+    uint16_t  _used;         ///< bytes currently occupied
+    uint16_t  _count;        ///< number of messages stored
+    uint16_t  _evictedCount; ///< total messages dropped due to buffer wraparound
 
     // Low-level helpers — all offsets must be in [0, _capacity)
     uint16_t _readU16(uint16_t offset) const;

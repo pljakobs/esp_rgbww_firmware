@@ -108,19 +108,20 @@ public:
             return;
         }
 
-        debug_i("drainPreNetBuffer: %u messages, %u/%u bytes used",
-                _preNetBuf->count(), _preNetBuf->used(), _preNetBuf->capacity());
+        debug_i("drainPreNetBuffer: %u messages, %u/%u bytes used, %u evicted",
+                _preNetBuf->count(), _preNetBuf->used(), _preNetBuf->capacity(),
+                _preNetBuf->evictedCount());
         // Capture a random nonce; the sentinel itself is sent at the start of
-        // the first _drainStep() tick (via queueCallback) rather than here.
-        // Sending sendTo() directly in the GotIP callback context causes the
-        // same silent packet loss as the write() path — the lwIP stack is
-        // mid-transition.  By the time queueCallback fires the stack is ready.
+        // the first _drainStep() tick rather than here.  Sending sendTo() directly
+        // in the GotIP callback context triggers the same silent packet loss as
+        // write() — the lwIP stack is mid-transition.
         _sentinelNonce = static_cast<uint32_t>(os_random());
         _needsSentinel = true;
-        // Drain one frame per OS tick so lwIP's TX queue can drain between sends.
-        // Sending all 120 frames in one tight loop exhausts the pbuf pool and
-        // silently drops all but the first ~3 packets.
-        System.queueCallback([this]() { _drainStep(); });
+        _drainEvicted  = _preNetBuf->evictedCount();
+        // Pace drain: fire first _drainStep() after one timer interval so lwIP
+        // is fully ready, then keep 10 ms between every subsequent packet.
+        // queueCallback (µs apart) exhausts the pbuf pool and causes ~30% loss.
+        _drainTimer.initializeMs(DRAIN_INTERVAL_MS, [this]() { _drainStep(); }).startOnce();
     }
 
     void end()
@@ -179,6 +180,14 @@ private:
             if(_buf[_active].length() > 0) {
                 queueActiveBuf();
             }
+            // Emit eviction summary as a real syslog line so it shows in the log viewer.
+            if(_drainEvicted > 0) {
+                String ev;
+                ev += F("pre-net buffer: ");
+                ev += String(_drainEvicted);
+                ev += F(" message(s) evicted due to buffer wraparound");
+                println(ev);
+            }
             flushPending();
             return;
         }
@@ -191,8 +200,9 @@ private:
             queueActiveBuf();
             flushPending();
         }
-        // Yield to OS, then send next frame.
-        System.queueCallback([this]() { _drainStep(); });
+        // Pace: wait DRAIN_INTERVAL_MS before sending next frame so lwIP can
+        // fully transmit the previous packet and avoid pbuf pool exhaustion.
+        _drainTimer.startOnce();
     }
 
 public:
@@ -342,6 +352,14 @@ private:
     bool          _ready{false};   ///< true once begin() has been called
     bool          _needsSentinel{false}; ///< send restart sentinel at start of next _drainStep()
     uint32_t      _sentinelNonce{0};     ///< nonce to stamp on the sentinel packet
+    uint16_t      _drainEvicted{0};      ///< evicted count captured at drain start, for syslog emit
+
+    /// Inter-packet delay during pre-net buffer drain (ms).
+    /// 10 ms gives lwIP time to hand each UDP packet to the WiFi chip before the
+    /// next one arrives, preventing pbuf pool exhaustion and the ~30% silent loss
+    /// seen when using queueCallback (µs-apart).
+    static constexpr uint32_t DRAIN_INTERVAL_MS = 10;
+    Timer        _drainTimer; ///< paces _drainStep() calls during pre-net buffer replay
 
     String _buf[2];
     int    _active{0};
