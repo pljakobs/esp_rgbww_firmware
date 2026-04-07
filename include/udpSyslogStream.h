@@ -110,30 +110,13 @@ public:
 
         debug_i("drainPreNetBuffer: %u messages, %u/%u bytes used",
                 _preNetBuf->count(), _preNetBuf->used(), _preNetBuf->capacity());
-        // Send restart sentinel 3× to survive UDP packet loss.
-        // Build the RFC 3164 packet directly and call sendTo() instead of
-        // routing through write() — the write() path calls _udp.sendTo() in
-        // the GotIP callback context where lwIP may silently drop the packet
-        // (network stack mid-transition).  By the first _drainStep() tick the
-        // stack is fully ready, so drained messages route fine via write().
-        // A per-boot random nonce lets the log service deduplicate the copies.
-        const uint32_t nonce = static_cast<uint32_t>(os_random());
-        {
-            String pkt;
-            pkt.reserve(80);
-            pkt += '<';
-            pkt += String(_priority);
-            pkt += '>';
-            pkt += _hostname.length() ? _hostname : F("device");
-            pkt += ' ';
-            pkt += _tag;
-            pkt += F(": 0 ===== system restart ===== nonce:");
-            pkt += String(nonce);
-            pkt += '\n';
-            for(int repeat = 0; repeat < 3; ++repeat) {
-                _udp.sendTo(IpAddress(_host), _port, pkt.c_str(), pkt.length());
-            }
-        }
+        // Capture a random nonce; the sentinel itself is sent at the start of
+        // the first _drainStep() tick (via queueCallback) rather than here.
+        // Sending sendTo() directly in the GotIP callback context causes the
+        // same silent packet loss as the write() path — the lwIP stack is
+        // mid-transition.  By the time queueCallback fires the stack is ready.
+        _sentinelNonce = static_cast<uint32_t>(os_random());
+        _needsSentinel = true;
         // Drain one frame per OS tick so lwIP's TX queue can drain between sends.
         // Sending all 120 frames in one tight loop exhausts the pbuf pool and
         // silently drops all but the first ~3 packets.
@@ -158,6 +141,27 @@ private:
     {
         if(!_preNetBuf) {
             return;
+        }
+
+        // Send restart sentinel on the first OS tick after GotIP, when the
+        // network stack is fully ready.  sendTo() in the GotIP callback itself
+        // fires while lwIP is mid-transition and silently drops the packets.
+        if(_needsSentinel) {
+            _needsSentinel = false;
+            String pkt;
+            pkt.reserve(80);
+            pkt += '<';
+            pkt += String(_priority);
+            pkt += '>';
+            pkt += _hostname.length() ? _hostname : F("device");
+            pkt += ' ';
+            pkt += _tag;
+            pkt += F(": 0 ===== system restart ===== nonce:");
+            pkt += String(_sentinelNonce);
+            pkt += '\n';
+            for(int repeat = 0; repeat < 3; ++repeat) {
+                _udp.sendTo(IpAddress(_host), _port, pkt.c_str(), pkt.length());
+            }
         }
 
         uint8_t  frame[HuffmanEncoder::OUTPUT_BUF_SIZE];
@@ -325,6 +329,8 @@ private:
     uint8_t       _priority{191};
     bool          _enabled{false};
     bool          _ready{false};   ///< true once begin() has been called
+    bool          _needsSentinel{false}; ///< send restart sentinel at start of next _drainStep()
+    uint32_t      _sentinelNonce{0};     ///< nonce to stamp on the sentinel packet
 
     String _buf[2];
     int    _active{0};
