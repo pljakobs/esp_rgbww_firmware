@@ -327,7 +327,9 @@ void AppWIFI::_STAGotIP(IpAddress ip, IpAddress mask, IpAddress gateway)
 	// carries the correct name — not the empty string from begin().
 	{
 		AppConfig::Network network(*app.cfg);
+#ifndef SMING_RELEASE
 		app.udpSyslogStream.setHostname(network.mdns.getName());
+#endif
 	}
 	debug_i("AppWIFI::_STAGotIP");
 
@@ -371,7 +373,9 @@ void AppWIFI::_STAGotIP(IpAddress ip, IpAddress mask, IpAddress gateway)
 	app.reportCrashDump();
 	// Now that we have an IP address, drain any log messages that were compressed
 	// into the pre-network ring buffer before the UDP socket was routable.
+#ifndef SMING_RELEASE
 	app.udpSyslogStream.drainPreNetBuffer();
+#endif
 }
 
 /**

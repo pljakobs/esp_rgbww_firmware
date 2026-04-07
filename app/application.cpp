@@ -33,8 +33,10 @@
 #include <VersionListener.h>
 #include <FlashString/Stream.hpp>
 #include <fileMap.h>
+#ifndef SMING_RELEASE
 #include <MultiOutputStream.h>
 #include <udpSyslogStream.h>
+#endif
 
 #if ARCH_ESP8266
 #define PART0 "lfs0"
@@ -177,12 +179,14 @@ extern "C" void custom_crash_callback(struct rst_info* ri, uint32_t stack, uint3
 
 Application app;
 
+#ifndef SMING_RELEASE
 MultiOutputStream debugStream;
 
 size_t debugStreamOutputCallback(const char* buffer, unsigned int length)
 {
 	return debugStream.write((const uint8_t*)buffer, length);
 }
+#endif
 
 void onReady()
 {
@@ -199,11 +203,12 @@ void onReady()
 #ifdef ARCH_ESP32
 	esp_wifi_set_ps (WIFI_PS_NONE);
 #endif
+#ifndef SMING_RELEASE
 	Serial.systemDebugOutput(false); // disable direct Serial hook; output now goes through debugStreamOutputCallback only
-
 	auto oldCallback = m_setPuts(&debugStreamOutputCallback);
 	debugStream.addStream(&Serial, false);
 	debugStream.addStream(&app.udpSyslogStream, false);
+#endif
 
 	// seperated application init
 	app.init();
@@ -578,7 +583,9 @@ debug_i("Application::init - running partition %s", part.name());
 			AppConfig::General general(*cfg);
 			String myName=general.getDeviceName();
 			debug_i("Initializing remote syslog with host %s and port %d", host.c_str(), port);
+#ifndef SMING_RELEASE
 			app.udpSyslogStream.begin(host, port, myName, F("Lightinator"));
+#endif
 		}
 	}
 	

@@ -24,7 +24,9 @@
 #include <otaupdate.h>
 #include <controllers.h>
 #include <mdnsHandler.h>
+#ifndef SMING_RELEASE
 #include <udpSyslogStream.h>
+#endif
 
 
 
@@ -92,7 +94,9 @@ public:
 public:
     AppWIFI network;
     ApplicationWebserver webserver;
+#ifndef SMING_RELEASE
     UdpSyslogStream udpSyslogStream;
+#endif
     APPLedCtrl rgbwwctrl;
     std::unique_ptr<Controllers> controllers;
     
