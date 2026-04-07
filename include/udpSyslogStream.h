@@ -90,10 +90,10 @@ public:
         _priority = priority;
         _enabled  = enabled;
         _udp.connect(IpAddress(_host), _port);
-        _ready    = true;
-        // Ring buffer is intentionally NOT drained here: begin() is typically called
-        // before the network has an IP address, so sendTo() would fail silently.
-        // Call drainPreNetBuffer() once the station has received an IP (GotIP callback).
+        // Do NOT set _ready = true here: begin() is called before the network has an
+        // IP address, so any write() that goes through flushPending() → sendTo() would
+        // be silently dropped.  Keep routing to the ring buffer until drainPreNetBuffer()
+        // is called from the GotIP callback, at which point the route actually exists.
     }
 
     /**
@@ -107,6 +107,11 @@ public:
         if(!_preNetBuf) {
             return;
         }
+
+        // From this point new writes go directly to UDP (GotIP has happened, so
+        // sendTo() is routed).  Messages written between begin() and here were
+        // kept in the ring buffer because _ready was still false.
+        _ready = true;
 
         debug_i("drainPreNetBuffer: %u messages, %u/%u bytes used, %u evicted",
                 _preNetBuf->count(), _preNetBuf->used(), _preNetBuf->capacity(),
