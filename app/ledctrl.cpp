@@ -135,7 +135,7 @@ void APPLedCtrl::init()
 		#ifdef ARCH_ESP32
 		{
 			AppConfig::Hardware::Pwm pwmconfig(*app.cfg);
-			Esp32HwPwmConfig config;
+			Esp32HardwarePwm::Config config;
 			config.timer.frequency = pwmconfig.timer.getFrequency();
 			config.timer.resolution = (ledc_timer_bit_t)pwmconfig.timer.getResolution();
 
@@ -158,16 +158,16 @@ void APPLedCtrl::init()
 
 			auto spreadMode = pwmconfig.spreadSpectrum.getMode();
 			if (spreadMode == AppConfig::ContainedHardware::ContainedPwm::SpreadSpectrumMode::ON) {
-				config.spreadSpectrum.mode = SpreadSpectrumMode::ON;
+				config.spreadSpectrum.mode = Esp32HardwarePwm::SpreadSpectrumMode::ON;
 			} else if (spreadMode == AppConfig::ContainedHardware::ContainedPwm::SpreadSpectrumMode::OFF) {
-				config.spreadSpectrum.mode = SpreadSpectrumMode::OFF;
+				config.spreadSpectrum.mode = Esp32HardwarePwm::SpreadSpectrumMode::OFF;
 			}
 
 			config.spreadSpectrum.WidthPercent = pwmconfig.spreadSpectrum.getWidth();
 			config.spreadSpectrum.Subsampling = pwmconfig.spreadSpectrum.getSubsampling();
 
 			// ✅ Use PhaseShiftMode enum  directly
-			(pwmconfig.phaseShift.getMode()==AppConfig::ContainedHardware::ContainedPwm::PhaseShiftMode::ON)?config.phaseShift.mode=PhaseShiftMode::AUTO:config.phaseShift.mode=PhaseShiftMode::OFF;
+			(pwmconfig.phaseShift.getMode()==AppConfig::ContainedHardware::ContainedPwm::PhaseShiftMode::ON)?config.phaseShift.mode=Esp32HardwarePwm::PhaseShiftMode::AUTO:config.phaseShift.mode=Esp32HardwarePwm::PhaseShiftMode::OFF;
 
 			RGBWWLed::init(pins.red, pins.green, pins.blue, pins.warmwhite, pins.coldwhite, config);
 		}
