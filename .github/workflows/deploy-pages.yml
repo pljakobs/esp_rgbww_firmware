@@ -316,7 +316,23 @@ jobs:
           else
               echo "Warning: Version directory download/$TARGET_BRANCH/$VERSION does not exist on remote"
           fi
-          
+
+          # Create/update direct download symlinks: download/<soc>/<branch>/<type>/app-merged.bin
+          # These match the static HTML download links and always point to the latest version.
+          echo "Updating direct download symlinks..."
+          IFS=',' read -ra soc_list <<< "$SUPPORTED_SOCS"
+          for soc in "${soc_list[@]}"; do
+            soc=$(echo "$soc" | tr -d ' ')
+            for type in debug release; do
+              symlink_dir="download/$soc/$TARGET_BRANCH/$type"
+              mkdir -p "$symlink_dir"
+              # Relative path from download/<soc>/<branch>/<type>/ up to download/ then into versioned path
+              ln -sf "../../../$TARGET_BRANCH/$VERSION/$soc/$type/single_image/app-merged.bin" \
+                "$symlink_dir/app-merged.bin"
+              echo "Symlink: $symlink_dir/app-merged.bin -> ../../../$TARGET_BRANCH/$VERSION/$soc/$type/single_image/app-merged.bin"
+            done
+          done
+
           echo "Culling old versions..."
           python3 manage_version.py version.json cull
           
