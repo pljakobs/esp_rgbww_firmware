@@ -762,6 +762,25 @@ void AppMqttClient::handleHomeAssistantCommand(const String& message) {
             
             debug_i("HA: Converted to internal - H: %.1f°, S: %.1f%%, V: %.1f%%", 
                     hsv[F("h")].as<float>(), hsv[F("s")].as<float>(), hsv[F("v")].as<float>());
+        } else if (doc.containsKey(F("color_temp"))) {
+            // HA sends color_temp in mireds; convert to firmware CT scale (0–100)
+            // min_mireds=153 (~6500K cool) → ct=0, max_mireds=370 (~2700K warm) → ct=100
+            int mireds = doc[F("color_temp")].as<int>();
+            int ct = (mireds - 153) * 100 / 217;
+            ct = (ct < 0) ? 0 : ((ct > 100) ? 100 : ct);
+            
+            debug_i("HA: color_temp from HA: %d mireds → ct=%d", mireds, ct);
+            
+            // Keep current hue, desaturate for pure white at the requested temperature
+            HSVCT currentColor = app.rgbwwctrl.getCurrentColor();
+            float cur_h, cur_s, cur_v;
+            int cur_ct;
+            currentColor.asRadian(cur_h, cur_s, cur_v, cur_ct);
+            
+            hsv[F("h")] = cur_h;
+            hsv[F("s")] = 0.0f;      // Desaturate: pure white
+            hsv[F("v")] = brightness;
+            hsv[F("ct")] = ct;
         } else {
             // Just brightness change - keep current color
             HSVCT currentColor = app.rgbwwctrl.getCurrentColor();
