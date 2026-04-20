@@ -573,7 +573,6 @@ void AppMqttClient::publishHAState(const ChannelOutput& raw, const HSVCT* pHsv) 
     // State and brightness - Use 0-100 scale as configured in discovery
     doc[F("state")] = v > 0 ? F("ON") : F("OFF");
     doc[F("brightness")] = (uint8_t)val_percent;  // V is already 0-100%, use directly
-
     // Report the correct color_mode: "color_temp" when CT is active on a white-capable
     // device, otherwise "hs". Sending the wrong mode violates the HA MQTT JSON light
     // contract and causes HA to ignore the state update.
@@ -588,12 +587,10 @@ void AppMqttClient::publishHAState(const ChannelOutput& raw, const HSVCT* pHsv) 
         }
     } else {
         doc[F("color_mode")] = F("hs");
-        // Only include color if light is on
-        if (v > 0) {
-            JsonObject color_obj = doc.createNestedObject(F("color"));
-            color_obj[F("h")] = hue_degrees;   // 0-360 degrees
-            color_obj[F("s")] = sat_percent;   // 0-100 percent
-        }
+        // Always include color object when color_mode is hs (HA requires it)
+        JsonObject color_obj = doc.createNestedObject(F("color"));
+        color_obj[F("h")] = hue_degrees;   // 0-360 degrees
+        color_obj[F("s")] = sat_percent;   // 0-100 percent
     }
     
     String stateTopic = _haDiscoveryPrefix + F("/light/") + _haNodeId + F("/") + _haObjectId + F("/state");
