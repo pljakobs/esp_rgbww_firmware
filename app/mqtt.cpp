@@ -66,7 +66,8 @@ void AppMqttClient::connect()
 		return;
 	   }
 	
-	if(!mqtt->setWill(F("last/will"), F("The connection from this device is lost:("),
+	String availabilityTopic = buildTopic(F("availability"));
+	if(!mqtt->setWill(availabilityTopic, F("offline"),
 					  MqttClient::getFlags(MQTT_QOS_AT_LEAST_ONCE, MQTT_RETAIN_TRUE))) {
 		debugf("Unable to set the last will and testament. Most probably there is not enough memory on the device.");
 	}
@@ -133,6 +134,8 @@ void AppMqttClient::start()
 
 int AppMqttClient::onConnected(MqttClient& client, mqtt_message_t* message){
 	debug_i("MQTT Broker connected!!");
+	// Publish availability "online" to match the LWT "offline" 
+	publish(buildTopic(F("availability")), F("online"), true);
 	{
 		AppConfig::Sync sync(*app.cfg);
 		if(sync.getClockSlaveEnabled()) {
@@ -437,11 +440,14 @@ void AppMqttClient::publishHomeAssistantConfig() {
     }
     
     // Create config document
-    StaticJsonDocument<512> doc;
+    StaticJsonDocument<768> doc;
     
     // Basic configuration
     doc[F("name")] = deviceName;  // Display name can have spaces
     doc[F("unique_id")] = _haUniqueId;  // Use chip-based unique ID
+    doc[F("availability_topic")] = buildTopic(F("availability"));
+    doc[F("payload_available")] = F("online");
+    doc[F("payload_not_available")] = F("offline");
     doc[F("state_topic")] = _haDiscoveryPrefix + F("/light/") + _haNodeId + F("/") + _haObjectId + F("/state");
     doc[F("command_topic")] = _haDiscoveryPrefix + F("/light/") + _haNodeId + F("/") + _haObjectId + F("/set");
     doc[F("schema")] = F("json");
