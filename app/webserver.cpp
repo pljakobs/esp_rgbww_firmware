@@ -792,6 +792,7 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response){
 		con[F("netmask")] = WifiStation.getNetworkMask().toString();
 		con[F("gateway")] = WifiStation.getNetworkGateway().toString();
 		con[F("mac")] = WifiStation.getMAC();
+		con[F("rssi")] = WifiStation.getRssi();
 		
 		// Skip ConfigDB reads during OTA — they consume heap and flash I/O we can't afford
 		if(!app.ota.isProccessing()) {
