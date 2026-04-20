@@ -66,7 +66,8 @@ void AppMqttClient::connect()
 		return;
 	   }
 	
-	if(!mqtt->setWill(F("last/will"), F("The connection from this device is lost:("),
+	String availabilityTopic = buildTopic(F("availability"));
+	if(!mqtt->setWill(availabilityTopic, F("offline"),
 					  MqttClient::getFlags(MQTT_QOS_AT_LEAST_ONCE, MQTT_RETAIN_TRUE))) {
 		debugf("Unable to set the last will and testament. Most probably there is not enough memory on the device.");
 	}
@@ -137,6 +138,8 @@ int AppMqttClient::onConnected(MqttClient& client, mqtt_message_t* message){
 	// Retained discovery messages can be lost when a broker restarts; re-publishing
 	// ensures HA always has a valid discovery payload.
 	_haConfigPublished = false;
+	// Publish availability "online" to match the LWT "offline" 
+	publish(buildTopic(F("availability")), F("online"), true);
 	{
 		AppConfig::Sync sync(*app.cfg);
 		if(sync.getClockSlaveEnabled()) {
@@ -441,11 +444,14 @@ void AppMqttClient::publishHomeAssistantConfig() {
     }
     
     // Create config document
-    StaticJsonDocument<512> doc;
+    StaticJsonDocument<768> doc;
     
     // Basic configuration
     doc[F("name")] = deviceName;  // Display name can have spaces
     doc[F("unique_id")] = _haUniqueId;  // Use chip-based unique ID
+    doc[F("availability_topic")] = buildTopic(F("availability"));
+    doc[F("payload_available")] = F("online");
+    doc[F("payload_not_available")] = F("offline");
     doc[F("state_topic")] = _haDiscoveryPrefix + F("/light/") + _haNodeId + F("/") + _haObjectId + F("/state");
     doc[F("command_topic")] = _haDiscoveryPrefix + F("/light/") + _haNodeId + F("/") + _haObjectId + F("/set");
     doc[F("schema")] = F("json");
@@ -577,13 +583,27 @@ void AppMqttClient::publishHAState(const ChannelOutput& raw, const HSVCT* pHsv) 
     // State and brightness - Use 0-100 scale as configured in discovery
     doc[F("state")] = v > 0 ? F("ON") : F("OFF");
     doc[F("brightness")] = (uint8_t)val_percent;  // V is already 0-100%, use directly
-    doc[F("color_mode")] = F("hs");  // Always include color_mode
-    
-    // Only include color if light is on
-    if (v > 0) {
-        JsonObject color_obj = doc.createNestedObject(F("color"));
-        color_obj[F("h")] = hue_degrees;   // 0-360 degrees
-        color_obj[F("s")] = sat_percent;   // 0-100 percent
+
+    // Report the correct color_mode: "color_temp" when CT is active on a white-capable
+    // device, otherwise "hs". Sending the wrong mode violates the HA MQTT JSON light
+    // contract and causes HA to ignore the state update.
+    int colorMode = getCurrentColorMode();
+    bool supportsCT = (colorMode == 1 || colorMode == 3); // RGBWW or RGBWWCW
+    if (supportsCT && ct > 0) {
+        // Convert firmware CT (0–100) back to mireds for HA
+        int mireds = 153 + ct * 217 / 100;
+        doc[F("color_mode")] = F("color_temp");
+        if (v > 0) {
+            doc[F("color_temp")] = mireds;
+        }
+    } else {
+        doc[F("color_mode")] = F("hs");
+        // Only include color if light is on
+        if (v > 0) {
+            JsonObject color_obj = doc.createNestedObject(F("color"));
+            color_obj[F("h")] = hue_degrees;   // 0-360 degrees
+            color_obj[F("s")] = sat_percent;   // 0-100 percent
+        }
     }
     
     String stateTopic = _haDiscoveryPrefix + F("/light/") + _haNodeId + F("/") + _haObjectId + F("/state");
@@ -766,6 +786,25 @@ void AppMqttClient::handleHomeAssistantCommand(const String& message) {
             
             debug_i("HA: Converted to internal - H: %.1f°, S: %.1f%%, V: %.1f%%", 
                     hsv[F("h")].as<float>(), hsv[F("s")].as<float>(), hsv[F("v")].as<float>());
+        } else if (doc.containsKey(F("color_temp"))) {
+            // HA sends color_temp in mireds; convert to firmware CT scale (0–100)
+            // min_mireds=153 (~6500K cool) → ct=0, max_mireds=370 (~2700K warm) → ct=100
+            int mireds = doc[F("color_temp")].as<int>();
+            int ct = (mireds - 153) * 100 / 217;
+            ct = (ct < 0) ? 0 : ((ct > 100) ? 100 : ct);
+            
+            debug_i("HA: color_temp from HA: %d mireds → ct=%d", mireds, ct);
+            
+            // Keep current hue, desaturate for pure white at the requested temperature
+            HSVCT currentColor = app.rgbwwctrl.getCurrentColor();
+            float cur_h, cur_s, cur_v;
+            int cur_ct;
+            currentColor.asRadian(cur_h, cur_s, cur_v, cur_ct);
+            
+            hsv[F("h")] = cur_h;
+            hsv[F("s")] = 0.0f;      // Desaturate: pure white
+            hsv[F("v")] = brightness;
+            hsv[F("ct")] = ct;
         } else {
             // Just brightness change - keep current color
             HSVCT currentColor = app.rgbwwctrl.getCurrentColor();
