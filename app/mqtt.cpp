@@ -598,12 +598,10 @@ void AppMqttClient::publishHAState(const ChannelOutput& raw, const HSVCT* pHsv) 
         }
     } else {
         doc[F("color_mode")] = F("hs");
-        // Only include color if light is on
-        if (v > 0) {
-            JsonObject color_obj = doc.createNestedObject(F("color"));
-            color_obj[F("h")] = hue_degrees;   // 0-360 degrees
-            color_obj[F("s")] = sat_percent;   // 0-100 percent
-        }
+        // Always include color object when color_mode is hs (HA requires it even when OFF)
+        JsonObject color_obj = doc.createNestedObject(F("color"));
+        color_obj[F("h")] = hue_degrees;   // 0-360 degrees
+        color_obj[F("s")] = sat_percent;   // 0-100 percent
     }
     
     String stateTopic = _haDiscoveryPrefix + F("/light/") + _haNodeId + F("/") + _haObjectId + F("/state");
