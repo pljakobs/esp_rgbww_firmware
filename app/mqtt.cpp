@@ -133,6 +133,10 @@ void AppMqttClient::start()
 
 int AppMqttClient::onConnected(MqttClient& client, mqtt_message_t* message){
 	debug_i("MQTT Broker connected!!");
+	// Reset discovery flag so config is re-published after a broker restart.
+	// Retained discovery messages can be lost when a broker restarts; re-publishing
+	// ensures HA always has a valid discovery payload.
+	_haConfigPublished = false;
 	{
 		AppConfig::Sync sync(*app.cfg);
 		if(sync.getClockSlaveEnabled()) {
