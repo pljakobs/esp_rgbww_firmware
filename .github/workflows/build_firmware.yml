@@ -5,7 +5,7 @@ permissions:
 
 on:
   push:
-    branches: [master, stable, testing, develop, experimental]
+    branches: [stable, testing, develop, experimental]
   pull_request:
     branches: [stable, testing, develop, experimental]
   repository_dispatch:
@@ -140,9 +140,9 @@ jobs:
 
           # Branch policy:
           # - push testing: bump y
-          # - push master: bump x, reset y
+          # - push stable: bump x, reset y
           # - push develop/experimental: keep base and only increment build
-          if [ "$event_name" = "push" ] && [ "$ref_name" = "master" ]; then
+          if [ "$event_name" = "push" ] && [ "$ref_name" = "stable" ]; then
             x=$((x + 1))
             y=0
           elif [ "$event_name" = "push" ] && [ "$ref_name" = "testing" ]; then
