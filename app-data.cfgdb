@@ -209,8 +209,7 @@
               }
             }
           }
-        },
-          "required":["id","name","group_id"]
+        }
       }
     }
   },
