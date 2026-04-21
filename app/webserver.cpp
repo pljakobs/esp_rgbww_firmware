@@ -784,16 +784,18 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response){
 		rgbww[F("version")] = RGBWW_VERSION;
 		rgbww[F("queuesize")] = RGBWW_ANIMATIONQSIZE;
 
+
 		JsonObject con = data.createNestedObject(F("connection"));
 		con[F("connected")] = WifiStation.isConnected();
-		con[F("ssid")] = WifiStation.getSSID();
-		con[F("dhcp")] = WifiStation.isEnabledDHCP();
-		con[F("ip")] = WifiStation.getIP().toString();
-		con[F("netmask")] = WifiStation.getNetworkMask().toString();
-		con[F("gateway")] = WifiStation.getNetworkGateway().toString();
-		con[F("mac")] = WifiStation.getMAC();
-		con[F("rssi")] = WifiStation.getRssi();
-		
+		if(WifiStation.isConnected()) {
+			con[F("ssid")] = WifiStation.getSSID();
+			con[F("dhcp")] = WifiStation.isEnabledDHCP();
+			con[F("ip")] = WifiStation.getIP().toString();
+			con[F("netmask")] = WifiStation.getNetworkMask().toString();
+			con[F("gateway")] = WifiStation.getNetworkGateway().toString();
+			con[F("mac")] = WifiStation.getMAC();
+			con[F("rssi")] = WifiStation.getRssi();
+		}
 		// Skip ConfigDB reads during OTA — they consume heap and flash I/O we can't afford
 		if(!app.ota.isProccessing()) {
 			AppConfig::Network network(*app.cfg);
