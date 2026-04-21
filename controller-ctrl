@@ -22,8 +22,8 @@ else:
     HAS_ZEROCONF = True
 
 # mDNS service type to look for
-SERVICE_TYPE = "_http._tcp.local."
-CONTROLLER_SERVICE_TYPE = "esprgbwwAPI._http._tcp.local."
+SERVICE_TYPE = "_lightinator-api._tcp.local."
+CONTROLLER_SERVICE_TYPE = "_lightinator-api._tcp.local."
 
 # Color support functions
 def supports_color():

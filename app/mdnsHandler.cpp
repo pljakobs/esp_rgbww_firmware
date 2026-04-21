@@ -31,8 +31,8 @@
 
 //#define DEBUG_MDNS 
 
-// Global pointer for leader service updates from other components
-static LEDControllerAPIService* g_ledControllerAPIService = nullptr;
+// No global pointer needed — swarm state is managed via the
+// ledControllerSwarmService member of mdnsHandler directly.
 
 mdnsHandler::mdnsHandler() {
     // Initialize with default values
@@ -83,6 +83,9 @@ void mdnsHandler::setHostname(const char* newHostname)
     deviceWebService =
         std::make_unique<LEDControllerWebService>(san_buf, LEDControllerWebService::HostType::Device);
 
+    // Update swarm service instance name so it matches the hostname
+    ledControllerSwarmService.setInstance(san_buf);
+
     // Create and configure the new primary responder
     primaryResponder = std::make_unique<Responder>();
     primaryResponder->begin(san_buf);
@@ -91,9 +94,13 @@ void mdnsHandler::setHostname(const char* newHostname)
     debug_i("Registered hostname: %s", san_buf);
 #endif
 
-    // Add services to the primary responder
+    // Register all three services on the primary responder:
+    //   _lightinator-api._tcp  — for HA / log-service / FHEM
+    //   _lightinator._tcp      — for controller-to-controller swarm gossip
+    //   _http._tcp             — for browser access via hostname.local
     primaryResponder->addService(ledControllerAPIService);
-    primaryResponder->addService(*deviceWebService); // Note the * to dereference
+    primaryResponder->addService(ledControllerSwarmService);
+    primaryResponder->addService(*deviceWebService);
 
     // Register the new handler with the mDNS server
     server.addHandler(*primaryResponder);
@@ -129,8 +136,8 @@ void mdnsHandler::start()
 
     checkGroupLeadership();
     
-    // Store global reference for API service
-    g_ledControllerAPIService = &ledControllerAPIService;
+    // Store global reference for API service (kept for external callers)
+    // Swarm service state is managed directly via ledControllerSwarmService member.
 
     // Set up leadership election with delay
     #ifdef DEBUG_MDNS
@@ -140,8 +147,8 @@ void mdnsHandler::start()
     _leaderElectionTimer.setIntervalMs(_mdnsTimerInterval * LEADER_ELECTION_DELAY);
     _leaderElectionTimer.startOnce();
     
-    // Set search name for discovering other controllers
-    setSearchName(F("esprgbwwAPI._http._tcp.local"));
+    // Set search name for discovering other controllers via the swarm service type
+    setSearchName(F("_lightinator._tcp.local"));
     
     // Set up timer for periodic mDNS searches
     #ifdef DEBUG_MDNS
@@ -211,10 +218,11 @@ bool mdnsHandler::onMessage(mDNS::Message& message)
     debug_i("answerName: %ssearchName: %s", answerName, searchName.c_str());
 #endif
 
-    // Check if this is an API service response or a hostname response
-    if (strcmp(answerName, searchName.c_str()) == 0) {
-        // This is an API service response - process as before
-        return processApiServiceResponse(message);
+    // Check if this is a swarm service response (_lightinator._tcp)
+    const char* swarm_suffix = "._lightinator._tcp.local";
+    const char* p_swarm = strstr(answerName, swarm_suffix);
+    if (p_swarm != nullptr && p_swarm[strlen(swarm_suffix)] == '\0') {
+        return processSwarmServiceResponse(message);
     } else {
         const char* http_tcp_local = "._http._tcp.local";
         const char* p = strstr(answerName, http_tcp_local);
@@ -238,8 +246,8 @@ bool mdnsHandler::onMessage(mDNS::Message& message)
     return false;
 }
 
-// Process API service responses (existing logic)
-bool mdnsHandler::processApiServiceResponse(mDNS::Message& message)
+// Process swarm service responses (_lightinator._tcp)
+bool mdnsHandler::processSwarmServiceResponse(mDNS::Message& message)
 {
     using namespace mDNS;
     bool msgHasA = false, msgHasTXT = false;
@@ -544,9 +552,9 @@ void mdnsHandler::queryKnownControllers(uint8_t batchIndex)
         // Query for this host using standard search
         mDNS::server.search(hostname_local.c_str(), mDNS::ResourceType::PTR);
         
-        // Also search for the API service
-        String api_service = "esprgbwwAPI._http._tcp.local";
-        mDNS::server.search(api_service, mDNS::ResourceType::PTR);
+        // Also search for the swarm service
+        String swarm_service = "_lightinator._tcp.local";
+        mDNS::server.search(swarm_service, mDNS::ResourceType::PTR);
 
         #ifdef DEBUG_MDNS
         debug_i("Querying for controller: %s", hostname.c_str());
@@ -675,47 +683,43 @@ void mdnsHandler::becomeLeader() {
     if (_isLeader) return;
     
     _isLeader = true;
-    if (g_ledControllerAPIService != nullptr) {
-        g_ledControllerAPIService->setLeader(true);
-        
-        // Create new web service for the leader
-        leaderWebService = std::make_unique<LEDControllerWebService>("lightinator", 
-            LEDControllerWebService::HostType::Leader);        
-        // Create new responder for "lightinator.local"
-        leaderResponder = std::make_unique<mDNS::Responder>();
-        leaderResponder->begin("lightinator");
-        
-        // Add services to the leader responder
-        leaderResponder->addService(*leaderWebService);  // Note the * to dereference
-        
-        // Register the leader responder with mDNS server
-        mDNS::server.addHandler(*leaderResponder);
+    ledControllerSwarmService.setLeader(true);
 
-        #ifdef DEBUG_MDNS
-        debug_i("This controller is now the global leader (lightinator.local)");
-        #endif
-    }
+    // Create new web service for the leader
+    leaderWebService = std::make_unique<LEDControllerWebService>("lightinator", 
+        LEDControllerWebService::HostType::Leader);
+    // Create new responder for "lightinator.local"
+    leaderResponder = std::make_unique<mDNS::Responder>();
+    leaderResponder->begin("lightinator");
+    
+    // _http._tcp only: browsers resolve lightinator.local via this
+    leaderResponder->addService(*leaderWebService);
+    
+    // Register the leader responder with mDNS server
+    mDNS::server.addHandler(*leaderResponder);
+
+    #ifdef DEBUG_MDNS
+    debug_i("This controller is now the global leader (lightinator.local)");
+    #endif
 }
 
 void mdnsHandler::relinquishLeadership() {
     if (!_isLeader) return;
     
     _isLeader = false;
-    if (g_ledControllerAPIService != nullptr) {
-        g_ledControllerAPIService->setLeader(false);
-        
-        // Remove leader responder from mDNS server
-        if (leaderResponder) {
-            mDNS::server.removeHandler(*leaderResponder);
-            leaderResponder.reset();
-        }
-        
-        // Clean up leader web service
-        leaderWebService.reset();
-        #ifdef DEBUG_MDNS
-        debug_i("This controller is no longer the global leader");
-        #endif
+    ledControllerSwarmService.setLeader(false);
+
+    // Remove leader responder from mDNS server
+    if (leaderResponder) {
+        mDNS::server.removeHandler(*leaderResponder);
+        leaderResponder.reset();
     }
+    
+    // Clean up leader web service
+    leaderWebService.reset();
+    #ifdef DEBUG_MDNS
+    debug_i("This controller is no longer the global leader");
+    #endif
 }
 
 void mdnsHandler::checkGroupLeadership() {
@@ -859,10 +863,10 @@ void mdnsHandler::updateServiceTxtRecords() {
         }
     }
     
-    // Update our service with group membership
-    ledControllerAPIService.setLeader(_isLeader);
-    ledControllerAPIService.setGroups(memberGroups);
-    ledControllerAPIService.setLeadingGroups(_leadingGroups);
+    // Update swarm service with current group and leader state
+    ledControllerSwarmService.setLeader(_isLeader);
+    ledControllerSwarmService.setGroups(memberGroups);
+    ledControllerSwarmService.setLeadingGroups(_leadingGroups);
 
     #ifdef DEBUG_MDNS
     debug_i("Updated service TXT records with %d group memberships and %d leading groups", 

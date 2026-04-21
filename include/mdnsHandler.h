@@ -158,113 +158,121 @@ namespace Util {
     }
 } // namespace Util
 
-// Define service classes FIRST before using them
+// ---------------------------------------------------------------------------
+// Service class definitions
+// ---------------------------------------------------------------------------
+
+/**
+ * _lightinator-api._tcp  —  machine-readable API endpoint
+ * Browsed by: Home Assistant, FHEM, ioBroker, lightinator-log-service.
+ * Carries only the minimum needed to reach the REST API; no swarm metadata.
+ */
 class LEDControllerAPIService : public mDNS::Service {
-    public:
-        void setLeader(bool isLeader) {
-            _isLeader = isLeader;
-        }
-        
-        void setGroups(const Vector<String>& groups) {
-            _groups = groups;
-        }
-        
-        void setLeadingGroups(const Vector<String>& groups) {
-            _leadingGroups = groups;
-        }
-        
-        String getInstance() override { return F("esprgbwwAPI"); }
-        String getName() override { return F("http"); }
-        Protocol getProtocol() override { return Protocol::Tcp; }
-        uint16_t getPort() override { return 80; }
-        
-        void addText(mDNS::Resource::TXT& txt) override {
-            #ifdef ESP8266
-            txt.add(F("mo=esp8266"));
-            #elif defined(ESP32)
-            txt.add(F("mo=esp32"));
-            #elif defined(ESP32C3)
-            txt.add(F("mo=esp32c3"));
-            #endif
-            txt.add(F("fn=LED Controller API"));
-            char idStr[16];
-            snprintf(idStr, sizeof(idStr), "id=%u", system_get_chip_id());
-            txt.add(idStr);
-            
-            // Add leader status if this is the leader
-            if (_isLeader) {
-                txt.add(F("isLeader=1"));
+public:
+    String getInstance() override { return F("esprgbwwAPI"); }
+    String getName() override { return F("lightinator-api"); }
+    Protocol getProtocol() override { return Protocol::Tcp; }
+    uint16_t getPort() override { return 80; }
+
+    void addText(mDNS::Resource::TXT& txt) override {
+#ifdef ESP8266
+        txt.add(F("mo=esp8266"));
+#elif defined(ESP32)
+        txt.add(F("mo=esp32"));
+#elif defined(ESP32C3)
+        txt.add(F("mo=esp32c3"));
+#endif
+        char idStr[16];
+        snprintf(idStr, sizeof(idStr), "id=%u", system_get_chip_id());
+        txt.add(idStr);
+        txt.add(F("path=/"));
+        txt.add(F("v=2"));
+    }
+};
+
+/**
+ * _lightinator._tcp  —  controller-to-controller swarm gossip
+ * Browsed by: other Lightinator controllers only.
+ * Carries swarm topology metadata (leader status, group membership).
+ */
+class LEDControllerSwarmService : public mDNS::Service {
+public:
+    void setInstance(const String& instance) { _instance = instance; }
+    void setLeader(bool isLeader)             { _isLeader = isLeader; }
+    void setGroups(const Vector<String>& g)   { _groups = g; }
+    void setLeadingGroups(const Vector<String>& g) { _leadingGroups = g; }
+
+    String getInstance() override { return _instance; }
+    String getName() override { return F("lightinator"); }
+    Protocol getProtocol() override { return Protocol::Tcp; }
+    uint16_t getPort() override { return 80; }
+
+    void addText(mDNS::Resource::TXT& txt) override {
+        char idStr[16];
+        snprintf(idStr, sizeof(idStr), "id=%u", system_get_chip_id());
+        txt.add(idStr);
+        txt.add(_isLeader ? F("isLeader=1") : F("isLeader=0"));
+        if (_groups.size() > 0) {
+            String groupList;
+            for (size_t i = 0; i < _groups.size(); i++) {
+                if (i > 0) groupList += ",";
+                groupList += _groups[i];
             }
-            
-            // Add groups information
-            if (_groups.size() > 0) {
-                String groupList = "";
-                for (size_t i = 0; i < _groups.size(); i++) {
-                    if (i > 0) groupList += ",";
-                    groupList += _groups[i];
-                }
-                txt.add(F("groups=") + groupList);
-            }
-            
-            // Add leading groups
-            for (size_t i = 0; i < _leadingGroups.size(); i++) {
-                txt.add(F("leads_") + _leadingGroups[i] + "=1");
-            }
+            txt.add(F("groups=") + groupList);
         }
-        
-    private:
-        bool _isLeader = false;
-        Vector<String> _groups;
-        Vector<String> _leadingGroups;
-    };
+        for (size_t i = 0; i < _leadingGroups.size(); i++) {
+            txt.add(F("leads_") + _leadingGroups[i] + "=1");
+        }
+    }
+
+private:
+    String _instance;
+    bool _isLeader = false;
+    Vector<String> _groups;
+    Vector<String> _leadingGroups;
+};
 
 
+/**
+ * _http._tcp  —  human-facing web frontend
+ * Browsed by: browsers, avahi-browse, webapp discovery UI.
+ * One instance per role: device hostname, group alias, global "lightinator".
+ * Carries only human-readable labels; no swarm topology.
+ */
 class LEDControllerWebService : public mDNS::Service {
-    public:
-        enum class HostType {
-            Device,  // Regular device hostname
-            Leader,  // Global leader (lightinator)
-            Group    // Group hostname
-        };
-    
-        LEDControllerWebService(const String& instance = "lightinator", HostType type = HostType::Device) 
-            : _instance(instance), _hostType(type) {}
-        
-        void setInstance(const String& instance) {
-            _instance = instance;
-        }
-        
-        String getInstance() override { return _instance; }
-        String getName() override { return F("http"); }
-        Protocol getProtocol() override { return Protocol::Tcp; }
-        uint16_t getPort() override { return 80; }
-        
-        void addText(mDNS::Resource::TXT& txt) override {
-            txt.add(F("fn=LED Controller"));
-            txt.add(F("instance=") + _instance);
-            char idStr[16];
-            snprintf(idStr, sizeof(idStr), "id=%u", system_get_chip_id());
-            txt.add(idStr);
-            
-            // Add type indicator
-            switch (_hostType) {
-                case HostType::Device:
-                    txt.add(F("type=host"));
-                    break;
-                case HostType::Leader:
-                    txt.add(F("type=leader"));
-                    break;
-                case HostType::Group:
-                    txt.add(F("type=group"));
-                    break;
-            }
-        }
-
-
-    private:
-        String _instance;
-        HostType _hostType;
+public:
+    enum class HostType {
+        Device,  // <hostname>.local
+        Leader,  // lightinator.local
+        Group    // <groupname>.local
     };
+
+    LEDControllerWebService(const String& instance = "lightinator", HostType type = HostType::Device)
+        : _instance(instance), _hostType(type) {}
+
+    void setInstance(const String& instance) { _instance = instance; }
+
+    String getInstance() override { return _instance; }
+    String getName() override { return F("http"); }
+    Protocol getProtocol() override { return Protocol::Tcp; }
+    uint16_t getPort() override { return 80; }
+
+    void addText(mDNS::Resource::TXT& txt) override {
+        txt.add(F("fn=") + _instance);
+        char idStr[16];
+        snprintf(idStr, sizeof(idStr), "id=%u", system_get_chip_id());
+        txt.add(idStr);
+        switch (_hostType) {
+            case HostType::Device: txt.add(F("type=host"));   break;
+            case HostType::Leader: txt.add(F("type=leader")); break;
+            case HostType::Group:  txt.add(F("type=group"));  break;
+        }
+    }
+
+private:
+    String _instance;
+    HostType _hostType;
+};
 /**
  * @class mdnsHandler
  * @brief A class that handles mDNS (Multicast DNS) functionality.
@@ -338,7 +346,8 @@ private:
     SimpleTimer _mdnsSearchTimer;
     SimpleTimer _pingTimer;
     String searchName;
-    const char* service = "_http._tcp.local";
+    // Swarm gossip service type — controllers browse this exclusively
+    const char* service = "_lightinator._tcp.local";
     int _mdnsTimerInterval = 15000; // Increased from 10000
     int _mdnsPingInterval = 10000; // Ping every minute
     int conntrack = 0;
@@ -373,14 +382,15 @@ private:
     // void queryKnownControllers(uint8_t batchIndex);
 
     // Service instances
-    LEDControllerAPIService ledControllerAPIService; // For API discovery
-    std::unique_ptr<LEDControllerWebService> deviceWebService;   // For hostname.local
-    std::unique_ptr<LEDControllerWebService> leaderWebService;   // For lightinator.local
+    LEDControllerAPIService  ledControllerAPIService;  // _lightinator-api._tcp: external tools
+    LEDControllerSwarmService ledControllerSwarmService; // _lightinator._tcp: swarm gossip
+    std::unique_ptr<LEDControllerWebService> deviceWebService;   // _http._tcp: hostname.local
+    std::unique_ptr<LEDControllerWebService> leaderWebService;   // _http._tcp: lightinator.local
     // Hostname resolution handling
     //std::map<String, String> _pendingHostnameResolutions;
 
     // Process different types of mDNS responses
-    bool processApiServiceResponse(mDNS::Message& message);
+    bool processSwarmServiceResponse(mDNS::Message& message); // _lightinator._tcp replies
     bool processHostnameARecord(mDNS::Message& message, mDNS::Answer* a_answer);
     bool processHostnameResponse(mDNS::Message& message, const char* hostname);
 
