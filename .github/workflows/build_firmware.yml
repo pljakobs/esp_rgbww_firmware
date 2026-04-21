@@ -150,8 +150,8 @@ jobs:
           fi
 
           semver_base="${major}.${x}.${y}"
-          version="V${semver_base}-build.${build_num}-${branch}"
-          build_tag="v${semver_base}-build.${build_num}"
+          version="V${semver_base}-${build_num}-${branch}"
+          build_tag="v${semver_base}-${build_num}"
 
           echo "fw_version=$version" >> $GITHUB_OUTPUT
           echo "fw_semver_base=$semver_base" >> $GITHUB_OUTPUT
