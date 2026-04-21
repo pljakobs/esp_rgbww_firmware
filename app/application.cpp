@@ -753,6 +753,7 @@ void Application::restart()
 	if(network.isApActive()) {
 		network.stopAp();
 		_systimer.initializeMs(500, TimerDelegate(&Application::restart, this)).startOnce();
+		return;
 	}
 	System.restart();
 }
@@ -813,10 +814,7 @@ bool Application::delayedCMD(String cmd, int delay)
 		wsBroadcast(F("notification"), F("Controller will switch to other rom"));
 		wsBroadcast(F("webapp_cmd"), F("reload"));
 		telemetryClient.log(F("delaycmd switch_rom"));
-//#if ARCH_ESP8266
-		switchRom();
-//_systimer.initializeMs(delay, TimerDelegate(&Application::restart, this)).startOnce();
-//#endif
+		_systimer.initializeMs(delay, TimerDelegate(&Application::switchRom, this)).startOnce();
 	} else if(cmd.equals(F("forget_controllers"))){
 		app.controllers->forgetControllers();
 		wsBroadcast(F("notification"), F("Controller list cleared"));
@@ -850,7 +848,8 @@ bool Application::mountfs(int slot)
      */
 	debug_i("mounting host file system");
 	fileSetFileSystem(&IFS::Host::getFileSystem());
-	return true;
+	_fs_mounted = true;
+	return _fs_mounted;
 #else
 	/*
      * on device file system
@@ -859,22 +858,31 @@ bool Application::mountfs(int slot)
 	auto part = Storage::findPartition(F("spiffs") + String(slot));
 	if(part) {
 		debug_i("mouting spiffs partition %i at %x, length %d", slot, part.address(), part.size());
-		return spiffs_mount(part);
+		_fs_mounted = spiffs_mount(part);
+		return _fs_mounted;
 	} else {
 		part = Storage::findPartition(F("lfs0"));
 		if(part) {
 			debug_i("mouting primary littlefs partition at %x, length %d", part.address(), part.size());
 			if(lfs_mount(part)) {
-				return true;
+				_fs_mounted = true;
+				return _fs_mounted;
 			} else {
-				part = Storage::findPartition(F("lfs1"));
+				auto secondary = Storage::findPartition(F("lfs1"));
+				if(!secondary) {
+					debug_e("primary partition mount failed and secondary lfs partition was not found");
+					_fs_mounted = false;
+					return _fs_mounted;
+				}
 				debug_e("primary partition mount failed, mounting secondary lfs partition  at %x, length %d",
-						part.address(), part.size());
-				return lfs_mount(part);
+						secondary.address(), secondary.size());
+				_fs_mounted = lfs_mount(secondary);
+				return _fs_mounted;
 			};
 		}
 		debug_i("partition is neither spiffs nor lfs");
-		return false;
+		_fs_mounted = false;
+		return _fs_mounted;
 	}
 #endif
 }
@@ -885,6 +893,14 @@ void Application::listFiles()
 		debug_i("found VERSION file");
 		char buffer[64];
 		int bytesRead = fileRead(file, buffer, sizeof(buffer));
+		if(bytesRead < 0) {
+			debug_e("Failed reading VERSION file");
+			fileClose(file);
+			return;
+		}
+		if(bytesRead >= static_cast<int>(sizeof(buffer))) {
+			bytesRead = sizeof(buffer) - 1;
+		}
 		buffer[bytesRead] = '\0';
 		debug_i("\nweb app version String: %s", buffer);
 		fileClose(file);

@@ -158,7 +158,7 @@ private:
     Timer _crashTestTimer;
 #endif
 
-    uint32_t _uptimeMinutes;
+    uint32_t _uptimeMinutes = 0;
     size_t _minimumHeapUptime = 32768;
     size_t _minimumHeap10min=32768;
     size_t _HeapLowErrUptime=0;
