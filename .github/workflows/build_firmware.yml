@@ -1,8 +1,11 @@
 name: firmwareBuild
 
+permissions:
+  contents: write
+
 on:
   push:
-    branches: [stable, testing, develop, experimental]
+    branches: [master, stable, testing, develop, experimental]
   pull_request:
     branches: [stable, testing, develop, experimental]
   repository_dispatch:
@@ -115,11 +118,50 @@ jobs:
       - name: Get firmware version
         id: get_fw_info
         run: |
+          git fetch --tags --force
+
           branch="${{ steps.sanitize_branch.outputs.sanitized_branch }}"
-          build_num=${{ github.run_number }}
-          version="V5.0-${build_num}-${branch}"
+          build_num="${{ github.run_number }}"
+
+          # Base version source: latest stable release-like tag v5.x.y (without build suffix)
+          latest_base_tag=$(git tag --list 'v5.*' | grep -E '^v5\.[0-9]+\.[0-9]+$' | sort -V | tail -n1)
+          if [ -z "$latest_base_tag" ]; then
+            latest_base_tag="v5.0.0"
+          fi
+
+          base_no_v="${latest_base_tag#v}"
+          major="${base_no_v%%.*}"
+          rest="${base_no_v#*.}"
+          x="${rest%%.*}"
+          y="${rest#*.}"
+
+          event_name="${{ github.event_name }}"
+          ref_name="${{ github.ref_name }}"
+
+          # Branch policy:
+          # - push testing: bump y
+          # - push master: bump x, reset y
+          # - push develop/experimental: keep base and only increment build
+          if [ "$event_name" = "push" ] && [ "$ref_name" = "master" ]; then
+            x=$((x + 1))
+            y=0
+          elif [ "$event_name" = "push" ] && [ "$ref_name" = "testing" ]; then
+            y=$((y + 1))
+          fi
+
+          semver_base="${major}.${x}.${y}"
+          version="V${semver_base}-build.${build_num}-${branch}"
+          build_tag="v${semver_base}-build.${build_num}"
+
           echo "fw_version=$version" >> $GITHUB_OUTPUT
+          echo "fw_semver_base=$semver_base" >> $GITHUB_OUTPUT
+          echo "fw_build_tag=$build_tag" >> $GITHUB_OUTPUT
           echo "fw_branch=$branch" >> $GITHUB_OUTPUT
+
+          echo "Using base tag: $latest_base_tag"
+          echo "Computed semver base: $semver_base"
+          echo "Computed fw_version: $version"
+          echo "Computed build tag: $build_tag"
 
       - name: Synchronize submodules
         run: |
@@ -165,7 +207,7 @@ jobs:
             docker.io/pjakobs/sming:latest \
             bash -c "git config --global --add safe.directory /workspace && \
                source /opt/Sming/Tools/export.sh && \
-               make partmap-build SMING_SOC=${{ matrix.soc }} SMING_RELEASE=${{ matrix.release }}"
+               make partmap-build GIT_VERSION='${{ steps.get_fw_info.outputs.fw_version }}' SMING_SOC=${{ matrix.soc }} SMING_RELEASE=${{ matrix.release }}"
 
       - name: Run Build in Docker Container
         env:
@@ -181,7 +223,7 @@ jobs:
               bash -c "git config --global --add safe.directory /workspace && \
               source /opt/Sming/Tools/export.sh && \
               make configdb-rebuild && \
-              make SMING_SOC=${{ matrix.soc }} SMING_RELEASE=${{ matrix.release }} DISABLE_WERROR=1 COM_SPEED=115200" 
+              make GIT_VERSION='${{ steps.get_fw_info.outputs.fw_version }}' SMING_SOC=${{ matrix.soc }} SMING_RELEASE=${{ matrix.release }} DISABLE_WERROR=1 COM_SPEED=115200" 
           else 
             docker run --rm --privileged -v ${{ github.workspace }}:/workspace -w /workspace \
               -e GITHUB_RUN_NUMBER=${{ github.run_number }} \
@@ -191,7 +233,7 @@ jobs:
               bash -c "git config --global --add safe.directory /workspace && \
               source /opt/Sming/Tools/export.sh && \
               make configdb-rebuild && \
-              make mergeflash SMING_SOC=${{ matrix.soc }} SMING_RELEASE=${{ matrix.release }} DISABLE_WERROR=1 COM_SPEED=115200" 
+              make mergeflash GIT_VERSION='${{ steps.get_fw_info.outputs.fw_version }}' SMING_SOC=${{ matrix.soc }} SMING_RELEASE=${{ matrix.release }} DISABLE_WERROR=1 COM_SPEED=115200" 
           fi
 
       - name: Set firmware path
@@ -305,8 +347,13 @@ jobs:
         run: |
           git config user.name github-actions
           git config user.email github-actions@github.com
-          git tag ${{ steps.get_fw_info.outputs.fw_version }}
-          git push origin ${{ steps.get_fw_info.outputs.fw_version }}
+          tag_name='${{ steps.get_fw_info.outputs.fw_build_tag }}'
+          if git rev-parse "$tag_name" >/dev/null 2>&1; then
+            echo "Tag $tag_name already exists, skipping"
+            exit 0
+          fi
+          git tag "$tag_name"
+          git push origin "$tag_name"
 
       - name: Notify webapp of schema update
         # Runs once per push (same matrix guard as Tag release).
