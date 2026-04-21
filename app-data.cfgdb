@@ -80,7 +80,8 @@
             "type":"string",
             "default":"led-strip-variant"
           }
-        }
+        },
+        "required":["id","name","ip-address"]
       }
     },
       "groups":{
@@ -107,7 +108,8 @@
              "type":"string"
             }
           }
-        }
+        },
+        "required":["id","name"]
       }
     },
     "scenes":{
@@ -207,7 +209,8 @@
               }
             }
           }
-        }
+        },
+          "required":["id","name","group_id"]
       }
     }
   },
