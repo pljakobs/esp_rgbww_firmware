@@ -169,7 +169,9 @@ namespace Util {
  */
 class LEDControllerAPIService : public mDNS::Service {
 public:
-    String getInstance() override { return F("esprgbwwAPI"); }
+    void setInstance(const String& instance) { _instance = instance; }
+
+    String getInstance() override { return _instance.length() > 0 ? _instance : F("esprgbwwAPI"); }
     String getName() override { return F("lightinator-api"); }
     Protocol getProtocol() override { return Protocol::Tcp; }
     uint16_t getPort() override { return 80; }
@@ -185,9 +187,15 @@ public:
         char idStr[16];
         snprintf(idStr, sizeof(idStr), "id=%u", system_get_chip_id());
         txt.add(idStr);
+        if (_instance.length() > 0) {
+            txt.add(F("fn=") + _instance);
+        }
         txt.add(F("path=/"));
         txt.add(F("v=2"));
     }
+
+private:
+    String _instance;
 };
 
 /**

@@ -83,7 +83,8 @@ void mdnsHandler::setHostname(const char* newHostname)
     deviceWebService =
         std::make_unique<LEDControllerWebService>(san_buf, LEDControllerWebService::HostType::Device);
 
-    // Update swarm service instance name so it matches the hostname
+    // Update API and swarm service instance names so they match the hostname
+    ledControllerAPIService.setInstance(san_buf);
     ledControllerSwarmService.setInstance(san_buf);
 
     // Create and configure the new primary responder
