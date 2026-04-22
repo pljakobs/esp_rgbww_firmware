@@ -89,7 +89,12 @@ public:
     size_t getMinimumHeapUptime() { return _minimumHeapUptime; }
     size_t getMinimumHeap10min() { return _minimumHeap10min; }
     size_t getHeapLowErrUptime() { return _HeapLowErrUptime; }
-    size_t getHeapLowErr10min() { return _HeapLowErr10min;}
+    size_t getHeapLowErr10min() { return _HeapLowErr10min; }
+
+#ifndef SMING_RELEASE
+    /** Returns the current pre-network log buffer state (Buffering / Draining / Done). */
+    UdpSyslogStream::PreNetState syslogPreNetState() const { return udpSyslogStream.preNetState(); }
+#endif
 
 public:
     AppWIFI network;

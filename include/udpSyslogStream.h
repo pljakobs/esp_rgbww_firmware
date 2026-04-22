@@ -280,6 +280,22 @@ public:
         }
     }
 
+    /**
+     * @brief Pre-network buffer status for external monitoring.
+     *
+     * Returns PreNetState::Buffering while writing into the ring buffer before
+     * the network is up, PreNetState::Draining while replaying buffered messages
+     * to UDP, and PreNetState::Done once the buffer has been freed and direct UDP
+     * routing is active.
+     */
+    enum class PreNetState : uint8_t { Buffering, Draining, Done };
+    PreNetState preNetState() const
+    {
+        if(!_preNetBuf) return PreNetState::Done;
+        if(_draining)   return PreNetState::Draining;
+        return PreNetState::Buffering;
+    }
+
     void enable() { _enabled = true; }
     void disable() { _enabled = false; }
     void setStatus(bool status) {_enabled=status;}

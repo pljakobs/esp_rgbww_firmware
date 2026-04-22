@@ -29,8 +29,26 @@
 #include <Network/Http/Websocket/WebsocketResource.h>
 #include <Storage.h>
 #include <config.h>
+#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
+extern "C" {
+#include <lwip/tcp.h>
+}
+#endif
 
 #include <fileMap.h>
+
+static uint16_t getActiveTcpConnectionCount()
+{
+#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
+	uint16_t count = 0;
+	for(const tcp_pcb* pcb = tcp_active_pcbs; pcb != nullptr; pcb = pcb->next) {
+		++count;
+	}
+	return count;
+#else
+	return 0;
+#endif
+}
 
 //#define NOCACHE
 
@@ -779,6 +797,25 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response){
 	if(request.getQueryParameter(F("V")) == "2"||request.getQueryParameter(F("v")) == "2"  ){
 		debug_i("onInfo v2");
 		addInfoFields(data);
+
+#ifndef SMING_RELEASE
+		{
+			const char* preNetState = "unknown";
+			switch(app.syslogPreNetState()) {
+			case UdpSyslogStream::PreNetState::Buffering:
+				preNetState = "buffering";
+				break;
+			case UdpSyslogStream::PreNetState::Draining:
+				preNetState = "draining";
+				break;
+			case UdpSyslogStream::PreNetState::Done:
+				preNetState = "done";
+				break;
+			}
+			JsonObject debug = data.createNestedObject(F("debug"));
+			debug[F("syslog_pre_net_state")] = preNetState;
+		}
+#endif
 		
 		JsonObject rgbww = data.createNestedObject(F("rgbww"));
 		rgbww[F("version")] = RGBWW_VERSION;
@@ -795,6 +832,9 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response){
 			con[F("gateway")] = WifiStation.getNetworkGateway().toString();
 			con[F("mac")] = WifiStation.getMAC();
 			con[F("rssi")] = WifiStation.getRssi();
+
+			JsonObject net = data.createNestedObject(F("network"));
+			net[F("tcp_connections")] = getActiveTcpConnectionCount();
 		}
 		// Skip ConfigDB reads during OTA — they consume heap and flash I/O we can't afford
 		if(!app.ota.isProccessing()) {
