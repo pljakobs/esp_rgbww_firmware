@@ -180,19 +180,31 @@ void ApplicationOTA::broadcastOtaStatus(int step, const String& message)
 
 void ApplicationOTA::start(String romurl)
 {
+	/*
+	 * ############################################################
+	 * ##### HIGH RISK: CORE OTA TRANSACTION SETUP            #####
+	 * ##### Changes here can brick OTA-only recoverable      #####
+	 * ##### devices.                                          #####
+	 * ############################################################
+	 */
 	debug_i("ApplicationOTA::start");
 	otaUpdater.reset(new Ota::Network::HttpUpgrader);
 	status = OTASTATUS::OTA_PROCESSING;
 
 	auto part = ota.getNextBootPartition();
 
-/*
+	/*
+	 * ############################################################
+	 * ##### HIGH RISK: OTA SAFETY CHECK                      #####
+	 * ##### Never write to the currently running partition.  #####
+	 * ##### Any regression here can leave devices unbootable.#####
+	 * ############################################################
 	 * Applications should always include a sanity check to ensure partitions being updated are
 	 * not in use. This should always included the application partition but should also consider
 	 * filing system partitions, etc. which may be actively in use.
 	 */
 	if(part == ota.getRunningPartition()) {
-		Serial << F("May be running in temporary mode. Please reboot and try again.") << endl;
+		debug_w("May be running in temporary mode. Please reboot and try again.");
 		broadcastOtaStatus(0, F("OTA failed: target partition is currently running, please reboot and try again"));
 		status = OTASTATUS::OTA_FAILED;
 		return;
@@ -208,6 +220,13 @@ void ApplicationOTA::start(String romurl)
 
 	beforeOTA();
 
+	/*
+	 * ############################################################
+	 * ##### HIGH RISK: OTA WATCHDOG RECOVERY                 #####
+	 * ##### This reboot path preserves field recoverability  #####
+	 * ##### when OTA stalls.                                  #####
+	 * ############################################################
+	 */
 	// Watchdog: if upgradeCallback has not fired within 2 minutes, reboot to recover
 	otaWatchdog.initializeMs<2 * 60 * 1000>([this]() {
 		debug_e("ApplicationOTA: watchdog timeout - OTA appears hung, rebooting to recover");
@@ -233,6 +252,12 @@ void ApplicationOTA::start(String romurl)
 	}
 	debug_i("Starting OTA ...");
 	broadcastOtaStatus(2, F("Starting OTA download"));
+	/*
+	 * ############################################################
+	 * ##### HIGH RISK: OTA START ACTION                      #####
+	 * ##### Starts flash write/download sequence.            #####
+	 * ############################################################
+	 */
 	otaUpdater->start();
 }
 
@@ -345,6 +370,12 @@ void ApplicationOTA::afterOTA()
 */
 void ApplicationOTA::upgradeCallback(Ota::Network::HttpUpgrader& client, bool result)
 {
+	/*
+	 * ############################################################
+	 * ##### HIGH RISK: OTA COMPLETION CALLBACK               #####
+	 * ##### Controls partition switch and restart behavior.  #####
+	 * ############################################################
+	 */
 	debug_i("ApplicationOTA::rBootCallback");
 	otaWatchdog.stop(); // disarm watchdog regardless of outcome
 	broadcastOtaStatus(3, F("OTA download complete, verifying"));
@@ -360,6 +391,11 @@ void ApplicationOTA::upgradeCallback(Ota::Network::HttpUpgrader& client, bool re
 		status = OTASTATUS::OTA_SUCCESS_REBOOT;
 		debug_i("OTA callback done, rebooting");
 		broadcastOtaStatus(4, F("OTA successful, rebooting"));
+		/*
+		 * ##########################################################
+		 * ##### HIGH RISK: IMMEDIATE REBOOT TO NEW PARTITION  #####
+		 * ##########################################################
+		 */
 		System.restart();
 	} else {
 		status = OTASTATUS::OTA_FAILED;
@@ -373,6 +409,12 @@ void ApplicationOTA::upgradeCallback(Ota::Network::HttpUpgrader& client, bool re
 		// intervention (dirty TCP/lwIP state after a large failed download
 		// can prevent the next OTA attempt from working).
 		otaWatchdog.initializeMs<5000>([this]() {
+			/*
+			 * ########################################################
+			 * ##### HIGH RISK: FORCED RECOVERY REBOOT          #####
+			 * ##### Restores OTA reachability after failure.   #####
+			 * ########################################################
+			 */
 			System.restart();
 		});
 		otaWatchdog.startOnce();
@@ -381,6 +423,12 @@ void ApplicationOTA::upgradeCallback(Ota::Network::HttpUpgrader& client, bool re
 
 void ApplicationOTA::checkAtBoot()
 {
+	/*
+	 * ############################################################
+	 * ##### HIGH RISK: BOOT-TIME OTA STATE HANDLING          #####
+	 * ##### Influences post-update recovery behavior.        #####
+	 * ############################################################
+	 */
 	debug_i("ApplicationOTA::checkAtBoot");
 	status = loadStatus();
 	/*
@@ -470,6 +518,13 @@ bool ApplicationOTA::copyContent(std::unique_ptr<IFS::FileSystem> src, std::uniq
 #ifdef ARCH_ESP8266
 bool ApplicationOTA::switchPartitions()
 {
+	/*
+	 * ############################################################
+	 * ##### HIGH RISK: PARTITION MIGRATION PATH              #####
+	 * ##### Rewrites partition table and migrates filesystems.#####
+	 * ##### Errors here can break boot and OTA recovery.      #####
+	 * ############################################################
+	 */
 	if(!Storage::findPartition(F("lfs1")) && !Storage::findPartition(F("lfs0"))) {
 		std::vector<Storage::esp_partition_info_t> partitionTable = getEditablePartitionTable();
 		//if present, delete spiffs1 to make space
@@ -528,6 +583,12 @@ bool ApplicationOTA::switchPartitions()
 //#ifdef ARCH_ESP8266
 bool ApplicationOTA::switchPartition(uint8_t slot)
 {
+	/*
+	 * ############################################################
+	 * ##### HIGH RISK: SINGLE-PARTITION MIGRATION            #####
+	 * ##### Transitional layout conversion path.             #####
+	 * ############################################################
+	 */
 	String spiffsPartName = F("spiffs") + String(slot);
 	String lfsPartName = F("lfs") + String(slot);
 	if(Storage::findPartition(spiffsPartName)) {
@@ -655,6 +716,13 @@ bool ApplicationOTA::delPartition(std::vector<Storage::esp_partition_info_t>& pa
 
 bool ApplicationOTA::savePartitionTable(std::vector<Storage::esp_partition_info_t>& partitionTable)
 {
+	/*
+	 * ############################################################
+	 * ##### HIGH RISK: FLASH PARTITION TABLE WRITE           #####
+	 * ##### Writes partition metadata directly to flash.     #####
+	 * ##### Must stay deterministic and heavily validated.   #####
+	 * ############################################################
+	 */
 	std::vector<uint8_t> entries;
 	auto& flash = *Storage::spiFlash;
 	//partitions have to be sorted by start address
