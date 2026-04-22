@@ -563,7 +563,6 @@ void ApplicationOTA::saveStatus(OTASTATUS newStatus)
 {
 	debug_i("ApplicationOTA::saveStatus %i to rom partition rom%i\n", newStatus, app.getRomSlot());
 	status = newStatus;
-	app.wsBroadcast(F("ota_status"), String((int)newStatus));
 	StaticJsonDocument<128> doc;
 	JsonObject root = doc.to<JsonObject>();
 	root[F("status")] = int(newStatus);
@@ -576,7 +575,6 @@ OTASTATUS ApplicationOTA::loadStatus()
 	StaticJsonDocument<128> doc;
 	if(Json::loadFromFile(doc, OTA_STATUS_FILE)) {
 		OTASTATUS status = (OTASTATUS)doc[F("status")].as<int>();
-		app.wsBroadcast(F("ota_status"), String((int)status));
 		return status;
 	} else {
 		return OTASTATUS::OTA_NOT_UPDATING;
