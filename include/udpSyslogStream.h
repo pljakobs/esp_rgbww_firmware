@@ -54,6 +54,8 @@ public:
     static const uint16_t SYSLOG_PORT = 514;
     // Max message payload — leaves ~40 bytes headroom for RFC 3164 header within 512-byte UDP
     static const size_t MAX_MSG_LEN = 470;
+    // Experimental branch: disable pre-network Huffman buffering to validate heap impact.
+    static constexpr bool PRE_NET_HUFFMAN_ENABLED = false;
 
     UdpSyslogStream()
     {
@@ -63,11 +65,13 @@ public:
         _pending[0] = false;
         _pending[1] = false;
 
-        // Allocate pre-network Huffman codec on the heap.
-        auto* mem = new uint8_t[PRE_NET_BUF_SIZE];
-        _ringMem.reset(mem);
-        _preNetBuf.reset(new HuffmanRingBuffer(mem, PRE_NET_BUF_SIZE));
-        _encoder.reset(new HuffmanEncoder(*_preNetBuf));
+        if(PRE_NET_HUFFMAN_ENABLED) {
+            // Allocate pre-network Huffman codec on the heap.
+            auto* mem = new uint8_t[PRE_NET_BUF_SIZE];
+            _ringMem.reset(mem);
+            _preNetBuf.reset(new HuffmanRingBuffer(mem, PRE_NET_BUF_SIZE));
+            _encoder.reset(new HuffmanEncoder(*_preNetBuf));
+        }
     }
 
     /**
@@ -105,6 +109,8 @@ public:
     void drainPreNetBuffer()
     {
         if(!_preNetBuf) {
+            // Experimental no-buffer mode: GotIP reached, switch to direct UDP path.
+            _ready = true;
             return;
         }
 
