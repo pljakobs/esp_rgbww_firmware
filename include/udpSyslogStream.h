@@ -296,6 +296,13 @@ public:
         return PreNetState::Buffering;
     }
 
+    bool preNetBufferAllocated() const { return static_cast<bool>(_ringMem); }
+    bool preNetEncoderAllocated() const { return static_cast<bool>(_encoder); }
+    uint16_t preNetBufferCapacity() const { return PRE_NET_BUF_SIZE; }
+    uint16_t preNetBufferUsed() const { return _preNetBuf ? _preNetBuf->used() : 0; }
+    uint16_t preNetBufferedFrames() const { return _preNetBuf ? _preNetBuf->count() : 0; }
+    uint16_t preNetEvictedFrames() const { return _preNetBuf ? _preNetBuf->evictedCount() : _drainEvicted; }
+
     void enable() { _enabled = true; }
     void disable() { _enabled = false; }
     void setStatus(bool status) {_enabled=status;}
