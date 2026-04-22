@@ -37,17 +37,69 @@ extern "C" {
 
 #include <fileMap.h>
 
+struct TcpPcbStats
+{
+	uint16_t active_total{0};
+	uint16_t established{0};
+	uint16_t syn_sent{0};
+	uint16_t syn_rcvd{0};
+	uint16_t fin_wait_1{0};
+	uint16_t fin_wait_2{0};
+	uint16_t close_wait{0};
+	uint16_t closing{0};
+	uint16_t last_ack{0};
+	uint16_t time_wait{0};
+	uint16_t closed{0};
+};
+
+static TcpPcbStats getTcpPcbStats()
+{
+	TcpPcbStats stats;
+#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
+	for(const tcp_pcb* pcb = tcp_active_pcbs; pcb != nullptr; pcb = pcb->next) {
+		++stats.active_total;
+		switch(pcb->state) {
+		case ESTABLISHED:
+			++stats.established;
+			break;
+		case SYN_SENT:
+			++stats.syn_sent;
+			break;
+		case SYN_RCVD:
+			++stats.syn_rcvd;
+			break;
+		case FIN_WAIT_1:
+			++stats.fin_wait_1;
+			break;
+		case FIN_WAIT_2:
+			++stats.fin_wait_2;
+			break;
+		case CLOSE_WAIT:
+			++stats.close_wait;
+			break;
+		case CLOSING:
+			++stats.closing;
+			break;
+		case LAST_ACK:
+			++stats.last_ack;
+			break;
+		case TIME_WAIT:
+			++stats.time_wait;
+			break;
+		case CLOSED:
+			++stats.closed;
+			break;
+		default:
+			break;
+		}
+	}
+#endif
+	return stats;
+}
+
 static uint16_t getActiveTcpConnectionCount()
 {
-#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
-	uint16_t count = 0;
-	for(const tcp_pcb* pcb = tcp_active_pcbs; pcb != nullptr; pcb = pcb->next) {
-		++count;
-	}
-	return count;
-#else
-	return 0;
-#endif
+	return getTcpPcbStats().active_total;
 }
 
 //#define NOCACHE
@@ -797,6 +849,7 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response){
 	if(request.getQueryParameter(F("V")) == "2"||request.getQueryParameter(F("v")) == "2"  ){
 		debug_i("onInfo v2");
 		addInfoFields(data);
+		const auto tcpStats = getTcpPcbStats();
 
 #ifndef SMING_RELEASE
 		{
@@ -814,6 +867,22 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response){
 			}
 			JsonObject debug = data.createNestedObject(F("debug"));
 			debug[F("syslog_pre_net_state")] = preNetState;
+			debug[F("http_active_connections")] = activeClients;
+			debug[F("websocket_connections")] = webSockets.size();
+			debug[F("eventserver_clients")] = app.eventserver.activeClients;
+			debug[F("syslog_pre_net_buffer_allocated")] = app.udpSyslogStream.preNetBufferAllocated();
+			debug[F("syslog_pre_net_encoder_allocated")] = app.udpSyslogStream.preNetEncoderAllocated();
+			debug[F("syslog_pre_net_buffer_capacity")] = app.udpSyslogStream.preNetBufferCapacity();
+			debug[F("syslog_pre_net_buffer_used")] = app.udpSyslogStream.preNetBufferUsed();
+			debug[F("syslog_pre_net_buffer_frames")] = app.udpSyslogStream.preNetBufferedFrames();
+			debug[F("syslog_pre_net_buffer_evicted")] = app.udpSyslogStream.preNetEvictedFrames();
+		#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
+			debug[F("tcp_pcb_size")] = sizeof(tcp_pcb);
+			debug[F("tcp_active_estimated_bytes")] = static_cast<uint32_t>(tcpStats.active_total) * sizeof(tcp_pcb);
+		#else
+			debug[F("tcp_pcb_size")] = 0;
+			debug[F("tcp_active_estimated_bytes")] = 0;
+		#endif
 		}
 #endif
 		
@@ -835,6 +904,17 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response){
 
 			JsonObject net = data.createNestedObject(F("network"));
 			net[F("tcp_connections")] = getActiveTcpConnectionCount();
+			net[F("tcp_active")]= tcpStats.active_total;
+			net[F("tcp_established")] = tcpStats.established;
+			net[F("tcp_syn_sent")] = tcpStats.syn_sent;
+			net[F("tcp_syn_rcvd")] = tcpStats.syn_rcvd;
+			net[F("tcp_fin_wait_1")] = tcpStats.fin_wait_1;
+			net[F("tcp_fin_wait_2")] = tcpStats.fin_wait_2;
+			net[F("tcp_close_wait")] = tcpStats.close_wait;
+			net[F("tcp_closing")] = tcpStats.closing;
+			net[F("tcp_last_ack")] = tcpStats.last_ack;
+			net[F("tcp_time_wait")] = tcpStats.time_wait;
+			net[F("tcp_closed")] = tcpStats.closed;
 		}
 		// Skip ConfigDB reads during OTA — they consume heap and flash I/O we can't afford
 		if(!app.ota.isProccessing()) {
