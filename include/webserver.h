@@ -53,6 +53,8 @@ public:
     inline bool isRunning() { return _running; };
 
     void wsSendBroadcast(const char* buffer, size_t length);
+    uint16_t getHttpActiveConnections() const { return activeClients; }
+    uint16_t getWebsocketConnectionCount() const { return webSockets.size(); }
 
     const char* getApiCodeMsg(API_CODES code);
 
