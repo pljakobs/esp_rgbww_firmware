@@ -33,6 +33,7 @@
 #include <VersionListener.h>
 #include <FlashString/Stream.hpp>
 #include <fileMap.h>
+#include <apihandler.h>
 #ifndef SMING_RELEASE
 #include <MultiOutputStream.h>
 #include <udpSyslogStream.h>
@@ -426,6 +427,7 @@ debug_i("Application::init - running partition %s", part.name());
 	// initialize config and data
 	cfg =  std::make_unique<AppConfig>(configDB_PATH);
 	data = std::make_unique<AppData>(dataDB_PATH);
+	api = std::make_unique<Api>();
 	controllers = std::make_unique<Controllers>();
 	(void)getFreeHeapSize(); // sample heap after ConfigDB + Controllers construction
 
