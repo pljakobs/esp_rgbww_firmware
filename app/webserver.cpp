@@ -105,8 +105,6 @@ static uint16_t getActiveTcpConnectionCount()
 //#define NOCACHE
 
 
-// ToDo: think about implementing a parameterized API to read objects from appData by id
-
 ApplicationWebserver::ApplicationWebserver()
 {
 	_running = false;
@@ -115,7 +113,7 @@ ApplicationWebserver::ApplicationWebserver()
 	HttpServerSettings settings;
 	settings.maxActiveConnections = HTTP_MAX_CONNECTIONS;
 	settings.minHeapSize = MINIMUM_HEAP_ACCEPT;
-	settings.keepAliveSeconds = 10; // do not close instantly when no transmission occurs. some clients are a bit slow (like FHEM)
+	settings.keepAliveSeconds = HTTP_KEEP_ALIVE_SECONDS; // do not close instantly when no transmission occurs. some clients are a bit slow (like FHEM)
 	configure(settings);
 
 	// workaround for bug in Sming 3.5.0
@@ -799,22 +797,6 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 				app.delayedCMD(F("restart"), 1000); // wait 1s to first send response
 			}
 
-
-			//bodyStream->seekOrigin(0,SeekOrigin::Start);
-			//app.wsBroadcast(F("config"),bodyStream->moveString());
-			/* ConfigDB ToDo
-            if (color_updated) {
-                debug_d("ApplicationWebserver::onConfig color settings changed - refreshing");
-
-                //refresh settings
-                app.rgbwwctrl.setup();
-
-                //refresh current output
-                app.rgbwwctrl.refresh();
-
-            }
-            */
-
 			setCorsHeaders(response);
 			sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 		} else {
@@ -843,7 +825,7 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response){
 	debug_i("onInfo");
 	if(!preflightRequest(request, response, { HttpMethod::GET },app.ota.isProccessing() ? 4000 : 0)) return;
 
-	auto stream = std::make_unique<JsonObjectStream>();
+	auto stream = std::make_unique<JsonObjectStream>(2048);
 	JsonObject data = stream->getRoot();
 	debug_i("onInfo request v=%s", request.getQueryParameter(F("V")).c_str());
 	if(request.getQueryParameter(F("V")) == "2"||request.getQueryParameter(F("v")) == "2"  ){
@@ -851,10 +833,10 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response){
 		addInfoFields(data);
 		const auto tcpStats = getTcpPcbStats();
 
-#ifndef SMING_RELEASE
-		{
-			const char* preNetState = "unknown";
-			switch(app.syslogPreNetState()) {
+		#ifndef SMING_RELEASE
+	
+		const char* preNetState = "unknown";
+		switch(app.syslogPreNetState()) {
 			case UdpSyslogStream::PreNetState::Buffering:
 				preNetState = "buffering";
 				break;
@@ -864,33 +846,30 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response){
 			case UdpSyslogStream::PreNetState::Done:
 				preNetState = "done";
 				break;
-			}
-			JsonObject debug = data.createNestedObject(F("debug"));
-			debug[F("syslog_pre_net_state")] = preNetState;
-			debug[F("http_active_connections")] = activeClients;
-			debug[F("websocket_connections")] = webSockets.size();
-			debug[F("eventserver_clients")] = app.eventserver.activeClients;
-			debug[F("syslog_pre_net_buffer_allocated")] = app.udpSyslogStream.preNetBufferAllocated();
-			debug[F("syslog_pre_net_encoder_allocated")] = app.udpSyslogStream.preNetEncoderAllocated();
-			debug[F("syslog_pre_net_buffer_capacity")] = app.udpSyslogStream.preNetBufferCapacity();
-			debug[F("syslog_pre_net_buffer_used")] = app.udpSyslogStream.preNetBufferUsed();
-			debug[F("syslog_pre_net_buffer_frames")] = app.udpSyslogStream.preNetBufferedFrames();
-			debug[F("syslog_pre_net_buffer_evicted")] = app.udpSyslogStream.preNetEvictedFrames();
-		#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
-			debug[F("tcp_pcb_size")] = sizeof(tcp_pcb);
-			debug[F("tcp_active_estimated_bytes")] = static_cast<uint32_t>(tcpStats.active_total) * sizeof(tcp_pcb);
-		#else
-			debug[F("tcp_pcb_size")] = 0;
-			debug[F("tcp_active_estimated_bytes")] = 0;
-		#endif
 		}
-#endif
+		JsonObject debug = data.createNestedObject(F("debug"));
+		debug[F("syslog_pre_net_state")] = preNetState;
+		debug[F("http_active_connections")] = activeClients;
+		debug[F("websocket_connections")] = webSockets.size();
+		debug[F("eventserver_clients")] = app.eventserver.activeClients;
+		debug[F("syslog_pre_net_buffer_allocated")] = app.udpSyslogStream.preNetBufferAllocated();
+		debug[F("syslog_pre_net_encoder_allocated")] = app.udpSyslogStream.preNetEncoderAllocated();
+		debug[F("syslog_pre_net_buffer_capacity")] = app.udpSyslogStream.preNetBufferCapacity();
+		debug[F("syslog_pre_net_buffer_used")] = app.udpSyslogStream.preNetBufferUsed();
+		debug[F("syslog_pre_net_buffer_frames")] = app.udpSyslogStream.preNetBufferedFrames();
+		debug[F("syslog_pre_net_buffer_evicted")] = app.udpSyslogStream.preNetEvictedFrames();
+		debug[F("tcp_pcb_size")] = sizeof(tcp_pcb);
+		debug[F("tcp_active_estimated_bytes")] = static_cast<uint32_t>(tcpStats.active_total) * sizeof(tcp_pcb);
+
+		#endif
+		
+		debug_i("onInfo adding rgbww object");
 		
 		JsonObject rgbww = data.createNestedObject(F("rgbww"));
 		rgbww[F("version")] = RGBWW_VERSION;
 		rgbww[F("queuesize")] = RGBWW_ANIMATIONQSIZE;
 
-
+		debug_i("onInfo adding connection object");
 		JsonObject con = data.createNestedObject(F("connection"));
 		con[F("connected")] = WifiStation.isConnected();
 		if(WifiStation.isConnected()) {
@@ -917,6 +896,7 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response){
 			net[F("tcp_closed")] = tcpStats.closed;
 		}
 		// Skip ConfigDB reads during OTA — they consume heap and flash I/O we can't afford
+		debug_i("onInfo adding OTA object");
 		if(!app.ota.isProccessing()) {
 			AppConfig::Network network(*app.cfg);
 			JsonObject mqtt=data.createNestedObject(F("mqtt"));

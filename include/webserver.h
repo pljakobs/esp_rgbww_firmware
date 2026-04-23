@@ -26,11 +26,11 @@
 #include <RGBWWLed/RGBWWLedColor.h>
 #include <Network/Http/Websocket/WebsocketResource.h>
 
-#define FILE_MAX_SIZE 16384 //max filesize for storage api files.
 #define MAX_LOG_LINE_SIZE 512
 
 #define MINIMUM_HEAP_ACCEPT 8000
 #define MINIMUM_HEAP MINIMUM_HEAP_ACCEPT
+#define HTTP_KEEP_ALIVE_SECONDS 5
 
 enum API_CODES {
     API_SUCCESS = 0,
