@@ -940,7 +940,7 @@ void Application::umountfs()
     }
     */
 }
-#if defined(ARCH_ESP8266) || defined(ESP32)
+#if defined(ARCH_ESP8266) || defined(ESP32) || defined(ARCH_HOST)
 void Application::switchRom()
 {
 	//ToDo - rewrite to use ota.getRunningPartition() and ota.getNextBootPartition()
@@ -967,7 +967,6 @@ void Application::switchRom()
 void Application::switchRom(){}
 #endif
 
-#if defined(ARCH_ESP8266) || defined(ESP32)
 int Application::getRomSlot()
 {
 	auto partition = app.ota.getRomPartition();
@@ -979,7 +978,6 @@ int Application::getRomSlot()
 	}
 	return slot;
 }
-#endif
 
 /*
 *	send a jsonrpc message from a fully constructed JsonRpcMessage object string
