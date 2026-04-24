@@ -42,8 +42,12 @@ public:
 
     JsonObject getRoot();
     String getMethod();
+    bool isValid() const { return _valid; }
+    const String& getError() const { return _error; }
 
 private:
     DynamicJsonDocument _doc;
+    bool _valid{false};
+    String _error;
 };
 

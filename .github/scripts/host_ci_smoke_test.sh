@@ -255,7 +255,7 @@ ws = WebSocketClient(ws_host, ws_port, ws_path, timeout=5.0)
 # WS malformed request checks
 ws.send_text("{bad json")
 msg = ws.recv_json(timeout=3.0)
-if "missing method" not in str(msg.get("error", "")):
+if "malformed json" not in str(msg.get("error", "")):
     fail(f"Expected WS malformed-json rejection, got: {msg}")
 
 ws.send_text(json.dumps({"jsonrpc": "2.0", "id": 7001, "params": {}}))

@@ -151,6 +151,12 @@ void ApplicationWebserver::wsMessageReceived(WebsocketConnection& socket, const 
 		socket.sendString(serialized);
 	};
 
+	if(!rpc.isValid()) {
+		debug_w("ws request rejected: malformed json (%s)", rpc.getError().c_str());
+		sendWsError(F("malformed json"));
+		return;
+	}
+
 	if(!method.length()) {
 		debug_w("ws request rejected: missing method");
 		sendWsError(F("missing method"));

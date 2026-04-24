@@ -241,6 +241,11 @@ bool Api::handleNetworks(const JsonObject& params, JsonObject& out)
 bool Api::dispatchJsonRpc(const String& json, String& errorMsg, bool relay)
 {
 	JsonRpcMessageIn rpc(json);
+	if(!rpc.isValid()) {
+		errorMsg = F("malformed json");
+		return false;
+	}
+
 	String method = rpc.getMethod();
 	if(!method.length()) {
 		errorMsg = F("missing method");
