@@ -147,7 +147,7 @@ jobs:
             -e MQTT_PASS=${{ secrets.MQTT_PASS }} \
             -e MQTT_USER=${{ secrets.MQTT_USER }} \
             docker.io/pjakobs/sming:latest \
-            bash -lc "git config --global --add safe.directory /workspace && ./.github/scripts/host_ci_smoke_test.sh"
+            bash -lc "git config --global --add safe.directory /workspace && bash ./.github/scripts/host_ci_smoke_test.sh"
 
       - name: Upload Host smoke logs
         if: always()
