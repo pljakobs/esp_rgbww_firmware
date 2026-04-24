@@ -121,9 +121,8 @@ jobs:
           git fetch --tags --force
 
           branch="${{ steps.sanitize_branch.outputs.sanitized_branch }}"
-          build_num="${{ github.run_number }}"
 
-          # Base version source: latest stable release-like tag v5.x.y (without build suffix)
+          # Base version source: latest stable/testing release-like tag v5.x.y.
           latest_base_tag=$(git tag --list 'v5.*' | grep -E '^v5\.[0-9]+\.[0-9]+$' | sort -V | tail -n1)
           if [ -z "$latest_base_tag" ]; then
             latest_base_tag="v5.0.0"
@@ -135,23 +134,46 @@ jobs:
           x="${rest%%.*}"
           y="${rest#*.}"
 
+          effective_branch="${{ steps.get_branch.outputs.branch }}"
           event_name="${{ github.event_name }}"
-          ref_name="${{ github.ref_name }}"
 
           # Branch policy:
-          # - push testing: bump y
-          # - push stable: bump x, reset y
-          # - push develop/experimental: keep base and only increment build
-          if [ "$event_name" = "push" ] && [ "$ref_name" = "stable" ]; then
+          # - push stable: bump x, reset y, emit clean release version/tag
+          # - push testing: bump y, emit clean release version/tag
+          # - push develop/experimental: emit prerelease version/tag for the
+          #   active line. Preserve the current legacy v5.0.0-N-* stream until
+          #   a clean testing/stable tag advances the line, then reset the
+          #   prerelease sequence for the next patch line.
+          if [ "$event_name" = "push" ] && [ "$effective_branch" = "stable" ]; then
             x=$((x + 1))
             y=0
-          elif [ "$event_name" = "push" ] && [ "$ref_name" = "testing" ]; then
+          elif [ "$event_name" = "push" ] && [ "$effective_branch" = "testing" ]; then
             y=$((y + 1))
+          elif [ "$effective_branch" = "develop" ] || [ "$effective_branch" = "experimental" ]; then
+            prerelease_current=$(git tag --list | grep -E "^v${major}\.${x}\.${y}-[0-9]+(-[A-Za-z0-9._-]+)?$" | sort -V | tail -n1)
+            if [ -n "$prerelease_current" ] && [ "$y" -eq 0 ]; then
+              :
+            else
+              y=$((y + 1))
+            fi
           fi
 
           semver_base="${major}.${x}.${y}"
-          version="V${semver_base}-${build_num}-${branch}"
-          build_tag="v${semver_base}-${build_num}"
+
+          if [ "$effective_branch" = "stable" ] || [ "$effective_branch" = "testing" ]; then
+            version="V${semver_base}"
+            build_tag="v${semver_base}"
+          else
+            prerelease_last=$(git tag --list | grep -E "^v${semver_base}-[0-9]+(-[A-Za-z0-9._-]+)?$" | sed -E 's/^v[0-9]+\.[0-9]+\.[0-9]+-([0-9]+)(-[A-Za-z0-9._-]+)?$/\1/' | sort -n | tail -n1)
+            if [ -z "$prerelease_last" ]; then
+              prerelease_seq=1
+            else
+              prerelease_seq=$((prerelease_last + 1))
+            fi
+
+            version="V${semver_base}-${prerelease_seq}-${branch}"
+            build_tag="v${semver_base}-${prerelease_seq}-${branch}"
+          fi
 
           echo "fw_version=$version" >> $GITHUB_OUTPUT
           echo "fw_semver_base=$semver_base" >> $GITHUB_OUTPUT
