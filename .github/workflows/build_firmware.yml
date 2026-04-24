@@ -201,7 +201,7 @@ jobs:
               WEBAPP_BRANCH="stable"
               ;;
             "experimental")
-              WEBAPP_BRANCH="devel"
+              WEBAPP_BRANCH="experimental"
               ;;
             *)
               WEBAPP_BRANCH="devel"

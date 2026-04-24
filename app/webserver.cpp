@@ -163,11 +163,12 @@ void ApplicationWebserver::wsMessageReceived(WebsocketConnection& socket, const 
 
 	JsonObject params = rpc.getParams();
 
-	if(method == F("info") || method == F("getInfo")) {
+	if(method == F("info") || method == F("getInfo") || method == F("color") ||
+	   method == F("getColor") || method == F("networks") || method == F("getNetworks")) {
 		DynamicJsonDocument resultDoc(4096);
 		JsonObject result = resultDoc.to<JsonObject>();
 		if(!app.api->dispatch(method, params, result)) {
-			debug_w("ws info rejected");
+			debug_w("ws getter rejected (%s)", method.c_str());
 			sendWsError(F("unsupported api method"));
 			return;
 		}
