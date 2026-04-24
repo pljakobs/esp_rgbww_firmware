@@ -285,7 +285,19 @@ if status != 200 or "raw" not in http_color_before:
     fail(f"Failed to read baseline color: status={status}, payload={http_color_before}")
 
 # Setter test via HTTP, read back via WS and HTTP
-status, set_resp = http_json("/color", method="POST", payload={"raw": {"r": 12, "g": 34, "b": 56, "ww": 78, "cw": 90}})
+base_raw = http_color_before.get("raw") or {}
+target_http_raw = {"r": 12, "g": 34, "b": 56, "ww": 78, "cw": 90}
+if target_http_raw == base_raw:
+    # Ensure test color differs from current state even when persisted config already matches defaults.
+    target_http_raw = {
+        "r": (int(base_raw.get("r", 0)) + 1) % 256,
+        "g": int(base_raw.get("g", 0)),
+        "b": int(base_raw.get("b", 0)),
+        "ww": int(base_raw.get("ww", 0)),
+        "cw": int(base_raw.get("cw", 0)),
+    }
+
+status, set_resp = http_json("/color", method="POST", payload={"raw": target_http_raw})
 if status != 200 or set_resp.get("success") is not True:
     fail(f"HTTP /color setter failed: status={status}, payload={set_resp}")
 
@@ -293,12 +305,12 @@ changed = False
 http_after_set = None
 for _ in range(20):
     status, http_after_set = http_json("/color")
-    if status == 200 and http_after_set.get("raw") != http_color_before.get("raw"):
+    if status == 200 and http_after_set.get("raw") == target_http_raw:
         changed = True
         break
     time.sleep(0.1)
 if not changed:
-    fail("HTTP /color setter did not change color state")
+    fail(f"HTTP /color setter did not converge to expected raw color: {target_http_raw}")
 
 ws_get = ws.request("getColor", req_id=8001)
 ws_color_after_http_set = ws_get.get("result", {})
@@ -310,7 +322,17 @@ if ws_color_after_http_set.get("raw") != http_after_set.get("raw"):
 
 # Setter test via WS, read back via HTTP and WS
 prev_raw = http_after_set.get("raw")
-ws_set_resp = ws.request("color", params={"raw": {"r": 90, "g": 10, "b": 20, "ww": 30, "cw": 40}}, req_id=8002)
+target_ws_raw = {"r": 90, "g": 10, "b": 20, "ww": 30, "cw": 40}
+if target_ws_raw == (prev_raw or {}):
+    target_ws_raw = {
+        "r": (int((prev_raw or {}).get("r", 0)) + 1) % 256,
+        "g": int((prev_raw or {}).get("g", 0)),
+        "b": int((prev_raw or {}).get("b", 0)),
+        "ww": int((prev_raw or {}).get("ww", 0)),
+        "cw": int((prev_raw or {}).get("cw", 0)),
+    }
+
+ws_set_resp = ws.request("color", params={"raw": target_ws_raw}, req_id=8002)
 if ws_set_resp.get("result", {}).get("success") is not True:
     fail(f"WS color setter failed: {ws_set_resp}")
 
@@ -318,12 +340,12 @@ changed = False
 http_after_ws_set = None
 for _ in range(20):
     status, http_after_ws_set = http_json("/color")
-    if status == 200 and http_after_ws_set.get("raw") != prev_raw:
+    if status == 200 and http_after_ws_set.get("raw") == target_ws_raw:
         changed = True
         break
     time.sleep(0.1)
 if not changed:
-    fail("WS /color setter did not change HTTP-observed color state")
+    fail(f"WS /color setter did not converge to expected raw color: {target_ws_raw}")
 
 ws_get_after_ws_set = ws.request("getColor", req_id=8003).get("result", {})
 if ws_get_after_ws_set.get("raw") != http_after_ws_set.get("raw"):
