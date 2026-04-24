@@ -38,8 +38,130 @@ jobs:
           echo 'soc_json=["esp8266","esp32","esp32c3"]' >> $GITHUB_OUTPUT
           echo 'soc_csv=esp8266,esp32,esp32c3' >> $GITHUB_OUTPUT
 
+  host-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Determine branch
+        id: get_branch
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "branch=${{ github.event.inputs.branch }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" == "repository_dispatch" ]; then
+            echo "branch=${{ github.event.client_payload.branch }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" == "push" ]; then
+            echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" == "pull_request" ]; then
+            echo "branch=${{ github.head_ref }}" >> $GITHUB_OUTPUT
+          else
+            echo "branch=develop" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Map firmware branch to webapp branch
+        id: map_webapp_branch
+        run: |
+          FIRMWARE_BRANCH="${{ steps.get_branch.outputs.branch }}"
+          case "$FIRMWARE_BRANCH" in
+            "develop")
+              WEBAPP_BRANCH="devel"
+              ;;
+            "testing")
+              WEBAPP_BRANCH="testing"
+              ;;
+            "stable")
+              WEBAPP_BRANCH="stable"
+              ;;
+            "experimental")
+              WEBAPP_BRANCH="experimental"
+              ;;
+            *)
+              WEBAPP_BRANCH="devel"
+              ;;
+          esac
+          echo "webapp_branch=$WEBAPP_BRANCH" >> $GITHUB_OUTPUT
+          echo "Firmware branch: $FIRMWARE_BRANCH -> Webapp branch: $WEBAPP_BRANCH"
+
+      - name: Sanitize branch name for artifact
+        id: sanitize_branch
+        run: |
+          BRANCH="${{ steps.get_branch.outputs.branch }}"
+          SANITIZED_BRANCH=${BRANCH//\//-}
+          SANITIZED_BRANCH=${SANITIZED_BRANCH//\\/-}
+          SANITIZED_BRANCH=${SANITIZED_BRANCH//\?/-}
+          SANITIZED_BRANCH=${SANITIZED_BRANCH//\:/-}
+          SANITIZED_BRANCH=${SANITIZED_BRANCH//\*/-}
+          SANITIZED_BRANCH=${SANITIZED_BRANCH//\"/-}
+          SANITIZED_BRANCH=${SANITIZED_BRANCH//\</-}
+          SANITIZED_BRANCH=${SANITIZED_BRANCH//\>/-}
+          SANITIZED_BRANCH=${SANITIZED_BRANCH//\|/-}
+          echo "sanitized_branch=$SANITIZED_BRANCH" >> $GITHUB_OUTPUT
+
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.get_branch.outputs.branch }}
+          fetch-depth: 0
+
+      - name: Synchronize submodules
+        run: |
+          git submodule sync --recursive
+          git submodule update --init --recursive
+
+      - name: Pull Docker Image
+        run: docker pull docker.io/pjakobs/sming:latest
+
+      - name: Download fileList.h artifact
+        run: |
+          WEBAPP_BRANCH="${{ steps.map_webapp_branch.outputs.webapp_branch }}"
+          if [ -f ./include/fileList.h ]; then
+            rm ./include/fileList.h
+          fi
+          artifact_url="https://pljakobs.github.io/esp_rgb_webapp2/${WEBAPP_BRANCH}/fileList.h"
+          echo "Downloading fileList.h from: $artifact_url"
+          curl -L -o fileList.h "$artifact_url"
+          mv fileList.h ./include
+
+      - name: Download webapp files artifact
+        run: |
+          WEBAPP_BRANCH="${{ steps.map_webapp_branch.outputs.webapp_branch }}"
+          if [ -d ./webapp ]; then
+            rm -rf ./webapp
+          fi
+          mkdir -p ./webapp
+          artifact_url="https://pljakobs.github.io/esp_rgb_webapp2/${WEBAPP_BRANCH}/spa-files.zip"
+          echo "Downloading webapp files from: $artifact_url"
+          curl -L -o spa-files.zip "$artifact_url"
+          unzip spa-files.zip -d ./webapp
+          mv ./webapp/dist/spa/* ./webapp
+          rm -rf ./webapp/dist/spa
+          echo "webapp files version"
+          cat ./webapp/VERSION
+
+      - name: Run Host smoke test in Docker Container
+        env:
+          MQTT_PASS: ${{ secrets.MQTT_PASS }}
+          MQTT_USER: ${{ secrets.MQTT_USER }}
+        run: |
+          docker run --rm --privileged -v ${{ github.workspace }}:/workspace -w /workspace \
+            -e GITHUB_RUN_NUMBER=${{ github.run_number }} \
+            -e MQTT_PASS=${{ secrets.MQTT_PASS }} \
+            -e MQTT_USER=${{ secrets.MQTT_USER }} \
+            docker.io/pjakobs/sming:latest \
+            bash -lc "git config --global --add safe.directory /workspace && ./.github/scripts/host_ci_smoke_test.sh"
+
+      - name: Upload Host smoke logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: host-smoke-${{ steps.sanitize_branch.outputs.sanitized_branch }}
+          path: |
+            out/host-ci/
+            out/Host/debug/firmware/app.cfg
+            out/Host/debug/firmware/partitions.bin
+          if-no-files-found: warn
+
   build:
-    needs: generate-matrix
+    needs: [generate-matrix, host-smoke]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: true
@@ -114,6 +236,28 @@ jobs:
         with:
           ref: ${{ steps.get_branch.outputs.branch }}
           fetch-depth: 0
+
+      - name: Resolve PR body for release notes
+        id: pr_notes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          pr_body=""
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            pr_body=$(jq -r '.pull_request.body // ""' "$GITHUB_EVENT_PATH")
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            pr_body=$(curl -fsSL \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer $GITHUB_TOKEN" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/${{ github.repository }}/commits/${{ github.sha }}/pulls" \
+              | jq -r 'map(select((.body // "") != "")) | first | .body // ""')
+          fi
+
+          pr_body_b64=$(printf '%s' "$pr_body" | base64 -w0)
+          echo "fw_comment_b64=$pr_body_b64" >> $GITHUB_OUTPUT
+          echo "Resolved PR body length: $(printf '%s' "$pr_body" | wc -c)"
 
       - name: Get firmware version
         id: get_fw_info
@@ -328,6 +472,7 @@ jobs:
         run: |
           echo "fw_version=${{ steps.get_fw_info.outputs.fw_version }}" > version-info.txt
           echo "fw_branch=${{ steps.sanitize_branch.outputs.sanitized_branch }}" >> version-info.txt
+          echo "fw_comment_b64=${{ steps.pr_notes.outputs.fw_comment_b64 }}" >> version-info.txt
           echo "supported_socs=${{ needs.generate-matrix.outputs.soc_csv }}" >> version-info.txt
         
       - name: Save version info
