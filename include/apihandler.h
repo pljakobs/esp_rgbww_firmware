@@ -34,5 +34,8 @@ public:
 
 private:
 	bool handleInfo(const JsonObject& params, JsonObject& out);
+	bool handleColor(const JsonObject& params, JsonObject& out);
+	bool handleNetworks(const JsonObject& params, JsonObject& out);
 	bool handleHosts(const JsonObject& params, std::unique_ptr<IDataSourceStream>& out, String& errorMsg);
+	bool handleConfig(const JsonObject& params, std::unique_ptr<IDataSourceStream>& out, String& errorMsg);
 };

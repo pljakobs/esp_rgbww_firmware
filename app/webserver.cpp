@@ -185,12 +185,12 @@ void ApplicationWebserver::wsMessageReceived(WebsocketConnection& socket, const 
 		return;
 	}
 
-	if(method == F("hosts") || method == F("getHosts")) {
+	if(method == F("hosts") || method == F("getHosts") || method == F("config") || method == F("getConfig")) {
 		std::unique_ptr<IDataSourceStream> stream;
 		String errorMsg;
 		if(!app.api->dispatchStream(method, params, stream, errorMsg) || !stream) {
-			debug_w("ws hosts rejected: %s", errorMsg.c_str());
-			sendWsError(errorMsg.length() ? errorMsg : String(F("could not create hosts response")));
+			debug_w("ws stream request rejected (%s): %s", method.c_str(), errorMsg.c_str());
+			sendWsError(errorMsg.length() ? errorMsg : String(F("could not create stream response")));
 			return;
 		}
 
@@ -928,10 +928,24 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 		/*
          * /config GET
          */
-		setCorsHeaders(response);
 		app.telemetryClient.log(F("onConfig GET"));
 
-		auto configStream = app.cfg->createExportStream(ConfigDB::Json::format);
+		if(!ensureApiInitialized(response)) {
+			return;
+		}
+
+		StaticJsonDocument<16> paramsDoc;
+		JsonObject params = paramsDoc.to<JsonObject>();
+		std::unique_ptr<IDataSourceStream> configStream;
+		String errorMsg;
+		if(!app.api->dispatchStream(F("config"), params, configStream, errorMsg)) {
+			setCorsHeaders(response);
+			sendApiCode(response, API_CODES::API_BAD_REQUEST,
+						errorMsg.length() ? errorMsg : F("could not create config response"));
+			return;
+		}
+
+		setCorsHeaders(response);
 		response.sendDataStream(configStream.release(), MIME_JSON);
 	}
 }
@@ -972,23 +986,16 @@ void ApplicationWebserver::onColorGet(HttpRequest& request, HttpResponse& respon
 	auto stream = std::make_unique<JsonObjectStream>();
 	JsonObject json = stream->getRoot();
 
-	JsonObject raw = json.createNestedObject("raw");
-	ChannelOutput output = app.rgbwwctrl.getCurrentOutput();
-	raw[F("r")] = output.r;
-	raw[F("g")] = output.g;
-	raw[F("b")] = output.b;
-	raw[F("ww")] = output.ww;
-	raw[F("cw")] = output.cw;
+	if(!ensureApiInitialized(response)) {
+		return;
+	}
 
-	JsonObject hsv = json.createNestedObject("hsv");
-	float h, s, v;
-	int ct;
-	HSVCT c = app.rgbwwctrl.getCurrentColor();
-	c.asRadian(h, s, v, ct);
-	hsv[F("h")] = h;
-	hsv[F("s")] = s;
-	hsv[F("v")] = v;
-	hsv[F("ct")] = ct;
+	StaticJsonDocument<16> paramsDoc;
+	JsonObject params = paramsDoc.to<JsonObject>();
+	if(!app.api->dispatch(F("color"), params, json)) {
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("unsupported api method"));
+		return;
+	}
 
 	setCorsHeaders(response);
 
@@ -1138,34 +1145,15 @@ void ApplicationWebserver::onNetworks(HttpRequest& request, HttpResponse& respon
 	auto stream = std::make_unique<JsonObjectStream>();
 	JsonObject json = stream->getRoot();
 
-	bool error = false;
+	if(!ensureApiInitialized(response)) {
+		return;
+	}
 
-	if(app.network.isScanning()) {
-		json[F("scanning")] = true;
-	} else {
-		json[F("scanning")] = false;
-		JsonArray netlist = json.createNestedArray(F("available"));
-		BssList networks = app.network.getAvailableNetworks();
-		for(unsigned int i = 0; i < networks.count(); i++) {
-			if(networks[i].hidden)
-				continue;
-
-			// SSIDs may contain any byte values. Some are not printable and will cause the javascript client to fail
-			// on parsing the message. Try to filter those here
-			if(!ApplicationWebserver::isPrintable(networks[i].ssid)) {
-				debug_w("Filtered SSID due to unprintable characters: %s", networks[i].ssid.c_str());
-				continue;
-			}
-
-			JsonObject item = netlist.createNestedObject();
-			item[F("id")] = (int)networks[i].getHashId();
-			item[F("ssid")] = networks[i].ssid;
-			item[F("signal")] = networks[i].rssi;
-			item[F("encryption")] = networks[i].getAuthorizationMethodName();
-			//limit to max 25 networks
-			if(i >= 25)
-				break;
-		}
+	StaticJsonDocument<16> paramsDoc;
+	JsonObject params = paramsDoc.to<JsonObject>();
+	if(!app.api->dispatch(F("networks"), params, json)) {
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("unsupported api method"));
+		return;
 	}
 	setCorsHeaders(response);
 	sendApiResponse(response, stream.release());
@@ -1208,8 +1196,14 @@ void ApplicationWebserver::onScanNetworks(HttpRequest& request, HttpResponse& re
 		return;
 	}
     */
-	if(!app.network.isScanning()) {
-		app.network.scan(false);
+	if(!ensureApiInitialized(response)) {
+		return;
+	}
+
+	StaticJsonDocument<16> paramsDoc;
+	JsonObject params = paramsDoc.to<JsonObject>();
+	if(!dispatchApiCommand(response, F("scan_networks"), params, F("scan networks failed"), false)) {
+		return;
 	}
 
 	sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
@@ -1335,49 +1329,8 @@ void ApplicationWebserver::onSystemReq(HttpRequest& request, HttpResponse& respo
 	}
 #endif
 */
-	bool error = false;
-	String body = request.getBody();
-	if(body == NULL) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("could not get HTTP body"));
+	if(!handleApiCommandPost(request, response, F("system"), F("system command failed"))) {
 		return;
-	} else {
-		debug_i("ApplicationWebserver::onSystemReq: %s", body.c_str());
-		// ConfigDB - CONFIG_MAX_LENGTH was no longer defined, what's the right size here?
-		StaticJsonDocument<512> doc;
-		Json::deserialize(doc, body);
-
-		String cmd = doc[F("cmd")].as<const char*>();
-		if(cmd) {
-			if(cmd.equals(F("debug"))) {
-				bool enable;
-				if(Json::getValue(doc[F("enable")], enable)) {
-					Serial.systemDebugOutput(enable);
-				} else {
-					error = true;
-				}
-
-			} else if(cmd.equals(F("restart"))) {
-				bool clearOta = false;
-				Json::getValue(doc[F("clearOTA")], clearOta);
-				String restartCmd = clearOta ? F("clear_ota_restart") : F("restart");
-				if(!app.delayedCMD(restartCmd, 1500)) {
-					error = true;
-				}
-
-			} else if(!app.delayedCMD(cmd, 1500)) {
-				error = true;
-			}
-
-		} else {
-			error = true;
-		}
-	}
-	setCorsHeaders(response);
-
-	if(!error) {
-		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
-	} else {
-		sendApiCode(response, API_CODES::API_MISSING_PARAM);
 	}
 }
 

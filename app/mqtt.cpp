@@ -863,12 +863,15 @@ void AppMqttClient::handleHomeAssistantCommand(const String& message) {
     
     String ledCommand = Json::serialize(root);
     debug_i("HA: Sending to LED controller: %s", ledCommand.c_str());
-    
-    // Process the command through your existing system
+
+    if(!app.api) {
+        debug_w("HA command ignored: api not initialized");
+        return;
+    }
+
+    // Route through Api so command marshalling stays centralized while internals evolve.
     String errorMsg;
-    app.jsonproc.onColor(ledCommand, errorMsg, false);
-    
-    if (errorMsg.length() > 0) {
+    if(!app.api->dispatchCommand(F("color"), root, errorMsg, false)) {
         debug_e("HA: LED controller error: %s", errorMsg.c_str());
     } else {
         debug_i("HA: LED controller command processed successfully");

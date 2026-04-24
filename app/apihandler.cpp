@@ -9,6 +9,16 @@ extern "C" {
 #endif
 
 namespace {
+bool isPrintableSsid(const String& str)
+{
+	for(unsigned int i = 0; i < str.length(); ++i) {
+		if(str[i] < 0x20) {
+			return false;
+		}
+	}
+	return true;
+}
+
 struct TcpPcbStats
 {
 	uint16_t active_total{0};
@@ -76,9 +86,16 @@ bool Api::dispatch(const String& method, const JsonObject& params, JsonObject& o
 	if(method == F("info") || method == F("getInfo")) {
 		return handleInfo(params, out);
 	}
+	if(method == F("color") || method == F("getColor")) {
+		return handleColor(params, out);
+	}
+	if(method == F("networks") || method == F("getNetworks")) {
+		return handleNetworks(params, out);
+	}
 
 	out[F("error")] = F("method not implemented");
 	out[F("method")] = method;
+    debug_i("Api::dispatch failed: %s", out[F("error")].as<const char*>());
 	return false;
 }
 
@@ -115,10 +132,110 @@ bool Api::dispatchCommand(const String& method, const JsonObject& params, String
 	if(method == F("setOff") || method == F("off")) {
 		return app.jsonproc.onSetOff(params, errorMsg, relay);
 	}
+	if(method == F("scan_networks")) {
+		if(!app.network.isScanning()) {
+			app.network.scan(false);
+		}
+		return true;
+	}
+	if(method == F("system")) {
+		String cmd = params[F("cmd")] | String::nullstr;
+		if(cmd == String::nullstr) {
+			errorMsg = F("missing cmd");
+			return false;
+		}
+
+		if(cmd.equals(F("debug"))) {
+			bool enable = false;
+			if(!Json::getValue(params[F("enable")], enable)) {
+				errorMsg = F("missing enable");
+				return false;
+			}
+			Serial.systemDebugOutput(enable);
+			return true;
+		}
+
+		if(cmd.equals(F("restart"))) {
+			bool clearOta = false;
+			Json::getValue(params[F("clearOTA")], clearOta);
+			String restartCmd = clearOta ? F("clear_ota_restart") : F("restart");
+			if(!app.delayedCMD(restartCmd, 1500)) {
+				errorMsg = F("system command failed");
+				return false;
+			}
+			return true;
+		}
+
+		if(!app.delayedCMD(cmd, 1500)) {
+			errorMsg = F("system command failed");
+			return false;
+		}
+
+		return true;
+	}
 
 	errorMsg = F("method not implemented");
     debug_e("Api::dispatchCommand failed: %s", errorMsg.c_str());
 	return false;
+}
+
+bool Api::handleColor(const JsonObject& params, JsonObject& out)
+{
+	(void)params;
+
+	JsonObject raw = out.createNestedObject(F("raw"));
+	ChannelOutput output = app.rgbwwctrl.getCurrentOutput();
+	raw[F("r")] = output.r;
+	raw[F("g")] = output.g;
+	raw[F("b")] = output.b;
+	raw[F("ww")] = output.ww;
+	raw[F("cw")] = output.cw;
+
+	JsonObject hsv = out.createNestedObject(F("hsv"));
+	float h, s, v;
+	int ct;
+	HSVCT c = app.rgbwwctrl.getCurrentColor();
+	c.asRadian(h, s, v, ct);
+	hsv[F("h")] = h;
+	hsv[F("s")] = s;
+	hsv[F("v")] = v;
+	hsv[F("ct")] = ct;
+
+	return true;
+}
+
+bool Api::handleNetworks(const JsonObject& params, JsonObject& out)
+{
+	(void)params;
+
+	if(app.network.isScanning()) {
+		out[F("scanning")] = true;
+		return true;
+	}
+
+	out[F("scanning")] = false;
+	JsonArray netlist = out.createNestedArray(F("available"));
+	BssList networks = app.network.getAvailableNetworks();
+	for(unsigned int i = 0; i < networks.count(); i++) {
+		if(networks[i].hidden) {
+			continue;
+		}
+		if(!isPrintableSsid(networks[i].ssid)) {
+			continue;
+		}
+
+		JsonObject item = netlist.createNestedObject();
+		item[F("id")] = (int)networks[i].getHashId();
+		item[F("ssid")] = networks[i].ssid;
+		item[F("signal")] = networks[i].rssi;
+		item[F("encryption")] = networks[i].getAuthorizationMethodName();
+
+		if(i >= 25) {
+			break;
+		}
+	}
+
+	return true;
 }
 
 bool Api::dispatchJsonRpc(const String& json, String& errorMsg, bool relay)
@@ -139,6 +256,9 @@ bool Api::dispatchStream(const String& method, const JsonObject& params, std::un
     debug_i("Api::dispatchStream: method=%s, params=%s", method.c_str(), Json::serialize(params).c_str());
 	if(method == F("hosts") || method == F("getHosts")) {
 		return handleHosts(params, out, errorMsg);
+	}
+	if(method == F("config") || method == F("getConfig")) {
+		return handleConfig(params, out, errorMsg);
 	}
 
 	errorMsg = F("method not implemented");
@@ -334,6 +454,24 @@ bool Api::handleHosts(const JsonObject& params, std::unique_ptr<IDataSourceStrea
 	out = app.controllers->createJsonStream(filter, false);
 	if(!out) {
 		errorMsg = F("could not create hosts stream");
+		return false;
+	}
+
+	return true;
+}
+
+bool Api::handleConfig(const JsonObject& params, std::unique_ptr<IDataSourceStream>& out, String& errorMsg)
+{
+	(void)params;
+
+	if(!app.cfg) {
+		errorMsg = F("ConfigDB not initialized");
+		return false;
+	}
+
+	out = app.cfg->createExportStream(ConfigDB::Json::format);
+	if(!out) {
+		errorMsg = F("could not create config response");
 		return false;
 	}
 

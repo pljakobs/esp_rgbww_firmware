@@ -24,6 +24,7 @@
 
 
 #include <RGBWWCtrl.h>
+#include <apihandler.h>
 
 #define MIN_HEAP_FREE 8192
 /**
@@ -660,8 +661,12 @@ int JsonProcessor::RequestParameters::checkParams(String& errorMsg) const
 bool JsonProcessor::onJsonRpc(const String& json)
 {
 	debug_d("JsonProcessor::onJsonRpc: %s\n", json.c_str());
-	JsonRpcMessageIn rpc(json);
+	if(app.api) {
+		String errorMsg;
+		return app.api->dispatchJsonRpc(json, errorMsg, false);
+	}
 
+	JsonRpcMessageIn rpc(json);
 	String msg;
 	String method = rpc.getMethod();
 	if(method == F("color")) {
@@ -678,9 +683,9 @@ bool JsonProcessor::onJsonRpc(const String& json)
 		return onContinue(rpc.getParams(), msg, false);
 	} else if(method == F("direct")) {
 		return onDirect(rpc.getParams(), msg, false);
-	} else {
-		return false;
 	}
+
+	return false;
 }
 
 /**
