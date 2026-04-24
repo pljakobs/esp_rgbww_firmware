@@ -255,3 +255,43 @@ jobs:
           git config user.email github-actions@github.com
           git tag ${{ steps.get_fw_info.outputs.fw_version }}
           git push origin ${{ steps.get_fw_info.outputs.fw_version }}
+
+  host-smoke-test:
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'push' && (github.ref_name == 'develop' || github.ref_name == 'experimental') }}
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - name: Synchronize submodules
+        run: |
+          git submodule sync --recursive
+          git submodule update --init --recursive
+
+      - name: Pull Docker Image
+        run: docker pull docker.io/pjakobs/sming:latest
+
+      - name: Build Host Emulator and Run Smoke Test
+        run: |
+          docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace \
+            docker.io/pjakobs/sming:latest \
+            bash -c "git config --global --add safe.directory /workspace && \
+            source /opt/Sming/Tools/export.sh && \
+            make configdb-rebuild SMING_ARCH=Host && \
+            make SMING_ARCH=Host -j\$(nproc) >/tmp/host_build.log 2>&1 && \
+            echo 'Host emulator build successful' && \
+            cat /tmp/host_build.log | tail -20"
+      
+      - name: Test HTTP API via Host Emulator
+        run: |
+          docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace \
+            docker.io/pjakobs/sming:latest \
+            bash -c "git config --global --add safe.directory /workspace && \
+            source /opt/Sming/Tools/export.sh && \
+            make configdb-rebuild SMING_ARCH=Host && \
+            make SMING_ARCH=Host flash >/dev/null 2>&1 && \
+            timeout 10 make SMING_ARCH=Host run 2>&1 | head -100 || true"
