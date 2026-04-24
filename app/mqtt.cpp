@@ -21,6 +21,7 @@
  */
 #include <RGBWWCtrl.h>
 #include <Network/Mqtt/MqttBuffer.h>
+#include <apihandler.h>
 
 AppMqttClient::AppMqttClient()
 {
@@ -214,11 +215,31 @@ int AppMqttClient::onMessageReceived(MqttClient& client, mqtt_message_t* msg)
 			uint32_t clock = message.toInt();
 			app.rgbwwctrl.onMasterClock(clock);
 		}
-	} else if(sync.getCmdSlaveEnabled() && topic == sync.getCmdSlaveTopic()) {
-		app.jsonproc.onJsonRpc(message);
-	} else if(sync.getColorSlaveEnabled() && (topic == sync.getColorSlaveTopic())) {
-		String error;
-		app.jsonproc.onColor(message, error, false);
+    } else if((sync.getCmdSlaveEnabled() && topic == sync.getCmdSlaveTopic()) ||
+              (sync.getColorSlaveEnabled() && topic == sync.getColorSlaveTopic())) {
+        if(!app.api) {
+            debug_w("MQTT sync command ignored: api not initialized");
+            return 0;
+        }
+
+        if(topic == sync.getCmdSlaveTopic()) {
+            String error;
+            if(!app.api->dispatchJsonRpc(message, error, false)) {
+                debug_w("MQTT cmd failed: %s", error.c_str());
+            }
+        } else {
+            StaticJsonDocument<1024> doc;
+            DeserializationError err = deserializeJson(doc, message);
+            if(err) {
+                debug_w("MQTT color payload invalid JSON");
+                return 0;
+            }
+
+            String error;
+            if(!app.api->dispatchCommand(F("color"), doc.as<JsonObject>(), error, false)) {
+                debug_w("MQTT color failed: %s", error.c_str());
+            }
+        }
 	}
 	return 0;
 }
@@ -842,12 +863,15 @@ void AppMqttClient::handleHomeAssistantCommand(const String& message) {
     
     String ledCommand = Json::serialize(root);
     debug_i("HA: Sending to LED controller: %s", ledCommand.c_str());
-    
-    // Process the command through your existing system
+
+    if(!app.api) {
+        debug_w("HA command ignored: api not initialized");
+        return;
+    }
+
+    // Route through Api so command marshalling stays centralized while internals evolve.
     String errorMsg;
-    app.jsonproc.onColor(ledCommand, errorMsg, false);
-    
-    if (errorMsg.length() > 0) {
+    if(!app.api->dispatchCommand(F("color"), root, errorMsg, false)) {
         debug_e("HA: LED controller error: %s", errorMsg.c_str());
     } else {
         debug_i("HA: LED controller command processed successfully");

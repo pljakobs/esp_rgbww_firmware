@@ -34,6 +34,8 @@ static const char* fw_git_version = GITVERSION;
 static const char* fw_git_date = GITDATE;
 static const char* sming_git_version = SMING_VERSION;
 
+class Api;
+
 
 // main forward declarations
 class Application {
@@ -103,6 +105,7 @@ public:
     UdpSyslogStream udpSyslogStream;
 #endif
     APPLedCtrl rgbwwctrl;
+    std::unique_ptr<Api> api;
     std::unique_ptr<Controllers> controllers;
     
     ApplicationOTA ota;

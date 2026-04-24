@@ -297,11 +297,15 @@ All endpoints are on port **80**. Responses are JSON. When security is enabled, 
 
 CORS headers are always present. `OPTIONS` requests are answered with `200 {"success":true}`.
 
+Many of the read and command endpoints below are also available over the WebSocket JSON-RPC API described in [WebSocket API](#websocket-api). HTTP remains fully supported; the webapp now prefers WebSocket first and falls back to HTTP when required.
+
 ---
 
 ### `GET /info`
 
 Returns device identity and runtime state.
+
+Also available via WebSocket JSON-RPC methods `info` and `getInfo`.
 
 **Query parameter:** `?v=2` — returns the extended v2 format (recommended).
 
@@ -354,6 +358,8 @@ Returns device identity and runtime state.
 
 Returns the current output state.
 
+Also available via WebSocket JSON-RPC methods `color` and `getColor`.
+
 ```json
 {
   "raw": { "r": 255, "g": 128, "b": 0, "ww": 0, "cw": 0 },
@@ -372,6 +378,8 @@ Send a color command. See [Color Command Reference](#color-command-reference).
 ### `GET /config`
 
 Returns the full configuration as JSON. Suitable for backup and programmatic inspection.
+
+Also available via WebSocket JSON-RPC methods `config` and `getConfig`.
 
 ### `POST /config`
 
@@ -405,6 +413,8 @@ curl -X POST http://<device>/config \
 
 Returns available Wi-Fi networks (up to 25). Trigger a scan first with `POST /scan_networks`.
 
+Also available via WebSocket JSON-RPC methods `networks` and `getNetworks`.
+
 ```json
 {
   "scanning": false,
@@ -417,6 +427,8 @@ Returns available Wi-Fi networks (up to 25). Trigger a scan first with `POST /sc
 ### `POST /scan_networks`
 
 Initiates an asynchronous Wi-Fi scan. Poll `GET /networks` for results.
+
+Also available via WebSocket JSON-RPC command `scan_networks`.
 
 ---
 
@@ -432,13 +444,15 @@ Submit Wi-Fi credentials to connect to a network.
 
 ### `GET /ping`
 
-Simple availability check. Returns `{"success":true}`.
+Simple availability check. Returns `{"ping":"pong"}`.
 
 ---
 
 ### `POST /system`
 
 System control commands.
+
+Also available via WebSocket JSON-RPC command `system`.
 
 | `cmd` | Description |
 |-------|-------------|
@@ -456,9 +470,13 @@ curl -X POST http://<device>/system -d '{"cmd":"restart"}'
 
 Turn the output on (restore last colour) or off immediately.
 
+Also available via WebSocket JSON-RPC commands `on` / `off` (plus aliases `setOn` / `setOff`).
+
 ### `POST /toggle`
 
 Toggle between on and off.
+
+Also available via WebSocket JSON-RPC command `toggle`.
 
 ---
 
@@ -466,21 +484,31 @@ Toggle between on and off.
 
 Stop animation and clear queue. Equivalent to skip + clear.
 
+Also available via WebSocket JSON-RPC command `stop`.
+
 ### `POST /skip`
 
 Skip the current animation step, jumping immediately to its end state.
+
+Also available via WebSocket JSON-RPC command `skip`.
 
 ### `POST /pause`
 
 Pause the animation queue.
 
+Also available via WebSocket JSON-RPC command `pause`.
+
 ### `POST /continue`
 
 Resume a paused animation queue.
 
+Also available via WebSocket JSON-RPC command `continue`.
+
 ### `POST /blink`
 
 Trigger an instant blink of the current color.
+
+Also available via WebSocket JSON-RPC command `blink`.
 
 ```json
 { "ramp": 500 }
@@ -707,7 +735,58 @@ Event types pushed:
 
 ## WebSocket API
 
-Connect to `ws://<device>/ws`. The controller pushes the same events as the TCP event server:
+Connect to `ws://<device>/ws`.
+
+The socket serves two roles:
+
+- **JSON-RPC request/response API** for reads and commands
+- **push events** for live state updates and notifications
+
+### JSON-RPC request format
+
+```json
+{ "jsonrpc": "2.0", "id": 1, "method": "info", "params": { "V": "2" } }
+```
+
+### JSON-RPC success response
+
+```json
+{ "jsonrpc": "2.0", "id": 1, "result": { "device": { "soc": "esp8266" } } }
+```
+
+### JSON-RPC error response
+
+```json
+{ "jsonrpc": "2.0", "id": 1, "error": "method not implemented" }
+```
+
+### Supported request/command methods
+
+| Method | Purpose |
+|--------|---------|
+| `info`, `getInfo` | Read runtime/device information |
+| `color`, `getColor` | Read current color state |
+| `config`, `getConfig` | Read full configuration |
+| `hosts`, `getHosts` | Read known peer controllers |
+| `networks`, `getNetworks` | Read current Wi-Fi scan results |
+| `scan_networks` | Trigger asynchronous Wi-Fi scan |
+| `system` | Execute system command (`restart`, `debug`, etc.) |
+| `color` | Execute color / animation payload |
+| `on`, `setOn` | Turn output on |
+| `off`, `setOff` | Turn output off |
+| `toggle` | Toggle on/off |
+| `stop` | Stop animation and clear queue |
+| `skip` | Skip current transition |
+| `pause` | Pause animation queue |
+| `continue` | Resume paused queue |
+| `blink` | Trigger blink |
+| `direct` | Apply direct color change |
+
+The `keep_alive` message is reserved for connection maintenance and is handled automatically by the webapp.
+
+### Push events
+
+The controller also pushes the same events as the TCP event server:
 
 ```json
 { "type": "color",   "data": { "raw": { "r": 255 }, "hsv": { "h": 1.047 } } }
@@ -715,7 +794,7 @@ Connect to `ws://<device>/ws`. The controller pushes the same events as the TCP 
 { "type": "notification", "data": "new SSID, MyNetwork" }
 ```
 
-The webapp uses this connection for live status updates.
+The webapp uses this connection both for live status updates and for request/response API traffic when available.
 
 ---
 
