@@ -18,6 +18,8 @@
 #pragma once
 
 #include <ArduinoJson.h>
+#include <Data/Stream/DataSourceStream.h>
+#include <memory>
 
 class Api {
 public:
@@ -25,7 +27,12 @@ public:
 	~Api() = default;
 
 	bool dispatch(const String& method, const JsonObject& params, JsonObject& out);
+	bool dispatchCommand(const String& method, const JsonObject& params, String& errorMsg, bool relay = true);
+	bool dispatchJsonRpc(const String& json, String& errorMsg, bool relay = false);
+	bool dispatchStream(const String& method, const JsonObject& params, std::unique_ptr<IDataSourceStream>& out,
+					 String& errorMsg);
 
 private:
 	bool handleInfo(const JsonObject& params, JsonObject& out);
+	bool handleHosts(const JsonObject& params, std::unique_ptr<IDataSourceStream>& out, String& errorMsg);
 };

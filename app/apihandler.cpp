@@ -72,12 +72,76 @@ TcpPcbStats getTcpPcbStats()
 
 bool Api::dispatch(const String& method, const JsonObject& params, JsonObject& out)
 {
+    debug_i("Api::dispatch: method=%s, params=%s", method.c_str(), Json::serialize(params).c_str());
 	if(method == F("info") || method == F("getInfo")) {
 		return handleInfo(params, out);
 	}
 
 	out[F("error")] = F("method not implemented");
 	out[F("method")] = method;
+	return false;
+}
+
+bool Api::dispatchCommand(const String& method, const JsonObject& params, String& errorMsg, bool relay)
+{
+    debug_i("Api::dispatchCommand: method=%s, params=%s", method.c_str(), Json::serialize(params).c_str());
+	if(method == F("color")) {
+		return app.jsonproc.onColor(params, errorMsg, relay);
+	}
+	if(method == F("stop")) {
+		return app.jsonproc.onStop(params, errorMsg, relay);
+	}
+	if(method == F("skip")) {
+		return app.jsonproc.onSkip(params, errorMsg, relay);
+	}
+	if(method == F("pause")) {
+		return app.jsonproc.onPause(params, errorMsg, relay);
+	}
+	if(method == F("continue")) {
+		return app.jsonproc.onContinue(params, errorMsg, relay);
+	}
+	if(method == F("blink")) {
+		return app.jsonproc.onBlink(params, errorMsg, relay);
+	}
+	if(method == F("toggle")) {
+		return app.jsonproc.onToggle(params, errorMsg, relay);
+	}
+	if(method == F("direct")) {
+		return app.jsonproc.onDirect(params, errorMsg, relay);
+	}
+	if(method == F("setOn") || method == F("on")) {
+		return app.jsonproc.onSetOn(params, errorMsg, relay);
+	}
+	if(method == F("setOff") || method == F("off")) {
+		return app.jsonproc.onSetOff(params, errorMsg, relay);
+	}
+
+	errorMsg = F("method not implemented");
+    debug_e("Api::dispatchCommand failed: %s", errorMsg.c_str());
+	return false;
+}
+
+bool Api::dispatchJsonRpc(const String& json, String& errorMsg, bool relay)
+{
+	JsonRpcMessageIn rpc(json);
+	String method = rpc.getMethod();
+	if(!method.length()) {
+		errorMsg = F("missing method");
+		return false;
+	}
+
+	return dispatchCommand(method, rpc.getParams(), errorMsg, relay);
+}
+
+bool Api::dispatchStream(const String& method, const JsonObject& params, std::unique_ptr<IDataSourceStream>& out,
+					 String& errorMsg)
+{
+    debug_i("Api::dispatchStream: method=%s, params=%s", method.c_str(), Json::serialize(params).c_str());
+	if(method == F("hosts") || method == F("getHosts")) {
+		return handleHosts(params, out, errorMsg);
+	}
+
+	errorMsg = F("method not implemented");
 	return false;
 }
 
@@ -251,6 +315,27 @@ bool Api::handleInfo(const JsonObject& params, JsonObject& data)
 	con[F("netmask")] = WifiStation.getNetworkMask().toString();
 	con[F("gateway")] = WifiStation.getNetworkGateway().toString();
 	con[F("mac")] = WifiStation.getMAC();
+
+	return true;
+}
+
+bool Api::handleHosts(const JsonObject& params, std::unique_ptr<IDataSourceStream>& out, String& errorMsg)
+{
+	if(!app.controllers) {
+		errorMsg = F("Controllers not initialized");
+		return false;
+	}
+
+	const bool showAll = (params[F("all")] == "1") || (params[F("all")] == "true");
+	const bool showDebug = (params[F("debug")] == "1") || (params[F("debug")] == "true");
+
+	Controllers::JsonFilter filter = (showAll || showDebug) ? Controllers::ALL_ENTRIES : Controllers::VISIBLE_ONLY;
+
+	out = app.controllers->createJsonStream(filter, false);
+	if(!out) {
+		errorMsg = F("could not create hosts stream");
+		return false;
+	}
 
 	return true;
 }
