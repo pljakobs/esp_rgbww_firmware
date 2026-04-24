@@ -60,10 +60,10 @@ void JsonRpcMessage::setId(int id)
 
 JsonRpcMessageIn::JsonRpcMessageIn(const String& json) : _doc(1024)
 {
-	DeserializationError error = Json::deserialize(_doc, json);
-	if(error) {
+	const bool parsed = Json::deserialize(_doc, json);
+	if(!parsed) {
 		_valid = false;
-		_error = error.c_str();
+		_error = F("deserialization failed");
 		return;
 	}
 
