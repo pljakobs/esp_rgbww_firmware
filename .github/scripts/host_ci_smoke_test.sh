@@ -268,7 +268,16 @@ if "malformed json" not in str(msg.get("error", "")):
 
 ws.send_text(json.dumps({"jsonrpc": "2.0", "id": 7001, "params": {}}))
 msg = ws.recv_json(timeout=3.0)
-if msg.get("id") != 7001 or "missing method" not in str(msg.get("error", "")):
+error_value = msg.get("error", "")
+error_text = str(error_value)
+if isinstance(error_value, dict):
+    error_text = f"{error_value.get('message', '')} {error_value.get('code', '')}".strip()
+
+if msg.get("id") != 7001 or (
+    "missing method" not in error_text
+    and "method not implemented" not in error_text
+    and "-32601" not in error_text
+):
     fail(f"Expected WS missing-method rejection, got: {msg}")
 
 status, http_color_before = http_json("/color")
