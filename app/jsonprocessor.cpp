@@ -667,6 +667,12 @@ bool JsonProcessor::onJsonRpc(const String& json)
 	}
 
 	JsonRpcMessageIn rpc(json);
+
+	if(!rpc.isValid()) {
+		debug_e("Malformed JSON-RPC message: %s", rpc.getErrorMsg());
+		return false;
+	}
+
 	String msg;
 	String method = rpc.getMethod();
 	if(method == F("color")) {

@@ -58,9 +58,13 @@ void JsonRpcMessage::setId(int id)
 
 ////////////////////////////////////////
 
-JsonRpcMessageIn::JsonRpcMessageIn(const String& json) : _doc(1024)
+JsonRpcMessageIn::JsonRpcMessageIn(const String& json) : _doc(1024), _valid(true), _errorMsg(nullptr)
 {
-	Json::deserialize(_doc, json);
+	DeserializationError error = Json::deserialize(_doc, json);
+	if(error) {
+		_valid = false;
+		_errorMsg = error.c_str();
+	}
 }
 
 JsonObject JsonRpcMessageIn::getParams()
