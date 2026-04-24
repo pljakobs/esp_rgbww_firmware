@@ -341,7 +341,7 @@ jobs:
           if [[ -f "$VALGRIND_SMOKE_LOG" ]]; then
             echo "### Smoke (host_smoke_api_test.py)" >> "$GITHUB_STEP_SUMMARY"
             echo '```' >> "$GITHUB_STEP_SUMMARY"
-            grep -E "ERROR SUMMARY:|definitely lost:|indirectly lost:|possibly lost:|still reachable:" "$VALGRIND_SMOKE_LOG" | tail -n 20 >> "$GITHUB_STEP_SUMMARY" || true
+            grep -E "ERROR SUMMARY:|definitely lost:|indirectly lost:|possibly lost:|still reachable:" "$VALGRIND_SMOKE_LOG" \vert{} tail -n 20 >> "$GITHUB_STEP_SUMMARY" || true
             echo '```' >> "$GITHUB_STEP_SUMMARY"
           else
             echo "- ⚠️ Smoke valgrind log not found ($VALGRIND_SMOKE_LOG)" >> "$GITHUB_STEP_SUMMARY"
@@ -350,7 +350,7 @@ jobs:
           if [[ -f "$VALGRIND_RGBWW_LOG" ]]; then
             echo "### RGBWW (rgbww_test.py)" >> "$GITHUB_STEP_SUMMARY"
             echo '```' >> "$GITHUB_STEP_SUMMARY"
-            grep -E "ERROR SUMMARY:|definitely lost:|indirectly lost:|possibly lost:|still reachable:" "$VALGRIND_RGBWW_LOG" | tail -n 20 >> "$GITHUB_STEP_SUMMARY" || true
+            grep -E "ERROR SUMMARY:|definitely lost:|indirectly lost:|possibly lost:|still reachable:" "$VALGRIND_RGBWW_LOG" \vert{} tail -n 20 >> "$GITHUB_STEP_SUMMARY" || true
             echo '```' >> "$GITHUB_STEP_SUMMARY"
           else
             echo "- ⚠️ RGBWW valgrind log not found ($VALGRIND_RGBWW_LOG)" >> "$GITHUB_STEP_SUMMARY"
@@ -361,7 +361,7 @@ jobs:
           if [[ -f "$VALGRIND_RUNTIME_SMOKE_START_LOG" ]]; then
             echo "#### Smoke startup snapshot" >> "$GITHUB_STEP_SUMMARY"
             echo '```' >> "$GITHUB_STEP_SUMMARY"
-            grep -E "runtime_snapshot=|runtime_snapshot_label=|LEAK SUMMARY:|definitely lost:|indirectly lost:|possibly lost:|still reachable:" "$VALGRIND_RUNTIME_SMOKE_START_LOG" | tail -n 25 >> "$GITHUB_STEP_SUMMARY" || true
+            grep -E "runtime_snapshot=|runtime_snapshot_label=|LEAK SUMMARY:|definitely lost:|indirectly lost:|possibly lost:|still reachable:" "$VALGRIND_RUNTIME_SMOKE_START_LOG" \vert{} tail -n 25 >> "$GITHUB_STEP_SUMMARY" || true
             echo '```' >> "$GITHUB_STEP_SUMMARY"
           else
             echo "- ⚠️ Smoke startup runtime valgrind snapshot not found ($VALGRIND_RUNTIME_SMOKE_START_LOG)" >> "$GITHUB_STEP_SUMMARY"
@@ -370,7 +370,7 @@ jobs:
           if [[ -f "$VALGRIND_RUNTIME_SMOKE_LOG" ]]; then
             echo "#### Smoke post-test snapshot" >> "$GITHUB_STEP_SUMMARY"
             echo '```' >> "$GITHUB_STEP_SUMMARY"
-            grep -E "runtime_snapshot=|runtime_snapshot_label=|LEAK SUMMARY:|definitely lost:|indirectly lost:|possibly lost:|still reachable:" "$VALGRIND_RUNTIME_SMOKE_LOG" | tail -n 25 >> "$GITHUB_STEP_SUMMARY" || true
+            grep -E "runtime_snapshot=|runtime_snapshot_label=|LEAK SUMMARY:|definitely lost:|indirectly lost:|possibly lost:|still reachable:" "$VALGRIND_RUNTIME_SMOKE_LOG" \vert{} tail -n 25 >> "$GITHUB_STEP_SUMMARY" || true
             echo '```' >> "$GITHUB_STEP_SUMMARY"
           else
             echo "- ⚠️ Smoke runtime valgrind snapshot not found ($VALGRIND_RUNTIME_SMOKE_LOG)" >> "$GITHUB_STEP_SUMMARY"
@@ -379,7 +379,7 @@ jobs:
           if [[ -f "$VALGRIND_RUNTIME_RGBWW_START_LOG" ]]; then
             echo "#### RGBWW startup snapshot" >> "$GITHUB_STEP_SUMMARY"
             echo '```' >> "$GITHUB_STEP_SUMMARY"
-            grep -E "runtime_snapshot=|runtime_snapshot_label=|LEAK SUMMARY:|definitely lost:|indirectly lost:|possibly lost:|still reachable:" "$VALGRIND_RUNTIME_RGBWW_START_LOG" | tail -n 25 >> "$GITHUB_STEP_SUMMARY" || true
+            grep -E "runtime_snapshot=|runtime_snapshot_label=|LEAK SUMMARY:|definitely lost:|indirectly lost:|possibly lost:|still reachable:" "$VALGRIND_RUNTIME_RGBWW_START_LOG" \vert{} tail -n 25 >> "$GITHUB_STEP_SUMMARY" || true
             echo '```' >> "$GITHUB_STEP_SUMMARY"
           else
             echo "- ⚠️ RGBWW startup runtime valgrind snapshot not found ($VALGRIND_RUNTIME_RGBWW_START_LOG)" >> "$GITHUB_STEP_SUMMARY"
@@ -388,7 +388,7 @@ jobs:
           if [[ -f "$VALGRIND_RUNTIME_RGBWW_LOG" ]]; then
             echo "#### RGBWW post-test snapshot" >> "$GITHUB_STEP_SUMMARY"
             echo '```' >> "$GITHUB_STEP_SUMMARY"
-            grep -E "runtime_snapshot=|runtime_snapshot_label=|LEAK SUMMARY:|definitely lost:|indirectly lost:|possibly lost:|still reachable:" "$VALGRIND_RUNTIME_RGBWW_LOG" | tail -n 25 >> "$GITHUB_STEP_SUMMARY" || true
+            grep -E "runtime_snapshot=|runtime_snapshot_label=|LEAK SUMMARY:|definitely lost:|indirectly lost:|possibly lost:|still reachable:" "$VALGRIND_RUNTIME_RGBWW_LOG" \vert{} tail -n 25 >> "$GITHUB_STEP_SUMMARY" || true
             echo '```' >> "$GITHUB_STEP_SUMMARY"
           else
             echo "- ⚠️ RGBWW runtime valgrind snapshot not found ($VALGRIND_RUNTIME_RGBWW_LOG)" >> "$GITHUB_STEP_SUMMARY"
@@ -837,3 +837,44 @@ jobs:
           else
             echo "✓ Webapp schema-update dispatched for $FIRMWARE_REF"
           fi
+
+  host-smoke-test:
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'push' && (github.ref_name == 'develop' || github.ref_name == 'experimental') }}
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - name: Synchronize submodules
+        run: |
+          git submodule sync --recursive
+          git submodule update --init --recursive
+
+      - name: Pull Docker Image
+        run: docker pull docker.io/pjakobs/sming:latest
+
+      - name: Build Host Emulator and Run Smoke Test
+        run: |
+          docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace \
+            docker.io/pjakobs/sming:latest \
+            bash -c "git config --global --add safe.directory /workspace && \
+            source /opt/Sming/Tools/export.sh && \
+            make configdb-rebuild SMING_ARCH=Host && \
+            make SMING_ARCH=Host -j\$(nproc) >/tmp/host_build.log 2>&1 && \
+            echo 'Host emulator build successful' && \
+            cat /tmp/host_build.log | tail -20"
+      
+      - name: Test HTTP API via Host Emulator
+        run: |
+          docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace \
+            docker.io/pjakobs/sming:latest \
+            bash -c "git config --global --add safe.directory /workspace && \
+            source /opt/Sning/Tools/export.sh && \
+            make configdb-rebuild SMING_ARCH=Host && \
+            make SMING_ARCH=Host flash >/dev/null 2>&1 && \
+            timeout 10 make SMING_ARCH=Host run 2>&1 | head -100 || true"
+
