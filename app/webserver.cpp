@@ -29,6 +29,8 @@
 #include <Network/Http/Websocket/WebsocketResource.h>
 #include <Storage.h>
 #include <config.h>
+#include <apihandler.h>
+#include <jsonrpcmessage.h>
 #if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
 extern "C" {
 #include <lwip/tcp.h>
@@ -96,6 +98,9 @@ void ApplicationWebserver::init()
 	// websocket api
 	wsResource = new WebsocketResource();
 	wsResource->setConnectionHandler([this](WebsocketConnection& socket) { this->wsConnected(socket); });
+	wsResource->setMessageHandler([this](WebsocketConnection& socket, const String& message) {
+		this->wsMessageReceived(socket, message);
+	});
 	wsResource->setDisconnectionHandler([this](WebsocketConnection& socket) { this->wsDisconnected(socket); });
 	paths.set("/ws", wsResource);
 
@@ -114,6 +119,117 @@ void ApplicationWebserver::wsDisconnected(WebsocketConnection& socket)
 	debug_i("<===wsDisconnected");
 	webSockets.removeElement(&socket);
 	debug_i("===>nr of websockets: %i", webSockets.size());
+}
+
+void ApplicationWebserver::wsMessageReceived(WebsocketConnection& socket, const String& message)
+{
+	if(!app.api) {
+		socket.sendString(F("{\"error\":\"api not initialized\"}"));
+		return;
+	}
+	debug_i("Websocket message received: %s", message.c_str());
+
+	JsonRpcMessageIn rpc(message);
+	JsonObject requestRoot = rpc.getRoot();
+	JsonVariant requestId = requestRoot[F("id")];
+	const bool hasRequestId = !requestId.isNull();
+	String method = rpc.getMethod();
+
+	auto sendWsError = [&](const String& errorText) {
+		if(!hasRequestId) {
+			socket.sendString(String(F("{\"error\":\"")) + errorText + F("\"}"));
+			return;
+		}
+
+		DynamicJsonDocument responseDoc(512);
+		JsonObject responseRoot = responseDoc.to<JsonObject>();
+		responseRoot[F("jsonrpc")] = F("2.0");
+		responseRoot[F("id")] = requestId;
+		responseRoot[F("error")] = errorText;
+		String serialized;
+		serializeJson(responseDoc, serialized);
+		socket.sendString(serialized);
+	};
+
+	if(!method.length()) {
+		debug_w("ws request rejected: missing method");
+		sendWsError(F("missing method"));
+		return;
+	}
+
+	if(method == F("keep_alive")) {
+		return;
+	}
+
+	JsonObject params = rpc.getParams();
+
+	if(method == F("info") || method == F("getInfo")) {
+		DynamicJsonDocument resultDoc(4096);
+		JsonObject result = resultDoc.to<JsonObject>();
+		if(!app.api->dispatch(method, params, result)) {
+			debug_w("ws info rejected");
+			sendWsError(F("unsupported api method"));
+			return;
+		}
+
+		DynamicJsonDocument responseDoc(4608);
+		JsonObject responseRoot = responseDoc.to<JsonObject>();
+		responseRoot[F("jsonrpc")] = F("2.0");
+		if(hasRequestId) {
+			responseRoot[F("id")] = requestId;
+		}
+		responseRoot[F("result")] = result;
+		String serialized;
+		serializeJson(responseDoc, serialized);
+		socket.sendString(serialized);
+		return;
+	}
+
+	if(method == F("hosts") || method == F("getHosts")) {
+		std::unique_ptr<IDataSourceStream> stream;
+		String errorMsg;
+		if(!app.api->dispatchStream(method, params, stream, errorMsg) || !stream) {
+			debug_w("ws hosts rejected: %s", errorMsg.c_str());
+			sendWsError(errorMsg.length() ? errorMsg : String(F("could not create hosts response")));
+			return;
+		}
+
+		String hostsPayload;
+		while(!stream->isFinished()) {
+			hostsPayload += stream->readString(512);
+		}
+
+		DynamicJsonDocument responseDoc(4096 + hostsPayload.length());
+		JsonObject responseRoot = responseDoc.to<JsonObject>();
+		responseRoot[F("jsonrpc")] = F("2.0");
+		if(hasRequestId) {
+			responseRoot[F("id")] = requestId;
+		}
+		responseRoot[F("result")] = serialized(hostsPayload);
+		String serializedResponse;
+		serializeJson(responseDoc, serializedResponse);
+		socket.sendString(serializedResponse);
+		return;
+	}
+
+	String errorMsg;
+	if(!app.api->dispatchCommand(method, params, errorMsg, false)) {
+		debug_w("ws command rejected: %s", errorMsg.c_str());
+		sendWsError(errorMsg.length() ? errorMsg : String(F("command failed")));
+		return;
+	}
+
+	if(hasRequestId) {
+		DynamicJsonDocument responseDoc(256);
+		JsonObject responseRoot = responseDoc.to<JsonObject>();
+		responseRoot[F("jsonrpc")] = F("2.0");
+		responseRoot[F("id")] = requestId;
+		JsonObject result = responseRoot.createNestedObject(F("result"));
+		result[F("success")] = true;
+		String serialized;
+		serializeJson(responseDoc, serialized);
+		socket.sendString(serialized);
+	}
 }
 
 /*
@@ -192,6 +308,70 @@ bool ICACHE_FLASH_ATTR ApplicationWebserver::authenticated(HttpRequest& request,
 		response.setHeader(F("Connection"), F("close"));
 	}
 	return authenticated;
+}
+
+bool ApplicationWebserver::ensureApiInitialized(HttpResponse& response)
+{
+	if(app.api) {
+		return true;
+	}
+
+	setCorsHeaders(response);
+	response.code = HTTP_STATUS_SERVICE_UNAVAILABLE;
+	response.setContentType(MIME_TEXT);
+	response.sendString(F("api not initialized"));
+	return false;
+}
+
+bool ApplicationWebserver::parseJsonBody(const String& body, HttpResponse& response, JsonDocument& doc, bool allowEmptyBody)
+{
+	if(body.length() == 0) {
+		if(allowEmptyBody) {
+			doc.to<JsonObject>();
+			return true;
+		}
+		sendApiCode(response, API_BAD_REQUEST, F("no body"));
+		return false;
+	}
+
+	if(deserializeJson(doc, body)) {
+		sendApiCode(response, API_BAD_REQUEST, F("Invalid JSON"));
+		return false;
+	}
+
+	return true;
+}
+
+bool ApplicationWebserver::dispatchApiCommand(HttpResponse& response, const String& method, const JsonObject& params,
+									  const String& fallbackError, bool relay)
+{
+	String errorMsg;
+	if(app.api->dispatchCommand(method, params, errorMsg, relay)) {
+		return true;
+	}
+
+	sendApiCode(response, API_CODES::API_BAD_REQUEST, errorMsg.length() ? errorMsg : fallbackError);
+	return false;
+}
+
+bool ApplicationWebserver::handleApiCommandPost(HttpRequest& request, HttpResponse& response, const String& method,
+									const String& fallbackError)
+{
+	if(!ensureApiInitialized(response)) {
+		return false;
+	}
+
+	StaticJsonDocument<512> doc;
+	if(!parseJsonBody(request.getBody(), response, doc, true)) {
+		return false;
+	}
+
+	if(!dispatchApiCommand(response, method, doc.as<JsonObject>(), fallbackError, true)) {
+		return false;
+	}
+
+	sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
+	return true;
 }
 
 const char* ApplicationWebserver::getApiCodeMsg(API_CODES code)
@@ -763,11 +943,7 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response){
 	auto stream = std::make_unique<JsonObjectStream>(2048);
 	JsonObject data = stream->getRoot();
 
-	if(!app.api) {
-		setCorsHeaders(response);
-		response.code = HTTP_STATUS_SERVICE_UNAVAILABLE;
-		response.setContentType(MIME_TEXT);
-		response.sendString(F("api not initialized"));
+	if(!ensureApiInitialized(response)) {
 		return;
 	}
 
@@ -846,21 +1022,21 @@ void ApplicationWebserver::onColorPost(HttpRequest& request, HttpResponse& respo
 	response.setHeader(F("Access-Control-Allow-Credentials"), F("true"));
     */
 
-	if(body == NULL) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("no body"));
+	debug_i("received color update with body legth %i and content %s", body.length(),body.c_str());
+	if(!ensureApiInitialized(response)) {
 		return;
 	}
 
-	debug_i("received color update with body legth %i and content %s", body.length(),body.c_str());
-	String msg;
-
-	if(!app.jsonproc.onColor(body, msg)) {
-		debug_i("received color update with message %s", msg.c_str());
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, msg);
-	} else {
-		debug_i("received color update with message %s", msg.c_str());
-		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
+	StaticJsonDocument<1024> doc;
+	if(!parseJsonBody(body, response, doc, false)) {
+		return;
 	}
+
+	if(!dispatchApiCommand(response, F("color"), doc.as<JsonObject>(), F("color command failed"), true)) {
+		return;
+	}
+
+	sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 }
 
 /**
@@ -1326,73 +1502,37 @@ void ApplicationWebserver::onStop(HttpRequest& request, HttpResponse& response)
 	}
     */
 
-	String msg;
-	if(app.jsonproc.onStop(request.getBody(), msg, true)) {
-		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
-	} else {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST);
-	}
+	handleApiCommandPost(request, response, F("stop"), F("stop failed"));
 }
 
 void ApplicationWebserver::onSkip(HttpRequest& request, HttpResponse& response)
 {
     if(!preflightRequest(request, response, {HttpMethod::POST})) return;
-    
-
-	String msg;
-	if(app.jsonproc.onSkip(request.getBody(), msg)) {
-		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
-	} else {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST);
-	}
+	handleApiCommandPost(request, response, F("skip"), F("skip failed"));
 }
 
 void ApplicationWebserver::onPause(HttpRequest& request, HttpResponse& response)
 {
     if(!preflightRequest(request, response, {HttpMethod::POST})) return;
-    
-	String msg;
-	if(app.jsonproc.onPause(request.getBody(), msg, true)) {
-		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
-	} else {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST);
-	}
+	handleApiCommandPost(request, response, F("pause"), F("pause failed"));
 }
 
 void ApplicationWebserver::onContinue(HttpRequest& request, HttpResponse& response)
 {
     if(!preflightRequest(request, response, {HttpMethod::POST})) return;
-    
-	String msg;
-	if(app.jsonproc.onContinue(request.getBody(), msg)) {
-		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
-	} else {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST);
-	}
+	handleApiCommandPost(request, response, F("continue"), F("continue failed"));
 }
 
 void ApplicationWebserver::onBlink(HttpRequest& request, HttpResponse& response)
 {
     if(!preflightRequest(request, response, {HttpMethod::POST})) return;
-
-	String msg;
-	if(app.jsonproc.onBlink(request.getBody(), msg)) {
-		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
-	} else {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST);
-	}
+	handleApiCommandPost(request, response, F("blink"), F("blink failed"));
 }
 
 void ApplicationWebserver::onToggle(HttpRequest& request, HttpResponse& response)
 {
     if(!preflightRequest(request, response, {HttpMethod::POST})) return;
-    
-	String msg;
-	if(app.jsonproc.onToggle(request.getBody(), msg)) {
-		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
-	} else {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST);
-	}
+	handleApiCommandPost(request, response, F("toggle"), F("toggle failed"));
 }
 
 
@@ -1400,28 +1540,26 @@ void ApplicationWebserver::onHosts(HttpRequest& request, HttpResponse& response)
 {
     if(!preflightRequest(request, response, {HttpMethod::GET})) return;
 
-    if(!app.controllers) {
-        setCorsHeaders(response);
-		debug_i("Controllers not initialized");
-        sendApiCode(response, API_CODES::API_BAD_REQUEST, F("Controllers not initialized"));
-        return;
-    }
+	if(!ensureApiInitialized(response)) {
+		return;
+	}
 
-    bool showAll = request.getQueryParameter(F("all")) == "1" || request.getQueryParameter(F("all")) == "true";
-	bool showDebug= request.getQueryParameter(F("debug"))== "1" || request.getQueryParameter(F("debug")) == "true";
+	StaticJsonDocument<96> paramsDoc;
+	JsonObject params = paramsDoc.to<JsonObject>();
+	params[F("all")] = request.getQueryParameter(F("all"));
+	params[F("debug")] = request.getQueryParameter(F("debug"));
 
-    Controllers::JsonFilter filter;
-    if (showAll || showDebug) {
-        filter = Controllers::ALL_ENTRIES;  // Show all controllers including incomplete ones
-    } else {
-        filter = Controllers::VISIBLE_ONLY; // Show only visible/online controllers
-    }
+	std::unique_ptr<IDataSourceStream> stream;
+	String errorMsg;
+	if(!app.api->dispatchStream(F("hosts"), params, stream, errorMsg)) {
+		setCorsHeaders(response);
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, errorMsg.length() ? errorMsg : F("could not create hosts response"));
+		return;
+	}
 
     setCorsHeaders(response);
     response.setContentType(MIME_JSON);
 
-    // Use the JsonStream for automatic streaming
-    auto stream = app.controllers->createJsonStream(filter, false); // Compact format for HTTP
     response.sendDataStream(stream.release(), MIME_JSON);
 
 //todo 
@@ -1467,17 +1605,18 @@ void ApplicationWebserver::onSetOn(HttpRequest &request, HttpResponse &response)
 	debug_i("onSetOn");
 		
 	String body = request.getBody();
-	StaticJsonDocument<512> doc;
-	DeserializationError err = deserializeJson(doc, body);
-	if (err) {
-		sendApiCode(response, API_BAD_REQUEST, F("Invalid JSON"));
+	if(!ensureApiInitialized(response)) {
 		return;
 	}
-	String msg;
-		if (app.jsonproc.onSetOn(doc.as<JsonObject>(), msg, true)) {
+
+	StaticJsonDocument<512> doc;
+	if(!parseJsonBody(body, response, doc, false)) {
+		return;
+	}
+	if(dispatchApiCommand(response, F("setOn"), doc.as<JsonObject>(), F("setOn failed"), true)) {
 		sendApiCode(response, API_SUCCESS, F("SetOn OK"));
 	} else {
-		sendApiCode(response, API_BAD_REQUEST, msg);
+		return;
 	}
 }
 
@@ -1487,17 +1626,18 @@ void ApplicationWebserver::onSetOff(HttpRequest &request, HttpResponse &response
 	debug_i("onSetOff");
 
 	String body = request.getBody();
-	StaticJsonDocument<512> doc;
-	DeserializationError err = deserializeJson(doc, body);
-	if (err) {
-		sendApiCode(response, API_BAD_REQUEST, F("Invalid JSON"));
+	if(!ensureApiInitialized(response)) {
 		return;
 	}
-	String msg;
-		if (app.jsonproc.onSetOff(doc.as<JsonObject>(), msg, true)) {
+
+	StaticJsonDocument<512> doc;
+	if(!parseJsonBody(body, response, doc, false)) {
+		return;
+	}
+	if(dispatchApiCommand(response, F("setOff"), doc.as<JsonObject>(), F("setOff failed"), true)) {
 		sendApiCode(response, API_SUCCESS, F("SetOff OK"));
 	} else {
-		sendApiCode(response, API_BAD_REQUEST, msg);
+		return;
 	}
 }
 
