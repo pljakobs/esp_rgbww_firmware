@@ -24,6 +24,7 @@ jobs:
     outputs:
       fw_version: ${{ steps.version.outputs.fw_version }}
       fw_branch: ${{ steps.version.outputs.fw_branch }}
+      fw_comment_b64: ${{ steps.version.outputs.fw_comment_b64 }}
       latest_run_id: ${{ steps.get_run.outputs.latest_run_id }}  
       supported_socs: ${{ steps.version.outputs.supported_socs }}
       
@@ -110,6 +111,7 @@ jobs:
           source ./version-info/version-info.txt
           echo "fw_version=$fw_version" >> $GITHUB_OUTPUT
           echo "fw_branch=$fw_branch" >> $GITHUB_OUTPUT
+          echo "fw_comment_b64=${fw_comment_b64:-}" >> $GITHUB_OUTPUT
           # Fall back to current known list for artifacts built before this change
           echo "supported_socs=${supported_socs:-esp8266,esp32,esp32c3}" >> $GITHUB_OUTPUT
 
@@ -138,6 +140,7 @@ jobs:
           echo "source_branch=$source_branch" >> $GITHUB_ENV
           echo "target_branch=$target_branch" >> $GITHUB_ENV
           echo "version=${{ needs.get-version.outputs.fw_version }}" >> $GITHUB_ENV
+          echo "version_comment_b64=${{ needs.get-version.outputs.fw_comment_b64 }}" >> $GITHUB_ENV
           echo "supported_socs=${{ needs.get-version.outputs.supported_socs }}" >> $GITHUB_ENV
    
       # Checkout main repository to get manage_version.py
@@ -272,6 +275,7 @@ jobs:
           DEPLOY_PATH="${{ env.deploy_path }}"
           TARGET_BRANCH="${{ env.target_branch }}"
           VERSION="${{ env.version }}"
+          COMMENT_B64="${{ env.version_comment_b64 }}"
           DEPLOY_SERVER="${{ env.deploy_server }}"
           SUPPORTED_SOCS="${{ env.supported_socs }}"
           
@@ -298,7 +302,7 @@ jobs:
               fi
               
               url="http://$DEPLOY_SERVER/download/$TARGET_BRANCH/$VERSION/$soc/$type/$bin_file"
-              python3 manage_version.py version.json add $soc $type $TARGET_BRANCH "$VERSION" "$url"
+              python3 manage_version.py version.json add $soc $type $TARGET_BRANCH "$VERSION" "$url" --comment-b64 "$COMMENT_B64"
               
               # ELF and map are sibling files — URL predictable by replacing bin filename.
               echo "ELF deployed at: http://$DEPLOY_SERVER/download/$TARGET_BRANCH/$VERSION/$soc/$type/$elf_file"
