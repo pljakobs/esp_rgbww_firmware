@@ -39,6 +39,7 @@ jobs:
           echo 'soc_csv=esp8266,esp32,esp32c3' >> $GITHUB_OUTPUT
 
   host-smoke:
+
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -141,15 +142,34 @@ jobs:
         env:
           MQTT_PASS: ${{ secrets.MQTT_PASS }}
           MQTT_USER: ${{ secrets.MQTT_USER }}
+          GITHUB_ACTIONS: 'true'
         run: |
           docker run --rm --privileged -v ${{ github.workspace }}:/workspace -w /workspace \
             -e GITHUB_RUN_NUMBER=${{ github.run_number }} \
+            -e GITHUB_ACTIONS=${{ env.GITHUB_ACTIONS }} \
             -e MQTT_PASS=${{ secrets.MQTT_PASS }} \
             -e MQTT_USER=${{ secrets.MQTT_USER }} \
             docker.io/pjakobs/sming:latest \
             bash -lc "git config --global --add safe.directory /workspace && bash ./.github/scripts/host_ci_smoke_test.sh"
 
-      - name: Upload Host smoke logs
+      - name: Display Host smoke test results
+        if: always()
+        run: |
+          echo "::group::Host Emulator Smoke Test - Full Results"
+          if [ -f out/host-ci/test_summary.md ]; then
+            cat out/host-ci/test_summary.md
+          else
+            echo "⚠️  Test summary not found"
+          fi
+          echo "::endgroup::"
+          
+          echo "::group::Host Emulator Application Log"
+          if [ -f out/host-ci/host-smoke.log ]; then
+            tail -n 50 out/host-ci/host-smoke.log
+          fi
+          echo "::endgroup::"
+
+      - name: Upload Host smoke logs and results
         if: always()
         uses: actions/upload-artifact@v7
         with:
@@ -159,6 +179,16 @@ jobs:
             out/Host/debug/firmware/app.cfg
             out/Host/debug/firmware/partitions.bin
           if-no-files-found: warn
+          retention-days: 30
+
+      - name: Create Job Summary
+        if: always()
+        run: |
+          if [ -f out/host-ci/test_summary.md ]; then
+            echo "## 🧪 Host Emulator Smoke Test Results" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            cat out/host-ci/test_summary.md >> $GITHUB_STEP_SUMMARY
+          fi
 
   build:
     needs: [generate-matrix, host-smoke]
