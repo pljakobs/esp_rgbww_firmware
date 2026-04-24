@@ -1,0 +1,573 @@
+name: firmwareBuild
+
+permissions:
+  contents: write
+
+on:
+  push:
+    branches: [stable, testing, develop, experimental]
+  pull_request:
+    branches: [stable, testing, develop, experimental]
+  repository_dispatch:
+    types: [frontend-build-completed]
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to build'
+        required: true
+        default: 'develop'
+        type: choice
+        options:
+          - stable
+          - testing
+          - develop
+          - experimental
+
+jobs:
+  # Single source of truth for supported SOCs.
+  # Update soc_json/soc_csv here when adding an SOC.
+  generate-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      soc_json: ${{ steps.set.outputs.soc_json }}
+      soc_csv: ${{ steps.set.outputs.soc_csv }}
+    steps:
+      - name: Define supported SOCs
+        id: set
+        run: |
+          echo 'soc_json=["esp8266","esp32","esp32c3"]' >> $GITHUB_OUTPUT
+          echo 'soc_csv=esp8266,esp32,esp32c3' >> $GITHUB_OUTPUT
+
+  host-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Determine branch
+        id: get_branch
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "branch=${{ github.event.inputs.branch }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" == "repository_dispatch" ]; then
+            echo "branch=${{ github.event.client_payload.branch }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" == "push" ]; then
+            echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" == "pull_request" ]; then
+            echo "branch=${{ github.head_ref }}" >> $GITHUB_OUTPUT
+          else
+            echo "branch=develop" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Map firmware branch to webapp branch
+        id: map_webapp_branch
+        run: |
+          FIRMWARE_BRANCH="${{ steps.get_branch.outputs.branch }}"
+          case "$FIRMWARE_BRANCH" in
+            "develop")
+              WEBAPP_BRANCH="devel"
+              ;;
+            "testing")
+              WEBAPP_BRANCH="testing"
+              ;;
+            "stable")
+              WEBAPP_BRANCH="stable"
+              ;;
+            "experimental")
+              WEBAPP_BRANCH="experimental"
+              ;;
+            *)
+              WEBAPP_BRANCH="devel"
+              ;;
+          esac
+          echo "webapp_branch=$WEBAPP_BRANCH" >> $GITHUB_OUTPUT
+          echo "Firmware branch: $FIRMWARE_BRANCH -> Webapp branch: $WEBAPP_BRANCH"
+
+      - name: Sanitize branch name for artifact
+        id: sanitize_branch
+        run: |
+          BRANCH="${{ steps.get_branch.outputs.branch }}"
+          SANITIZED_BRANCH=${BRANCH//\//-}
+          SANITIZED_BRANCH=${SANITIZED_BRANCH//\\/-}
+          SANITIZED_BRANCH=${SANITIZED_BRANCH//\?/-}
+          SANITIZED_BRANCH=${SANITIZED_BRANCH//\:/-}
+          SANITIZED_BRANCH=${SANITIZED_BRANCH//\*/-}
+          SANITIZED_BRANCH=${SANITIZED_BRANCH//\"/-}
+          SANITIZED_BRANCH=${SANITIZED_BRANCH//\</-}
+          SANITIZED_BRANCH=${SANITIZED_BRANCH//\>/-}
+          SANITIZED_BRANCH=${SANITIZED_BRANCH//\|/-}
+          echo "sanitized_branch=$SANITIZED_BRANCH" >> $GITHUB_OUTPUT
+
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.get_branch.outputs.branch }}
+          fetch-depth: 0
+
+      - name: Synchronize submodules
+        run: |
+          git submodule sync --recursive
+          git submodule update --init --recursive
+
+      - name: Pull Docker Image
+        run: docker pull docker.io/pjakobs/sming:latest
+
+      - name: Download fileList.h artifact
+        run: |
+          WEBAPP_BRANCH="${{ steps.map_webapp_branch.outputs.webapp_branch }}"
+          if [ -f ./include/fileList.h ]; then
+            rm ./include/fileList.h
+          fi
+          artifact_url="https://pljakobs.github.io/esp_rgb_webapp2/${WEBAPP_BRANCH}/fileList.h"
+          echo "Downloading fileList.h from: $artifact_url"
+          curl -L -o fileList.h "$artifact_url"
+          mv fileList.h ./include
+
+      - name: Download webapp files artifact
+        run: |
+          WEBAPP_BRANCH="${{ steps.map_webapp_branch.outputs.webapp_branch }}"
+          if [ -d ./webapp ]; then
+            rm -rf ./webapp
+          fi
+          mkdir -p ./webapp
+          artifact_url="https://pljakobs.github.io/esp_rgb_webapp2/${WEBAPP_BRANCH}/spa-files.zip"
+          echo "Downloading webapp files from: $artifact_url"
+          curl -L -o spa-files.zip "$artifact_url"
+          unzip spa-files.zip -d ./webapp
+          mv ./webapp/dist/spa/* ./webapp
+          rm -rf ./webapp/dist/spa
+          echo "webapp files version"
+          cat ./webapp/VERSION
+
+      - name: Run Host smoke test in Docker Container
+        env:
+          MQTT_PASS: ${{ secrets.MQTT_PASS }}
+          MQTT_USER: ${{ secrets.MQTT_USER }}
+        run: |
+          docker run --rm --privileged -v ${{ github.workspace }}:/workspace -w /workspace \
+            -e GITHUB_RUN_NUMBER=${{ github.run_number }} \
+            -e MQTT_PASS=${{ secrets.MQTT_PASS }} \
+            -e MQTT_USER=${{ secrets.MQTT_USER }} \
+            docker.io/pjakobs/sming:latest \
+            bash -lc "git config --global --add safe.directory /workspace && ./.github/scripts/host_ci_smoke_test.sh"
+
+      - name: Upload Host smoke logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: host-smoke-${{ steps.sanitize_branch.outputs.sanitized_branch }}
+          path: |
+            out/host-ci/
+            out/Host/debug/firmware/app.cfg
+            out/Host/debug/firmware/partitions.bin
+          if-no-files-found: warn
+
+  build:
+    needs: [generate-matrix, host-smoke]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        soc: ${{ fromJson(needs.generate-matrix.outputs.soc_json) }}
+        release: [0, 1]
+        single: [0, 1]
+
+    steps:
+      - name: Determine branch
+        id: get_branch
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "branch=${{ github.event.inputs.branch }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" == "repository_dispatch" ]; then
+            echo "branch=${{ github.event.client_payload.branch }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" == "push" ]; then
+            echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" == "pull_request" ]; then
+            echo "branch=${{ github.head_ref }}" >> $GITHUB_OUTPUT
+          else
+            echo "branch=develop" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Map firmware branch to webapp branch
+        id: map_webapp_branch
+        run: |
+          FIRMWARE_BRANCH="${{ steps.get_branch.outputs.branch }}"
+          case "$FIRMWARE_BRANCH" in
+            "develop")
+              WEBAPP_BRANCH="devel"
+              ;;
+            "testing")
+              WEBAPP_BRANCH="testing"
+              ;;
+            "stable")
+              WEBAPP_BRANCH="stable"
+              ;;
+            "experimental")
+              WEBAPP_BRANCH="experimental"
+              ;;
+            *)
+              WEBAPP_BRANCH="devel"
+              ;;
+          esac
+          echo "webapp_branch=$WEBAPP_BRANCH" >> $GITHUB_OUTPUT
+          echo "Firmware branch: $FIRMWARE_BRANCH -> Webapp branch: $WEBAPP_BRANCH"
+
+      - name: Sanitize branch name for artifact
+        id: sanitize_branch
+        run: |
+          # Get the original branch name
+          BRANCH="${{ steps.get_branch.outputs.branch }}"
+          
+          # Replace forward slashes with hyphens
+          SANITIZED_BRANCH=${BRANCH//\//-}
+          
+          # Replace other problematic characters
+          SANITIZED_BRANCH=${SANITIZED_BRANCH//\\/-}
+          SANITIZED_BRANCH=${SANITIZED_BRANCH//\?/-}
+          SANITIZED_BRANCH=${SANITIZED_BRANCH//\:/-}
+          SANITIZED_BRANCH=${SANITIZED_BRANCH//\*/-}
+          SANITIZED_BRANCH=${SANITIZED_BRANCH//\"/-}
+          SANITIZED_BRANCH=${SANITIZED_BRANCH//\</-}
+          SANITIZED_BRANCH=${SANITIZED_BRANCH//\>/-}
+          SANITIZED_BRANCH=${SANITIZED_BRANCH//\|/-}
+          
+          echo "sanitized_branch=$SANITIZED_BRANCH" >> $GITHUB_OUTPUT
+
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.get_branch.outputs.branch }}
+          fetch-depth: 0
+
+      - name: Resolve PR body for release notes
+        id: pr_notes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          pr_body=""
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            pr_body=$(jq -r '.pull_request.body // ""' "$GITHUB_EVENT_PATH")
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            pr_body=$(curl -fsSL \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer $GITHUB_TOKEN" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/${{ github.repository }}/commits/${{ github.sha }}/pulls" \
+              | jq -r 'map(select((.body // "") != "")) | first | .body // ""')
+          fi
+
+          pr_body_b64=$(printf '%s' "$pr_body" | base64 -w0)
+          echo "fw_comment_b64=$pr_body_b64" >> $GITHUB_OUTPUT
+          echo "Resolved PR body length: $(printf '%s' "$pr_body" | wc -c)"
+
+      - name: Get firmware version
+        id: get_fw_info
+        run: |
+          git fetch --tags --force
+
+          branch="${{ steps.sanitize_branch.outputs.sanitized_branch }}"
+
+          # Base version source: latest stable/testing release-like tag v5.x.y.
+          latest_base_tag=$(git tag --list 'v5.*' | grep -E '^v5\.[0-9]+\.[0-9]+$' | sort -V | tail -n1)
+          if [ -z "$latest_base_tag" ]; then
+            latest_base_tag="v5.0.0"
+          fi
+
+          base_no_v="${latest_base_tag#v}"
+          major="${base_no_v%%.*}"
+          rest="${base_no_v#*.}"
+          x="${rest%%.*}"
+          y="${rest#*.}"
+
+          effective_branch="${{ steps.get_branch.outputs.branch }}"
+          event_name="${{ github.event_name }}"
+
+          # Branch policy:
+          # - push stable: bump x, reset y, emit clean release version/tag
+          # - push testing: bump y, emit clean release version/tag
+          # - push develop/experimental: emit prerelease version/tag for the
+          #   active line. Preserve the current legacy v5.0.0-N-* stream until
+          #   a clean testing/stable tag advances the line, then reset the
+          #   prerelease sequence for the next patch line.
+          if [ "$event_name" = "push" ] && [ "$effective_branch" = "stable" ]; then
+            x=$((x + 1))
+            y=0
+          elif [ "$event_name" = "push" ] && [ "$effective_branch" = "testing" ]; then
+            y=$((y + 1))
+          elif [ "$effective_branch" = "develop" ] || [ "$effective_branch" = "experimental" ]; then
+            prerelease_current=$(git tag --list | grep -E "^v${major}\.${x}\.${y}-[0-9]+(-[A-Za-z0-9._-]+)?$" | sort -V | tail -n1)
+            if [ -n "$prerelease_current" ] && [ "$y" -eq 0 ]; then
+              :
+            else
+              y=$((y + 1))
+            fi
+          fi
+
+          semver_base="${major}.${x}.${y}"
+
+          if [ "$effective_branch" = "stable" ] || [ "$effective_branch" = "testing" ]; then
+            version="V${semver_base}"
+            build_tag="v${semver_base}"
+          else
+            prerelease_last=$(git tag --list | grep -E "^v${semver_base}-[0-9]+(-[A-Za-z0-9._-]+)?$" | sed -E 's/^v[0-9]+\.[0-9]+\.[0-9]+-([0-9]+)(-[A-Za-z0-9._-]+)?$/\1/' | sort -n | tail -n1)
+            if [ -z "$prerelease_last" ]; then
+              prerelease_seq=1
+            else
+              prerelease_seq=$((prerelease_last + 1))
+            fi
+
+            version="V${semver_base}-${prerelease_seq}-${branch}"
+            build_tag="v${semver_base}-${prerelease_seq}-${branch}"
+          fi
+
+          echo "fw_version=$version" >> $GITHUB_OUTPUT
+          echo "fw_semver_base=$semver_base" >> $GITHUB_OUTPUT
+          echo "fw_build_tag=$build_tag" >> $GITHUB_OUTPUT
+          echo "fw_branch=$branch" >> $GITHUB_OUTPUT
+
+          echo "Using base tag: $latest_base_tag"
+          echo "Computed semver base: $semver_base"
+          echo "Computed fw_version: $version"
+          echo "Computed build tag: $build_tag"
+
+      - name: Synchronize submodules
+        run: |
+          git submodule sync --recursive
+          git submodule update --init --recursive
+
+      - name: Pull Docker Image
+        run: docker pull docker.io/pjakobs/sming:latest
+
+      - name: Download fileList.h artifact
+        run: |
+          WEBAPP_BRANCH="${{ steps.map_webapp_branch.outputs.webapp_branch }}"
+          if [ -f ./include/fileList.h ]; then
+            echo "removing fileList.h"
+            rm ./include/fileList.h
+          fi
+          artifact_url="https://pljakobs.github.io/esp_rgb_webapp2/${WEBAPP_BRANCH}/fileList.h"
+          echo "Downloading fileList.h from: $artifact_url"
+          curl -L -o fileList.h "$artifact_url"
+          mv fileList.h ./include
+
+      - name: Download webapp files artifact
+        run: |
+          WEBAPP_BRANCH="${{ steps.map_webapp_branch.outputs.webapp_branch }}"
+          if [ -d ./webapp ]; then
+            echo "removing and re-creating webapp directory"
+            rm -rf ./webapp
+            mkdir ./webapp
+          fi
+          artifact_url="https://pljakobs.github.io/esp_rgb_webapp2/${WEBAPP_BRANCH}/spa-files.zip"
+          echo "Downloading webapp files from: $artifact_url"
+          curl -L -o spa-files.zip "$artifact_url"
+          unzip spa-files.zip -d ./webapp
+          mv ./webapp/dist/spa/* ./webapp
+          rm -rf ./webapp/dist/spa
+          echo "webapp files version"
+          cat ./webapp/VERSION
+
+      - name: Build partition map (ESP8266 only)
+        if: ${{ matrix.soc == 'esp8266' }}
+        run: |
+          docker run --rm --privileged -v ${{ github.workspace }}:/workspace -w /workspace \
+            docker.io/pjakobs/sming:latest \
+            bash -c "git config --global --add safe.directory /workspace && \
+               source /opt/Sming/Tools/export.sh && \
+               make partmap-build GIT_VERSION='${{ steps.get_fw_info.outputs.fw_version }}' SMING_SOC=${{ matrix.soc }} SMING_RELEASE=${{ matrix.release }}"
+
+      - name: Run Build in Docker Container
+        env:
+          MQTT_PASS: ${{ secrets.MQTT_PASS }}
+          MQTT_USER: ${{ secrets.MQTT_USER }}
+        run: |
+          if [ "${{ matrix.single }}" = "0" ]; then 
+            docker run --rm --privileged -v ${{ github.workspace }}:/workspace -w /workspace \
+              -e GITHUB_RUN_NUMBER=${{ github.run_number }} \
+              -e MQTT_PASS=${{ secrets.MQTT_PASS }} \
+              -e MQTT_USER=${{ secrets.MQTT_USER }} \
+              docker.io/pjakobs/sming:latest \
+              bash -c "git config --global --add safe.directory /workspace && \
+              source /opt/Sming/Tools/export.sh && \
+              make configdb-rebuild && \
+              make GIT_VERSION='${{ steps.get_fw_info.outputs.fw_version }}' SMING_SOC=${{ matrix.soc }} SMING_RELEASE=${{ matrix.release }} DISABLE_WERROR=1 COM_SPEED=115200" 
+          else 
+            docker run --rm --privileged -v ${{ github.workspace }}:/workspace -w /workspace \
+              -e GITHUB_RUN_NUMBER=${{ github.run_number }} \
+              -e MQTT_PASS=${{ secrets.MQTT_PASS }} \
+              -e MQTT_USER=${{ secrets.MQTT_USER }} \
+              docker.io/pjakobs/sming:latest \
+              bash -c "git config --global --add safe.directory /workspace && \
+              source /opt/Sming/Tools/export.sh && \
+              make configdb-rebuild && \
+              make mergeflash GIT_VERSION='${{ steps.get_fw_info.outputs.fw_version }}' SMING_SOC=${{ matrix.soc }} SMING_RELEASE=${{ matrix.release }} DISABLE_WERROR=1 COM_SPEED=115200" 
+          fi
+
+      - name: Set firmware path
+        id: set_firmware_path
+        run: |
+          if [ "${{ matrix.soc }}" = "esp8266" ] && [ "${{ matrix.release }}" = "0" ] && [ "${{ matrix.single }}" = "0" ]; then
+            echo "path=out/Esp8266/debug/firmware/rom0.bin" >> $GITHUB_OUTPUT
+          elif [ "${{ matrix.soc }}" = "esp8266" ] && [ "${{ matrix.release }}" = "1" ] && [ "${{ matrix.single }}" = "0" ]; then
+            echo "path=out/Esp8266/release/firmware/rom0.bin" >> $GITHUB_OUTPUT
+          elif [ "${{ matrix.soc }}" = "esp32" ] && [ "${{ matrix.release }}" = "0" ] && [ "${{ matrix.single }}" = "0" ]; then
+            echo "path=out/Esp32/esp32/debug/firmware/app.bin" >> $GITHUB_OUTPUT
+          elif [ "${{ matrix.soc }}" = "esp32" ] && [ "${{ matrix.release }}" = "1" ] && [ "${{ matrix.single }}" = "0" ]; then
+            echo "path=out/Esp32/esp32/release/firmware/app.bin" >> $GITHUB_OUTPUT
+          elif [ "${{ matrix.soc }}" = "esp32c3" ] && [ "${{ matrix.release }}" = "0" ] && [ "${{ matrix.single }}" = "0" ]; then
+            echo "path=out/Esp32/esp32c3/debug/firmware/app.bin" >> $GITHUB_OUTPUT
+          elif [ "${{ matrix.soc }}" = "esp32c3" ] && [ "${{ matrix.release }}" = "1" ] && [ "${{ matrix.single }}" = "0" ]; then
+            echo "path=out/Esp32/esp32c3/release/firmware/app.bin" >> $GITHUB_OUTPUT
+          elif [ "${{ matrix.soc }}" = "esp8266" ] && [ "${{ matrix.release }}" = "0" ] && [ "${{ matrix.single }}" = "1" ]; then
+            echo "path=out/Esp8266/debug/firmware/app-merged.bin" >> $GITHUB_OUTPUT
+          elif [ "${{ matrix.soc }}" = "esp8266" ] && [ "${{ matrix.release }}" = "1" ] && [ "${{ matrix.single }}" = "1" ]; then
+            echo "path=out/Esp8266/release/firmware/app-merged.bin" >> $GITHUB_OUTPUT
+          elif [ "${{ matrix.soc }}" = "esp32" ] && [ "${{ matrix.release }}" = "0" ] && [ "${{ matrix.single }}" = "1" ]; then
+            echo "path=out/Esp32/esp32/debug/firmware/app-merged.bin" >> $GITHUB_OUTPUT
+          elif [ "${{ matrix.soc }}" = "esp32" ] && [ "${{ matrix.release }}" = "1" ] && [ "${{ matrix.single }}" = "1" ]; then
+            echo "path=out/Esp32/esp32/release/firmware/app-merged.bin" >> $GITHUB_OUTPUT
+          elif [ "${{ matrix.soc }}" = "esp32c3" ] && [ "${{ matrix.release }}" = "0" ] && [ "${{ matrix.single }}" = "1" ]; then
+            echo "path=out/Esp32/esp32c3/debug/firmware/app-merged.bin" >> $GITHUB_OUTPUT
+          elif [ "${{ matrix.soc }}" = "esp32c3" ] && [ "${{ matrix.release }}" = "1" ] && [ "${{ matrix.single }}" = "1" ]; then
+            echo "path=out/Esp32/esp32c3/release/firmware/app-merged.bin" >> $GITHUB_OUTPUT
+          else
+            echo "path=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set artifact name
+        id: set_artifact_name
+        run: |
+          if [ "${{ matrix.single }}" = "1" ]; then
+            tag="-single_image"
+          else
+            tag=""
+          fi
+          if [ "${{ matrix.release }}" = "1" ]; then
+            echo "artifact_name=lightinator-${{ matrix.soc }}-release${tag}-${{ steps.sanitize_branch.outputs.sanitized_branch }}" >> $GITHUB_OUTPUT
+          else
+            echo "artifact_name=lightinator-${{ matrix.soc }}-debug${tag}-${{ steps.sanitize_branch.outputs.sanitized_branch }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set ELF path
+        id: set_elf_path
+        # Only for non-single-image builds: single images share the same ELF as their counterpart
+        if: ${{ matrix.single == 0 }}
+        run: |
+          if [ "${{ matrix.soc }}" = "esp8266" ] && [ "${{ matrix.release }}" = "0" ]; then
+            echo "elf=out/Esp8266/debug/build/app_0.out" >> $GITHUB_OUTPUT
+            echo "map=out/Esp8266/debug/build/app_0.map" >> $GITHUB_OUTPUT
+          elif [ "${{ matrix.soc }}" = "esp8266" ] && [ "${{ matrix.release }}" = "1" ]; then
+            echo "elf=out/Esp8266/release/build/app_0.out" >> $GITHUB_OUTPUT
+            echo "map=out/Esp8266/release/build/app_0.map" >> $GITHUB_OUTPUT
+          elif [ "${{ matrix.soc }}" = "esp32" ] && [ "${{ matrix.release }}" = "0" ]; then
+            echo "elf=out/Esp32/esp32/debug/build/app.out" >> $GITHUB_OUTPUT
+            echo "map=out/Esp32/esp32/debug/build/app.map" >> $GITHUB_OUTPUT
+          elif [ "${{ matrix.soc }}" = "esp32" ] && [ "${{ matrix.release }}" = "1" ]; then
+            echo "elf=out/Esp32/esp32/release/build/app.out" >> $GITHUB_OUTPUT
+            echo "map=out/Esp32/esp32/release/build/app.map" >> $GITHUB_OUTPUT
+          elif [ "${{ matrix.soc }}" = "esp32c3" ] && [ "${{ matrix.release }}" = "0" ]; then
+            echo "elf=out/Esp32/esp32c3/debug/build/app.out" >> $GITHUB_OUTPUT
+            echo "map=out/Esp32/esp32c3/debug/build/app.map" >> $GITHUB_OUTPUT
+          elif [ "${{ matrix.soc }}" = "esp32c3" ] && [ "${{ matrix.release }}" = "1" ]; then
+            echo "elf=out/Esp32/esp32c3/release/build/app.out" >> $GITHUB_OUTPUT
+            echo "map=out/Esp32/esp32c3/release/build/app.map" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Stage artifacts for upload
+        id: stage
+        if: ${{ steps.set_firmware_path.outputs.path != '' }}
+        run: |
+          mkdir -p _upload
+          cp "${{ steps.set_firmware_path.outputs.path }}" _upload/
+          if [ "${{ matrix.single }}" = "0" ]; then
+            [ -f "${{ steps.set_elf_path.outputs.elf }}" ] && cp "${{ steps.set_elf_path.outputs.elf }}" _upload/ || true
+            [ -f "${{ steps.set_elf_path.outputs.map }}" ] && cp "${{ steps.set_elf_path.outputs.map }}" _upload/ || true
+          fi
+
+      - name: Upload firmware artifact
+        if: ${{ steps.set_firmware_path.outputs.path != '' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.set_artifact_name.outputs.artifact_name }}
+          path: _upload/
+          
+      - name: Create version info file
+        run: |
+          echo "fw_version=${{ steps.get_fw_info.outputs.fw_version }}" > version-info.txt
+          echo "fw_branch=${{ steps.sanitize_branch.outputs.sanitized_branch }}" >> version-info.txt
+          echo "fw_comment_b64=${{ steps.pr_notes.outputs.fw_comment_b64 }}" >> version-info.txt
+          echo "supported_socs=${{ needs.generate-matrix.outputs.soc_csv }}" >> version-info.txt
+        
+      - name: Save version info
+        # Only upload version info from one specific matrix combination to avoid conflicts
+        if: ${{ matrix.soc == 'esp8266' && matrix.release == 0 && matrix.single == 0 }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: version-info-${{ steps.sanitize_branch.outputs.sanitized_branch }}
+          path: version-info.txt
+
+      - name: Tag release
+        if: |
+          github.event_name == 'push' &&
+          matrix.soc == 'esp8266' &&
+          matrix.release == 0 &&
+          matrix.single == 0
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          tag_name='${{ steps.get_fw_info.outputs.fw_build_tag }}'
+          if git rev-parse "$tag_name" >/dev/null 2>&1; then
+            echo "Tag $tag_name already exists, skipping"
+            exit 0
+          fi
+          git tag "$tag_name"
+          git push origin "$tag_name"
+
+      - name: Notify webapp of schema update
+        # Runs once per push (same matrix guard as Tag release).
+        # Requires secrets.WEBAPP_DISPATCH_TOKEN with scopes: repo + workflow
+        # on the pljakobs/esp_rgb_webapp2 repository.
+        if: |
+          github.event_name == 'push' &&
+          matrix.soc == 'esp8266' &&
+          matrix.release == 0 &&
+          matrix.single == 0
+        run: |
+          FIRMWARE_REF="${{ steps.get_fw_info.outputs.fw_version }}"
+          FIRMWARE_SHA="${{ github.sha }}"
+          FIRMWARE_BRANCH="${{ steps.get_branch.outputs.branch }}"
+
+          # Map firmware branch to webapp base branch
+          case "$FIRMWARE_BRANCH" in
+            develop)     WEBAPP_BASE="devel"   ;;
+            testing)     WEBAPP_BASE="testing" ;;
+            stable|main) WEBAPP_BASE="stable"  ;;
+            *)           WEBAPP_BASE="devel"   ;;
+          esac
+
+          echo "Dispatching firmware-schema-update to esp_rgb_webapp2 (base: $WEBAPP_BASE)"
+
+          HTTP_CODE=$(curl -sS -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.WEBAPP_DISPATCH_TOKEN }}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -H "Content-Type: application/json" \
+            -w "\n%{http_code}" \
+            -o /tmp/dispatch_response.json \
+            https://api.github.com/repos/pljakobs/esp_rgb_webapp2/dispatches \
+            -d "$(jq -nc \
+              --arg et firmware-schema-update \
+              --arg ref "$FIRMWARE_REF" \
+              --arg sha "$FIRMWARE_SHA" \
+              --arg branch "$FIRMWARE_BRANCH" \
+              '{event_type:$et,client_payload:{firmware_ref:$ref,firmware_sha:$sha,branch:$branch}}')" \
+            | tail -1)
+
+          echo "HTTP status: $HTTP_CODE"
+          if [ -s /tmp/dispatch_response.json ]; then cat /tmp/dispatch_response.json; fi
+
+          if [ "$HTTP_CODE" -ne "204" ]; then
+            echo "WARNING: schema-update dispatch failed (HTTP $HTTP_CODE). Verify WEBAPP_DISPATCH_TOKEN."
+            # Non-fatal: firmware build succeeded; schema sync can be done manually.
+          else
+            echo "✓ Webapp schema-update dispatched for $FIRMWARE_REF"
+          fi
