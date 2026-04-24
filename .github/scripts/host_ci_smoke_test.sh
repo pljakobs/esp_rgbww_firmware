@@ -86,6 +86,14 @@ ensure_pytest() {
 
 mkdir -p "$LOG_DIR"
 rm -f "$APP_LOG" "$LOG_DIR/info.json" "$HTTP_TRACE_LOG" "$MALFORMED_JSON_TRACE"
+{
+    echo "host_ci_smoke_test started"
+    echo "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    echo "pwd=$(pwd)"
+    echo "tap_if=$TAP_IF"
+    echo "host_cidr=$HOST_CIDR"
+    echo "app_ip=$APP_IP"
+} > "$LOG_DIR/run-info.txt"
 
 if ! ensure_ip_tool; then
   echo "cannot configure TAP interface without ip command" >&2

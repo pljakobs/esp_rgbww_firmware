@@ -138,6 +138,18 @@ jobs:
           echo "webapp files version"
           cat ./webapp/VERSION
 
+      - name: Prepare host-smoke artifact directory
+        if: always()
+        run: |
+          mkdir -p out/host-ci
+          {
+            echo "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "branch=${{ steps.get_branch.outputs.branch }}"
+            echo "webapp_branch=${{ steps.map_webapp_branch.outputs.webapp_branch }}"
+            echo "run_id=${{ github.run_id }}"
+            echo "run_attempt=${{ github.run_attempt }}"
+          } > out/host-ci/ci-bootstrap.txt
+
       - name: Run Host smoke test in Docker Container
         env:
           MQTT_PASS: ${{ secrets.MQTT_PASS }}
@@ -175,9 +187,9 @@ jobs:
         with:
           name: host-smoke-${{ steps.sanitize_branch.outputs.sanitized_branch }}
           path: |
-            out/host-ci/
-            out/Host/debug/firmware/app.cfg
-            out/Host/debug/firmware/partitions.bin
+            out/host-ci/**
+            out/Host/debug/firmware/**
+            out/Host/debug/config.mk
           if-no-files-found: warn
           retention-days: 30
 
