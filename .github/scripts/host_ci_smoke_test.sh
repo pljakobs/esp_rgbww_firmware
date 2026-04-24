@@ -91,7 +91,10 @@ else
   exit 1
 fi
 
+# Sming's export.sh references SMING_HOME directly and is not nounset-safe.
+set +u
 source "$export_script"
+set -u
 
 make configdb-rebuild
 make SMING_ARCH=Host flash DISABLE_WERROR=1 COM_SPEED=115200
