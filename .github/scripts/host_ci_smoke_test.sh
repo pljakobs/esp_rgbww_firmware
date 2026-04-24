@@ -12,6 +12,9 @@ LOG_DIR="${HOST_CI_LOG_DIR:-out/host-ci}"
 APP_LOG="${LOG_DIR}/host-smoke.log"
 PING_URL="http://${APP_IP}/ping"
 INFO_URL="http://${APP_IP}/info"
+WS_HOST="${WS_HOST:-$APP_IP}"
+WS_PORT="${WS_PORT:-80}"
+WS_PATH="${WS_PATH:-/ws}"
 
 cleanup() {
   set +e
@@ -99,6 +102,64 @@ set -u
 make configdb-rebuild
 make SMING_ARCH=Host flash DISABLE_WERROR=1 COM_SPEED=115200
 
+FLASH_BIN="${FIRMWARE_DIR}/flash.bin"
+PARTITIONS_BIN="${FIRMWARE_DIR}/partitions.bin"
+HOST_CONFIG_MK="out/Host/debug/config.mk"
+
+if [[ ! -f "$PARTITIONS_BIN" ]]; then
+  echo "Missing Host partition table: $PARTITIONS_BIN" >&2
+  exit 1
+fi
+
+if [[ ! -f "$HOST_CONFIG_MK" ]]; then
+  echo "Missing Host build config: $HOST_CONFIG_MK" >&2
+  exit 1
+fi
+
+PARTITION_OFFSET_HEX="$(awk -F= '/^PARTITION_TABLE_OFFSET=/{print $2; exit}' "$HOST_CONFIG_MK")"
+if [[ -z "$PARTITION_OFFSET_HEX" ]]; then
+  echo "Could not determine PARTITION_TABLE_OFFSET from $HOST_CONFIG_MK" >&2
+  exit 1
+fi
+
+# Ensure flash.bin exists and contains partitions.bin at PARTITION_TABLE_OFFSET.
+python3 - "$FLASH_BIN" "$PARTITIONS_BIN" "$PARTITION_OFFSET_HEX" <<'PY'
+import os
+import sys
+
+flash_path = sys.argv[1]
+partitions_path = sys.argv[2]
+partition_offset = int(sys.argv[3], 0)
+
+with open(partitions_path, "rb") as f:
+    partitions = f.read()
+
+if not partitions:
+    raise SystemExit(f"Partition table is empty: {partitions_path}")
+
+flash_size = 4 * 1024 * 1024
+required_size = max(flash_size, partition_offset + len(partitions))
+
+if not os.path.exists(flash_path):
+    with open(flash_path, "wb") as f:
+        f.truncate(required_size)
+
+with open(flash_path, "r+b") as f:
+    current_size = os.path.getsize(flash_path)
+    if current_size < required_size:
+        f.truncate(required_size)
+    f.seek(partition_offset)
+    current = f.read(len(partitions))
+    if current != partitions:
+        f.seek(partition_offset)
+        f.write(partitions)
+        f.flush()
+        os.fsync(f.fileno())
+        print(f"Injected partition table into {flash_path} at 0x{partition_offset:x}")
+    else:
+        print(f"Partition table already present in {flash_path} at 0x{partition_offset:x}")
+PY
+
 if "$IP_BIN" link show "$TAP_IF" >/dev/null 2>&1; then
   "$IP_BIN" link del "$TAP_IF"
 fi
@@ -149,6 +210,56 @@ if [[ "$ready" != "1" ]]; then
   tail -n 200 "$APP_LOG" >&2 || true
   exit 1
 fi
+
+python3 - "$WS_HOST" "$WS_PORT" "$WS_PATH" <<'PY'
+import base64
+import hashlib
+import socket
+import sys
+
+host = sys.argv[1]
+port = int(sys.argv[2])
+path = sys.argv[3]
+
+nonce = base64.b64encode(b"host-ci-websocket-key").decode("ascii")
+request = (
+  f"GET {path} HTTP/1.1\r\n"
+  f"Host: {host}:{port}\r\n"
+  "Upgrade: websocket\r\n"
+  "Connection: Upgrade\r\n"
+  f"Sec-WebSocket-Key: {nonce}\r\n"
+  "Sec-WebSocket-Version: 13\r\n"
+  "\r\n"
+)
+
+with socket.create_connection((host, port), timeout=5) as sock:
+  sock.sendall(request.encode("ascii"))
+  response = sock.recv(4096).decode("latin-1", errors="replace")
+
+status_line = response.split("\r\n", 1)[0].strip()
+if "101" not in status_line:
+  raise SystemExit(f"WebSocket handshake failed: {status_line}\n{response}")
+
+headers = {}
+for line in response.split("\r\n")[1:]:
+  if not line:
+    break
+  if ":" in line:
+    k, v = line.split(":", 1)
+    headers[k.strip().lower()] = v.strip()
+
+expected_accept = base64.b64encode(
+  hashlib.sha1((nonce + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode("ascii")).digest()
+).decode("ascii")
+
+accept = headers.get("sec-websocket-accept", "")
+if accept != expected_accept:
+  raise SystemExit(
+    f"Invalid Sec-WebSocket-Accept header: {accept!r} != {expected_accept!r}"
+  )
+
+print(f"WebSocket handshake OK: {status_line}")
+PY
 
 python3 - "$INFO_URL" "$APP_IP" "$LOG_DIR/info.json" <<'PY'
 import json
