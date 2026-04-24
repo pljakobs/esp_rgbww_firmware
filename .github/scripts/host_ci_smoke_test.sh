@@ -15,6 +15,7 @@ INFO_URL="http://${APP_IP}/info"
 WS_HOST="${WS_HOST:-$APP_IP}"
 WS_PORT="${WS_PORT:-80}"
 WS_PATH="${WS_PATH:-/ws}"
+COLOR_URL="http://${APP_IP}/color"
 
 cleanup() {
   set +e
@@ -99,7 +100,7 @@ set +u
 source "$export_script"
 set -u
 
-make configdb-rebuild
+make SMING_ARCH=Host configdb-rebuild
 make SMING_ARCH=Host flash DISABLE_WERROR=1 COM_SPEED=115200
 
 FLASH_BIN="${FIRMWARE_DIR}/flash.bin"
@@ -290,6 +291,146 @@ print(json.dumps({
     "build_type": payload.get("build_type"),
     "sming": payload.get("sming"),
     "ip": actual_ip,
+}, sort_keys=True))
+PY
+
+python3 - "$COLOR_URL" <<'PY'
+import http.client
+import json
+import sys
+import urllib.error
+import urllib.request
+
+url = sys.argv[1]
+bad_payload = b'{"raw":{"r":12,"g":34'
+request = urllib.request.Request(
+  url,
+  data=bad_payload,
+  headers={"Content-Type": "application/json"},
+  method="POST",
+)
+
+try:
+  with urllib.request.urlopen(request, timeout=5) as response:
+    status = response.status
+    body = response.read().decode("utf-8", errors="replace")
+except urllib.error.HTTPError as exc:
+  status = exc.code
+  try:
+    body = exc.read().decode("utf-8", errors="replace")
+  except http.client.IncompleteRead as incomplete:
+    body = (incomplete.partial or b"").decode("utf-8", errors="replace")
+except Exception as exc:
+  raise SystemExit(f"Malformed JSON HTTP probe failed unexpectedly: {exc!r}")
+
+if status != 400:
+  raise SystemExit(f"Malformed JSON should return HTTP 400, got: {status}")
+
+if "Invalid JSON" not in body:
+  raise SystemExit(f"Malformed JSON error body missing expected text: {body!r}")
+
+print(json.dumps({
+  "malformed_json_status": status,
+  "malformed_json_error": body,
+}, sort_keys=True))
+PY
+
+python3 - "$APP_IP" <<'PY'
+import base64
+import json
+import os
+import socket
+import struct
+import sys
+
+host = sys.argv[1]
+
+def recv_until(sock, marker, timeout=5):
+  sock.settimeout(timeout)
+  data = b""
+  while marker not in data:
+    chunk = sock.recv(4096)
+    if not chunk:
+      break
+    data += chunk
+  return data
+
+def ws_send_text(sock, text):
+  payload = text.encode("utf-8")
+  size = len(payload)
+  if size < 126:
+    header = bytes([0x81, 0x80 | size])
+  elif size < (1 << 16):
+    header = bytes([0x81, 0x80 | 126]) + struct.pack("!H", size)
+  else:
+    header = bytes([0x81, 0x80 | 127]) + struct.pack("!Q", size)
+  mask = os.urandom(4)
+  masked_payload = bytes(byte ^ mask[index % 4] for index, byte in enumerate(payload))
+  sock.sendall(header + mask + masked_payload)
+
+def ws_recv_frame(sock, timeout=2.0):
+  sock.settimeout(timeout)
+  header = sock.recv(2)
+  if not header:
+    return None, None
+  first, second = header
+  opcode = first & 0x0F
+  size = second & 0x7F
+  if size == 126:
+    size = struct.unpack("!H", sock.recv(2))[0]
+  elif size == 127:
+    size = struct.unpack("!Q", sock.recv(8))[0]
+  payload = b""
+  while len(payload) < size:
+    chunk = sock.recv(size - len(payload))
+    if not chunk:
+      break
+    payload += chunk
+  return opcode, payload
+
+sock = socket.create_connection((host, 80), timeout=5)
+key = base64.b64encode(os.urandom(16)).decode("ascii")
+request = (
+  f"GET /ws HTTP/1.1\\r\\n"
+  f"Host: {host}:80\\r\\n"
+  "Upgrade: websocket\\r\\n"
+  "Connection: Upgrade\\r\\n"
+  f"Sec-WebSocket-Key: {key}\\r\\n"
+  "Sec-WebSocket-Version: 13\\r\\n\\r\\n"
+)
+sock.sendall(request.encode("ascii"))
+handshake = recv_until(sock, b"\\r\\n\\r\\n", timeout=5)
+if b"101" not in handshake.split(b"\\r\\n", 1)[0]:
+  raise SystemExit("WebSocket handshake failed")
+
+probe = {
+  "jsonrpc": "2.0",
+  "id": 7001,
+  "method": "definitelyNotAMethod",
+}
+ws_send_text(sock, json.dumps(probe, separators=(",", ":")))
+
+response_text = None
+for _ in range(8):
+  opcode, payload = ws_recv_frame(sock, timeout=1.0)
+  if opcode is None:
+    break
+  if opcode == 1:
+    response_text = payload.decode("utf-8", errors="replace")
+    break
+  if opcode == 9:
+    sock.sendall(bytes([0x8A, len(payload)]) + payload)
+
+sock.close()
+
+if not response_text:
+  raise SystemExit("No WebSocket response for unknown method request")
+
+if "method not implemented" not in response_text:
+  raise SystemExit(f"Unexpected WebSocket unknown-method response: {response_text!r}")
+
+print(json.dumps({
+  "ws_unknown_method_response": response_text,
 }, sort_keys=True))
 PY
 
