@@ -77,12 +77,3 @@ String JsonRpcMessageIn::getMethod()
 {
 	return getRoot()[F("method")];
 }
-
-bool JsonRpcMessageIn::isValid() const
-{
-	if(_doc.isNull() || !_doc.is<JsonObjectConst>()) {
-		return false;
-	}
-	JsonObjectConst root = _doc.as<JsonObjectConst>();
-	return root.containsKey(F("method")) && !root[F("method")].isNull();
-}
