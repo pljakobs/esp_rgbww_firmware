@@ -13,9 +13,6 @@
    fun:malloc
    fun:mc_malloc
    fun:mc_realloc
-   fun:*allocate*
-   fun:*allocate*
-   fun:*ObjectList*allocate*
-   fun:*Vector*
+   ...
    fun:AppWIFI::AppWIFI()
 }
