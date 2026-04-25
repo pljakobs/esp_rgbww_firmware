@@ -234,7 +234,7 @@ export HOST_SMOKE_WS_PORT="$WS_PORT"
 export HOST_SMOKE_WS_PATH="$WS_PATH"
 export HOST_SMOKE_LOG_DIR="$LOG_DIR"
 
-python3 -m pytest -q -s tests/host_smoke_api_test.py
+python3 -m pytest -q -s tests/host_smoke_api_test.py tests/rgbww_test.py
 
 echo "Host smoke test passed"
 tail -n 40 "$APP_LOG"
