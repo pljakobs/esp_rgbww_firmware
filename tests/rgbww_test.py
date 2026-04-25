@@ -27,7 +27,7 @@ jsonTempl = """{{
 }}
 """
 
-jsonTemplChannels = """{{channels:[{channels}]}}"""
+jsonTemplChannels = """{{"channels":[{channels}]}}"""
 
 jsonTemplSolid = """{{
   "hsv":{{"ct":2700,"v":"{v}","h":"{h}","s":"{s}"}},
@@ -39,7 +39,12 @@ jsonTemplSolid = """{{
 
 def do_post(base_url: str, endpoint: str, post_data: str) -> None:
     """Post data to endpoint, raise on error"""
-    response = http_request("POST", f"{base_url}/{endpoint}", body=post_data.encode())
+    response = http_request(
+        "POST",
+        f"{base_url}/{endpoint}",
+        body=post_data.encode(),
+        headers={"Content-Type": "application/json"},
+    )
     if response["status"] != 200:
         raise Exception(f"POST {endpoint} failed: {response['status']} {response['body']}")
 
@@ -78,20 +83,16 @@ def set_hue_fade(base_url: str, hue: float, ramp: float, sat: float = 100, val: 
     ts = time.time()
     print(f"Setting hue {hue} with ramp {ramp} s")
     post_data = jsonTempl.format(hue=hue, val=val, sat=sat, time=int(ramp * 1000), queue=queuePolicy, cmd="fade")
-    response = http_request("POST", f"{base_url}/color", body=post_data.encode())
-    if response["status"] != 200:
-        raise Exception(f"set_hue_fade failed: {response['body']}")
+    do_post(base_url, "color", post_data)
     return ts
 
 
-def set_channel_cmd(base_url: str, cmd: str, channels: str = "'h','s','v'") -> float:
+def set_channel_cmd(base_url: str, cmd: str, channels: str = '"h","s","v"') -> float:
     """Send channel command (pause, continue, etc)"""
     ts = time.time()
     print(f"Setting {cmd}")
-    post_data = jsonTemplChannels.format(channels=channels)
-    response = http_request("POST", f"{base_url}/{cmd}", body=post_data.encode())
-    if response["status"] != 200:
-        raise Exception(f"set_channel_cmd {cmd} failed: {response['status']}")
+    post_data = jsonTemplChannels.format(channels=channels.replace("'", '"'))
+    do_post(base_url, cmd, post_data)
     return ts
 
 
@@ -298,12 +299,12 @@ def test_pause_channel(smoke_config: SmokeConfig) -> None:
     
     set_hue_fade(smoke_config.base_url, "100", val=50, sat=50, ramp=10)
     time.sleep(5)
-    set_channel_cmd(smoke_config.base_url, "pause", "'h'")
+    set_channel_cmd(smoke_config.base_url, "pause", '"h"')
     time.sleep(5)
     hue1 = get_hue(smoke_config.color_url)
     sat1 = get_sat(smoke_config.color_url)
     val1 = get_val(smoke_config.color_url)
-    set_channel_cmd(smoke_config.base_url, "continue", "'h'")
+    set_channel_cmd(smoke_config.base_url, "continue", '"h"')
     time.sleep(5)
     hue2 = get_hue(smoke_config.color_url)
     sat2 = get_sat(smoke_config.color_url)
