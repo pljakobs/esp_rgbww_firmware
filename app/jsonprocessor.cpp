@@ -665,6 +665,10 @@ bool JsonProcessor::onJsonRpc(const String& json)
 {
 	debug_d("JsonProcessor::onJsonRpc: %s\n", json.c_str());
 	JsonRpcMessageIn rpc(json);
+	if(!rpc.isValid()) {
+		debug_w("JsonProcessor::onJsonRpc: malformed json: %s", rpc.getError().c_str());
+		return false;
+	}
 
 	String msg;
 	String method = rpc.getMethod();
