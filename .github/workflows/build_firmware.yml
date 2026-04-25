@@ -237,10 +237,26 @@ jobs:
       - name: Create Job Summary
         if: always()
         run: |
-          if [ -f out/host-ci/test_summary.md ]; then
-            echo "## 🧪 Host Emulator Smoke Test Results" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🧪 Host Emulator Smoke Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Include pytest-md formatted results if available
+          if [ -f out/host-ci/test-results.md ]; then
+            cat out/host-ci/test-results.md >> $GITHUB_STEP_SUMMARY
+          elif [ -f out/host-ci/test_summary.md ]; then
             cat out/host-ci/test_summary.md >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️  Test results not found" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Extract and display failure details
+          if [ -f out/host-ci/test-output.txt ] && grep -q "FAILED\|AssertionError" out/host-ci/test-output.txt; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Failure Details" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            grep -A 2 "AssertionError\|assert" out/host-ci/test-output.txt | head -50 >> $GITHUB_STEP_SUMMARY || true
+            echo '```' >> $GITHUB_STEP_SUMMARY
           fi
 
   build:

@@ -241,7 +241,15 @@ export HOST_SMOKE_WS_PORT="$WS_PORT"
 export HOST_SMOKE_WS_PATH="$WS_PATH"
 export HOST_SMOKE_LOG_DIR="$LOG_DIR"
 
-python3 -m pytest -q -s tests/host_smoke_api_test.py
+TEST_REPORT="${LOG_DIR}/test-results.md"
+TEST_OUTPUT="${LOG_DIR}/test-output.txt"
 
-echo "Host smoke test passed"
+python3 -m pip install --quiet pytest-md
+
+python3 -m pytest \
+    -v \
+    --md "$TEST_REPORT" \
+    tests/host_smoke_api_test.py 2>&1 | tee "$TEST_OUTPUT" || true
+
+echo "Host smoke test completed"
 tail -n 40 "$APP_LOG"
