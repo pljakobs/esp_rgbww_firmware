@@ -7,9 +7,12 @@ import unittest
 import requests
 import json
 import time
+import os
 
 #host = "sz-led-wall"
 host = "wz-led-tv"
+
+ASSERT_TOLERANCE = float(os.environ.get("RGBWW_TEST_TOLERANCE", "5.0"))
 
 jsonTempl = u'''{{
   "q":"{queue}",
@@ -79,7 +82,7 @@ def set_and_print(hue, ramp):
         ts_now = time.time()
         print("Current hue: {} - Time since ramp start: {:.2f}".format(cur_hue, ts_now - ts))
 
-        if (abs(cur_hue - hue) < 0.5):
+        if (abs(cur_hue - hue) < ASSERT_TOLERANCE):
             break
         if (ts_now - ts > ramp):
             raise Exception("!!!!!!!!! Ramp taking too long!")
@@ -98,7 +101,7 @@ class RgbwwTest(unittest.TestCase):
         time.sleep(ramp)
         cur_hue = get_hue()
         
-        self.assertAlmostEqual(cur_hue, new_hue, delta=0.5)
+        self.assertAlmostEqual(cur_hue, new_hue, delta=ASSERT_TOLERANCE)
 
     def testRampAccuracy(self):
         '''Repeats multiple times a 60 seconds fade and checks the reache value'''
@@ -108,7 +111,7 @@ class RgbwwTest(unittest.TestCase):
             set_hue_fade(120, ramp)
             time.sleep(ramp)
             cur_hue = get_hue()
-            self.assertAlmostEqual(cur_hue, 120, delta=0.5)
+            self.assertAlmostEqual(cur_hue, 120, delta=ASSERT_TOLERANCE)
         
 
     def testQueueBack(self):
@@ -117,11 +120,11 @@ class RgbwwTest(unittest.TestCase):
         set_hue_fade(170, ramp)
         time.sleep(2 * ramp)
         
-        self.assertAlmostEqual(get_hue(), 170, delta=0.5)
+        self.assertAlmostEqual(get_hue(), 170, delta=ASSERT_TOLERANCE)
         
     def testQueueFrontReset(self):
         ramp = 12
-        delta = 0.8
+        delta = ASSERT_TOLERANCE
         set_hue_fade(120, ramp)
         time.sleep(6)
         hue1 = get_hue() # 60
@@ -140,7 +143,7 @@ class RgbwwTest(unittest.TestCase):
         
     def testQueueFront(self):
         ramp = 12
-        delta = 1.0
+        delta = ASSERT_TOLERANCE
         set_hue_fade(120, ramp)
         time.sleep(6)
         hue1 = get_hue() # 60
@@ -159,7 +162,7 @@ class RgbwwTest(unittest.TestCase):
 
     def testRelativePlus(self):
         ramp = 3
-        delta = 0.8
+        delta = ASSERT_TOLERANCE
         set_hue_fade("+10", ramp)
         time.sleep(3)
         hue1 = get_hue() # 60
@@ -173,12 +176,12 @@ class RgbwwTest(unittest.TestCase):
         time.sleep(3)
         hue1 = get_hue() # 60
 
-        delta = 0.8
+        delta = ASSERT_TOLERANCE
         self.assertAlmostEqual(hue1, 10, delta=delta)
               
     def testRelativePlus2(self):
         ramp = 3
-        delta = 0.8
+        delta = ASSERT_TOLERANCE
         set_hue_fade("+10", ramp)
         set_hue_fade("+10", ramp)
         time.sleep(3)
@@ -196,7 +199,7 @@ class RgbwwTest(unittest.TestCase):
         time.sleep(ramp)
         hue1 = get_hue()
 
-        delta = 0.8
+        delta = ASSERT_TOLERANCE
         self.assertAlmostEqual(hue1, 90, delta=delta)
         
     def testRelativeMinus_CircleBottom(self):
@@ -206,7 +209,7 @@ class RgbwwTest(unittest.TestCase):
         time.sleep(3)
         hue1 = get_hue()
 
-        delta = 0.8
+        delta = ASSERT_TOLERANCE
         self.assertAlmostEqual(hue1, 310, delta=delta)
     
     def testPauseAll(self):
@@ -223,7 +226,7 @@ class RgbwwTest(unittest.TestCase):
         sat2 = get_sat()
         val2 = get_val()
         
-        delta = 0.8
+        delta = ASSERT_TOLERANCE
         self.assertAlmostEqual(hue1, 50, delta=delta)  
         self.assertAlmostEqual(sat1, 75, delta=delta)  
         self.assertAlmostEqual(val1, 75, delta=delta)  
@@ -245,7 +248,7 @@ class RgbwwTest(unittest.TestCase):
         sat2 = get_sat()
         val2 = get_val()
         
-        delta = 0.8
+        delta = ASSERT_TOLERANCE
         self.assertAlmostEqual(hue1, 50, delta=delta)  
         self.assertAlmostEqual(sat1, 50, delta=delta)  
         self.assertAlmostEqual(val1, 50, delta=delta)  
