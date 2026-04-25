@@ -1,0 +1,4 @@
+label=start
+timestamp_utc=2026-04-22T13:47:42.474116+00:00
+led-bu.fritz.box: ok status=200 keys=134
+led-wo.fritz.box: ok status=200 keys=134
