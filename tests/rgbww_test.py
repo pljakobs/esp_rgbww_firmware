@@ -9,6 +9,7 @@ import json
 import os
 import socket
 import time
+from typing import Optional
 from urllib import error, request
 
 import pytest
@@ -94,7 +95,7 @@ def set_channel_cmd(base_url: str, cmd: str, channels: str = "'h','s','v'") -> f
     return ts
 
 
-def ws_recv_color_event(sock: socket.socket, timeout: float = 2.0) -> dict | None:
+def ws_recv_color_event(sock: socket.socket, timeout: float = 2.0) -> Optional[dict]:
     """Receive frames until a color_event is found, return the parsed JSON or None"""
     start_time = time.time()
     while time.time() - start_time < timeout:
