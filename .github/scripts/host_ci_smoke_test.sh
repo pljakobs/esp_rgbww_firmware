@@ -10,6 +10,8 @@ NETMASK="${NETMASK:-255.255.255.0}"
 FIRMWARE_DIR="out/Host/debug/firmware"
 LOG_DIR="${HOST_CI_LOG_DIR:-out/host-ci}"
 APP_LOG="${LOG_DIR}/host-smoke.log"
+HTTP_TRACE_LOG="${LOG_DIR}/http-probes.jsonl"
+MALFORMED_JSON_TRACE="${LOG_DIR}/malformed-color-response.json"
 PING_URL="http://${APP_IP}/ping"
 INFO_URL="http://${APP_IP}/info"
 WS_HOST="${WS_HOST:-$APP_IP}"
@@ -73,8 +75,17 @@ ensure_ip_tool() {
   fi
 }
 
+ensure_pytest() {
+  if python3 -c 'import pytest' >/dev/null 2>&1; then
+    return 0
+  fi
+
+  echo "pytest not found; installing it into the container environment" >&2
+  python3 -m pip install --quiet pytest
+}
+
 mkdir -p "$LOG_DIR"
-rm -f "$APP_LOG" "$LOG_DIR/info.json"
+rm -f "$APP_LOG" "$LOG_DIR/info.json" "$HTTP_TRACE_LOG" "$MALFORMED_JSON_TRACE"
 
 if ! ensure_ip_tool; then
   echo "cannot configure TAP interface without ip command" >&2
@@ -212,227 +223,18 @@ if [[ "$ready" != "1" ]]; then
   exit 1
 fi
 
-python3 - "$WS_HOST" "$WS_PORT" "$WS_PATH" <<'PY'
-import base64
-import hashlib
-import socket
-import sys
+ensure_pytest
 
-host = sys.argv[1]
-port = int(sys.argv[2])
-path = sys.argv[3]
+export HOST_SMOKE_APP_IP="$APP_IP"
+export HOST_SMOKE_BASE_URL="http://${APP_IP}"
+export HOST_SMOKE_INFO_URL="$INFO_URL"
+export HOST_SMOKE_COLOR_URL="$COLOR_URL"
+export HOST_SMOKE_WS_HOST="$WS_HOST"
+export HOST_SMOKE_WS_PORT="$WS_PORT"
+export HOST_SMOKE_WS_PATH="$WS_PATH"
+export HOST_SMOKE_LOG_DIR="$LOG_DIR"
 
-nonce = base64.b64encode(b"host-ci-websocket-key").decode("ascii")
-request = (
-  f"GET {path} HTTP/1.1\r\n"
-  f"Host: {host}:{port}\r\n"
-  "Upgrade: websocket\r\n"
-  "Connection: Upgrade\r\n"
-  f"Sec-WebSocket-Key: {nonce}\r\n"
-  "Sec-WebSocket-Version: 13\r\n"
-  "\r\n"
-)
-
-with socket.create_connection((host, port), timeout=5) as sock:
-  sock.sendall(request.encode("ascii"))
-  response = sock.recv(4096).decode("latin-1", errors="replace")
-
-status_line = response.split("\r\n", 1)[0].strip()
-if "101" not in status_line:
-  raise SystemExit(f"WebSocket handshake failed: {status_line}\n{response}")
-
-headers = {}
-for line in response.split("\r\n")[1:]:
-  if not line:
-    break
-  if ":" in line:
-    k, v = line.split(":", 1)
-    headers[k.strip().lower()] = v.strip()
-
-expected_accept = base64.b64encode(
-  hashlib.sha1((nonce + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode("ascii")).digest()
-).decode("ascii")
-
-accept = headers.get("sec-websocket-accept", "")
-if accept != expected_accept:
-  raise SystemExit(
-    f"Invalid Sec-WebSocket-Accept header: {accept!r} != {expected_accept!r}"
-  )
-
-print(f"WebSocket handshake OK: {status_line}")
-PY
-
-python3 - "$INFO_URL" "$APP_IP" "$LOG_DIR/info.json" <<'PY'
-import json
-import sys
-import urllib.request
-
-url = sys.argv[1]
-expected_ip = sys.argv[2]
-output_path = sys.argv[3]
-
-with urllib.request.urlopen(url, timeout=5) as response:
-    payload = json.load(response)
-
-required_keys = ["git_version", "build_type", "sming", "connection"]
-missing_keys = [key for key in required_keys if key not in payload]
-if missing_keys:
-    raise SystemExit(f"Missing keys in /info response: {', '.join(missing_keys)}")
-
-actual_ip = payload.get("connection", {}).get("ip")
-if actual_ip != expected_ip:
-    raise SystemExit(f"Unexpected Host IP in /info: {actual_ip!r} != {expected_ip!r}")
-
-with open(output_path, "w", encoding="utf-8") as handle:
-    json.dump(payload, handle, indent=2, sort_keys=True)
-
-print(json.dumps({
-    "git_version": payload.get("git_version"),
-    "build_type": payload.get("build_type"),
-    "sming": payload.get("sming"),
-    "ip": actual_ip,
-}, sort_keys=True))
-PY
-
-python3 - "$COLOR_URL" <<'PY'
-import http.client
-import json
-import sys
-import urllib.error
-import urllib.request
-
-url = sys.argv[1]
-bad_payload = b'{"raw":{"r":12,"g":34'
-request = urllib.request.Request(
-  url,
-  data=bad_payload,
-  headers={"Content-Type": "application/json"},
-  method="POST",
-)
-
-try:
-  with urllib.request.urlopen(request, timeout=5) as response:
-    status = response.status
-    body = response.read().decode("utf-8", errors="replace")
-except urllib.error.HTTPError as exc:
-  status = exc.code
-  try:
-    body = exc.read().decode("utf-8", errors="replace")
-  except http.client.IncompleteRead as incomplete:
-    body = (incomplete.partial or b"").decode("utf-8", errors="replace")
-except Exception as exc:
-  raise SystemExit(f"Malformed JSON HTTP probe failed unexpectedly: {exc!r}")
-
-if status != 400:
-  raise SystemExit(f"Malformed JSON should return HTTP 400, got: {status}")
-
-if "Invalid JSON" not in body:
-  raise SystemExit(f"Malformed JSON error body missing expected text: {body!r}")
-
-print(json.dumps({
-  "malformed_json_status": status,
-  "malformed_json_error": body,
-}, sort_keys=True))
-PY
-
-python3 - "$APP_IP" <<'PY'
-import base64
-import json
-import os
-import socket
-import struct
-import sys
-
-host = sys.argv[1]
-
-def recv_until(sock, marker, timeout=5):
-  sock.settimeout(timeout)
-  data = b""
-  while marker not in data:
-    chunk = sock.recv(4096)
-    if not chunk:
-      break
-    data += chunk
-  return data
-
-def ws_send_text(sock, text):
-  payload = text.encode("utf-8")
-  size = len(payload)
-  if size < 126:
-    header = bytes([0x81, 0x80 | size])
-  elif size < (1 << 16):
-    header = bytes([0x81, 0x80 | 126]) + struct.pack("!H", size)
-  else:
-    header = bytes([0x81, 0x80 | 127]) + struct.pack("!Q", size)
-  mask = os.urandom(4)
-  masked_payload = bytes(byte ^ mask[index % 4] for index, byte in enumerate(payload))
-  sock.sendall(header + mask + masked_payload)
-
-def ws_recv_frame(sock, timeout=2.0):
-  sock.settimeout(timeout)
-  header = sock.recv(2)
-  if not header:
-    return None, None
-  first, second = header
-  opcode = first & 0x0F
-  size = second & 0x7F
-  if size == 126:
-    size = struct.unpack("!H", sock.recv(2))[0]
-  elif size == 127:
-    size = struct.unpack("!Q", sock.recv(8))[0]
-  payload = b""
-  while len(payload) < size:
-    chunk = sock.recv(size - len(payload))
-    if not chunk:
-      break
-    payload += chunk
-  return opcode, payload
-
-sock = socket.create_connection((host, 80), timeout=5)
-key = base64.b64encode(os.urandom(16)).decode("ascii")
-request = (
-  f"GET /ws HTTP/1.1\\r\\n"
-  f"Host: {host}:80\\r\\n"
-  "Upgrade: websocket\\r\\n"
-  "Connection: Upgrade\\r\\n"
-  f"Sec-WebSocket-Key: {key}\\r\\n"
-  "Sec-WebSocket-Version: 13\\r\\n\\r\\n"
-)
-sock.sendall(request.encode("ascii"))
-handshake = recv_until(sock, b"\\r\\n\\r\\n", timeout=5)
-if b"101" not in handshake.split(b"\\r\\n", 1)[0]:
-  raise SystemExit("WebSocket handshake failed")
-
-probe = {
-  "jsonrpc": "2.0",
-  "id": 7001,
-  "method": "definitelyNotAMethod",
-}
-ws_send_text(sock, json.dumps(probe, separators=(",", ":")))
-
-response_text = None
-for _ in range(8):
-  opcode, payload = ws_recv_frame(sock, timeout=1.0)
-  if opcode is None:
-    break
-  if opcode == 1:
-    response_text = payload.decode("utf-8", errors="replace")
-    break
-  if opcode == 9:
-    sock.sendall(bytes([0x8A, len(payload)]) + payload)
-
-sock.close()
-
-if not response_text:
-  raise SystemExit("No WebSocket response for unknown method request")
-
-if "method not implemented" not in response_text:
-  raise SystemExit(f"Unexpected WebSocket unknown-method response: {response_text!r}")
-
-print(json.dumps({
-  "ws_unknown_method_response": response_text,
-}, sort_keys=True))
-PY
+python3 -m pytest -q -s tests/host_smoke_api_test.py
 
 echo "Host smoke test passed"
 tail -n 40 "$APP_LOG"
