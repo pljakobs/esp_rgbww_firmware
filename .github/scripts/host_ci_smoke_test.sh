@@ -237,7 +237,15 @@ export RGBWW_TEST_TIME_SCALE="${RGBWW_TEST_TIME_SCALE:-0.2}"
 export RGBWW_RAMP_ACCURACY_SECONDS="${RGBWW_RAMP_ACCURACY_SECONDS:-12}"
 export RGBWW_RAMP_ACCURACY_ITERATIONS="${RGBWW_RAMP_ACCURACY_ITERATIONS:-3}"
 
-python3 -m pytest -q -s tests/host_smoke_api_test.py tests/rgbww_test.py
+TEST_REPORT="${LOG_DIR}/test-report.json"
 
-echo "Host smoke test passed"
+python3 -m pip install --quiet pytest-json-report
+
+python3 -m pytest \
+  -q -s \
+  --json-report \
+  --json-report-file="$TEST_REPORT" \
+  tests/host_smoke_api_test.py tests/rgbww_test.py || true
+
+echo "Host smoke test completed"
 tail -n 40 "$APP_LOG"

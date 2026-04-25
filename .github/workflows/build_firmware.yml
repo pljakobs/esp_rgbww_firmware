@@ -164,9 +164,22 @@ jobs:
       - name: Add Host smoke artifact summary
         if: always()
         run: |
-          echo "## Host smoke test artifacts" >> "$GITHUB_STEP_SUMMARY"
-          echo "Smoke and functional pytest output logs are available in the uploaded artifact:" >> "$GITHUB_STEP_SUMMARY"
-          echo "${{ steps.upload_host_smoke.outputs.artifact-url }}" >> "$GITHUB_STEP_SUMMARY"
+          TEST_REPORT="out/host-ci/test-report.json"
+          SCRIPT_DIR=".github/scripts"
+          
+          echo "## Test Results 📊" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          
+          if [[ -f "$TEST_REPORT" ]]; then
+            python3 "$SCRIPT_DIR/generate_test_summary.py" "$TEST_REPORT" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "⚠️ No test report found" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Artifacts 📦" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "[📥 Download Test Logs](${{ steps.upload_host_smoke.outputs.artifact-url }})" >> "$GITHUB_STEP_SUMMARY"
 
   build:
     needs: [generate-matrix, host-smoke]
