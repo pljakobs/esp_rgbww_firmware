@@ -243,6 +243,7 @@ jobs:
           TEST_OUTPUT="out/host-ci/test-output.txt"
           VALGRIND_SMOKE_LOG="out/host-ci/valgrind-smoke.log"
           VALGRIND_RGBWW_LOG="out/host-ci/valgrind-rgbww.log"
+          VALGRIND_STATUS_FILE="out/host-ci/valgrind-status.txt"
           
           # Include pytest-md formatted results if available
           if [ -f out/host-ci/test-results.md ]; then
@@ -266,6 +267,10 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "## Valgrind Results 🧠" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ -f "$VALGRIND_STATUS_FILE" ]]; then
+            echo "- Execution mode: $(cat "$VALGRIND_STATUS_FILE")" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
           if [[ -f "$VALGRIND_SMOKE_LOG" ]]; then
             echo "### Smoke (host_smoke_api_test.py)" >> "$GITHUB_STEP_SUMMARY"

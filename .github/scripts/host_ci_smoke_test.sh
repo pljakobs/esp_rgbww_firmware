@@ -19,6 +19,8 @@ VALGRIND_LOG_RGBWW="${LOG_DIR}/valgrind-rgbww.log"
 VALGRIND_OPTIONS="${HOST_CI_VALGRIND_OPTIONS:---tool=memcheck --leak-check=full --show-leak-kinds=all --track-origins=yes --num-callers=25}"
 ENABLE_VALGRIND="${HOST_CI_ENABLE_VALGRIND:-1}"
 ENFORCE_VALGRIND="${HOST_CI_ENFORCE_VALGRIND:-1}"
+VALGRIND_PREINSTALL_DEBUGINFO="${HOST_CI_VALGRIND_PREINSTALL_DEBUGINFO:-1}"
+VALGRIND_STATUS_FILE="${LOG_DIR}/valgrind-status.txt"
 PING_URL="http://${APP_IP}/ping"
 INFO_URL="http://${APP_IP}/info"
 WS_HOST="${WS_HOST:-$APP_IP}"
@@ -128,18 +130,46 @@ ensure_valgrind() {
     fi
     echo "WARNING: valgrind unavailable, continuing without valgrind" >&2
   fi
+
+  if [[ "$VALGRIND_PREINSTALL_DEBUGINFO" == "1" ]] && command -v valgrind >/dev/null 2>&1; then
+    ensure_valgrind_debug_symbols
+  fi
+}
+
+ensure_valgrind_debug_symbols() {
+  echo "Attempting to install libc/glibc debug symbols for valgrind..." >&2
+
+  if command -v apt-get >/dev/null 2>&1; then
+    apt-get update -y >/dev/null || true
+    DEBIAN_FRONTEND=noninteractive apt-get install -y libc6-dbg >/dev/null || true
+    dpkg --add-architecture i386 >/dev/null 2>&1 || true
+    apt-get update -y >/dev/null || true
+    DEBIAN_FRONTEND=noninteractive apt-get install -y libc6-dbg:i386 >/dev/null || true
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y glibc-debuginfo >/dev/null || true
+    dnf install -y glibc-debuginfo.i686 >/dev/null || true
+  elif command -v yum >/dev/null 2>&1; then
+    yum install -y glibc-debuginfo >/dev/null || true
+  fi
 }
 
 start_host_app() {
   local app_log_path="$1"
   local vg_log_path="$2"
   local mode="$3"
+  local retry_attempt="${4:-1}"
+  local force_plain="${5:-0}"
+  local use_valgrind=0
 
   if [[ "$mode" == "smoke" ]]; then
     rm -f "$HTTP_TRACE_LOG" "$MALFORMED_JSON_TRACE"
   fi
 
-  if [[ "$ENABLE_VALGRIND" == "1" ]] && command -v valgrind >/dev/null 2>&1; then
+  if [[ "$force_plain" != "1" ]] && [[ "$ENABLE_VALGRIND" == "1" ]] && command -v valgrind >/dev/null 2>&1; then
+    use_valgrind=1
+  fi
+
+  if [[ "$use_valgrind" == "1" ]]; then
     # shellcheck disable=SC2086
     valgrind $VALGRIND_OPTIONS --log-file="$vg_log_path" \
       "${FIRMWARE_DIR}/app" \
@@ -163,13 +193,35 @@ start_host_app() {
   APP_PID=$!
 
   local ready=0
-  for attempt in $(seq 1 60); do
+  for poll_attempt in $(seq 1 60); do
     if ! kill -0 "$APP_PID" 2>/dev/null; then
       echo "Host emulator exited before becoming ready" >&2
       tail -n 200 "$app_log_path" >&2 || true
       if [[ -f "$vg_log_path" ]]; then
         tail -n 200 "$vg_log_path" >&2 || true
       fi
+
+      if [[ "$use_valgrind" == "1" ]] && [[ -f "$vg_log_path" ]] && grep -q "Fatal error at startup: a function redirection" "$vg_log_path"; then
+        if [[ "$retry_attempt" == "1" ]]; then
+          echo "valgrind startup failed due to missing loader debug symbols; retrying after debug-symbol install" >&2
+          printf "mode=%s\n" "retry-debug-symbol-install" > "$VALGRIND_STATUS_FILE"
+          ensure_valgrind_debug_symbols
+          start_host_app "$app_log_path" "$vg_log_path" "$mode" "2" "$force_plain"
+          return $?
+        fi
+
+        if [[ "$ENFORCE_VALGRIND" == "1" ]]; then
+          printf "mode=%s\n" "failed-strict" > "$VALGRIND_STATUS_FILE"
+          echo "valgrind startup still failing after retry and HOST_CI_ENFORCE_VALGRIND=1" >&2
+          return 1
+        fi
+
+        echo "valgrind unavailable after retry, falling back to plain host app (ENFORCE=0)" >&2
+        printf "mode=%s\n" "fallback-plain" > "$VALGRIND_STATUS_FILE"
+        start_host_app "$app_log_path" "$vg_log_path" "$mode" "$retry_attempt" "1"
+        return $?
+      fi
+
       return 1
     fi
 
@@ -200,6 +252,12 @@ PY
     fi
     return 1
   fi
+
+  if [[ "$use_valgrind" == "1" ]]; then
+    printf "mode=%s\n" "enabled" > "$VALGRIND_STATUS_FILE"
+  elif [[ "$force_plain" == "1" ]]; then
+    printf "mode=%s\n" "plain-forced" > "$VALGRIND_STATUS_FILE"
+  fi
 }
 
 stop_host_app() {
@@ -212,6 +270,7 @@ stop_host_app() {
 
 mkdir -p "$LOG_DIR"
 rm -f "$APP_LOG" "$APP_LOG_SMOKE" "$APP_LOG_RGBWW" "$LOG_DIR/info.json" "$HTTP_TRACE_LOG" "$MALFORMED_JSON_TRACE" "$VALGRIND_LOG_SMOKE" "$VALGRIND_LOG_RGBWW"
+rm -f "$VALGRIND_STATUS_FILE"
 {
     echo "host_ci_smoke_test started"
     echo "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
