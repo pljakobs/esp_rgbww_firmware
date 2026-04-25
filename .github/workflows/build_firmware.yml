@@ -150,6 +150,7 @@ jobs:
             bash -lc "git config --global --add safe.directory /workspace && bash ./.github/scripts/host_ci_smoke_test.sh"
 
       - name: Upload Host smoke logs
+        id: upload_host_smoke
         if: always()
         uses: actions/upload-artifact@v7
         with:
@@ -159,6 +160,13 @@ jobs:
             out/Host/debug/firmware/app.cfg
             out/Host/debug/firmware/partitions.bin
           if-no-files-found: warn
+
+      - name: Add Host smoke artifact summary
+        if: always()
+        run: |
+          echo "## Host smoke test artifacts" >> "$GITHUB_STEP_SUMMARY"
+          echo "Smoke and functional pytest output logs are available in the uploaded artifact:" >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ steps.upload_host_smoke.outputs.artifact-url }}" >> "$GITHUB_STEP_SUMMARY"
 
   build:
     needs: [generate-matrix, host-smoke]
