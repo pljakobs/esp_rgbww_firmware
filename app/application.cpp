@@ -688,6 +688,30 @@ void Application::startNetworkServices()
 	
 }
 
+void Application::stopServices()
+{
+	debug_i("Application::stopServices");
+
+	// Stop timers first so no new work is queued while sockets are closing.
+	_systimer.stop();
+	_uptimetimer.stop();
+	_checkRamTimer.stop();
+	_resetPinTimer.stop();
+#if defined(ARCH_ESP8266) && !defined(SMING_RELEASE)
+	_crashTestTimer.stop();
+#endif
+
+	rgbwwctrl.stop();
+	eventserver.stop();
+	webserver.stop();
+	mqttclient.stop();
+	telemetryClient.stop();
+
+	if(network.isApActive()) {
+		network.stopAp();
+	}
+}
+
 void Application::logRestart(){
 	char msg[128];
 	m_snprintf(msg, sizeof(msg), "restart, reason: %u, exccause: %u", 
@@ -751,12 +775,23 @@ void Application::reportCrashDump()
 }
 void Application::restart()
 {
+	static bool gracefulRestartInProgress = false;
+
 	debug_i("Application::restart");
 	if(network.isApActive()) {
 		network.stopAp();
 		_systimer.initializeMs(500, TimerDelegate(&Application::restart, this)).startOnce();
 		return;
 	}
+
+	if(!gracefulRestartInProgress) {
+		gracefulRestartInProgress = true;
+		stopServices();
+		// Give network stacks a short window to process close callbacks cleanly.
+		_systimer.initializeMs(250, TimerDelegate(&Application::restart, this)).startOnce();
+		return;
+	}
+
 	System.restart();
 }
 

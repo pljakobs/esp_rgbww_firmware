@@ -10,8 +10,15 @@ NETMASK="${NETMASK:-255.255.255.0}"
 FIRMWARE_DIR="out/Host/debug/firmware"
 LOG_DIR="${HOST_CI_LOG_DIR:-out/host-ci}"
 APP_LOG="${LOG_DIR}/host-smoke.log"
+APP_LOG_SMOKE="${LOG_DIR}/host-smoke-app.log"
+APP_LOG_RGBWW="${LOG_DIR}/host-rgbww-app.log"
 HTTP_TRACE_LOG="${LOG_DIR}/http-probes.jsonl"
 MALFORMED_JSON_TRACE="${LOG_DIR}/malformed-color-response.json"
+VALGRIND_LOG_SMOKE="${LOG_DIR}/valgrind-smoke.log"
+VALGRIND_LOG_RGBWW="${LOG_DIR}/valgrind-rgbww.log"
+VALGRIND_OPTIONS="${HOST_CI_VALGRIND_OPTIONS:---tool=memcheck --leak-check=full --show-leak-kinds=all --track-origins=yes --num-callers=25}"
+ENABLE_VALGRIND="${HOST_CI_ENABLE_VALGRIND:-1}"
+ENFORCE_VALGRIND="${HOST_CI_ENFORCE_VALGRIND:-1}"
 PING_URL="http://${APP_IP}/ping"
 INFO_URL="http://${APP_IP}/info"
 WS_HOST="${WS_HOST:-$APP_IP}"
@@ -84,8 +91,127 @@ ensure_pytest() {
     python3 -m pip install --quiet pytest
 }
 
+ensure_valgrind() {
+  if [[ "$ENABLE_VALGRIND" != "1" ]]; then
+    return 0
+  fi
+
+  if command -v valgrind >/dev/null 2>&1; then
+    return 0
+  fi
+
+  echo "valgrind not found; attempting to install it into the container environment" >&2
+
+  if command -v apt-get >/dev/null 2>&1; then
+    apt-get update -y >/dev/null
+    DEBIAN_FRONTEND=noninteractive apt-get install -y valgrind >/dev/null || true
+    if ! command -v valgrind >/dev/null 2>&1; then
+      dpkg --add-architecture i386 >/dev/null 2>&1 || true
+      apt-get update -y >/dev/null
+      DEBIAN_FRONTEND=noninteractive apt-get install -y valgrind:i386 >/dev/null || true
+    fi
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y valgrind >/dev/null || true
+    if ! command -v valgrind >/dev/null 2>&1; then
+      dnf install -y valgrind.i686 >/dev/null || true
+    fi
+  elif command -v yum >/dev/null 2>&1; then
+    yum install -y valgrind >/dev/null || true
+  elif command -v apk >/dev/null 2>&1; then
+    apk add --no-cache valgrind >/dev/null || true
+  fi
+
+  if ! command -v valgrind >/dev/null 2>&1; then
+    if [[ "$ENFORCE_VALGRIND" == "1" ]]; then
+      echo "valgrind installation failed and HOST_CI_ENFORCE_VALGRIND=1" >&2
+      return 1
+    fi
+    echo "WARNING: valgrind unavailable, continuing without valgrind" >&2
+  fi
+}
+
+start_host_app() {
+  local app_log_path="$1"
+  local vg_log_path="$2"
+  local mode="$3"
+
+  if [[ "$mode" == "smoke" ]]; then
+    rm -f "$HTTP_TRACE_LOG" "$MALFORMED_JSON_TRACE"
+  fi
+
+  if [[ "$ENABLE_VALGRIND" == "1" ]] && command -v valgrind >/dev/null 2>&1; then
+    # shellcheck disable=SC2086
+    valgrind $VALGRIND_OPTIONS --log-file="$vg_log_path" \
+      "${FIRMWARE_DIR}/app" \
+      --flashfile="${FIRMWARE_DIR}/flash.bin" \
+      --flashsize=4M \
+      --ifname="$TAP_IF" \
+      --ipaddr="$APP_IP" \
+      --gateway="$HOST_IP" \
+      --netmask="$NETMASK" \
+      >"$app_log_path" 2>&1 &
+  else
+    "${FIRMWARE_DIR}/app" \
+      --flashfile="${FIRMWARE_DIR}/flash.bin" \
+      --flashsize=4M \
+      --ifname="$TAP_IF" \
+      --ipaddr="$APP_IP" \
+      --gateway="$HOST_IP" \
+      --netmask="$NETMASK" \
+      >"$app_log_path" 2>&1 &
+  fi
+  APP_PID=$!
+
+  local ready=0
+  for attempt in $(seq 1 60); do
+    if ! kill -0 "$APP_PID" 2>/dev/null; then
+      echo "Host emulator exited before becoming ready" >&2
+      tail -n 200 "$app_log_path" >&2 || true
+      if [[ -f "$vg_log_path" ]]; then
+        tail -n 200 "$vg_log_path" >&2 || true
+      fi
+      return 1
+    fi
+
+    if python3 - "$PING_URL" <<'PY'
+import json
+import sys
+import urllib.request
+
+url = sys.argv[1]
+with urllib.request.urlopen(url, timeout=2) as response:
+    payload = json.load(response)
+if payload.get("ping") != "pong":
+    raise SystemExit(1)
+PY
+    then
+      ready=1
+      break
+    fi
+
+    sleep 1
+  done
+
+  if [[ "$ready" != "1" ]]; then
+    echo "Timed out waiting for Host API readiness" >&2
+    tail -n 200 "$app_log_path" >&2 || true
+    if [[ -f "$vg_log_path" ]]; then
+      tail -n 200 "$vg_log_path" >&2 || true
+    fi
+    return 1
+  fi
+}
+
+stop_host_app() {
+  if [[ -n "${APP_PID:-}" ]] && kill -0 "$APP_PID" 2>/dev/null; then
+    kill "$APP_PID" 2>/dev/null || true
+    wait "$APP_PID" 2>/dev/null || true
+  fi
+  APP_PID=""
+}
+
 mkdir -p "$LOG_DIR"
-rm -f "$APP_LOG" "$LOG_DIR/info.json" "$HTTP_TRACE_LOG" "$MALFORMED_JSON_TRACE"
+rm -f "$APP_LOG" "$APP_LOG_SMOKE" "$APP_LOG_RGBWW" "$LOG_DIR/info.json" "$HTTP_TRACE_LOG" "$MALFORMED_JSON_TRACE" "$VALGRIND_LOG_SMOKE" "$VALGRIND_LOG_RGBWW"
 {
     echo "host_ci_smoke_test started"
     echo "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -99,6 +225,8 @@ if ! ensure_ip_tool; then
     echo "cannot configure TAP interface without ip command" >&2
     exit 1
 fi
+
+ensure_valgrind
 
 if [[ ! -c /dev/net/tun ]]; then
     echo "/dev/net/tun is not available inside the Sming container" >&2
@@ -187,49 +315,6 @@ fi
 "$IP_BIN" addr add "$HOST_CIDR" dev "$TAP_IF"
 "$IP_BIN" link set "$TAP_IF" up
 
-"${FIRMWARE_DIR}/app" \
-    --flashfile="${FIRMWARE_DIR}/flash.bin" \
-    --flashsize=4M \
-    --ifname="$TAP_IF" \
-    --ipaddr="$APP_IP" \
-    --gateway="$HOST_IP" \
-    --netmask="$NETMASK" \
-    >"$APP_LOG" 2>&1 &
-APP_PID=$!
-
-ready=0
-for attempt in $(seq 1 60); do
-    if ! kill -0 "$APP_PID" 2>/dev/null; then
-        echo "Host emulator exited before becoming ready" >&2
-        tail -n 200 "$APP_LOG" >&2 || true
-        exit 1
-    fi
-
-    if python3 - "$PING_URL" <<'PY'
-import json
-import sys
-import urllib.request
-
-url = sys.argv[1]
-with urllib.request.urlopen(url, timeout=2) as response:
-        payload = json.load(response)
-if payload.get("ping") != "pong":
-        raise SystemExit(1)
-PY
-    then
-        ready=1
-        break
-    fi
-
-    sleep 1
-done
-
-if [[ "$ready" != "1" ]]; then
-    echo "Timed out waiting for Host API readiness" >&2
-    tail -n 200 "$APP_LOG" >&2 || true
-    exit 1
-fi
-
 ensure_pytest
 
 export HOST_SMOKE_APP_IP="$APP_IP"
@@ -243,13 +328,52 @@ export HOST_SMOKE_LOG_DIR="$LOG_DIR"
 
 TEST_REPORT="${LOG_DIR}/test-results.md"
 TEST_OUTPUT="${LOG_DIR}/test-output.txt"
+SMOKE_TEST_REPORT="${LOG_DIR}/smoke-test-results.md"
+SMOKE_TEST_OUTPUT="${LOG_DIR}/smoke-test-output.txt"
+RGBWW_TEST_REPORT="${LOG_DIR}/rgbww-test-results.md"
+RGBWW_TEST_OUTPUT="${LOG_DIR}/rgbww-test-output.txt"
 
 python3 -m pip install --quiet pytest-md
 
+start_host_app "$APP_LOG_SMOKE" "$VALGRIND_LOG_SMOKE" "smoke"
 python3 -m pytest \
-    -v \
-    --md "$TEST_REPORT" \
-    tests/host_smoke_api_test.py 2>&1 | tee "$TEST_OUTPUT" || true
+  -v \
+  --md "$SMOKE_TEST_REPORT" \
+  tests/host_smoke_api_test.py 2>&1 | tee "$SMOKE_TEST_OUTPUT" || true
+stop_host_app
+
+start_host_app "$APP_LOG_RGBWW" "$VALGRIND_LOG_RGBWW" "rgbww"
+python3 -m pytest \
+  -v \
+  --md "$RGBWW_TEST_REPORT" \
+  tests/rgbww_test.py 2>&1 | tee "$RGBWW_TEST_OUTPUT" || true
+stop_host_app
+
+{
+  echo "# Host CI Test Results"
+  echo
+  echo "## Smoke"
+  cat "$SMOKE_TEST_REPORT"
+  echo
+  echo "## RGBWW"
+  cat "$RGBWW_TEST_REPORT"
+} > "$TEST_REPORT"
+
+{
+  echo "===== Smoke test output ====="
+  cat "$SMOKE_TEST_OUTPUT"
+  echo
+  echo "===== RGBWW test output ====="
+  cat "$RGBWW_TEST_OUTPUT"
+} > "$TEST_OUTPUT"
+
+{
+  echo "===== Smoke app log ====="
+  cat "$APP_LOG_SMOKE"
+  echo
+  echo "===== RGBWW app log ====="
+  cat "$APP_LOG_RGBWW"
+} > "$APP_LOG"
 
 echo "Host smoke test completed"
-tail -n 40 "$APP_LOG"
+tail -n 40 "$APP_LOG_RGBWW"
