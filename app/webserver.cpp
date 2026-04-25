@@ -426,7 +426,8 @@ void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, c
 		sendApiCode(response, code, getApiCodeMsg(code));
 		return;
 	}
-	sendApiCode(response, code, String(msg).c_str());
+	String flashMsg(msg);
+	sendApiCode(response, code, flashMsg);
 }
 
 void ApplicationWebserver::addInfoFields(JsonObject& obj)
@@ -457,9 +458,7 @@ void ApplicationWebserver::addInfoFields(JsonObject& obj)
 
 void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, const char* msg)
 {
-	if(msg == nullptr) {
-		msg = getApiCodeMsg(code);
-	}
+	const String stableMsg = (msg == nullptr) ? String(getApiCodeMsg(code)) : String(msg);
 	auto stream = std::make_unique<JsonObjectStream>();
 	JsonObject json = stream->getRoot();
 
@@ -476,7 +475,7 @@ void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, c
 			addInfoFields(data);
 		}
 
-		json[F("error")] = msg;
+		json[F("error")] = stableMsg;
 		sendApiResponse(response, stream.release(), HTTP_STATUS_BAD_REQUEST);
 	}
 }
@@ -1542,12 +1541,13 @@ void ApplicationWebserver::onData(HttpRequest& request, HttpResponse& response){
 		if(bodyStream) {
 			debug_i("received Data bodyStream");
 			ConfigDB::Status status = app.data->importFromStream(ConfigDB::Json::format, *bodyStream);
+			String statusMsg = status.toString();
 			if(status){
 				debug_i("successfully updated app-data");
-				sendApiCode(response, API_CODES::API_SUCCESS, status.toString().c_str());
+				sendApiCode(response, API_CODES::API_SUCCESS, statusMsg);
 			}else{
 				debug_i("could not update app-data");
-				sendApiCode(response, API_CODES::API_BAD_REQUEST, status.toString().c_str());
+				sendApiCode(response, API_CODES::API_BAD_REQUEST, statusMsg);
 			}
 		}else{
 			debug_i("could not get bodyStream");
