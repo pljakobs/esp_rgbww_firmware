@@ -6,13 +6,15 @@ Created on 02.04.2017
 Converted to pytest format integrated with host_smoke_api_test.py harness
 """
 import json
+import os
+import socket
 import time
 from urllib import error, request
 
 import pytest
 
 # Import helpers from host_smoke_api_test
-from host_smoke_api_test import SmokeConfig, http_request, smoke_config  # noqa: F401
+from host_smoke_api_test import SmokeConfig, http_request, smoke_config, websocket_handshake, ws_recv_frame, ws_send_text  # noqa: F401
 
 # JSON templates for color commands
 jsonTempl = """{{
@@ -90,6 +92,27 @@ def set_channel_cmd(base_url: str, cmd: str, channels: str = "'h','s','v'") -> f
     if response["status"] != 200:
         raise Exception(f"set_channel_cmd {cmd} failed: {response['status']}")
     return ts
+
+
+def ws_recv_color_event(sock: socket.socket, timeout: float = 2.0) -> dict | None:
+    """Receive frames until a color_event is found, return the parsed JSON or None"""
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        opcode, payload = ws_recv_frame(sock, timeout=0.5)
+        if opcode is None:
+            continue
+        if opcode == 1:  # Text frame
+            try:
+                event = json.loads((payload or b"").decode("utf-8", errors="replace"))
+                if event.get("method") == "color_event":
+                    return event
+            except (json.JSONDecodeError, ValueError):
+                pass
+        elif opcode == 9:  # Ping
+            # Send pong response
+            pong_payload = payload or b""
+            sock.sendall(bytes([0x8A, len(pong_payload)]) + pong_payload)
+    return None
 
 
 # Pytest tests
@@ -292,3 +315,57 @@ def test_pause_channel(smoke_config: SmokeConfig) -> None:
     assert abs(hue2 - 100) < delta, f"hue2: expected ~100, got {hue2}"
     assert abs(sat2 - 50) < delta, f"sat2: expected ~50, got {sat2}"
     assert abs(val2 - 50) < delta, f"val2: expected ~50, got {val2}"
+
+
+def test_websocket_color_event_on_set(smoke_config: SmokeConfig) -> None:
+    """Verify websocket receives color_event when setting solid color"""
+    sock, handshake_trace = websocket_handshake(smoke_config, os.urandom(16))
+    try:
+        # Check handshake succeeded
+        status_line = handshake_trace["response"]["status_line"]
+        assert "101" in status_line, f"WebSocket handshake failed: {status_line}"
+        
+        # Set a color and wait for event
+        rgbww_set(smoke_config.base_url, 45, 80, 90)
+        
+        # Receive color event
+        event = ws_recv_color_event(sock, timeout=3.0)
+        assert event is not None, "No color_event received from WebSocket"
+        assert event.get("method") == "color_event", f"Expected color_event, got {event.get('method')}"
+        
+        # Verify params contain HSV data
+        params = event.get("params", {})
+        raw = params.get("raw", {})
+        assert "h" in raw or "hsv" in params, f"No HSV data in event: {event}"
+        
+    finally:
+        sock.close()
+
+
+def test_websocket_color_event_on_fade(smoke_config: SmokeConfig) -> None:
+    """Verify websocket receives color_event updates during fade"""
+    sock, handshake_trace = websocket_handshake(smoke_config, os.urandom(16))
+    try:
+        status_line = handshake_trace["response"]["status_line"]
+        assert "101" in status_line, f"WebSocket handshake failed: {status_line}"
+        
+        # Start a fade
+        rgbww_set(smoke_config.base_url, 0, 100, 100)
+        set_hue_fade(smoke_config.base_url, 180, 5)  # 5 second fade
+        
+        # Receive multiple color events during fade
+        events_received = []
+        for _ in range(3):
+            event = ws_recv_color_event(sock, timeout=2.0)
+            if event:
+                events_received.append(event)
+        
+        assert len(events_received) > 0, "No color_event received during fade"
+        
+        # Verify all events have the expected structure
+        for event in events_received:
+            assert event.get("method") == "color_event", f"Invalid event method: {event.get('method')}"
+            assert "params" in event, f"No params in event: {event}"
+            
+    finally:
+        sock.close()
