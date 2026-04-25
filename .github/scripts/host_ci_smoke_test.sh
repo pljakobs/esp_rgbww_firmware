@@ -238,13 +238,14 @@ export RGBWW_RAMP_ACCURACY_SECONDS="${RGBWW_RAMP_ACCURACY_SECONDS:-12}"
 export RGBWW_RAMP_ACCURACY_ITERATIONS="${RGBWW_RAMP_ACCURACY_ITERATIONS:-3}"
 
 TEST_REPORT="${LOG_DIR}/test-results.md"
+TEST_OUTPUT="${LOG_DIR}/test-output.txt"
 
 python3 -m pip install --quiet pytest-md
 
 python3 -m pytest \
-  -q -s \
+  -v \
   --md "$TEST_REPORT" \
-  tests/host_smoke_api_test.py tests/rgbww_test.py || true
+  tests/host_smoke_api_test.py tests/rgbww_test.py 2>&1 | tee "$TEST_OUTPUT" || true
 
 echo "Host smoke test completed"
 tail -n 40 "$APP_LOG"

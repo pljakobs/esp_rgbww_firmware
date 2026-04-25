@@ -165,6 +165,7 @@ jobs:
         if: always()
         run: |
           TEST_REPORT="out/host-ci/test-results.md"
+          TEST_OUTPUT="out/host-ci/test-output.txt"
           
           echo "## Test Results 📊" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
@@ -175,10 +176,23 @@ jobs:
             echo "⚠️ No test report found" >> "$GITHUB_STEP_SUMMARY"
           fi
           
+          # Extract failure details from test output
+          if [[ -f "$TEST_OUTPUT" ]] && grep -q "FAILED\|AssertionError" "$TEST_OUTPUT"; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "### Failure Details" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            grep -A 2 "AssertionError\|assert" "$TEST_OUTPUT" | head -50 >> "$GITHUB_STEP_SUMMARY" || true
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "### Artifacts 📦" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "[📥 Download Test Logs](${{ steps.upload_host_smoke.outputs.artifact-url }})" >> "$GITHUB_STEP_SUMMARY"
+          echo "Test logs are available in the run artifacts:" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Full test output: test-output.txt" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Formatted results: test-results.md" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Host app log: host-smoke.log" >> "$GITHUB_STEP_SUMMARY"
 
   build:
     needs: [generate-matrix, host-smoke]
