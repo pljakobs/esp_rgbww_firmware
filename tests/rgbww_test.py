@@ -17,6 +17,14 @@ import pytest
 # Import helpers from host_smoke_api_test
 from host_smoke_api_test import SmokeConfig, http_request, smoke_config, websocket_handshake, ws_recv_frame, ws_send_text  # noqa: F401
 
+TIME_SCALE = float(os.environ.get("RGBWW_TEST_TIME_SCALE", "1.0"))
+RAMP_ACCURACY_RAMP_SECONDS = float(os.environ.get("RGBWW_RAMP_ACCURACY_SECONDS", "60"))
+RAMP_ACCURACY_ITERATIONS = int(os.environ.get("RGBWW_RAMP_ACCURACY_ITERATIONS", "9"))
+
+
+def scaled(seconds: float) -> float:
+    return max(0.0, seconds * TIME_SCALE)
+
 # JSON templates for color commands
 jsonTempl = """{{
   "q":"{queue}",
@@ -124,7 +132,7 @@ def test_simple_fade(smoke_config: SmokeConfig) -> None:
     rgbww_set(smoke_config.base_url, 0, 100, 100)
     
     new_hue = 120
-    ramp = 10
+    ramp = scaled(10)
     set_hue_fade(smoke_config.base_url, new_hue, ramp)
     time.sleep(ramp)
     cur_hue = get_hue(smoke_config.color_url)
@@ -134,8 +142,8 @@ def test_simple_fade(smoke_config: SmokeConfig) -> None:
 
 def test_ramp_accuracy(smoke_config: SmokeConfig) -> None:
     """Repeat 60-second fades and verify accuracy"""
-    ramp = 60
-    for i in range(1, 10):
+    ramp = scaled(RAMP_ACCURACY_RAMP_SECONDS)
+    for i in range(1, RAMP_ACCURACY_ITERATIONS + 1):
         rgbww_set(smoke_config.base_url, 0, 100, 100)
         set_hue_fade(smoke_config.base_url, 120, ramp)
         time.sleep(ramp)
@@ -147,7 +155,7 @@ def test_queue_back(smoke_config: SmokeConfig) -> None:
     """Test default queue (back) behavior"""
     rgbww_set(smoke_config.base_url, 0, 100, 100)
     
-    ramp = 10
+    ramp = scaled(10)
     set_hue_fade(smoke_config.base_url, 120, ramp)
     set_hue_fade(smoke_config.base_url, 170, ramp)
     time.sleep(2 * ramp)
@@ -159,17 +167,17 @@ def test_queue_front_reset(smoke_config: SmokeConfig) -> None:
     """Test front_reset queue policy"""
     rgbww_set(smoke_config.base_url, 0, 100, 100)
     
-    ramp = 12
+    ramp = scaled(12)
     delta = 0.8
     set_hue_fade(smoke_config.base_url, 120, ramp)
-    time.sleep(6)
+    time.sleep(scaled(6))
     hue1 = get_hue(smoke_config.color_url)  # ~60
-    set_hue_fade(smoke_config.base_url, 30, 12, queuePolicy="front_reset")
-    time.sleep(6)
+    set_hue_fade(smoke_config.base_url, 30, ramp, queuePolicy="front_reset")
+    time.sleep(scaled(6))
     hue2 = get_hue(smoke_config.color_url)  # ~45
-    time.sleep(6)
+    time.sleep(scaled(6))
     hue3 = get_hue(smoke_config.color_url)  # ~30
-    time.sleep(6)
+    time.sleep(scaled(6))
     hue4 = get_hue(smoke_config.color_url)  # ~75
 
     assert abs(hue1 - 60) < delta, f"hue1: expected ~60, got {hue1}"
@@ -182,17 +190,17 @@ def test_queue_front(smoke_config: SmokeConfig) -> None:
     """Test front queue policy"""
     rgbww_set(smoke_config.base_url, 0, 100, 100)
     
-    ramp = 12
+    ramp = scaled(12)
     delta = 1.0
     set_hue_fade(smoke_config.base_url, 120, ramp)
-    time.sleep(6)
+    time.sleep(scaled(6))
     hue1 = get_hue(smoke_config.color_url)  # ~60
-    set_hue_fade(smoke_config.base_url, 30, 12, queuePolicy="front")
-    time.sleep(6)
+    set_hue_fade(smoke_config.base_url, 30, ramp, queuePolicy="front")
+    time.sleep(scaled(6))
     hue2 = get_hue(smoke_config.color_url)  # ~45
-    time.sleep(6)
+    time.sleep(scaled(6))
     hue3 = get_hue(smoke_config.color_url)  # ~60
-    time.sleep(3)
+    time.sleep(scaled(3))
     hue4 = get_hue(smoke_config.color_url)  # ~60
 
     assert abs(hue1 - 60) < delta, f"hue1: expected ~60, got {hue1}"
@@ -205,10 +213,10 @@ def test_relative_plus(smoke_config: SmokeConfig) -> None:
     """Test relative hue increase"""
     rgbww_set(smoke_config.base_url, 0, 100, 100)
     
-    ramp = 3
+    ramp = scaled(3)
     delta = 0.8
     set_hue_fade(smoke_config.base_url, "+10", ramp)
-    time.sleep(3)
+    time.sleep(ramp)
     hue1 = get_hue(smoke_config.color_url)
 
     assert abs(hue1 - 10) < delta, f"Expected hue ~10, got {hue1}"
@@ -217,9 +225,9 @@ def test_relative_plus(smoke_config: SmokeConfig) -> None:
 def test_relative_plus_circle_top(smoke_config: SmokeConfig) -> None:
     """Test relative hue increase wrapping around 360"""
     set_hue_fade(smoke_config.base_url, "350", 0)
-    ramp = 3
+    ramp = scaled(3)
     set_hue_fade(smoke_config.base_url, "+20", ramp)
-    time.sleep(3)
+    time.sleep(ramp)
     hue1 = get_hue(smoke_config.color_url)
 
     delta = 0.8
@@ -230,13 +238,13 @@ def test_relative_plus_multiple(smoke_config: SmokeConfig) -> None:
     """Test multiple relative hue increases"""
     rgbww_set(smoke_config.base_url, 0, 100, 100)
     
-    ramp = 3
+    ramp = scaled(3)
     delta = 0.8
     set_hue_fade(smoke_config.base_url, "+10", ramp)
     set_hue_fade(smoke_config.base_url, "+10", ramp)
-    time.sleep(3)
+    time.sleep(ramp)
     hue1 = get_hue(smoke_config.color_url)
-    time.sleep(3)
+    time.sleep(ramp)
     hue2 = get_hue(smoke_config.color_url)
 
     assert abs(hue1 - 10) < delta, f"hue1: expected ~10, got {hue1}"
@@ -246,7 +254,7 @@ def test_relative_plus_multiple(smoke_config: SmokeConfig) -> None:
 def test_relative_minus(smoke_config: SmokeConfig) -> None:
     """Test relative hue decrease"""
     set_hue_fade(smoke_config.base_url, "100", 0)
-    ramp = 3
+    ramp = scaled(3)
     set_hue_fade(smoke_config.base_url, "-10", ramp)
     time.sleep(ramp)
     hue1 = get_hue(smoke_config.color_url)
@@ -258,9 +266,9 @@ def test_relative_minus(smoke_config: SmokeConfig) -> None:
 def test_relative_minus_circle_bottom(smoke_config: SmokeConfig) -> None:
     """Test relative hue decrease wrapping around 0"""
     set_hue_fade(smoke_config.base_url, "100", 0)
-    ramp = 3
+    ramp = scaled(3)
     set_hue_fade(smoke_config.base_url, "-150", ramp)
-    time.sleep(3)
+    time.sleep(ramp)
     hue1 = get_hue(smoke_config.color_url)
 
     delta = 0.8
@@ -271,15 +279,15 @@ def test_pause_all(smoke_config: SmokeConfig) -> None:
     """Test pause/continue of all channels"""
     rgbww_set(smoke_config.base_url, 0, 100, 100)
     
-    set_hue_fade(smoke_config.base_url, "100", val=50, sat=50, ramp=10)
-    time.sleep(5)
+    set_hue_fade(smoke_config.base_url, "100", val=50, sat=50, ramp=scaled(10))
+    time.sleep(scaled(5))
     set_channel_cmd(smoke_config.base_url, "pause")
-    time.sleep(5)
+    time.sleep(scaled(5))
     hue1 = get_hue(smoke_config.color_url)
     sat1 = get_sat(smoke_config.color_url)
     val1 = get_val(smoke_config.color_url)
     set_channel_cmd(smoke_config.base_url, "continue")
-    time.sleep(5)
+    time.sleep(scaled(5))
     hue2 = get_hue(smoke_config.color_url)
     sat2 = get_sat(smoke_config.color_url)
     val2 = get_val(smoke_config.color_url)
@@ -297,15 +305,15 @@ def test_pause_channel(smoke_config: SmokeConfig) -> None:
     """Test pause/continue of individual channel"""
     rgbww_set(smoke_config.base_url, 0, 100, 100)
     
-    set_hue_fade(smoke_config.base_url, "100", val=50, sat=50, ramp=10)
-    time.sleep(5)
+    set_hue_fade(smoke_config.base_url, "100", val=50, sat=50, ramp=scaled(10))
+    time.sleep(scaled(5))
     set_channel_cmd(smoke_config.base_url, "pause", '"h"')
-    time.sleep(5)
+    time.sleep(scaled(5))
     hue1 = get_hue(smoke_config.color_url)
     sat1 = get_sat(smoke_config.color_url)
     val1 = get_val(smoke_config.color_url)
     set_channel_cmd(smoke_config.base_url, "continue", '"h"')
-    time.sleep(5)
+    time.sleep(scaled(5))
     hue2 = get_hue(smoke_config.color_url)
     sat2 = get_sat(smoke_config.color_url)
     val2 = get_val(smoke_config.color_url)
@@ -353,7 +361,7 @@ def test_websocket_color_event_on_fade(smoke_config: SmokeConfig) -> None:
         
         # Start a fade
         rgbww_set(smoke_config.base_url, 0, 100, 100)
-        set_hue_fade(smoke_config.base_url, 180, 5)  # 5 second fade
+        set_hue_fade(smoke_config.base_url, 180, scaled(5))  # 5 second fade
         
         # Receive multiple color events during fade
         events_received = []
