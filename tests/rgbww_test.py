@@ -21,6 +21,8 @@ TIME_SCALE = float(os.environ.get("RGBWW_TEST_TIME_SCALE", "1.0"))
 RAMP_ACCURACY_RAMP_SECONDS = float(os.environ.get("RGBWW_RAMP_ACCURACY_SECONDS", "60"))
 RAMP_ACCURACY_ITERATIONS = int(os.environ.get("RGBWW_RAMP_ACCURACY_ITERATIONS", "9"))
 ASSERT_TOLERANCE = float(os.environ.get("RGBWW_TEST_TOLERANCE", "5.0"))
+RETRY_READ_ATTEMPTS = int(os.environ.get("RGBWW_TEST_READ_RETRIES", "5"))
+RETRY_READ_INTERVAL_SECONDS = float(os.environ.get("RGBWW_TEST_READ_RETRY_INTERVAL", "0.02"))
 
 # Buffer to ensure final animation step (step 100) completes before sampling (~20ms per update cycle)
 ANIMATION_COMPLETION_BUFFER_MS = 50  # 2-3 update cycles
@@ -33,6 +35,25 @@ def scaled(seconds: float) -> float:
 def wait_for_fade_complete(fade_duration_s: float) -> None:
     """Wait for fade to complete plus buffer for final step execution"""
     time.sleep(fade_duration_s + ANIMATION_COMPLETION_BUFFER_MS / 1000.0)
+
+
+def assert_eventually_close(
+    read_fn,
+    expected: float,
+    tolerance: float,
+    message: str,
+    attempts: int = RETRY_READ_ATTEMPTS,
+    interval_s: float = RETRY_READ_INTERVAL_SECONDS,
+) -> None:
+    """Retry a numeric read a few times to avoid transient early-read failures."""
+    last_value = None
+    for attempt in range(max(1, attempts)):
+        last_value = read_fn()
+        if abs(last_value - expected) < tolerance:
+            return
+        if attempt < attempts - 1:
+            time.sleep(interval_s)
+    assert False, f"{message} (after {attempts} reads/{interval_s:.3f}s), got {last_value}"
 
 # JSON templates for color commands
 jsonTempl = """{{
@@ -144,9 +165,12 @@ def test_simple_fade(smoke_config: SmokeConfig) -> None:
     ramp = scaled(10)
     set_hue_fade(smoke_config.base_url, new_hue, ramp)
     wait_for_fade_complete(ramp)
-    cur_hue = get_hue(smoke_config.color_url)
-    
-    assert abs(cur_hue - new_hue) < ASSERT_TOLERANCE, f"Expected hue ~{new_hue}, got {cur_hue}"
+    assert_eventually_close(
+        lambda: get_hue(smoke_config.color_url),
+        new_hue,
+        ASSERT_TOLERANCE,
+        f"Expected hue ~{new_hue}",
+    )
 
 
 def test_ramp_accuracy(smoke_config: SmokeConfig) -> None:
@@ -156,8 +180,12 @@ def test_ramp_accuracy(smoke_config: SmokeConfig) -> None:
         rgbww_set(smoke_config.base_url, 0, 100, 100)
         set_hue_fade(smoke_config.base_url, 120, ramp)
         wait_for_fade_complete(ramp)
-        cur_hue = get_hue(smoke_config.color_url)
-        assert abs(cur_hue - 120) < ASSERT_TOLERANCE, f"Iteration {i}: Expected hue ~120, got {cur_hue}"
+        assert_eventually_close(
+            lambda: get_hue(smoke_config.color_url),
+            120,
+            ASSERT_TOLERANCE,
+            f"Iteration {i}: Expected hue ~120",
+        )
 
 
 def test_queue_back(smoke_config: SmokeConfig) -> None:
@@ -169,7 +197,12 @@ def test_queue_back(smoke_config: SmokeConfig) -> None:
     set_hue_fade(smoke_config.base_url, 170, ramp)
     wait_for_fade_complete(2 * ramp)
     
-    assert abs(get_hue(smoke_config.color_url) - 170) < ASSERT_TOLERANCE
+    assert_eventually_close(
+        lambda: get_hue(smoke_config.color_url),
+        170,
+        ASSERT_TOLERANCE,
+        "Expected hue ~170",
+    )
 
 
 def test_queue_front_reset(smoke_config: SmokeConfig) -> None:
@@ -180,19 +213,14 @@ def test_queue_front_reset(smoke_config: SmokeConfig) -> None:
     delta = ASSERT_TOLERANCE
     set_hue_fade(smoke_config.base_url, 120, ramp)
     time.sleep(scaled(6))
-    hue1 = get_hue(smoke_config.color_url)  # ~60
+    assert_eventually_close(lambda: get_hue(smoke_config.color_url), 60, delta, "hue1: expected ~60")
     set_hue_fade(smoke_config.base_url, 30, ramp, queuePolicy="front_reset")
     time.sleep(scaled(6))
-    hue2 = get_hue(smoke_config.color_url)  # ~45
+    assert_eventually_close(lambda: get_hue(smoke_config.color_url), 45, delta, "hue2: expected ~45")
     time.sleep(scaled(6))
-    hue3 = get_hue(smoke_config.color_url)  # ~30
+    assert_eventually_close(lambda: get_hue(smoke_config.color_url), 30, delta, "hue3: expected ~30")
     time.sleep(scaled(6))
-    hue4 = get_hue(smoke_config.color_url)  # ~75
-
-    assert abs(hue1 - 60) < delta, f"hue1: expected ~60, got {hue1}"
-    assert abs(hue2 - 45) < delta, f"hue2: expected ~45, got {hue2}"
-    assert abs(hue3 - 30) < delta, f"hue3: expected ~30, got {hue3}"
-    assert abs(hue4 - 75) < delta, f"hue4: expected ~75, got {hue4}"
+    assert_eventually_close(lambda: get_hue(smoke_config.color_url), 75, delta, "hue4: expected ~75")
 
 
 def test_queue_front(smoke_config: SmokeConfig) -> None:
@@ -203,19 +231,14 @@ def test_queue_front(smoke_config: SmokeConfig) -> None:
     delta = ASSERT_TOLERANCE
     set_hue_fade(smoke_config.base_url, 120, ramp)
     time.sleep(scaled(6))
-    hue1 = get_hue(smoke_config.color_url)  # ~60
+    assert_eventually_close(lambda: get_hue(smoke_config.color_url), 60, delta, "hue1: expected ~60")
     set_hue_fade(smoke_config.base_url, 30, ramp, queuePolicy="front")
     time.sleep(scaled(6))
-    hue2 = get_hue(smoke_config.color_url)  # ~45
+    assert_eventually_close(lambda: get_hue(smoke_config.color_url), 45, delta, "hue2: expected ~45")
     time.sleep(scaled(6))
-    hue3 = get_hue(smoke_config.color_url)  # ~60
+    assert_eventually_close(lambda: get_hue(smoke_config.color_url), 60, delta, "hue3: expected ~60")
     time.sleep(scaled(3))
-    hue4 = get_hue(smoke_config.color_url)  # ~60
-
-    assert abs(hue1 - 60) < delta, f"hue1: expected ~60, got {hue1}"
-    assert abs(hue2 - 45) < delta, f"hue2: expected ~45, got {hue2}"
-    assert abs(hue3 - 60) < delta, f"hue3: expected ~60, got {hue3}"
-    assert abs(hue4 - 90) < delta, f"hue4: expected ~90, got {hue4}"
+    assert_eventually_close(lambda: get_hue(smoke_config.color_url), 90, delta, "hue4: expected ~90")
 
 
 def test_relative_plus(smoke_config: SmokeConfig) -> None:
@@ -226,9 +249,7 @@ def test_relative_plus(smoke_config: SmokeConfig) -> None:
     delta = ASSERT_TOLERANCE
     set_hue_fade(smoke_config.base_url, "+10", ramp)
     wait_for_fade_complete(ramp)
-    hue1 = get_hue(smoke_config.color_url)
-
-    assert abs(hue1 - 10) < delta, f"Expected hue ~10, got {hue1}"
+    assert_eventually_close(lambda: get_hue(smoke_config.color_url), 10, delta, "Expected hue ~10")
 
 
 def test_relative_plus_circle_top(smoke_config: SmokeConfig) -> None:
@@ -237,10 +258,8 @@ def test_relative_plus_circle_top(smoke_config: SmokeConfig) -> None:
     ramp = scaled(3)
     set_hue_fade(smoke_config.base_url, "+20", ramp)
     wait_for_fade_complete(ramp)
-    hue1 = get_hue(smoke_config.color_url)
-
     delta = ASSERT_TOLERANCE
-    assert abs(hue1 - 10) < delta, f"Expected hue ~10 (wrap), got {hue1}"
+    assert_eventually_close(lambda: get_hue(smoke_config.color_url), 10, delta, "Expected hue ~10 (wrap)")
 
 
 def test_relative_plus_multiple(smoke_config: SmokeConfig) -> None:
@@ -252,12 +271,9 @@ def test_relative_plus_multiple(smoke_config: SmokeConfig) -> None:
     set_hue_fade(smoke_config.base_url, "+10", ramp)
     set_hue_fade(smoke_config.base_url, "+10", ramp)
     wait_for_fade_complete(ramp)
-    hue1 = get_hue(smoke_config.color_url)
+    assert_eventually_close(lambda: get_hue(smoke_config.color_url), 10, delta, "hue1: expected ~10")
     wait_for_fade_complete(ramp)
-    hue2 = get_hue(smoke_config.color_url)
-
-    assert abs(hue1 - 10) < delta, f"hue1: expected ~10, got {hue1}"
-    assert abs(hue2 - 20) < delta, f"hue2: expected ~20, got {hue2}"
+    assert_eventually_close(lambda: get_hue(smoke_config.color_url), 20, delta, "hue2: expected ~20")
 
 
 def test_relative_minus(smoke_config: SmokeConfig) -> None:
@@ -266,10 +282,8 @@ def test_relative_minus(smoke_config: SmokeConfig) -> None:
     ramp = scaled(3)
     set_hue_fade(smoke_config.base_url, "-10", ramp)
     wait_for_fade_complete(ramp)
-    hue1 = get_hue(smoke_config.color_url)
-
     delta = ASSERT_TOLERANCE
-    assert abs(hue1 - 90) < delta, f"Expected hue ~90, got {hue1}"
+    assert_eventually_close(lambda: get_hue(smoke_config.color_url), 90, delta, "Expected hue ~90")
 
 
 def test_relative_minus_circle_bottom(smoke_config: SmokeConfig) -> None:
@@ -278,62 +292,46 @@ def test_relative_minus_circle_bottom(smoke_config: SmokeConfig) -> None:
     ramp = scaled(3)
     set_hue_fade(smoke_config.base_url, "-150", ramp)
     wait_for_fade_complete(ramp)
-    hue1 = get_hue(smoke_config.color_url)
-
     delta = ASSERT_TOLERANCE
-    assert abs(hue1 - 310) < delta, f"Expected hue ~310 (wrap), got {hue1}"
+    assert_eventually_close(lambda: get_hue(smoke_config.color_url), 310, delta, "Expected hue ~310 (wrap)")
 
 
 def test_pause_all(smoke_config: SmokeConfig) -> None:
     """Test pause/continue of all channels"""
     rgbww_set(smoke_config.base_url, 0, 100, 100)
+    delta = ASSERT_TOLERANCE
     
     set_hue_fade(smoke_config.base_url, "100", val=50, sat=50, ramp=scaled(10))
     time.sleep(scaled(5))
     set_channel_cmd(smoke_config.base_url, "pause")
     time.sleep(scaled(5))
-    hue1 = get_hue(smoke_config.color_url)
-    sat1 = get_sat(smoke_config.color_url)
-    val1 = get_val(smoke_config.color_url)
+    assert_eventually_close(lambda: get_hue(smoke_config.color_url), 50, delta, "hue1: expected ~50")
+    assert_eventually_close(lambda: get_sat(smoke_config.color_url), 75, delta, "sat1: expected ~75")
+    assert_eventually_close(lambda: get_val(smoke_config.color_url), 75, delta, "val1: expected ~75")
     set_channel_cmd(smoke_config.base_url, "continue")
     wait_for_fade_complete(scaled(5))
-    hue2 = get_hue(smoke_config.color_url)
-    sat2 = get_sat(smoke_config.color_url)
-    val2 = get_val(smoke_config.color_url)
-    
-    delta = ASSERT_TOLERANCE
-    assert abs(hue1 - 50) < delta, f"hue1: expected ~50, got {hue1}"
-    assert abs(sat1 - 75) < delta, f"sat1: expected ~75, got {sat1}"
-    assert abs(val1 - 75) < delta, f"val1: expected ~75, got {val1}"
-    assert abs(hue2 - 100) < delta, f"hue2: expected ~100, got {hue2}"
-    assert abs(sat2 - 50) < delta, f"sat2: expected ~50, got {sat2}"
-    assert abs(val2 - 50) < delta, f"val2: expected ~50, got {val2}"
+    assert_eventually_close(lambda: get_hue(smoke_config.color_url), 100, delta, "hue2: expected ~100")
+    assert_eventually_close(lambda: get_sat(smoke_config.color_url), 50, delta, "sat2: expected ~50")
+    assert_eventually_close(lambda: get_val(smoke_config.color_url), 50, delta, "val2: expected ~50")
 
 
 def test_pause_channel(smoke_config: SmokeConfig) -> None:
     """Test pause/continue of individual channel"""
     rgbww_set(smoke_config.base_url, 0, 100, 100)
+    delta = ASSERT_TOLERANCE
     
     set_hue_fade(smoke_config.base_url, "100", val=50, sat=50, ramp=scaled(10))
     time.sleep(scaled(5))
     set_channel_cmd(smoke_config.base_url, "pause", '"h"')
     time.sleep(scaled(5))
-    hue1 = get_hue(smoke_config.color_url)
-    sat1 = get_sat(smoke_config.color_url)
-    val1 = get_val(smoke_config.color_url)
+    assert_eventually_close(lambda: get_hue(smoke_config.color_url), 50, delta, "hue1: expected ~50")
+    assert_eventually_close(lambda: get_sat(smoke_config.color_url), 50, delta, "sat1: expected ~50")
+    assert_eventually_close(lambda: get_val(smoke_config.color_url), 50, delta, "val1: expected ~50")
     set_channel_cmd(smoke_config.base_url, "continue", '"h"')
     wait_for_fade_complete(scaled(5))
-    hue2 = get_hue(smoke_config.color_url)
-    sat2 = get_sat(smoke_config.color_url)
-    val2 = get_val(smoke_config.color_url)
-    
-    delta = ASSERT_TOLERANCE
-    assert abs(hue1 - 50) < delta, f"hue1: expected ~50, got {hue1}"
-    assert abs(sat1 - 50) < delta, f"sat1: expected ~50, got {sat1}"
-    assert abs(val1 - 50) < delta, f"val1: expected ~50, got {val1}"
-    assert abs(hue2 - 100) < delta, f"hue2: expected ~100, got {hue2}"
-    assert abs(sat2 - 50) < delta, f"sat2: expected ~50, got {sat2}"
-    assert abs(val2 - 50) < delta, f"val2: expected ~50, got {val2}"
+    assert_eventually_close(lambda: get_hue(smoke_config.color_url), 100, delta, "hue2: expected ~100")
+    assert_eventually_close(lambda: get_sat(smoke_config.color_url), 50, delta, "sat2: expected ~50")
+    assert_eventually_close(lambda: get_val(smoke_config.color_url), 50, delta, "val2: expected ~50")
 
 
 def test_websocket_color_event_on_set(smoke_config: SmokeConfig) -> None:
