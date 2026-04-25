@@ -243,7 +243,47 @@ jobs:
           TEST_OUTPUT="out/host-ci/test-output.txt"
           VALGRIND_SMOKE_LOG="out/host-ci/valgrind-smoke.log"
           VALGRIND_RGBWW_LOG="out/host-ci/valgrind-rgbww.log"
+          VALGRIND_RUNTIME_SMOKE_START_LOG="out/host-ci/valgrind-runtime-smoke-startup.log"
+          VALGRIND_RUNTIME_SMOKE_LOG="out/host-ci/valgrind-runtime-smoke.log"
+          VALGRIND_RUNTIME_RGBWW_START_LOG="out/host-ci/valgrind-runtime-rgbww-startup.log"
+          VALGRIND_RUNTIME_RGBWW_LOG="out/host-ci/valgrind-runtime-rgbww.log"
           VALGRIND_STATUS_FILE="out/host-ci/valgrind-status.txt"
+
+          extract_leak_bytes() {
+            local file="$1"
+            local metric="$2"
+            if [[ ! -f "$file" ]]; then
+              return 0
+            fi
+            grep -E "${metric}:" "$file" | head -n1 | sed -E "s/.*${metric}:[[:space:]]*([0-9,]+).*/\1/" | tr -d ','
+          }
+
+          print_runtime_delta_row() {
+            local phase="$1"
+            local start_log="$2"
+            local end_log="$3"
+
+            local start_def end_def start_ind end_ind start_pos end_pos start_reach end_reach
+            start_def="$(extract_leak_bytes "$start_log" "definitely lost")"
+            end_def="$(extract_leak_bytes "$end_log" "definitely lost")"
+            start_ind="$(extract_leak_bytes "$start_log" "indirectly lost")"
+            end_ind="$(extract_leak_bytes "$end_log" "indirectly lost")"
+            start_pos="$(extract_leak_bytes "$start_log" "possibly lost")"
+            end_pos="$(extract_leak_bytes "$end_log" "possibly lost")"
+            start_reach="$(extract_leak_bytes "$start_log" "still reachable")"
+            end_reach="$(extract_leak_bytes "$end_log" "still reachable")"
+
+            if [[ -n "$start_def" && -n "$end_def" && -n "$start_ind" && -n "$end_ind" && -n "$start_pos" && -n "$end_pos" && -n "$start_reach" && -n "$end_reach" ]]; then
+              local delta_def delta_ind delta_pos delta_reach
+              delta_def=$((end_def - start_def))
+              delta_ind=$((end_ind - start_ind))
+              delta_pos=$((end_pos - start_pos))
+              delta_reach=$((end_reach - start_reach))
+              printf '| %s | %+d | %+d | %+d | %+d |\n' "$phase" "$delta_def" "$delta_ind" "$delta_pos" "$delta_reach" >> "$GITHUB_STEP_SUMMARY"
+            else
+              printf '| %s | n/a | n/a | n/a | n/a |\n' "$phase" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          }
           
           # Include pytest-md formatted results if available
           if [ -f out/host-ci/test-results.md ]; then
@@ -289,6 +329,50 @@ jobs:
           else
             echo "- ⚠️ RGBWW valgrind log not found ($VALGRIND_RGBWW_LOG)" >> "$GITHUB_STEP_SUMMARY"
           fi
+
+          echo "### Runtime Leak Snapshots (pre-shutdown)" >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ -f "$VALGRIND_RUNTIME_SMOKE_START_LOG" ]]; then
+            echo "#### Smoke startup snapshot" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            grep -E "runtime_snapshot=|runtime_snapshot_label=|LEAK SUMMARY:|definitely lost:|indirectly lost:|possibly lost:|still reachable:" "$VALGRIND_RUNTIME_SMOKE_START_LOG" | tail -n 25 >> "$GITHUB_STEP_SUMMARY" || true
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- ⚠️ Smoke startup runtime valgrind snapshot not found ($VALGRIND_RUNTIME_SMOKE_START_LOG)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          if [[ -f "$VALGRIND_RUNTIME_SMOKE_LOG" ]]; then
+            echo "#### Smoke post-test snapshot" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            grep -E "runtime_snapshot=|runtime_snapshot_label=|LEAK SUMMARY:|definitely lost:|indirectly lost:|possibly lost:|still reachable:" "$VALGRIND_RUNTIME_SMOKE_LOG" | tail -n 25 >> "$GITHUB_STEP_SUMMARY" || true
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- ⚠️ Smoke runtime valgrind snapshot not found ($VALGRIND_RUNTIME_SMOKE_LOG)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          if [[ -f "$VALGRIND_RUNTIME_RGBWW_START_LOG" ]]; then
+            echo "#### RGBWW startup snapshot" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            grep -E "runtime_snapshot=|runtime_snapshot_label=|LEAK SUMMARY:|definitely lost:|indirectly lost:|possibly lost:|still reachable:" "$VALGRIND_RUNTIME_RGBWW_START_LOG" | tail -n 25 >> "$GITHUB_STEP_SUMMARY" || true
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- ⚠️ RGBWW startup runtime valgrind snapshot not found ($VALGRIND_RUNTIME_RGBWW_START_LOG)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          if [[ -f "$VALGRIND_RUNTIME_RGBWW_LOG" ]]; then
+            echo "#### RGBWW post-test snapshot" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            grep -E "runtime_snapshot=|runtime_snapshot_label=|LEAK SUMMARY:|definitely lost:|indirectly lost:|possibly lost:|still reachable:" "$VALGRIND_RUNTIME_RGBWW_LOG" | tail -n 25 >> "$GITHUB_STEP_SUMMARY" || true
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- ⚠️ RGBWW runtime valgrind snapshot not found ($VALGRIND_RUNTIME_RGBWW_LOG)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          echo "### Runtime Leak Delta (startup -> post-tests)" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Phase | definitely lost (bytes) | indirectly lost (bytes) | possibly lost (bytes) | still reachable (bytes) |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| --- | ---: | ---: | ---: | ---: |" >> "$GITHUB_STEP_SUMMARY"
+          print_runtime_delta_row "Smoke" "$VALGRIND_RUNTIME_SMOKE_START_LOG" "$VALGRIND_RUNTIME_SMOKE_LOG"
+          print_runtime_delta_row "RGBWW" "$VALGRIND_RUNTIME_RGBWW_START_LOG" "$VALGRIND_RUNTIME_RGBWW_LOG"
           
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "### Artifacts 📦" >> "$GITHUB_STEP_SUMMARY"
@@ -299,6 +383,10 @@ jobs:
           echo "- Host app log: host-smoke.log" >> "$GITHUB_STEP_SUMMARY"
           echo "- Valgrind log (Smoke): valgrind-smoke.log" >> "$GITHUB_STEP_SUMMARY"
           echo "- Valgrind log (RGBWW): valgrind-rgbww.log" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Valgrind runtime log (Smoke): valgrind-runtime-smoke.log" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Valgrind runtime startup log (Smoke): valgrind-runtime-smoke-startup.log" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Valgrind runtime log (RGBWW): valgrind-runtime-rgbww.log" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Valgrind runtime startup log (RGBWW): valgrind-runtime-rgbww-startup.log" >> "$GITHUB_STEP_SUMMARY"
 
   build:
     needs: [generate-matrix, host-smoke]

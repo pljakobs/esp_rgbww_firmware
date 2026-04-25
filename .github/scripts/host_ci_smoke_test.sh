@@ -16,6 +16,10 @@ HTTP_TRACE_LOG="${LOG_DIR}/http-probes.jsonl"
 MALFORMED_JSON_TRACE="${LOG_DIR}/malformed-color-response.json"
 VALGRIND_LOG_SMOKE="${LOG_DIR}/valgrind-smoke.log"
 VALGRIND_LOG_RGBWW="${LOG_DIR}/valgrind-rgbww.log"
+VALGRIND_RUNTIME_LOG_SMOKE_START="${LOG_DIR}/valgrind-runtime-smoke-startup.log"
+VALGRIND_RUNTIME_LOG_SMOKE="${LOG_DIR}/valgrind-runtime-smoke.log"
+VALGRIND_RUNTIME_LOG_RGBWW_START="${LOG_DIR}/valgrind-runtime-rgbww-startup.log"
+VALGRIND_RUNTIME_LOG_RGBWW="${LOG_DIR}/valgrind-runtime-rgbww.log"
 VALGRIND_OPTIONS="${HOST_CI_VALGRIND_OPTIONS:---tool=memcheck --leak-check=full --show-leak-kinds=all --track-origins=yes --num-callers=25}"
 ENABLE_VALGRIND="${HOST_CI_ENABLE_VALGRIND:-1}"
 ENFORCE_VALGRIND="${HOST_CI_ENFORCE_VALGRIND:-1}"
@@ -27,6 +31,7 @@ WS_HOST="${WS_HOST:-$APP_IP}"
 WS_PORT="${WS_PORT:-80}"
 WS_PATH="${WS_PATH:-/ws}"
 COLOR_URL="http://${APP_IP}/color"
+APP_UNDER_VALGRIND=0
 
 cleanup() {
     set +e
@@ -168,6 +173,7 @@ start_host_app() {
   if [[ "$force_plain" != "1" ]] && [[ "$ENABLE_VALGRIND" == "1" ]] && command -v valgrind >/dev/null 2>&1; then
     use_valgrind=1
   fi
+  APP_UNDER_VALGRIND="$use_valgrind"
 
   if [[ "$use_valgrind" == "1" ]]; then
     # shellcheck disable=SC2086
@@ -260,6 +266,34 @@ PY
   fi
 }
 
+collect_runtime_valgrind_snapshot() {
+  local runtime_log_path="$1"
+  local label="$2"
+
+  if [[ "$APP_UNDER_VALGRIND" != "1" ]]; then
+    echo "runtime_snapshot=skipped (app not under valgrind)" > "$runtime_log_path"
+    return 0
+  fi
+
+  if [[ -z "${APP_PID:-}" ]] || ! kill -0 "$APP_PID" 2>/dev/null; then
+    echo "runtime_snapshot=skipped (app pid unavailable)" > "$runtime_log_path"
+    return 0
+  fi
+
+  if ! command -v vgdb >/dev/null 2>&1; then
+    echo "runtime_snapshot=skipped (vgdb unavailable)" > "$runtime_log_path"
+    return 0
+  fi
+
+  {
+    echo "runtime_snapshot_label=$label"
+    echo "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    echo "app_pid=$APP_PID"
+    echo
+    vgdb --pid="$APP_PID" leak_check summary 2>&1
+  } > "$runtime_log_path" || true
+}
+
 stop_host_app() {
   if [[ -n "${APP_PID:-}" ]] && kill -0 "$APP_PID" 2>/dev/null; then
     kill "$APP_PID" 2>/dev/null || true
@@ -269,7 +303,7 @@ stop_host_app() {
 }
 
 mkdir -p "$LOG_DIR"
-rm -f "$APP_LOG" "$APP_LOG_SMOKE" "$APP_LOG_RGBWW" "$LOG_DIR/info.json" "$HTTP_TRACE_LOG" "$MALFORMED_JSON_TRACE" "$VALGRIND_LOG_SMOKE" "$VALGRIND_LOG_RGBWW"
+rm -f "$APP_LOG" "$APP_LOG_SMOKE" "$APP_LOG_RGBWW" "$LOG_DIR/info.json" "$HTTP_TRACE_LOG" "$MALFORMED_JSON_TRACE" "$VALGRIND_LOG_SMOKE" "$VALGRIND_LOG_RGBWW" "$VALGRIND_RUNTIME_LOG_SMOKE_START" "$VALGRIND_RUNTIME_LOG_SMOKE" "$VALGRIND_RUNTIME_LOG_RGBWW_START" "$VALGRIND_RUNTIME_LOG_RGBWW"
 rm -f "$VALGRIND_STATUS_FILE"
 {
     echo "host_ci_smoke_test started"
@@ -395,17 +429,21 @@ RGBWW_TEST_OUTPUT="${LOG_DIR}/rgbww-test-output.txt"
 python3 -m pip install --quiet pytest-md
 
 start_host_app "$APP_LOG_SMOKE" "$VALGRIND_LOG_SMOKE" "smoke"
+collect_runtime_valgrind_snapshot "$VALGRIND_RUNTIME_LOG_SMOKE_START" "smoke_startup_idle"
 python3 -m pytest \
   -v \
   --md "$SMOKE_TEST_REPORT" \
   tests/host_smoke_api_test.py 2>&1 | tee "$SMOKE_TEST_OUTPUT" || true
+collect_runtime_valgrind_snapshot "$VALGRIND_RUNTIME_LOG_SMOKE" "smoke_post_tests"
 stop_host_app
 
 start_host_app "$APP_LOG_RGBWW" "$VALGRIND_LOG_RGBWW" "rgbww"
+collect_runtime_valgrind_snapshot "$VALGRIND_RUNTIME_LOG_RGBWW_START" "rgbww_startup_idle"
 python3 -m pytest \
   -v \
   --md "$RGBWW_TEST_REPORT" \
   tests/rgbww_test.py 2>&1 | tee "$RGBWW_TEST_OUTPUT" || true
+collect_runtime_valgrind_snapshot "$VALGRIND_RUNTIME_LOG_RGBWW" "rgbww_post_tests"
 stop_host_app
 
 {
