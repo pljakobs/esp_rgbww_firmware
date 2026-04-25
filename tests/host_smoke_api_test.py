@@ -64,38 +64,69 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
         handle.write("\n")
 
 
-def http_request(method: str, url: str, body: bytes | None = None, headers: dict[str, str] | None = None, timeout: float = 5.0) -> dict[str, Any]:
-    req = request.Request(url, data=body, headers=headers or {}, method=method)
-    try:
-        with request.urlopen(req, timeout=timeout) as response:
-            raw_body = response.read()
+def http_request(method: str, url: str, body: bytes | None = None, headers: dict[str, str] | None = None, timeout: float = 5.0, max_redirects: int = 5) -> dict[str, Any]:
+    """Make an HTTP request and follow redirects up to max_redirects times."""
+    for redirect_count in range(max_redirects):
+        req = request.Request(url, data=body, headers=headers or {}, method=method)
+        try:
+            with request.urlopen(req, timeout=timeout) as response:
+                # Check if this is a redirect (3xx status code)
+                if 300 <= response.status < 400:
+                    location = response.headers.get('Location')
+                    if location:
+                        url = location
+                        # For redirects, follow with GET and no body
+                        method = 'GET'
+                        body = None
+                        continue
+                
+                raw_body = response.read()
+                return {
+                    "status": response.status,
+                    "reason": getattr(response, "reason", "") or "",
+                    "headers": dict(response.getheaders()),
+                    "body": raw_body.decode("utf-8", errors="replace"),
+                    "error": "",
+                }
+        except error.HTTPError as exc:
+            # Check if this is a redirect error (3xx status code)
+            if 300 <= exc.code < 400:
+                location = exc.headers.get('Location')
+                if location:
+                    url = location
+                    # For redirects, follow with GET and no body
+                    method = 'GET'
+                    body = None
+                    continue
+            
+            try:
+                raw_body = exc.read()
+            except http.client.IncompleteRead as incomplete:
+                raw_body = incomplete.partial or b""
             return {
-                "status": response.status,
-                "reason": getattr(response, "reason", "") or "",
-                "headers": dict(response.getheaders()),
+                "status": exc.code,
+                "reason": getattr(exc, "reason", "") or "",
+                "headers": dict(exc.headers.items()),
                 "body": raw_body.decode("utf-8", errors="replace"),
                 "error": "",
             }
-    except error.HTTPError as exc:
-        try:
-            raw_body = exc.read()
-        except http.client.IncompleteRead as incomplete:
-            raw_body = incomplete.partial or b""
-        return {
-            "status": exc.code,
-            "reason": getattr(exc, "reason", "") or "",
-            "headers": dict(exc.headers.items()),
-            "body": raw_body.decode("utf-8", errors="replace"),
-            "error": "",
-        }
-    except Exception as exc:  # noqa: BLE001
-        return {
-            "status": 0,
-            "reason": "",
-            "headers": {},
-            "body": "",
-            "error": repr(exc),
-        }
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "status": 0,
+                "reason": "",
+                "headers": {},
+                "body": "",
+                "error": repr(exc),
+            }
+    
+    # Max redirects exceeded
+    return {
+        "status": 0,
+        "reason": "",
+        "headers": {},
+        "body": "",
+        "error": "Max redirects exceeded",
+    }
 
 
 def record_http_probe(
