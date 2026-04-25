@@ -3,7 +3,7 @@ Created on 02.04.2017
 
 @author: Robin
 
-Converted to pytest format integrated with host_smoke_api_test.py harness
+Converted to pytest format integrated with host_smoke_api_test.py harness by pjakobs
 """
 import json
 import os
