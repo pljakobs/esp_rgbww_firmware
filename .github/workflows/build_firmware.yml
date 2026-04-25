@@ -164,14 +164,13 @@ jobs:
       - name: Add Host smoke artifact summary
         if: always()
         run: |
-          TEST_REPORT="out/host-ci/test-report.json"
-          SCRIPT_DIR=".github/scripts"
+          TEST_REPORT="out/host-ci/test-results.md"
           
           echo "## Test Results 📊" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           
           if [[ -f "$TEST_REPORT" ]]; then
-            python3 "$SCRIPT_DIR/generate_test_summary.py" "$TEST_REPORT" >> "$GITHUB_STEP_SUMMARY"
+            cat "$TEST_REPORT" >> "$GITHUB_STEP_SUMMARY"
           else
             echo "⚠️ No test report found" >> "$GITHUB_STEP_SUMMARY"
           fi
