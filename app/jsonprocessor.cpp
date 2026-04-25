@@ -41,7 +41,11 @@ bool JsonProcessor::onColor(const String& json, String& msg, bool relay)
 {
 	debug_e("JsonProcessor::onColor: %s", json.c_str());
 	StaticJsonDocument<400> doc;
-	Json::deserialize(doc, json);
+	DeserializationError err = deserializeJson(doc, json);
+	if(err) {
+		msg = F("Invalid JSON");
+		return false;
+	}
 	return onColor(doc.as<JsonObject>(), msg, relay);
 }
 
