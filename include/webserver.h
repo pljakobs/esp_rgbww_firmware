@@ -43,9 +43,7 @@ enum API_CODES {
 class ApplicationWebserver: private HttpServer {
 public:
     ApplicationWebserver();
-    virtual ~ApplicationWebserver() {
-        delete wsResource;
-    };
+    virtual ~ApplicationWebserver() = default;
 
     void start();
     void stop();
@@ -62,7 +60,7 @@ private:
     bool _running = false;
     
 
-    WebsocketResource* wsResource;
+    WebsocketResource* wsResource = nullptr;
     WebsocketList webSockets;
 
     bool authenticated(HttpRequest &request, HttpResponse &response);

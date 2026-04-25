@@ -59,10 +59,22 @@ void EventServer::start(ApplicationWebserver& webServer)
  */
 void EventServer::stop()
 {
-	if(not active)
-		return;
+	_keepAliveTimer.stop();
 
-	shutdown();
+	// TcpServer::shutdown() calls delete this when connections drain.
+	// EventServer is an embedded Application member, so self-delete is invalid.
+	if(tcp) {
+		tcp_arg(tcp, nullptr);
+		tcp_accept(tcp, nullptr);
+		tcp_close(tcp);
+		tcp = nullptr;
+	}
+
+	for(auto& connection : connections) {
+		if(connection != nullptr) {
+			connection->setTimeOut(1);
+		}
+	}
 }
 
 /**

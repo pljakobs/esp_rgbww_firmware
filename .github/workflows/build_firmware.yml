@@ -40,7 +40,7 @@ jobs:
 
   host-smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
     steps:
       - name: Determine branch
         id: get_branch
@@ -166,6 +166,8 @@ jobs:
         run: |
           TEST_REPORT="out/host-ci/test-results.md"
           TEST_OUTPUT="out/host-ci/test-output.txt"
+          VALGRIND_SMOKE_LOG="out/host-ci/valgrind-smoke.log"
+          VALGRIND_RGBWW_LOG="out/host-ci/valgrind-rgbww.log"
           
           echo "## Test Results 📊" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
@@ -185,6 +187,28 @@ jobs:
             grep -A 2 "AssertionError\|assert" "$TEST_OUTPUT" | head -50 >> "$GITHUB_STEP_SUMMARY" || true
             echo '```' >> "$GITHUB_STEP_SUMMARY"
           fi
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "## Valgrind Results 🧠" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ -f "$VALGRIND_SMOKE_LOG" ]]; then
+            echo "### Smoke (host_smoke_api_test.py)" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            grep -E "ERROR SUMMARY:|definitely lost:|indirectly lost:|possibly lost:|still reachable:" "$VALGRIND_SMOKE_LOG" | tail -n 20 >> "$GITHUB_STEP_SUMMARY" || true
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- ⚠️ Smoke valgrind log not found ($VALGRIND_SMOKE_LOG)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          if [[ -f "$VALGRIND_RGBWW_LOG" ]]; then
+            echo "### RGBWW (rgbww_test.py)" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            grep -E "ERROR SUMMARY:|definitely lost:|indirectly lost:|possibly lost:|still reachable:" "$VALGRIND_RGBWW_LOG" | tail -n 20 >> "$GITHUB_STEP_SUMMARY" || true
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- ⚠️ RGBWW valgrind log not found ($VALGRIND_RGBWW_LOG)" >> "$GITHUB_STEP_SUMMARY"
+          fi
           
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "### Artifacts 📦" >> "$GITHUB_STEP_SUMMARY"
@@ -193,6 +217,8 @@ jobs:
           echo "- Full test output: test-output.txt" >> "$GITHUB_STEP_SUMMARY"
           echo "- Formatted results: test-results.md" >> "$GITHUB_STEP_SUMMARY"
           echo "- Host app log: host-smoke.log" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Valgrind log (Smoke): valgrind-smoke.log" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Valgrind log (RGBWW): valgrind-rgbww.log" >> "$GITHUB_STEP_SUMMARY"
 
   build:
     needs: [generate-matrix, host-smoke]
