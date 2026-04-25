@@ -55,6 +55,9 @@ public:
     void wsSendBroadcast(const char* buffer, size_t length);
 
     const char* getApiCodeMsg(API_CODES code);
+    
+    uint32_t getHttpActiveConnections() const;
+    uint32_t getWebsocketConnectionCount() const;
 
 private:
 

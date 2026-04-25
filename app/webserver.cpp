@@ -275,6 +275,16 @@ const char* ApplicationWebserver::getApiCodeMsg(API_CODES code)
 	}
 }
 
+uint32_t ApplicationWebserver::getHttpActiveConnections() const
+{
+	return activeClients;
+}
+
+uint32_t ApplicationWebserver::getWebsocketConnectionCount() const
+{
+	return webSockets.size();
+}
+
 void ApplicationWebserver::sendApiResponse(HttpResponse& response, JsonObjectStream* stream, HttpStatus code)
 {
 	if(!checkHeap(response)) {
