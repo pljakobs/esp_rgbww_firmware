@@ -234,6 +234,134 @@ def fail_with_trace(message: str, trace: dict[str, Any], detail_path: Path | Non
     )
 
 
+def decode_json_response(response: dict[str, Any], trace: dict[str, Any], *, failure_message: str) -> Any:
+    if response["error"]:
+        fail_with_trace(failure_message, trace)
+    try:
+        return json.loads(response["body"]) if response["body"] else {}
+    except json.JSONDecodeError:
+        fail_with_trace(f"{failure_message}: invalid JSON body", trace)
+
+
+def recv_ws_text(sock: socket.socket, timeout: float = 3.0) -> str:
+    deadline = socket.getdefaulttimeout()
+    del deadline
+    while True:
+        opcode, payload = ws_recv_frame(sock, timeout=timeout)
+        if opcode is None:
+            pytest.fail("WebSocket connection closed before a text frame was received")
+        if opcode == 1:
+            return (payload or b"").decode("utf-8", errors="replace")
+        if opcode == 9:
+            pong_payload = payload or b""
+            sock.sendall(bytes([0x8A, len(pong_payload)]) + pong_payload)
+            continue
+        if opcode == 8:
+            pytest.fail("Unexpected WebSocket close frame received")
+        pytest.fail(f"Unsupported WebSocket opcode received: {opcode}")
+
+
+def recv_ws_json(sock: socket.socket, timeout: float = 3.0) -> dict[str, Any]:
+    text = recv_ws_text(sock, timeout=timeout)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as exc:
+        pytest.fail(f"Expected JSON WebSocket payload, got {text!r}: {exc}")
+
+
+def jsonrpc_error_text(payload: dict[str, Any]) -> str:
+    error_value = payload.get("error", "")
+    if isinstance(error_value, dict):
+        return f"{error_value.get('message', '')} {error_value.get('code', '')}".strip()
+    return str(error_value)
+
+
+def assert_method_error_variant(message: str, trace: dict[str, Any]) -> None:
+    normalized = message.lower()
+    if (
+        "missing method" not in normalized
+        and "method not implemented" not in normalized
+        and "method not found" not in normalized
+        and "-32601" not in normalized
+    ):
+        fail_with_trace("Unexpected JSON-RPC method error", trace)
+
+
+def make_distinct_raw(candidate: dict[str, Any], current: dict[str, Any] | None) -> dict[str, int]:
+    base = current or {}
+    normalized = {
+        "r": int(candidate.get("r", 0)),
+        "g": int(candidate.get("g", 0)),
+        "b": int(candidate.get("b", 0)),
+        "ww": int(candidate.get("ww", 0)),
+        "cw": int(candidate.get("cw", 0)),
+    }
+    current_normalized = {
+        key: int(base.get(key, 0)) for key in ["r", "g", "b", "ww", "cw"]
+    }
+    if normalized != current_normalized:
+        return normalized
+
+    normalized["r"] = (current_normalized["r"] + 1) % 256
+    return normalized
+
+
+def wait_for_color_raw(smoke_config: SmokeConfig, expected_raw: dict[str, int], attempts: int = 20) -> tuple[dict[str, Any], dict[str, Any]]:
+    last_response: dict[str, Any] | None = None
+    last_trace: dict[str, Any] | None = None
+    for _ in range(attempts):
+        response = http_request("GET", smoke_config.color_url)
+        trace = record_http_probe(
+            smoke_config,
+            probe="color_poll",
+            method="GET",
+            url=smoke_config.color_url,
+            body=None,
+            headers={"Accept": "application/json"},
+            response=response,
+        )
+        payload = decode_json_response(response, trace, failure_message="/color polling failed")
+        last_response = payload
+        last_trace = trace
+        if payload.get("raw") == expected_raw:
+            return payload, trace
+    fail_with_trace(
+        f"/color did not converge to expected raw value {expected_raw}",
+        last_trace or {"request": {}, "response": last_response or {}},
+    )
+
+
+def ws_request(sock: socket.socket, payload: dict[str, Any], timeout: float = 3.0) -> tuple[dict[str, Any], dict[str, Any]]:
+    ws_send_text(sock, json.dumps(payload, separators=(",", ":")))
+    response_text = recv_ws_text(sock, timeout=timeout)
+    trace = {
+        "request": payload,
+        "response": {"text": response_text},
+    }
+    try:
+        return json.loads(response_text), trace
+    except json.JSONDecodeError:
+        fail_with_trace("WebSocket response was not valid JSON", trace)
+
+
+def ws_wait_for_method(sock: socket.socket, method_name: str, timeout: float = 8.0) -> tuple[dict[str, Any], dict[str, Any]]:
+    deadline = timeout
+    while deadline > 0:
+        response_text = recv_ws_text(sock, timeout=min(1.0, deadline))
+        deadline -= 1.0
+        trace = {
+            "request": {"expected_method": method_name},
+            "response": {"text": response_text},
+        }
+        try:
+            payload = json.loads(response_text)
+        except json.JSONDecodeError:
+            fail_with_trace("WebSocket event payload was not valid JSON", trace)
+        if payload.get("method") == method_name:
+            return payload, trace
+    pytest.fail(f"Timed out waiting for WebSocket method event {method_name!r}")
+
+
 def test_websocket_handshake(smoke_config: SmokeConfig) -> None:
     sock, trace = websocket_handshake(smoke_config, b"host-ci-websocket-key")
     try:
@@ -247,6 +375,23 @@ def test_websocket_handshake(smoke_config: SmokeConfig) -> None:
             fail_with_trace("Invalid Sec-WebSocket-Accept header", trace)
     finally:
         sock.close()
+
+
+def test_ping_endpoint(smoke_config: SmokeConfig) -> None:
+    url = f"{smoke_config.base_url}/ping"
+    response = http_request("GET", url)
+    trace = record_http_probe(
+        smoke_config,
+        probe="ping",
+        method="GET",
+        url=url,
+        body=None,
+        headers={"Accept": "application/json"},
+        response=response,
+    )
+    payload = decode_json_response(response, trace, failure_message="/ping probe failed")
+    if response["status"] != 200 or payload.get("ping") != "pong":
+        fail_with_trace("Unexpected /ping response", trace)
 
 
 def test_info_endpoint(smoke_config: SmokeConfig) -> None:
@@ -309,6 +454,156 @@ def test_malformed_json_returns_bad_request(smoke_config: SmokeConfig) -> None:
         fail_with_trace("Malformed JSON error body missing expected text", trace, smoke_config.malformed_json_trace)
 
 
+@pytest.mark.parametrize("path", ["/color", "/on"])
+def test_http_malformed_json_rejected(smoke_config: SmokeConfig, path: str) -> None:
+    url = f"{smoke_config.base_url}{path}"
+    bad_payload = b"{bad json"
+    response = http_request(
+        "POST",
+        url,
+        body=bad_payload,
+        headers={"Content-Type": "application/json"},
+    )
+    trace = record_http_probe(
+        smoke_config,
+        probe=f"malformed_json_{path.strip('/').replace('/', '_')}",
+        method="POST",
+        url=url,
+        body=bad_payload,
+        headers={"Content-Type": "application/json"},
+        response=response,
+    )
+    if response["error"]:
+        fail_with_trace("Malformed JSON HTTP probe failed unexpectedly", trace)
+    if response["status"] != 400 or "Invalid JSON" not in response["body"]:
+        fail_with_trace("Malformed JSON request should be rejected with Invalid JSON", trace)
+
+
+@pytest.mark.parametrize("path", ["/color", "/networks", "/hosts", "/config", "/connect", "/data"])
+def test_get_endpoints_return_json(smoke_config: SmokeConfig, path: str) -> None:
+    url = f"{smoke_config.base_url}{path}"
+    response = http_request("GET", url)
+    trace = record_http_probe(
+        smoke_config,
+        probe=f"get_{path.strip('/').replace('/', '_')}",
+        method="GET",
+        url=url,
+        body=None,
+        headers={"Accept": "application/json"},
+        response=response,
+    )
+    payload = decode_json_response(response, trace, failure_message=f"GET {path} failed")
+    if response["status"] != 200 or not isinstance(payload, (dict, list)):
+        fail_with_trace(f"GET {path} should return JSON", trace)
+
+
+def test_hosts_endpoint_returns_object(smoke_config: SmokeConfig) -> None:
+    url = f"{smoke_config.base_url}/hosts"
+    response = http_request("GET", url)
+    trace = record_http_probe(
+        smoke_config,
+        probe="hosts_object",
+        method="GET",
+        url=url,
+        body=None,
+        headers={"Accept": "application/json"},
+        response=response,
+    )
+    payload = decode_json_response(response, trace, failure_message="GET /hosts failed")
+    if response["status"] != 200 or not isinstance(payload, dict):
+        fail_with_trace("/hosts should return a JSON object", trace)
+
+
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        ("/scan_networks", {}),
+        ("/system", {"cmd": "debug", "enable": False}),
+        ("/stop", {}),
+        ("/skip", {}),
+        ("/pause", {}),
+        ("/continue", {}),
+        ("/blink", {}),
+        ("/toggle", {}),
+    ],
+)
+def test_post_action_endpoints_succeed(smoke_config: SmokeConfig, path: str, body: dict[str, Any]) -> None:
+    url = f"{smoke_config.base_url}{path}"
+    body_bytes = json.dumps(body, separators=(",", ":")).encode("utf-8")
+    response = http_request(
+        "POST",
+        url,
+        body=body_bytes,
+        headers={"Content-Type": "application/json"},
+    )
+    trace = record_http_probe(
+        smoke_config,
+        probe=f"post_{path.strip('/').replace('/', '_')}",
+        method="POST",
+        url=url,
+        body=body_bytes,
+        headers={"Content-Type": "application/json"},
+        response=response,
+    )
+    payload = decode_json_response(response, trace, failure_message=f"POST {path} failed")
+    if response["status"] != 200 or payload.get("success") is not True:
+        fail_with_trace(f"POST {path} should return success", trace)
+
+
+def test_update_post_returns_api_error(smoke_config: SmokeConfig) -> None:
+    url = f"{smoke_config.base_url}/update"
+    body_bytes = b"{}"
+    response = http_request(
+        "POST",
+        url,
+        body=body_bytes,
+        headers={"Content-Type": "application/json"},
+    )
+    trace = record_http_probe(
+        smoke_config,
+        probe="post_update",
+        method="POST",
+        url=url,
+        body=body_bytes,
+        headers={"Content-Type": "application/json"},
+        response=response,
+    )
+    payload = decode_json_response(response, trace, failure_message="POST /update failed")
+    if response["status"] != 400 or "error" not in payload:
+        fail_with_trace("POST /update should return a 400 API error", trace)
+
+
+def test_websocket_rejects_malformed_json(smoke_config: SmokeConfig) -> None:
+    sock, handshake_trace = websocket_handshake(smoke_config, os.urandom(16))
+    try:
+        if "101" not in handshake_trace["response"]["status_line"]:
+            fail_with_trace("WebSocket handshake failed before malformed-json probe", handshake_trace)
+        bad_request = "{bad json"
+        ws_send_text(sock, bad_request)
+        response_text = recv_ws_text(sock, timeout=3.0)
+        trace = {
+            "request": {"payload": bad_request},
+            "response": {"text": response_text},
+        }
+        if "malformed json" not in response_text.lower():
+            fail_with_trace("Expected malformed JSON rejection over WebSocket", trace)
+    finally:
+        sock.close()
+
+
+def test_websocket_missing_method(smoke_config: SmokeConfig) -> None:
+    sock, handshake_trace = websocket_handshake(smoke_config, os.urandom(16))
+    try:
+        if "101" not in handshake_trace["response"]["status_line"]:
+            fail_with_trace("WebSocket handshake failed before missing-method probe", handshake_trace)
+        payload, trace = ws_request(sock, {"jsonrpc": "2.0", "id": 7001, "params": {}}, timeout=3.0)
+        if payload.get("id") != 7001:
+            fail_with_trace("Unexpected JSON-RPC id in missing-method response", trace)
+        assert_method_error_variant(jsonrpc_error_text(payload), trace)
+    finally:
+        sock.close()
+
+
 def test_websocket_unknown_method(smoke_config: SmokeConfig) -> None:
     sock, handshake_trace = websocket_handshake(smoke_config, os.urandom(16))
     try:
@@ -321,31 +616,169 @@ def test_websocket_unknown_method(smoke_config: SmokeConfig) -> None:
             "id": 7001,
             "method": "definitelyNotAMethod",
         }
-        ws_send_text(sock, json.dumps(probe, separators=(",", ":")))
-
-        response_text = None
-        for _ in range(8):
-            opcode, payload = ws_recv_frame(sock, timeout=1.0)
-            if opcode is None:
-                break
-            if opcode == 1:
-                response_text = (payload or b"").decode("utf-8", errors="replace")
-                break
-            if opcode == 9:
-                pong_payload = payload or b""
-                sock.sendall(bytes([0x8A, len(pong_payload)]) + pong_payload)
-
-        trace = {
-            "probe": "ws_unknown_method",
-            "request": probe,
-            "response": {
-                "text": response_text,
-            },
-        }
-
-        if not response_text:
-            fail_with_trace("No WebSocket response for unknown method request", trace)
-        if "method not implemented" not in response_text:
-            fail_with_trace("Unexpected WebSocket unknown-method response", trace)
+        payload, trace = ws_request(sock, probe, timeout=3.0)
+        if payload.get("id") != 7001:
+            fail_with_trace("Unexpected JSON-RPC id in unknown-method response", trace)
+        assert_method_error_variant(jsonrpc_error_text(payload), trace)
     finally:
         sock.close()
+
+
+def test_color_setters_roundtrip_between_http_and_websocket(smoke_config: SmokeConfig) -> None:
+    color_response = http_request("GET", smoke_config.color_url)
+    color_trace = record_http_probe(
+        smoke_config,
+        probe="baseline_color",
+        method="GET",
+        url=smoke_config.color_url,
+        body=None,
+        headers={"Accept": "application/json"},
+        response=color_response,
+    )
+    color_payload = decode_json_response(color_response, color_trace, failure_message="GET /color failed")
+    base_raw = color_payload.get("raw")
+    if not isinstance(base_raw, dict):
+        fail_with_trace("GET /color should include a raw object", color_trace)
+
+    target_http_raw = make_distinct_raw({"r": 12, "g": 34, "b": 56, "ww": 78, "cw": 90}, base_raw)
+    http_body = json.dumps({"raw": target_http_raw}, separators=(",", ":")).encode("utf-8")
+    set_response = http_request(
+        "POST",
+        smoke_config.color_url,
+        body=http_body,
+        headers={"Content-Type": "application/json"},
+    )
+    set_trace = record_http_probe(
+        smoke_config,
+        probe="set_color_http",
+        method="POST",
+        url=smoke_config.color_url,
+        body=http_body,
+        headers={"Content-Type": "application/json"},
+        response=set_response,
+    )
+    set_payload = decode_json_response(set_response, set_trace, failure_message="POST /color failed")
+    if set_response["status"] != 200 or set_payload.get("success") is not True:
+        fail_with_trace("HTTP color setter should return success", set_trace)
+
+    http_after_set, _ = wait_for_color_raw(smoke_config, target_http_raw)
+
+    sock, handshake_trace = websocket_handshake(smoke_config, os.urandom(16))
+    try:
+        if "101" not in handshake_trace["response"]["status_line"]:
+            fail_with_trace("WebSocket handshake failed before color roundtrip checks", handshake_trace)
+
+        ws_get_payload, ws_get_trace = ws_request(
+            sock,
+            {"jsonrpc": "2.0", "id": 8001, "method": "getColor", "params": {}},
+            timeout=3.0,
+        )
+        if ws_get_payload.get("result", {}).get("raw") != http_after_set.get("raw"):
+            fail_with_trace("HTTP-set color differs between HTTP and WebSocket reads", ws_get_trace)
+
+        target_ws_raw = make_distinct_raw({"r": 90, "g": 10, "b": 20, "ww": 30, "cw": 40}, http_after_set.get("raw"))
+        ws_set_payload, ws_set_trace = ws_request(
+            sock,
+            {"jsonrpc": "2.0", "id": 8002, "method": "color", "params": {"raw": target_ws_raw}},
+            timeout=3.0,
+        )
+        if ws_set_payload.get("result", {}).get("success") is not True:
+            fail_with_trace("WebSocket color setter should return success", ws_set_trace)
+
+        http_after_ws_set, _ = wait_for_color_raw(smoke_config, target_ws_raw)
+
+        ws_after_payload, ws_after_trace = ws_request(
+            sock,
+            {"jsonrpc": "2.0", "id": 8003, "method": "getColor", "params": {}},
+            timeout=3.0,
+        )
+        if ws_after_payload.get("result", {}).get("raw") != http_after_ws_set.get("raw"):
+            fail_with_trace("WebSocket-set color differs between HTTP and WebSocket reads", ws_after_trace)
+    finally:
+        sock.close()
+
+
+def test_off_on_emit_color_events(smoke_config: SmokeConfig) -> None:
+    prep_raw = {"r": 5, "g": 10, "b": 15, "ww": 20, "cw": 25}
+    prep_body = json.dumps({"raw": prep_raw}, separators=(",", ":")).encode("utf-8")
+    prep_response = http_request(
+        "POST",
+        smoke_config.color_url,
+        body=prep_body,
+        headers={"Content-Type": "application/json"},
+    )
+    prep_trace = record_http_probe(
+        smoke_config,
+        probe="prep_non_zero_color",
+        method="POST",
+        url=smoke_config.color_url,
+        body=prep_body,
+        headers={"Content-Type": "application/json"},
+        response=prep_response,
+    )
+    prep_payload = decode_json_response(prep_response, prep_trace, failure_message="Preparing non-zero color failed")
+    if prep_response["status"] != 200 or prep_payload.get("success") is not True:
+        fail_with_trace("Preparing non-zero color should succeed", prep_trace)
+    wait_for_color_raw(smoke_config, prep_raw)
+
+    sock, handshake_trace = websocket_handshake(smoke_config, os.urandom(16))
+    try:
+        if "101" not in handshake_trace["response"]["status_line"]:
+            fail_with_trace("WebSocket handshake failed before on/off event checks", handshake_trace)
+
+        for path in ["/off", "/on"]:
+            url = f"{smoke_config.base_url}{path}"
+            response = http_request(
+                "POST",
+                url,
+                body=b"{}",
+                headers={"Content-Type": "application/json"},
+            )
+            trace = record_http_probe(
+                smoke_config,
+                probe=f"post_{path.strip('/')}",
+                method="POST",
+                url=url,
+                body=b"{}",
+                headers={"Content-Type": "application/json"},
+                response=response,
+            )
+            payload = decode_json_response(response, trace, failure_message=f"POST {path} failed")
+            if response["status"] != 200 or payload.get("success") is not True:
+                fail_with_trace(f"POST {path} should return success", trace)
+
+            event_payload, event_trace = ws_wait_for_method(sock, "color_event", timeout=8.0)
+            raw = event_payload.get("params", {}).get("raw", {})
+            if path == "/off":
+                if any(int(raw.get(channel, 0)) != 0 for channel in ["r", "g", "b", "ww", "cw"]):
+                    fail_with_trace("/off should emit a zeroed color_event", event_trace)
+            else:
+                if all(int(raw.get(channel, 0)) == 0 for channel in ["r", "g", "b", "ww", "cw"]):
+                    fail_with_trace("/on should emit a non-zero color_event", event_trace)
+    finally:
+        sock.close()
+
+
+@pytest.mark.parametrize("path", ["/", "/webapp"])
+def test_webapp_routes_respond(smoke_config: SmokeConfig, path: str) -> None:
+    url = f"{smoke_config.base_url}{path}"
+    response = http_request("GET", url)
+    trace = record_http_probe(
+        smoke_config,
+        probe=f"webapp_{path.strip('/') or 'root'}",
+        method="GET",
+        url=url,
+        body=None,
+        headers={"Accept": "text/html"},
+        response=response,
+    )
+    if response["error"]:
+        fail_with_trace(f"GET {path} failed unexpectedly", trace)
+    if response["status"] != 200:
+        fail_with_trace(f"GET {path} should return HTTP 200", trace)
+
+    body = response["body"]
+    lowered = body.lower()
+    if not any(marker in lowered for marker in ["<!doctype", "<html"]):
+        if len(body) == 0 or (len(body) < 100 and "error" in lowered):
+            fail_with_trace(f"GET {path} did not return a usable webapp response", trace)
