@@ -1,4 +1,0 @@
-label=end
-timestamp_utc=2026-04-22T21:32:23.762426+00:00
-led-bu.fritz.box: error status=0 err=<urlopen error timed out>
-led-wo.fritz.box: ok status=200 keys=134
