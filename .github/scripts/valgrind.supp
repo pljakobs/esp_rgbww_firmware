@@ -1,0 +1,21 @@
+# Valgrind suppressions for esp_rgbww_firmware host build
+#
+# AppWIFI/WiringList interior-pointer allocation
+# WVector (WiringList) stores an interior pointer to the data region, with a
+# hidden header before the allocation start.  Valgrind classifies the block as
+# "possibly lost" because it only sees the interior pointer and cannot confirm
+# the base-pointer is still held.  This is a Sming framework pattern; the
+# memory is not a real leak.
+{
+   AppWIFI_WiringList_WVector_alloc
+   Memcheck:Leak
+   match-leak-kinds: possible
+   fun:malloc
+   fun:mc_malloc
+   fun:mc_realloc
+   fun:*allocate*
+   fun:*allocate*
+   fun:*ObjectList*allocate*
+   fun:*Vector*
+   fun:AppWIFI::AppWIFI()
+}
