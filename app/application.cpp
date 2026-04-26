@@ -567,14 +567,6 @@ debug_i("Application::init - running partition %s", part.name());
 
 	initButtons();
 	debug_i("buttons initialized");
-#if defined(ARCH_ESP8266) && !defined(SMING_RELEASE)
-	// GPIO0 (FLASH button) held low for 3 s triggers a deliberate null-pointer
-	// store (exccause 29 / StoreProhibited) so the crash-dump path produces a
-	// real, decode-stacktrace-compatible stack trace on demand.
-	pinMode(0, INPUT);
-	_crashTestTimer.initializeMs(100, TimerDelegate(&Application::pollCrashTestPin, this)).start();
-	debug_i("crash-test trigger armed on GPIO0 (hold 3s to trigger StoreProhibited)");
-#endif
 
 	// initialize webserver
 	app.webserver.init();
@@ -1117,28 +1109,3 @@ uint32_t Application::getUptime()
 {
 	return _uptimeMinutes * 60u;
 }
-
-#if defined(ARCH_ESP8266) && !defined(SMING_RELEASE)
-void Application::pollCrashTestPin()
-{
-	static int holdCounter = 0;
-	static int tickCounter = 0;
-	// Heartbeat every 5 s so we can confirm the timer is actually firing.
-	if(++tickCounter >= 50) {
-		tickCounter = 0;
-		debug_i("crash-test poll alive, GPIO0=%d", digitalRead(0));
-	}
-	if(digitalRead(0) == LOW) {
-		debug_i("crash-test GPIO0 LOW, holdCounter=%d", holdCounter);
-		if(++holdCounter >= 30) { // 30 × 100 ms = 3 s
-			holdCounter = 0;
-			debug_w("*** CRASH TEST: illegal instruction via GPIO0 hold — generating stack trace ***");
-			// 'ill' is the Xtensa illegal-instruction opcode; it always raises
-			// exccause 0 (ILLEGAL_INSTRUCTION) regardless of memory mapping.
-			asm volatile("ill");
-		}
-	} else {
-		holdCounter = 0;
-	}
-}
-#endif
