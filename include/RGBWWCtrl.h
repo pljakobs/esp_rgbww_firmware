@@ -36,6 +36,8 @@
 	#define SOC "esp32c3"
 #elif defined(SOC_ESP32)
     #define SOC "esp32"
+#elif defined(ARCH_HOST)
+    #define SOC "host"
 #else
     #define SOC "unknown"
 #endif

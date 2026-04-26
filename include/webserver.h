@@ -26,11 +26,11 @@
 #include <RGBWWLed/RGBWWLedColor.h>
 #include <Network/Http/Websocket/WebsocketResource.h>
 
+#define FILE_MAX_SIZE 4096 //max filesize for storage api files.
 #define MAX_LOG_LINE_SIZE 512
 
 #define MINIMUM_HEAP_ACCEPT 8000
-#define MINIMUM_HEAP MINIMUM_HEAP_ACCEPT
-#define HTTP_KEEP_ALIVE_SECONDS 5
+#define MINIMUM_HEAP 8000
 
 enum API_CODES {
     API_SUCCESS = 0,
@@ -51,8 +51,6 @@ public:
     inline bool isRunning() { return _running; };
 
     void wsSendBroadcast(const char* buffer, size_t length);
-    uint16_t getHttpActiveConnections() const { return activeClients; }
-    uint16_t getWebsocketConnectionCount() const { return webSockets.size(); }
 
     const char* getApiCodeMsg(API_CODES code);
 
@@ -107,12 +105,6 @@ private:
     bool checkHeap(HttpResponse &response);
     bool checkHeap(HttpResponse &response, int minHeap);
     bool preflightRequest(HttpRequest& request, HttpResponse& response, std::initializer_list<HttpMethod> allowedMethods, int minHeap = 0 );
-    bool ensureApiInitialized(HttpResponse& response);
-    bool parseJsonBody(const String& body, HttpResponse& response, JsonDocument& doc, bool allowEmptyBody = true);
-    bool dispatchApiCommand(HttpResponse& response, const String& method, const JsonObject& params,
-                                                        const String& fallbackError, bool relay = true);
-    bool handleApiCommandPost(HttpRequest& request, HttpResponse& response, const String& method,
-                                                            const String& fallbackError);
     String makeId();
     
     static bool isPrintable(const String& str);
@@ -121,7 +113,6 @@ private:
 
     void wsConnected(WebsocketConnection& socket);
     void wsDisconnected(WebsocketConnection& socket);
-    void wsMessageReceived(WebsocketConnection& socket, const String& message);
 };
 
 #endif // APP_WEBSERVER_H_
