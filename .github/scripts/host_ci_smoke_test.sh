@@ -20,6 +20,8 @@ VALGRIND_RUNTIME_LOG_SMOKE_START="${LOG_DIR}/valgrind-runtime-smoke-startup.log"
 VALGRIND_RUNTIME_LOG_SMOKE="${LOG_DIR}/valgrind-runtime-smoke.log"
 VALGRIND_RUNTIME_LOG_RGBWW_START="${LOG_DIR}/valgrind-runtime-rgbww-startup.log"
 VALGRIND_RUNTIME_LOG_RGBWW="${LOG_DIR}/valgrind-runtime-rgbww.log"
+BUILD_LOG="${LOG_DIR}/build-output.txt"
+COMPILER_WARNINGS_LOG="${LOG_DIR}/build-warnings.txt"
 VALGRIND_OPTIONS="${HOST_CI_VALGRIND_OPTIONS:---tool=memcheck --leak-check=full --show-leak-kinds=all --track-origins=yes --num-callers=25 --suppressions=/workspace/.github/scripts/valgrind.supp}"
 ENABLE_VALGRIND="${HOST_CI_ENABLE_VALGRIND:-1}"
 ENFORCE_VALGRIND="${HOST_CI_ENFORCE_VALGRIND:-1}"
@@ -303,7 +305,7 @@ stop_host_app() {
 }
 
 mkdir -p "$LOG_DIR"
-rm -f "$APP_LOG" "$APP_LOG_SMOKE" "$APP_LOG_RGBWW" "$LOG_DIR/info.json" "$HTTP_TRACE_LOG" "$MALFORMED_JSON_TRACE" "$VALGRIND_LOG_SMOKE" "$VALGRIND_LOG_RGBWW" "$VALGRIND_RUNTIME_LOG_SMOKE_START" "$VALGRIND_RUNTIME_LOG_SMOKE" "$VALGRIND_RUNTIME_LOG_RGBWW_START" "$VALGRIND_RUNTIME_LOG_RGBWW"
+rm -f "$APP_LOG" "$APP_LOG_SMOKE" "$APP_LOG_RGBWW" "$LOG_DIR/info.json" "$HTTP_TRACE_LOG" "$MALFORMED_JSON_TRACE" "$VALGRIND_LOG_SMOKE" "$VALGRIND_LOG_RGBWW" "$VALGRIND_RUNTIME_LOG_SMOKE_START" "$VALGRIND_RUNTIME_LOG_SMOKE" "$VALGRIND_RUNTIME_LOG_RGBWW_START" "$VALGRIND_RUNTIME_LOG_RGBWW" "$BUILD_LOG" "$COMPILER_WARNINGS_LOG"
 rm -f "$VALGRIND_STATUS_FILE"
 {
     echo "host_ci_smoke_test started"
@@ -340,8 +342,12 @@ set +u
 source "$export_script"
 set -u
 
-make SMING_ARCH=Host configdb-rebuild
-make SMING_ARCH=Host flash DISABLE_WERROR=1 COM_SPEED=115200
+echo "===== Host build output =====" > "$BUILD_LOG"
+make SMING_ARCH=Host configdb-rebuild 2>&1 | tee -a "$BUILD_LOG"
+make SMING_ARCH=Host flash DISABLE_WERROR=1 COM_SPEED=115200 2>&1 | tee -a "$BUILD_LOG"
+
+# Collect non-fatal compiler warnings from the Host build output for CI visibility.
+grep -E '\bwarning:' "$BUILD_LOG" > "$COMPILER_WARNINGS_LOG" || true
 
 FLASH_BIN="${FIRMWARE_DIR}/flash.bin"
 PARTITIONS_BIN="${FIRMWARE_DIR}/partitions.bin"
@@ -432,12 +438,34 @@ RGBWW_TEST_OUTPUT="${LOG_DIR}/rgbww-test-output.txt"
 
 python3 -m pip install --quiet pytest-md
 
+# Known timing-sensitive RGBWW tests that may fail in CI due to fade precision/jitter.
+# These are reported as warnings and do not fail the CI job unless additional tests fail.
+ALLOWED_RGBWW_WARNINGS_DEFAULT=$'tests/rgbww_test.py::test_queue_front_reset\ntests/rgbww_test.py::test_queue_front\ntests/rgbww_test.py::test_relative_plus_multiple\ntests/rgbww_test.py::test_pause_all'
+ALLOWED_RGBWW_WARNINGS="${RGBWW_ALLOWED_WARNING_TESTS:-$ALLOWED_RGBWW_WARNINGS_DEFAULT}"
+
+is_allowed_rgbww_warning_test() {
+  local test_name="$1"
+  while IFS= read -r allowed; do
+    [[ -z "$allowed" ]] && continue
+    if [[ "$test_name" == "$allowed" ]]; then
+      return 0
+    fi
+  done <<< "$ALLOWED_RGBWW_WARNINGS"
+  return 1
+}
+
+extract_failed_tests() {
+  local output_file="$1"
+  grep -E '^FAILED[[:space:]]+' "$output_file" | sed -E 's/^FAILED[[:space:]]+([^[:space:]]+).*/\1/' || true
+}
+
 start_host_app "$APP_LOG_SMOKE" "$VALGRIND_LOG_SMOKE" "smoke"
 collect_runtime_valgrind_snapshot "$VALGRIND_RUNTIME_LOG_SMOKE_START" "smoke_startup_idle"
 python3 -m pytest \
   -v \
   --md "$SMOKE_TEST_REPORT" \
-  tests/host_smoke_api_test.py 2>&1 | tee "$SMOKE_TEST_OUTPUT" || true
+  tests/host_smoke_api_test.py 2>&1 | tee "$SMOKE_TEST_OUTPUT"
+SMOKE_PYTEST_EXIT=${PIPESTATUS[0]}
 collect_runtime_valgrind_snapshot "$VALGRIND_RUNTIME_LOG_SMOKE" "smoke_post_tests"
 stop_host_app
 
@@ -446,9 +474,38 @@ collect_runtime_valgrind_snapshot "$VALGRIND_RUNTIME_LOG_RGBWW_START" "rgbww_sta
 python3 -m pytest \
   -v \
   --md "$RGBWW_TEST_REPORT" \
-  tests/rgbww_test.py 2>&1 | tee "$RGBWW_TEST_OUTPUT" || true
+  tests/rgbww_test.py 2>&1 | tee "$RGBWW_TEST_OUTPUT"
+RGBWW_PYTEST_EXIT=${PIPESTATUS[0]}
 collect_runtime_valgrind_snapshot "$VALGRIND_RUNTIME_LOG_RGBWW" "rgbww_post_tests"
 stop_host_app
+
+HOST_CI_SHOULD_FAIL=0
+
+if [[ "$SMOKE_PYTEST_EXIT" -ne 0 ]]; then
+  echo "ERROR: host_smoke_api_test.py failed." >&2
+  HOST_CI_SHOULD_FAIL=1
+fi
+
+if [[ "$RGBWW_PYTEST_EXIT" -ne 0 ]]; then
+  mapfile -t RGBWW_FAILED_TESTS < <(extract_failed_tests "$RGBWW_TEST_OUTPUT")
+  if [[ ${#RGBWW_FAILED_TESTS[@]} -eq 0 ]]; then
+    echo "ERROR: rgbww_test.py failed but failed test list could not be parsed." >&2
+    HOST_CI_SHOULD_FAIL=1
+  else
+    RGBWW_UNEXPECTED_FAIL=0
+    for test_name in "${RGBWW_FAILED_TESTS[@]}"; do
+      if is_allowed_rgbww_warning_test "$test_name"; then
+        echo "WARNING: allowed flaky RGBWW failure: $test_name" >&2
+      else
+        echo "ERROR: unexpected RGBWW failure: $test_name" >&2
+        RGBWW_UNEXPECTED_FAIL=1
+      fi
+    done
+    if [[ "$RGBWW_UNEXPECTED_FAIL" -ne 0 ]]; then
+      HOST_CI_SHOULD_FAIL=1
+    fi
+  fi
+fi
 
 {
   echo "# Host CI Test Results"
@@ -461,6 +518,16 @@ stop_host_app
 } > "$TEST_REPORT"
 
 {
+  echo "===== Host build output ====="
+  cat "$BUILD_LOG"
+  echo
+  echo "===== Compiler warnings (non-fatal) ====="
+  if [[ -s "$COMPILER_WARNINGS_LOG" ]]; then
+    cat "$COMPILER_WARNINGS_LOG"
+  else
+    echo "none"
+  fi
+  echo
   echo "===== Smoke test output ====="
   cat "$SMOKE_TEST_OUTPUT"
   echo
@@ -478,3 +545,7 @@ stop_host_app
 
 echo "Host smoke test completed"
 tail -n 40 "$APP_LOG_RGBWW"
+
+if [[ "$HOST_CI_SHOULD_FAIL" -ne 0 ]]; then
+  exit 1
+fi
