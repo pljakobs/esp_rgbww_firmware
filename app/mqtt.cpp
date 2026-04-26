@@ -29,6 +29,7 @@ AppMqttClient::AppMqttClient()
 
 AppMqttClient::~AppMqttClient()
 {
+    stop();
 	delete mqtt;
 	mqtt = nullptr;
 }
@@ -36,6 +37,9 @@ AppMqttClient::~AppMqttClient()
 void AppMqttClient::onComplete(TcpClient& client, bool success)
 //onComplete handler for mqtt 
 {
+    if(!_running) {
+        return;
+    }
 	// lost connection
 		connectDelayed(2000);
 	
@@ -44,6 +48,9 @@ void AppMqttClient::onComplete(TcpClient& client, bool success)
 
 void AppMqttClient::connectDelayed(int delay)
 {
+    if(!_running) {
+        return;
+    }
 	debug_d("MQTT::connectDelayed");
 	_procTimer.initializeMs(delay, TimerDelegate(&AppMqttClient::connect, this)).startOnce();
 /*
@@ -56,6 +63,9 @@ void AppMqttClient::connectDelayed(int delay)
 
 void AppMqttClient::connect()
 {
+    if(!_running) {
+        return;
+    }
 	if(!mqtt ){
 		debug_i("no mqtt client object");
 		return;
@@ -79,7 +89,7 @@ void AppMqttClient::connect()
 		AppConfig::Network network(*app.cfg);
 		url = F("mqtt://") + network.mqtt.getUsername() + F(":") + network.mqtt.getPassword() + F("@") +
 				  network.mqtt.getServer() + F(":") + String(network.mqtt.getPort());
-		debug_i("mqtt url: %s, id: %s",url.toString().c_str(), _id);
+        debug_i("mqtt url: %s, id: %s", url.toString().c_str(), _id.c_str());
 		
 	} // end ConfigDB network context
 #ifdef ENABLE_SSL
@@ -122,10 +132,12 @@ void AppMqttClient::start()
 {
 	debug_i("Start MQTT");
 
+    _running = true;
 	init();
-	if(mqtt){
-		debug_i("mqttclient start - deleting existing mqtt client");
-		stop();
+    if(mqtt) {
+        debug_i("mqttclient start - reusing existing mqtt client");
+        connect();
+        return;
 	}
 	mqtt = new MqttClient();
 	mqtt->setEventHandler(MQTT_TYPE_PUBLISH, MqttDelegate(&AppMqttClient::onMessageReceived, this));
@@ -167,8 +179,15 @@ int AppMqttClient::onConnected(MqttClient& client, mqtt_message_t* message){
 
 void AppMqttClient::stop()
 {
-	delete mqtt;
-	mqtt = nullptr;
+    _running = false;
+    _procTimer.stop();
+    if(!mqtt) {
+        return;
+    }
+    // Do not delete the client while async DNS/TCP callbacks may still be in flight.
+    mqtt->setCompleteDelegate(TcpClientCompleteDelegate());
+    mqtt->setEventHandler(MQTT_TYPE_PUBLISH, MqttDelegate());
+    mqtt->setConnectedHandler(MqttDelegate());
 }
 
 bool AppMqttClient::isRunning() const
