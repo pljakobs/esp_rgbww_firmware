@@ -147,7 +147,7 @@ void AppWIFI::init()
 		char ssid_buf[64];
 		snprintf(ssid_buf, sizeof(ssid_buf), "%s%u", DEFAULT_AP_SSIDPREFIX, system_get_chip_id());
 		String SSID = ssid_buf;
-		printf("%s", SSID.c_str());
+		debug_i("%s", SSID.c_str());
 
 		AppConfig::Network network(*app.cfg);
 		if(auto networkUpdate = network.update()) {

@@ -232,7 +232,7 @@ void init(){
 	Serial.systemDebugOutput(true);
     
 	delay(500);
-	Serial.setTxBufferSize(1024);
+	Serial.setTxBufferSize(512);
 	Serial.setTxWait(false); // Make sure debug output doesn't stall
 	Serial.systemDebugOutput(true);
 	
