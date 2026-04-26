@@ -43,7 +43,7 @@
 #if defined(ARCH_ESP32)
     #define HTTP_MAX_CONNECTIONS 10
 #else
-    #define HTTP_MAX_CONNECTIONS 5
+    #define HTTP_MAX_CONNECTIONS 8
 #endif
 
 #if defined(SMING_RELEASE)
