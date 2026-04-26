@@ -39,17 +39,17 @@ extern "C" {
 
 struct TcpPcbStats
 {
-	uint16_t active_total{0};
-	uint16_t established{0};
-	uint16_t syn_sent{0};
-	uint16_t syn_rcvd{0};
-	uint16_t fin_wait_1{0};
-	uint16_t fin_wait_2{0};
-	uint16_t close_wait{0};
-	uint16_t closing{0};
-	uint16_t last_ack{0};
-	uint16_t time_wait{0};
-	uint16_t closed{0};
+	uint8_t active_total{0};
+	uint8_t established{0};
+	uint8_t syn_sent{0};
+	uint8_t syn_rcvd{0};
+	uint8_t fin_wait_1{0};
+	uint8_t fin_wait_2{0};
+	uint8_t close_wait{0};
+	uint8_t closing{0};
+	uint8_t last_ack{0};
+	uint8_t time_wait{0};
+	uint8_t closed{0};
 };
 
 static TcpPcbStats getTcpPcbStats()
@@ -97,7 +97,7 @@ static TcpPcbStats getTcpPcbStats()
 	return stats;
 }
 
-static uint16_t getActiveTcpConnectionCount()
+static uint8_t getActiveTcpConnectionCount()
 {
 	return getTcpPcbStats().active_total;
 }
@@ -902,6 +902,7 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response){
 			con[F("rssi")] = WifiStation.getRssi();
 
 			JsonObject net = data.createNestedObject(F("network"));
+			net[F("max http connections")] = HTTP_MAX_CONNECTIONS;
 			net[F("tcp_connections")] = getActiveTcpConnectionCount();
 			net[F("tcp_active")]= tcpStats.active_total;
 			net[F("tcp_established")] = tcpStats.established;
@@ -1042,18 +1043,7 @@ void ApplicationWebserver::onColorGet(HttpRequest& request, HttpResponse& respon
  */
 void ApplicationWebserver::onColorPost(HttpRequest& request, HttpResponse& response)
 {
-    /*
-	if(!checkHeap(response)) {
-		return;
-	}
-    */
 	String body = request.getBody();
-
-    /*
-	setCorsHeaders(response);
-	response.setHeader(F("Access-Control-Allow-Methods"), F("GET, PUT, POST, OPTIONS"));
-	response.setHeader(F("Access-Control-Allow-Credentials"), F("true"));
-    */
 
 	if(body == NULL) {
 		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("no body"));
@@ -1091,18 +1081,6 @@ void ApplicationWebserver::onColor(HttpRequest& request, HttpResponse& response)
 	}
 #endif
 	debug_i("received /color request");
-    /*
-	setCorsHeaders(response);
-	response.setHeader(F("Access-Control-Allow-Origin"), F("*"));
-
-	if(request.method == HttpMethod::OPTIONS) {
-		response.setHeader(F("Access-Control-Allow-Methods"), F("GET, PUT, POST, OPTIONS"));
-
-		debug_i("OPTIONS");
-		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
-		return;
-	}
-    */
 
 	bool error = false;
 	if(request.method == HttpMethod::POST) {
@@ -1155,18 +1133,6 @@ void ApplicationWebserver::onNetworks(HttpRequest& request, HttpResponse& respon
 		return;
 	}
 #endif
-    /*
-	if(request.method == HttpMethod::OPTIONS) {
-		setCorsHeaders(response);
-
-		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
-		return;
-	}
-	if(request.method != HttpMethod::GET) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not HTTP GET"));
-		return;
-	}
-    */
 
 	auto stream = std::make_unique<JsonObjectStream>();
 	JsonObject json = stream->getRoot();

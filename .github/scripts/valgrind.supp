@@ -11,8 +11,6 @@
    Memcheck:Leak
    match-leak-kinds: possible
    fun:malloc
-   fun:mc_malloc
-   fun:mc_realloc
    ...
    fun:AppWIFI::AppWIFI()
 }

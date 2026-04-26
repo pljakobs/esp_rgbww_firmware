@@ -687,9 +687,6 @@ void Application::stopServices()
 	_uptimetimer.stop();
 	_checkRamTimer.stop();
 	_resetPinTimer.stop();
-#if defined(ARCH_ESP8266) && !defined(SMING_RELEASE)
-	_crashTestTimer.stop();
-#endif
 
 	rgbwwctrl.stop();
 	eventserver.stop();
