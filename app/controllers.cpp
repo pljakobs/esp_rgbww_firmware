@@ -27,7 +27,7 @@
 extern Application app;
 
 // Constructor
-Controllers::Controllers() : _pingInProgress(false), _pingIndex(0), _pingInterval(10000), _pingTimeout(5000) {
+Controllers::Controllers() {
     debug_i("Controllers constructor called");
     if (!app.data) {
         debug_e("app.data is NULL in Controllers constructor!");
@@ -57,7 +57,6 @@ Controllers::Controllers() : _pingInProgress(false), _pingIndex(0), _pingInterva
         localCtrl.id = localId;
         localCtrl.ttl = 0;
         localCtrl.state = LOCALHOST;
-        localCtrl.pingPending = false;
         visibleControllers.push_back(localCtrl);
     }
     debug_i("Controllers constructor completed");
@@ -65,7 +64,6 @@ Controllers::Controllers() : _pingInProgress(false), _pingIndex(0), _pingInterva
 
 // Destructor
 Controllers::~Controllers() {
-    //_pingTimer.stop();
 }
 
 // Core methods
@@ -84,14 +82,12 @@ void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char*
         // Update existing
         visibleControllers[index].ttl = ttl;
         visibleControllers[index].state = (ttl > 0) ? ONLINE : OFFLINE;
-        visibleControllers[index].pingPending = false;
     } else {
         // Add new visible controller
         VisibleController newController;
         newController.id = id;
         newController.ttl = ttl;
         newController.state = (ttl > 0) ? ONLINE : OFFLINE;
-        newController.pingPending = false;
         visibleControllers.push_back(newController);
     }
 
@@ -146,17 +142,13 @@ void Controllers::addOrUpdate(unsigned int id, const String& hostname, const Str
     addOrUpdate(id, hostname.c_str(), ipAddress.c_str(), ttl);
 }
 
-void Controllers::updateFromPing(unsigned int id, int ttl) {
-    addOrUpdate(id, "", "", ttl);
-}
-
 void Controllers::removeExpired(int elapsedSeconds) {
     for (auto& controller : visibleControllers) {
         // Never expire or set OFFLINE for the local controller (LOCALHOST)
         if (controller.id == (unsigned int)system_get_chip_id() || controller.state == LOCALHOST) {
             continue;
         }
-        controller.ttl = std::max(0, controller.ttl - elapsedSeconds);
+        controller.ttl -= elapsedSeconds;
         if (controller.ttl <= 0) {
             controller.state = OFFLINE;
         }
@@ -262,11 +254,6 @@ bool Controllers::isVisibleByIpAddress(const String& ipAddress) {
     return isVisibleByIpAddress(ipAddress.c_str());
 }
 
-bool Controllers::isPingPending(unsigned int id) {
-    size_t index = findVisibleControllerIndex(id);
-    return index != INVALID_INDEX && visibleControllers[index].pingPending;
-}
-
 int Controllers::getTTL(unsigned int id) {
     size_t index = findVisibleControllerIndex(id);
     return (index != INVALID_INDEX) ? visibleControllers[index].ttl : 0;
@@ -293,8 +280,7 @@ size_t Controllers::getTotalCount() {
 }
 
 // Utility
-void Controllers::init(int pingInterval) {
-    _pingInterval = pingInterval;
+void Controllers::init() {
     // Additional initialization if needed
 }
 
@@ -338,14 +324,12 @@ Controllers::ControllerInfo Controllers::Iterator::operator*() {
             strncpy(info.ipAddress, configItem.getIpAddress().c_str(), CONTROLLER_IP_MAX_SIZE);
             info.state = OFFLINE;
             info.ttl = 0;
-            info.pingPending = false;
             
             // Check if controller is visible
             size_t visibleIndex = manager.findVisibleControllerIndex(info.id);
             if (visibleIndex != Controllers::INVALID_INDEX) {
                 info.ttl = manager.visibleControllers[visibleIndex].ttl;
                 info.state = (info.ttl > 0) ? ONLINE : OFFLINE;
-                info.pingPending = manager.visibleControllers[visibleIndex].pingPending;
             } else if (strlen(info.hostname) == 0 || strlen(info.ipAddress) == 0) {
                 info.state = INCOMPLETE;
             }
@@ -399,14 +383,12 @@ Controllers::ControllerInfo Controllers::findById(unsigned int id) {
             strncpy(info.ipAddress, controller.getIpAddress().c_str(), CONTROLLER_IP_MAX_SIZE);
             info.state = OFFLINE;
             info.ttl = 0;
-            info.pingPending = false;
             
             // Check if visible
             size_t visibleIndex = findVisibleControllerIndex(id);
             if (visibleIndex != INVALID_INDEX) {
                 info.ttl = visibleControllers[visibleIndex].ttl;
                 info.state = (info.ttl > 0) ? ONLINE : OFFLINE;
-                info.pingPending = visibleControllers[visibleIndex].pingPending;
             } else if (strlen(info.hostname) == 0 || strlen(info.ipAddress) == 0) {
                 info.state = INCOMPLETE;
             }
@@ -522,7 +504,6 @@ size_t Controllers::JsonPrinter::operator()() {
                 strncpy(info.ipAddress, configItem.getIpAddress().c_str(), CONTROLLER_IP_MAX_SIZE);
                 info.state = OFFLINE;
                 info.ttl = 0;
-                info.pingPending = false;
                 // Check if controller is visible (online)
                 size_t visibleIndex = manager.findVisibleControllerIndex(info.id);
                 if (visibleIndex != INVALID_INDEX) {
@@ -532,7 +513,6 @@ size_t Controllers::JsonPrinter::operator()() {
                     } else {
                         info.state = (info.ttl > 0) ? ONLINE : OFFLINE;
                     }
-                    info.pingPending = manager.visibleControllers[visibleIndex].pingPending;
                 } else if (strlen(info.hostname) == 0 || strlen(info.ipAddress) == 0) {
                     info.state = INCOMPLETE;
                 } else {

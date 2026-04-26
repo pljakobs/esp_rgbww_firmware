@@ -18,8 +18,6 @@
 #pragma once
 
 #include <app-data.h>
-#include <Network/HttpClient.h>
-#include <Timer.h>
 #include <Data/Stream/DataSourceStream.h>
 #include <vector>
 #include <algorithm>
@@ -45,14 +43,12 @@ public:
         char ipAddress[CONTROLLER_IP_MAX_SIZE] = {0};
         ControllerState state = NOT_FOUND;
         int ttl = 0;
-        bool pingPending = false;
     };
 
     struct VisibleController {
         unsigned int id;
         int ttl;
         ControllerState state;
-        bool pingPending = false;
     };
 
     class Iterator {
@@ -124,7 +120,6 @@ public:
     // Core methods
     void addOrUpdate(unsigned int id, const char* hostname, const char* ipAddress, int ttl);
     void addOrUpdate(unsigned int id, const String& hostname, const String& ipAddress, int ttl);
-    void updateFromPing(unsigned int id, int ttl);
     void removeExpired(int elapsedSeconds);
     
     // Query methods
@@ -145,7 +140,6 @@ public:
     bool isVisibleByHostname(const String& hostname);
     bool isVisibleByIpAddress(const char* ipAddress);
     bool isVisibleByIpAddress(const String& ipAddress);
-    bool isPingPending(unsigned int id);
     int getTTL(unsigned int id);
     
     // Counts
@@ -153,7 +147,7 @@ public:
     size_t getTotalCount();
     
     // Utility
-    void init(int pingInterval = 10000);
+    void init();
     void update();
     void forgetControllers();
 
@@ -169,15 +163,6 @@ private:
     static const size_t INVALID_INDEX = SIZE_MAX;
     
     std::vector<VisibleController> visibleControllers;
-    
-    // Ping management
-    bool _pingInProgress;
-    size_t _pingIndex;
-    int _pingInterval;
-    int _pingTimeout;
-    std::vector<unsigned int> _controllersToPing;
-    Timer _pingTimer;
-    HttpClient _pingClient;
     
     // Helper methods
     size_t findVisibleControllerIndex(unsigned int id);

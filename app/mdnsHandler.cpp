@@ -565,57 +565,6 @@ void mdnsHandler::queryKnownControllers(uint8_t batchIndex)
     }
 }
     */
-/*
-void mdnsHandler::pingController(const String& ipAddress)
-{
-    if (ipAddress.length() > 0 && ipAddress != "0.0.0.0") {
-        unsigned int id = app.getControllerIdforIpAddress(ipAddress);
-        for (auto& ctrl : app.visibleControllers) {
-            if (ctrl.id == id) {
-                ctrl.pingPending = true;
-                break;
-            }
-        }
-
-
-        HttpClient* client = new HttpClient();
-
-        // Create a timer for timeout
-        Timer* timeoutTimer = new Timer();
-        timeoutTimer->initializeMs(5000, [client, id, this, timeoutTimer]() {
-            // Timeout handler: clean up
-            debug_w("Ping timeout for controller %d", id);
-            app.controllers->updateFromPing(id, 0); // Optionally mark as failed
-            conntrack--;
-            client->cleanup();
-            delete client;
-            delete timeoutTimer;
-        }).startOnce();
-
-        // Start ping
-        client->downloadString("http://" + ipAddress + "/ping",
-            RequestCompletedDelegate(&mdnsHandler::pingCallback, this),128);
-
-        conntrack++;
-        debug_i("Current connection track count: %d", conntrack);
-    }
-}
-*/
-/*
-// The callback function for all pings
-int mdnsHandler::pingCallback(HttpConnection& connection, bool successful)
-{
-    String ip = connection.getRemoteIp().toString();
-    unsigned int id = app.getControllerIdforIpAddress(ip);
-    #ifdef DEBUG_MDNS
-    debug_i("Received %s ping response from controller: %s [%d]", (successful?"successful":"failed"), ip.c_str(), id);
-    #endif
-
-    app.controllers->updateFromPing(id, TTL_HTTP_VERIFIED);
-    conntrack--;
-    return 0;
-}
-*/
 void mdnsHandler::sendWsUpdate(const char* type, JsonObject host)
 {
     String hostString;
