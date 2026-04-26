@@ -71,8 +71,19 @@ CUSTOM_TARGETS += check_versions
 ifdef GITHUB_RUN_NUMBER
   GIT_VERSION = V5.0-$(GITHUB_RUN_NUMBER)-$(shell git rev-parse --abbrev-ref HEAD)
 else
-  # For local builds, use the git describe approach
-  GIT_VERSION = $(shell git describe --abbrev=4 --dirty --always --tags)"-["$(shell git rev-parse --abbrev-ref HEAD)"]"
+  # For local builds: find the nearest ancestor CI build tag (ci/<branch>/<run_number>)
+  # and format as V5.0-<run>-<branch>-<hostname>-<commits_since_tag>[-dirty]
+  _CI_DESC    := $(shell git fetch --tags --quiet 2>/dev/null; git describe --tags --match 'ci/*/*' --long 2>/dev/null)
+  _LOCAL_HOST := $(shell hostname -s 2>/dev/null || echo local)
+  ifneq ($(_CI_DESC),)
+    _CI_BRANCH  := $(shell echo '$(_CI_DESC)' | sed 's|ci/\([^/]*\)/.*|\1|')
+    _CI_RUN     := $(shell echo '$(_CI_DESC)' | sed 's|ci/[^/]*/\([0-9]*\)-[0-9]*-g[0-9a-f]*.*|\1|')
+    _CI_COMMITS := $(shell echo '$(_CI_DESC)' | sed 's|.*-\([0-9]*\)-g[0-9a-f]*$$|\1|')
+    _DIRTY      := $(shell git diff --quiet HEAD 2>/dev/null || echo -dirty)
+    GIT_VERSION  = V5.0-$(_CI_RUN)-$(_CI_BRANCH)-$(_LOCAL_HOST)-$(_CI_COMMITS)$(_DIRTY)
+  else
+    GIT_VERSION = $(shell git describe --abbrev=4 --dirty --always --tags)"-["$(shell git rev-parse --abbrev-ref HEAD)"]"
+  endif
 endif
 GIT_DATE = $(firstword $(shell git --no-pager show --date=short --format="%ad" --name-only))
 SMING_GITVERSION =	$(shell git -C $(SMING_HOME)/.. describe --abbrev=4 --dirty --always --tags)"-["$(shell git -C $(SMING_HOME)/.. rev-parse --abbrev-ref HEAD)"]"

@@ -107,6 +107,15 @@ jobs:
           git submodule sync --recursive
           git submodule update --init --recursive
 
+      - name: Create CI build tag
+        run: |
+          BRANCH="${{ steps.get_branch.outputs.branch }}"
+          TAG="ci/${BRANCH}/${{ github.run_number }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${TAG}" || true
+          git push origin "${TAG}" || true
+
       - name: Pull Docker Image
         run: docker pull docker.io/pjakobs/sming:latest
 
