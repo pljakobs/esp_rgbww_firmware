@@ -21,17 +21,17 @@ bool isPrintableSsid(const String& str)
 
 struct TcpPcbStats
 {
-	uint16_t active_total{0};
-	uint16_t established{0};
-	uint16_t syn_sent{0};
-	uint16_t syn_rcvd{0};
-	uint16_t fin_wait_1{0};
-	uint16_t fin_wait_2{0};
-	uint16_t close_wait{0};
-	uint16_t closing{0};
-	uint16_t last_ack{0};
-	uint16_t time_wait{0};
-	uint16_t closed{0};
+	uint8_t active_total{0};
+	uint8_t established{0};
+	uint8_t syn_sent{0};
+	uint8_t syn_rcvd{0};
+	uint8_t fin_wait_1{0};
+	uint8_t fin_wait_2{0};
+	uint8_t close_wait{0};
+	uint8_t closing{0};
+	uint8_t last_ack{0};
+	uint8_t time_wait{0};
+	uint8_t closed{0};
 };
 
 TcpPcbStats getTcpPcbStats()
@@ -82,20 +82,15 @@ TcpPcbStats getTcpPcbStats()
 
 bool Api::dispatch(const String& method, const JsonObject& params, JsonObject& out)
 {
-    debug_i("Api::dispatch: method=%s, params=%s", method.c_str(), Json::serialize(params).c_str());
-	if(method == F("info") || method == F("getInfo")) {
-		return handleInfo(params, out);
-	}
-	if(method == F("color") || method == F("getColor")) {
-		return handleColor(params, out);
-	}
-	if(method == F("networks") || method == F("getNetworks")) {
-		return handleNetworks(params, out);
+	debug_i("Api::dispatch: method=%s, params=%s", method.c_str(), Json::serialize(params).c_str());
+	String errorMsg;
+	if(dispatchDataRequest(method, params, &out, nullptr, errorMsg)) {
+		return true;
 	}
 
-	out[F("error")] = F("method not implemented");
+	out[F("error")] = errorMsg;
 	out[F("method")] = method;
-    debug_i("Api::dispatch failed: %s", out[F("error")].as<const char*>());
+	debug_i("Api::dispatch failed: %s", errorMsg.c_str());
 	return false;
 }
 
@@ -155,6 +150,45 @@ bool Api::dispatchCommand(const String& method, const JsonObject& params, String
 			return true;
 		}
 
+		if(cmd.equals(F("debug_log"))) {
+			JsonObject logParams;
+			if(params[F("param")].is<JsonObject>()) {
+				logParams = params[F("param")].as<JsonObject>();
+			} else {
+				// Allow legacy flat payloads where lvl/text are at top level.
+				logParams = params;
+			}
+
+			int level = 0;
+			if(!Json::getValue(logParams[F("lvl")], level)) {
+				errorMsg = F("missing lvl");
+				return false;
+			}
+
+			String text = String::nullstr;
+			if(!Json::getValue(logParams[F("text")], text) || text == String::nullstr) {
+				errorMsg = F("missing text");
+				return false;
+			}
+
+			switch(level) {
+			case 1:
+				debug_i("WEBAPP: api debug_log: %s", text.c_str());
+				break;
+			case 2:
+				debug_w("WEBAPP: api debug_log: %s", text.c_str());
+				break;
+			case 3:
+				debug_e("WEBAPP: api debug_log: %s", text.c_str());
+				break;
+			default:
+				errorMsg = F("invalid lvl (use 1, 2 or 3)");
+				return false;
+			}
+
+			return true;
+		}
+
 		if(cmd.equals(F("restart"))) {
 			bool clearOta = false;
 			Json::getValue(params[F("clearOTA")], clearOta);
@@ -177,6 +211,50 @@ bool Api::dispatchCommand(const String& method, const JsonObject& params, String
 	errorMsg = F("method not implemented");
     debug_e("Api::dispatchCommand failed: %s", errorMsg.c_str());
 	return false;
+}
+
+bool Api::dispatchCommand(const String& method, const String& params, String& errorMsg, bool relay)
+{
+	debug_i("Api::dispatchCommand(str): method=%s, params=%s", method.c_str(), params.c_str());
+	if(method == F("color")) {
+		return app.jsonproc.onColor(params, errorMsg, relay);
+	}
+	if(method == F("stop")) {
+		return app.jsonproc.onStop(params, errorMsg, relay);
+	}
+	if(method == F("skip")) {
+		return app.jsonproc.onSkip(params, errorMsg, relay);
+	}
+	if(method == F("pause")) {
+		return app.jsonproc.onPause(params, errorMsg, relay);
+	}
+	if(method == F("continue")) {
+		return app.jsonproc.onContinue(params, errorMsg, relay);
+	}
+	if(method == F("blink")) {
+		return app.jsonproc.onBlink(params, errorMsg, relay);
+	}
+	if(method == F("toggle")) {
+		return app.jsonproc.onToggle(params, errorMsg, relay);
+	}
+	if(method == F("direct")) {
+		return app.jsonproc.onDirect(params, errorMsg, relay);
+	}
+	if(method == F("setOn") || method == F("on")) {
+		return app.jsonproc.onSetOn(params, errorMsg, relay);
+	}
+	if(method == F("setOff") || method == F("off")) {
+		return app.jsonproc.onSetOff(params, errorMsg, relay);
+	}
+
+	StaticJsonDocument<512> doc;
+	DeserializationError err = deserializeJson(doc, params);
+	if(err) {
+		errorMsg = F("malformed json");
+		return false;
+	}
+
+	return dispatchCommand(method, doc.as<JsonObject>(), errorMsg, relay);
 }
 
 bool Api::handleColor(const JsonObject& params, JsonObject& out)
@@ -258,12 +336,32 @@ bool Api::dispatchJsonRpc(const String& json, String& errorMsg, bool relay)
 bool Api::dispatchStream(const String& method, const JsonObject& params, std::unique_ptr<IDataSourceStream>& out,
 					 String& errorMsg)
 {
-    debug_i("Api::dispatchStream: method=%s, params=%s", method.c_str(), Json::serialize(params).c_str());
-	if(method == F("hosts") || method == F("getHosts")) {
-		return handleHosts(params, out, errorMsg);
+	debug_i("Api::dispatchStream: method=%s, params=%s", method.c_str(), Json::serialize(params).c_str());
+	return dispatchDataRequest(method, params, nullptr, &out, errorMsg);
+}
+
+bool Api::dispatchDataRequest(const String& method, const JsonObject& params, JsonObject* outObject,
+						 std::unique_ptr<IDataSourceStream>* outStream, String& errorMsg)
+{
+	if(outObject != nullptr) {
+		if(method == F("info") || method == F("getInfo")) {
+			return handleInfo(params, *outObject);
+		}
+		if(method == F("color") || method == F("getColor")) {
+			return handleColor(params, *outObject);
+		}
+		if(method == F("networks") || method == F("getNetworks")) {
+			return handleNetworks(params, *outObject);
+		}
 	}
-	if(method == F("config") || method == F("getConfig")) {
-		return handleConfig(params, out, errorMsg);
+
+	if(outStream != nullptr) {
+		if(method == F("hosts") || method == F("getHosts")) {
+			return handleHosts(params, *outStream, errorMsg);
+		}
+		if(method == F("config") || method == F("getConfig")) {
+			return handleConfig(params, *outStream, errorMsg);
+		}
 	}
 
 	errorMsg = F("method not implemented");

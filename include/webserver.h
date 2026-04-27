@@ -26,7 +26,7 @@
 #include <RGBWWLed/RGBWWLedColor.h>
 #include <Network/Http/Websocket/WebsocketResource.h>
 
-#define FILE_MAX_SIZE 4096 //max filesize for storage api files.
+//#define FILE_MAX_SIZE 4096 //max filesize for storage api files.
 #define MAX_LOG_LINE_SIZE 512
 
 #define MINIMUM_HEAP_ACCEPT 8000
@@ -49,6 +49,8 @@ public:
     void stop();
     void init();
     inline bool isRunning() { return _running; };
+    unsigned getHttpActiveConnections() const;
+    unsigned getWebsocketConnectionCount() const;
 
     void wsSendBroadcast(const char* buffer, size_t length);
 

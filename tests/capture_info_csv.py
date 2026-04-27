@@ -20,6 +20,23 @@ DEFAULT_TIMEOUT_SECONDS = 3.0
 DEFAULT_REBOOT_WAIT_SECONDS = 8.0
 
 
+def _lower_key_map(payload: dict[str, Any]) -> dict[str, Any]:
+    return {str(k).lower(): v for k, v in payload.items()}
+
+
+def _pick(payload: dict[str, Any], *keys: str) -> Any:
+    if not payload:
+        return ""
+    lowered = _lower_key_map(payload)
+    for key in keys:
+        if key in payload:
+            return payload[key]
+        value = lowered.get(key.lower())
+        if value is not None:
+            return value
+    return ""
+
+
 def normalize_host(value: str) -> str:
     value = value.strip()
     if not value:
@@ -122,20 +139,50 @@ def row_for_host(
     runtime = data.get("runtime", {}) if isinstance(data.get("runtime", {}), dict) else {}
     debug = data.get("debug", {}) if isinstance(data.get("debug", {}), dict) else {}
 
+    # Some firmware versions return flat /info JSON (legacy) instead of v2 nested objects.
+    # Read nested first, then fall back to flat aliases.
+    deviceid = _pick(device, "deviceid", "device_id") or _pick(data, "deviceid", "device_id")
+    soc = _pick(device, "soc") or _pick(data, "soc")
+    current_rom = _pick(device, "current_rom", "currentRom", "currentrom") or _pick(
+        data, "current_rom", "currentRom", "currentrom"
+    )
+
+    build_type = _pick(app, "build_type", "buildType") or _pick(data, "build_type", "buildType")
+    git_version = _pick(app, "git_version", "gitVersion") or _pick(data, "git_version", "gitVersion")
+
+    uptime = _pick(runtime, "uptime") or _pick(data, "uptime")
+    heap_free = _pick(runtime, "heap_free", "heapFree") or _pick(data, "heap_free", "heapFree")
+    minimumfree_heap_runtime = _pick(runtime, "minimumfreeHeapRuntime") or _pick(
+        data, "minimumfreeHeapRuntime"
+    )
+    minimumfree_heap_10min = _pick(runtime, "minimumfreeHeap10min") or _pick(
+        data, "minimumfreeHeap10min"
+    )
+    events_num_clients = _pick(runtime, "event_num_clients", "eventNumClients") or _pick(
+        data, "event_num_clients", "eventNumClients"
+    )
+
+    ws_clients = _pick(debug, "wsClients", "websocket_connections") or _pick(
+        data, "wsClients", "websocket_connections"
+    )
+    http_active_connections = _pick(debug, "http_active_connections", "httpActiveConnections") or _pick(
+        data, "http_active_connections", "httpActiveConnections"
+    )
+
     row.update(
         {
-            "deviceid": device.get("deviceid", ""),
-            "soc": device.get("soc", ""),
-            "current_rom": device.get("current_rom", ""),
-            "build_type": app.get("build_type", ""),
-            "git_version": app.get("git_version", ""),
-            "uptime": runtime.get("uptime", ""),
-            "heap_free": runtime.get("heap_free", ""),
-            "minimumfreeHeapRuntime": runtime.get("minimumfreeHeapRuntime", ""),
-            "minimumfreeHeap10min": runtime.get("minimumfreeHeap10min", ""),
-            "ws_clients": debug.get("wsClients", ""),
-            "http_active_connections": debug.get("http_active_connections", ""),
-            "events_num_clients": runtime.get("event_num_clients", ""),
+            "deviceid": deviceid,
+            "soc": soc,
+            "current_rom": current_rom,
+            "build_type": build_type,
+            "git_version": git_version,
+            "uptime": uptime,
+            "heap_free": heap_free,
+            "minimumfreeHeapRuntime": minimumfree_heap_runtime,
+            "minimumfreeHeap10min": minimumfree_heap_10min,
+            "ws_clients": ws_clients,
+            "http_active_connections": http_active_connections,
+            "events_num_clients": events_num_clients,
         }
     )
     return row
@@ -157,8 +204,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--info-path",
-        default="/info",
-        help="Info endpoint path (default: /info)",
+        default="/info?v=2",
+        help="Info endpoint path (default: /info?v=2)",
     )
     parser.add_argument(
         "--reboot",

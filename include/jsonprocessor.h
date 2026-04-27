@@ -86,7 +86,9 @@ public:
     bool onBlink(JsonObject root, String& msg, bool relay = true);
 
     // SetOn/SetOff API
+    bool onSetOn(const String& json, String& msg, bool relay = true);
     bool onSetOn(JsonObject root, String& msg, bool relay = true);
+    bool onSetOff(const String& json, String& msg, bool relay = true);
     bool onSetOff(JsonObject root, String& msg, bool relay = true);
 
     bool onToggle(const String& json, String& msg, bool relay = true);

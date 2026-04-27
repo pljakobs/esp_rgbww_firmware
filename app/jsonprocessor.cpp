@@ -731,6 +731,14 @@ void JsonProcessor::addChannelStatesToCmd(JsonObject root, const RGBWWLed::Chann
 	}
 	}
 }
+
+bool JsonProcessor::onSetOn(const String& json, String& msg, bool relay)
+{
+	StaticJsonDocument<512> doc;
+	Json::deserialize(doc, json);
+	return onSetOn(doc.as<JsonObject>(), msg, relay);
+}
+
 bool JsonProcessor::onSetOn(JsonObject root, String& msg, bool relay) {
 	RequestParameters params;
 	parseRequestParams(root, params);
@@ -745,6 +753,13 @@ bool JsonProcessor::onSetOn(JsonObject root, String& msg, bool relay) {
 	);
 	// Optionally relay or set msg
 	return true;
+}
+
+bool JsonProcessor::onSetOff(const String& json, String& msg, bool relay)
+{
+	StaticJsonDocument<512> doc;
+	Json::deserialize(doc, json);
+	return onSetOff(doc.as<JsonObject>(), msg, relay);
 }
 
 bool JsonProcessor::onSetOff(JsonObject root, String& msg, bool relay) {

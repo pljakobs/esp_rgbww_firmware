@@ -28,11 +28,14 @@ public:
 
 	bool dispatch(const String& method, const JsonObject& params, JsonObject& out);
 	bool dispatchCommand(const String& method, const JsonObject& params, String& errorMsg, bool relay = true);
+	bool dispatchCommand(const String& method, const String& params, String& errorMsg, bool relay = true);
 	bool dispatchJsonRpc(const String& json, String& errorMsg, bool relay = false);
 	bool dispatchStream(const String& method, const JsonObject& params, std::unique_ptr<IDataSourceStream>& out,
 					 String& errorMsg);
 
 private:
+	bool dispatchDataRequest(const String& method, const JsonObject& params, JsonObject* outObject,
+						 std::unique_ptr<IDataSourceStream>* outStream, String& errorMsg);
 	bool handleInfo(const JsonObject& params, JsonObject& out);
 	bool handleColor(const JsonObject& params, JsonObject& out);
 	bool handleNetworks(const JsonObject& params, JsonObject& out);

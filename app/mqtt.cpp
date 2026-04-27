@@ -247,15 +247,8 @@ int AppMqttClient::onMessageReceived(MqttClient& client, mqtt_message_t* msg)
                 debug_w("MQTT cmd failed: %s", error.c_str());
             }
         } else {
-            StaticJsonDocument<1024> doc;
-            DeserializationError err = deserializeJson(doc, message);
-            if(err) {
-                debug_w("MQTT color payload invalid JSON");
-                return 0;
-            }
-
             String error;
-            if(!app.api->dispatchCommand(F("color"), doc.as<JsonObject>(), error, false)) {
+            if(!app.api->dispatchCommand(F("color"), message, error, false)) {
                 debug_w("MQTT color failed: %s", error.c_str());
             }
         }

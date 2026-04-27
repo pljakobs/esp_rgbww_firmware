@@ -23,6 +23,7 @@
  */
 
 #include <RGBWWCtrl.h>
+#include <apihandler.h>
 #include <Data/WebHelpers/base64.h>
 #include <memory>
 
@@ -193,6 +194,16 @@ void ICACHE_FLASH_ATTR ApplicationWebserver::wsSendBroadcast(const char* buffer,
         // Use firstSocket as needed
         socket->broadcast(buffer, length, WS_FRAME_TEXT);
     }
+}
+
+unsigned ApplicationWebserver::getHttpActiveConnections() const
+{
+	return activeClients;
+}
+
+unsigned ApplicationWebserver::getWebsocketConnectionCount() const
+{
+	return webSockets.size();
 }
 
 void ApplicationWebserver::start()
@@ -411,7 +422,8 @@ void ApplicationWebserver::onFile(HttpRequest& request, HttpResponse& response)
 				response.headers[HTTP_HEADER_LOCATION] = F("http://") + WifiAccessPoint.getIP().toString() + "/";
 			} else {
 #ifndef NOCACHE
-				//response.setCache(604800, true); // It's important to use cache for better performance.
+				// cache helps performance but can cause issues when updating the webapp. 
+				
 				response.setHeader(F("Cache-Control"),F("public, max-age=604800, immutable"));
 #endif
 				response.code = HTTP_STATUS_OK;
@@ -1334,49 +1346,27 @@ void ApplicationWebserver::onSystemReq(HttpRequest& request, HttpResponse& respo
 	}
 #endif
 */
-	bool error = false;
 	String body = request.getBody();
 	if(body == NULL) {
 		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("could not get HTTP body"));
 		return;
-	} else {
-		debug_i("ApplicationWebserver::onSystemReq: %s", body.c_str());
-		// ConfigDB - CONFIG_MAX_LENGTH was no longer defined, what's the right size here?
-		StaticJsonDocument<512> doc;
-		Json::deserialize(doc, body);
-
-		String cmd = doc[F("cmd")].as<const char*>();
-		if(cmd) {
-			if(cmd.equals(F("debug"))) {
-				bool enable;
-				if(Json::getValue(doc[F("enable")], enable)) {
-					Serial.systemDebugOutput(enable);
-				} else {
-					error = true;
-				}
-
-			} else if(cmd.equals(F("restart"))) {
-				bool clearOta = false;
-				Json::getValue(doc[F("clearOTA")], clearOta);
-				String restartCmd = clearOta ? F("clear_ota_restart") : F("restart");
-				if(!app.delayedCMD(restartCmd, 1500)) {
-					error = true;
-				}
-
-			} else if(!app.delayedCMD(cmd, 1500)) {
-				error = true;
-			}
-
-		} else {
-			error = true;
-		}
 	}
+
+	if(!app.api) {
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("api not initialized"));
+		return;
+	}
+
+	debug_i("ApplicationWebserver::onSystemReq: %s", body.c_str());
+	String errorMsg;
+	const bool ok = app.api->dispatchCommand(F("system"), body, errorMsg, false);
+
 	setCorsHeaders(response);
 
-	if(!error) {
+	if(ok) {
 		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 	} else {
-		sendApiCode(response, API_CODES::API_MISSING_PARAM);
+		sendApiCode(response, API_CODES::API_MISSING_PARAM, errorMsg);
 	}
 }
 
@@ -1641,16 +1631,15 @@ void ApplicationWebserver::onSetOn(HttpRequest &request, HttpResponse &response)
     
 
 	debug_i("onSetOn");
-		
-	String body = request.getBody();
-	StaticJsonDocument<512> doc;
-	DeserializationError err = deserializeJson(doc, body);
-	if (err) {
-		sendApiCode(response, API_BAD_REQUEST, F("Invalid JSON"));
+
+	if(!app.api) {
+		sendApiCode(response, API_BAD_REQUEST, F("api not initialized"));
 		return;
 	}
+
+	String body = request.getBody();
 	String msg;
-		if (app.jsonproc.onSetOn(doc.as<JsonObject>(), msg, true)) {
+	if(app.api->dispatchCommand(F("setOn"), body, msg, true)) {
 		sendApiCode(response, API_SUCCESS, F("SetOn OK"));
 	} else {
 		sendApiCode(response, API_BAD_REQUEST, msg);
@@ -1662,15 +1651,14 @@ void ApplicationWebserver::onSetOff(HttpRequest &request, HttpResponse &response
     
 	debug_i("onSetOff");
 
-	String body = request.getBody();
-	StaticJsonDocument<512> doc;
-	DeserializationError err = deserializeJson(doc, body);
-	if (err) {
-		sendApiCode(response, API_BAD_REQUEST, F("Invalid JSON"));
+	if(!app.api) {
+		sendApiCode(response, API_BAD_REQUEST, F("api not initialized"));
 		return;
 	}
+
+	String body = request.getBody();
 	String msg;
-		if (app.jsonproc.onSetOff(doc.as<JsonObject>(), msg, true)) {
+	if(app.api->dispatchCommand(F("setOff"), body, msg, true)) {
 		sendApiCode(response, API_SUCCESS, F("SetOff OK"));
 	} else {
 		sendApiCode(response, API_BAD_REQUEST, msg);
