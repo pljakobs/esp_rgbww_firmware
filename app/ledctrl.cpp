@@ -288,9 +288,12 @@ void APPLedCtrl::publishToEventServer()
 		debug_i("APPLEDCtrl - eventserver is disabled");
 		return;
 	}
-	HSVCT const* pHsv = NULL;
-	if(_mode == ColorMode::Hsv)
-		pHsv = &getCurrentColor();
+	HSVCT currentHsv;
+	const HSVCT* pHsv = nullptr;
+	if(_mode == ColorMode::Hsv) {
+		currentHsv = getCurrentColor();
+		pHsv = &currentHsv;
+	}
 
 	app.eventserver.publishCurrentState(getCurrentOutput(), pHsv);
 }

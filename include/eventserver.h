@@ -23,8 +23,8 @@
 
 class EventServer : public TcpServer{
 public:
-    EventServer() : webServer(nullptr) {} // Empty constructor
-	EventServer(ApplicationWebserver& webServer) : webServer(&webServer){} ;
+    EventServer() : webServer(nullptr), enabled(false) {} // Empty constructor
+	EventServer(ApplicationWebserver& webServer) : webServer(&webServer), enabled(false) {};
 	virtual ~EventServer();
 
     void start(ApplicationWebserver& webServer); // Add this line
@@ -57,7 +57,8 @@ private:
     const unsigned long _minEventInterval = 500; // 500ms = 2 per second max
 	
 	ChannelOutput _lastRaw;
-	const HSVCT* _lastpHsv = nullptr;
+	HSVCT _lastHsv;
+	bool _lastHasHsv = false;
 	// websocket interface
     ApplicationWebserver* webServer;
 	};
