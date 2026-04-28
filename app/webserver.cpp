@@ -188,10 +188,11 @@ void ApplicationWebserver::wsDisconnected(WebsocketConnection& socket)
 */
 void ICACHE_FLASH_ATTR ApplicationWebserver::wsSendBroadcast(const char* buffer, size_t length)
 {
-    if (!webSockets.isEmpty()) {
-        WebsocketConnection* socket = webSockets[0];
-        // Use firstSocket as needed
-        socket->broadcast(buffer, length, WS_FRAME_TEXT);
+    if(buffer == nullptr || length == 0 || webSockets.isEmpty()) { return; }
+    for(unsigned i = 0; i < webSockets.size(); ++i) {
+        WebsocketConnection* socket = webSockets[i];
+        if(socket == nullptr) { continue; }
+        socket->send(buffer, length, WS_FRAME_TEXT);
     }
 }
 
