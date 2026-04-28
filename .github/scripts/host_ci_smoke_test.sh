@@ -467,21 +467,25 @@ extract_failed_tests() {
 
 start_host_app "$APP_LOG_SMOKE" "$VALGRIND_LOG_SMOKE" "smoke"
 collect_runtime_valgrind_snapshot "$VALGRIND_RUNTIME_LOG_SMOKE_START" "smoke_startup_idle"
+set +e
 python3 -m pytest \
   -v \
   --md "$SMOKE_TEST_REPORT" \
   tests/host_smoke_api_test.py 2>&1 | tee "$SMOKE_TEST_OUTPUT"
 SMOKE_PYTEST_EXIT=${PIPESTATUS[0]}
+set -e
 collect_runtime_valgrind_snapshot "$VALGRIND_RUNTIME_LOG_SMOKE" "smoke_post_tests"
 stop_host_app
 
 start_host_app "$APP_LOG_RGBWW" "$VALGRIND_LOG_RGBWW" "rgbww"
 collect_runtime_valgrind_snapshot "$VALGRIND_RUNTIME_LOG_RGBWW_START" "rgbww_startup_idle"
+set +e
 python3 -m pytest \
   -v \
   --md "$RGBWW_TEST_REPORT" \
   tests/rgbww_test.py 2>&1 | tee "$RGBWW_TEST_OUTPUT"
 RGBWW_PYTEST_EXIT=${PIPESTATUS[0]}
+set -e
 collect_runtime_valgrind_snapshot "$VALGRIND_RUNTIME_LOG_RGBWW" "rgbww_post_tests"
 stop_host_app
 
