@@ -115,6 +115,8 @@ private:
 
     void wsConnected(WebsocketConnection& socket);
     void wsDisconnected(WebsocketConnection& socket);
+    void wsMessageReceived(WebsocketConnection& socket, const String& message);
+    void wsSendJsonRpcError(WebsocketConnection& socket, const JsonVariantConst& requestId, const String& message);
 };
 
 #endif // APP_WEBSERVER_H_

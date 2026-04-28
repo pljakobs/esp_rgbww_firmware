@@ -74,7 +74,7 @@ def http_request(method: str, url: str, body: bytes | None = None, headers: dict
                 if 300 <= response.status < 400:
                     location = response.headers.get('Location')
                     if location:
-                        url = location
+                        url = parse.urljoin(url, location)
                         # For redirects, follow with GET and no body
                         method = 'GET'
                         body = None
@@ -93,7 +93,7 @@ def http_request(method: str, url: str, body: bytes | None = None, headers: dict
             if 300 <= exc.code < 400:
                 location = exc.headers.get('Location')
                 if location:
-                    url = location
+                    url = parse.urljoin(url, location)
                     # For redirects, follow with GET and no body
                     method = 'GET'
                     body = None

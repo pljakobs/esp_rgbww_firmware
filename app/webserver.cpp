@@ -165,6 +165,9 @@ void ApplicationWebserver::init()
 	wsResource = new WebsocketResource();
 	wsResource->setConnectionHandler([this](WebsocketConnection& socket) { this->wsConnected(socket); });
 	wsResource->setDisconnectionHandler([this](WebsocketConnection& socket) { this->wsDisconnected(socket); });
+	wsResource->setMessageHandler([this](WebsocketConnection& socket, const String& message) {
+		this->wsMessageReceived(socket, message);
+	});
 	paths.set("/ws", wsResource);
 
 	_init = true;
@@ -182,6 +185,53 @@ void ApplicationWebserver::wsDisconnected(WebsocketConnection& socket)
 	debug_i("<===wsDisconnected");
 	webSockets.removeElement(&socket);
 	debug_i("===>nr of websockets: %i", webSockets.size());
+}
+
+void ApplicationWebserver::wsSendJsonRpcError(WebsocketConnection& socket, const JsonVariantConst& requestId,
+										 const String& message)
+{
+	auto stream = std::make_unique<JsonObjectStream>();
+	JsonObject root = stream->getRoot();
+	root[F("jsonrpc")] = F("2.0");
+
+	if(requestId.isNull()) {
+		root[F("id")] = nullptr;
+	} else {
+		root[F("id")] = requestId;
+	}
+
+	JsonObject error = root.createNestedObject(F("error"));
+	error[F("message")] = message;
+	if(message == F("missing method") || message == F("method not implemented")) {
+		error[F("code")] = -32601;
+	} else {
+		error[F("code")] = -32600;
+	}
+
+	socket.send(Json::serialize(root), WS_FRAME_TEXT);
+}
+
+void ApplicationWebserver::wsMessageReceived(WebsocketConnection& socket, const String& message)
+{
+	DynamicJsonDocument requestDoc(1024);
+	DeserializationError parseErr = deserializeJson(requestDoc, message);
+	JsonVariantConst requestId;
+	if(!parseErr) {
+		requestId = requestDoc[F("id")];
+	}
+
+	if(!app.api) {
+		wsSendJsonRpcError(socket, requestId, F("api not initialized"));
+		return;
+	}
+
+	String errorMsg;
+	if(!app.api->dispatchJsonRpc(message, errorMsg, false)) {
+		if(errorMsg.length() == 0) {
+			errorMsg = F("method not found");
+		}
+		wsSendJsonRpcError(socket, requestId, errorMsg);
+	}
 }
 
 /*
