@@ -27,6 +27,27 @@
 #include <apihandler.h>
 
 #define MIN_HEAP_FREE 8192
+
+namespace {
+template <size_t Capacity>
+bool parseJsonObjectOrSetError(const String& json, StaticJsonDocument<Capacity>& doc, String& msg)
+{
+	DeserializationError err = deserializeJson(doc, json);
+	if(err) {
+		debug_w("JsonProcessor JSON parse failed: %s", err.c_str());
+		msg = F("Invalid JSON");
+		return false;
+	}
+
+	if(doc.template as<JsonObject>().isNull()) {
+		msg = F("Invalid JSON");
+		return false;
+	}
+
+	return true;
+}
+} // namespace
+
 /**
  * @brief Processes the color JSON data.
  *
@@ -42,7 +63,9 @@ bool JsonProcessor::onColor(const String& json, String& msg, bool relay)
 {
 	debug_e("JsonProcessor::onColor: %s", json.c_str());
 	StaticJsonDocument<400> doc;
-	Json::deserialize(doc, json);
+	if(!parseJsonObjectOrSetError(json, doc, msg)) {
+		return false;
+	}
 	return onColor(doc.as<JsonObject>(), msg, relay);
 }
 
@@ -115,7 +138,9 @@ bool JsonProcessor::onColor(JsonObject root, String& msg, bool relay)
 bool JsonProcessor::onStop(const String& json, String& msg, bool relay)
 {
 	StaticJsonDocument<256> doc;
-	Json::deserialize(doc, json);
+	if(!parseJsonObjectOrSetError(json, doc, msg)) {
+		return false;
+	}
 	return onStop(doc.as<JsonObject>(), msg, relay);
 }
 
@@ -160,7 +185,9 @@ bool JsonProcessor::onStop(JsonObject root, String& msg, bool relay)
 bool JsonProcessor::onSkip(const String& json, String& msg, bool relay)
 {
 	StaticJsonDocument<256> doc;
-	Json::deserialize(doc, json);
+	if(!parseJsonObjectOrSetError(json, doc, msg)) {
+		return false;
+	}
 	return onSkip(doc.as<JsonObject>(), msg, relay);
 }
 
@@ -207,7 +234,9 @@ bool JsonProcessor::onSkip(JsonObject root, String& msg, bool relay)
 bool JsonProcessor::onPause(const String& json, String& msg, bool relay)
 {
 	StaticJsonDocument<256> doc;
-	Json::deserialize(doc, json);
+	if(!parseJsonObjectOrSetError(json, doc, msg)) {
+		return false;
+	}
 	return onPause(doc.as<JsonObject>(), msg, relay);
 }
 
@@ -256,7 +285,9 @@ bool JsonProcessor::onPause(JsonObject root, String& msg, bool relay)
 bool JsonProcessor::onContinue(const String& json, String& msg, bool relay)
 {
 	StaticJsonDocument<256> doc;
-	Json::deserialize(doc, json);
+	if(!parseJsonObjectOrSetError(json, doc, msg)) {
+		return false;
+	}
 	return onContinue(doc.as<JsonObject>(), msg, relay);
 }
 
@@ -298,7 +329,9 @@ bool JsonProcessor::onContinue(JsonObject root, String& msg, bool relay)
 bool JsonProcessor::onBlink(const String& json, String& msg, bool relay)
 {
 	StaticJsonDocument<256> doc;
-	Json::deserialize(doc, json);
+	if(!parseJsonObjectOrSetError(json, doc, msg)) {
+		return false;
+	}
 	return onBlink(doc.as<JsonObject>(), msg, relay);
 }
 
@@ -343,7 +376,9 @@ bool JsonProcessor::onBlink(JsonObject root, String& msg, bool relay)
 bool JsonProcessor::onToggle(const String& json, String& msg, bool relay)
 {
 	StaticJsonDocument<256> doc;
-	Json::deserialize(doc, json);
+	if(!parseJsonObjectOrSetError(json, doc, msg)) {
+		return false;
+	}
 	return onToggle(doc.as<JsonObject>(), msg, relay);
 }
 
@@ -438,7 +473,9 @@ bool JsonProcessor::onSingleColorCommand(JsonObject root, String& errorMsg)
 bool JsonProcessor::onDirect(const String& json, String& msg, bool relay)
 {
 	StaticJsonDocument<256> doc;
-	Json::deserialize(doc, json);
+	if(!parseJsonObjectOrSetError(json, doc, msg)) {
+		return false;
+	}
 	return onDirect(doc.as<JsonObject>(), msg, relay);
 }
 
@@ -735,7 +772,9 @@ void JsonProcessor::addChannelStatesToCmd(JsonObject root, const RGBWWLed::Chann
 bool JsonProcessor::onSetOn(const String& json, String& msg, bool relay)
 {
 	StaticJsonDocument<512> doc;
-	Json::deserialize(doc, json);
+	if(!parseJsonObjectOrSetError(json, doc, msg)) {
+		return false;
+	}
 	return onSetOn(doc.as<JsonObject>(), msg, relay);
 }
 
@@ -758,7 +797,9 @@ bool JsonProcessor::onSetOn(JsonObject root, String& msg, bool relay) {
 bool JsonProcessor::onSetOff(const String& json, String& msg, bool relay)
 {
 	StaticJsonDocument<512> doc;
-	Json::deserialize(doc, json);
+	if(!parseJsonObjectOrSetError(json, doc, msg)) {
+		return false;
+	}
 	return onSetOff(doc.as<JsonObject>(), msg, relay);
 }
 
