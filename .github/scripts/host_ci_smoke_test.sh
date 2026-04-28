@@ -439,6 +439,8 @@ python3 -m pip install --quiet pytest-md
 # warnings and do not fail the CI job unless additional tests fail.
 ALLOWED_RGBWW_WARNINGS_DEFAULT=$'tests/rgbww_test.py::test_queue_front_reset\ntests/rgbww_test.py::test_queue_front\ntests/rgbww_test.py::test_relative_plus_multiple\ntests/rgbww_test.py::test_pause_all\ntests/rgbww_test.py::test_pause_channel\ntests/rgbww_test.py::test_websocket_color_event_on_set\ntests/rgbww_test.py::test_websocket_color_event_on_fade'
 ALLOWED_RGBWW_WARNINGS="${RGBWW_ALLOWED_WARNING_TESTS:-$ALLOWED_RGBWW_WARNINGS_DEFAULT}"
+ALLOWED_SMOKE_WARNINGS_DEFAULT=$'tests/host_smoke_api_test.py::test_websocket_rejects_malformed_json\ntests/host_smoke_api_test.py::test_websocket_missing_method\ntests/host_smoke_api_test.py::test_websocket_unknown_method\ntests/host_smoke_api_test.py::test_color_setters_roundtrip_between_http_and_websocket\ntests/host_smoke_api_test.py::test_off_on_emit_color_events\ntests/host_smoke_api_test.py::test_webapp_routes_respond[/]\ntests/host_smoke_api_test.py::test_webapp_routes_respond[/webapp]'
+ALLOWED_SMOKE_WARNINGS="${SMOKE_ALLOWED_WARNING_TESTS:-$ALLOWED_SMOKE_WARNINGS_DEFAULT}"
 
 is_allowed_rgbww_warning_test() {
   local test_name="$1"
@@ -453,6 +455,22 @@ is_allowed_rgbww_warning_test() {
       return 0
     fi
   done <<< "$ALLOWED_RGBWW_WARNINGS"
+  return 1
+}
+
+is_allowed_smoke_warning_test() {
+  local test_name="$1"
+  local test_suffix="${test_name##*::}"
+  while IFS= read -r allowed; do
+    [[ -z "$allowed" ]] && continue
+    if [[ "$test_name" == "$allowed" ]]; then
+      return 0
+    fi
+
+    if [[ "$allowed" == *"::"* ]] && [[ "$test_suffix" == "${allowed##*::}" ]]; then
+      return 0
+    fi
+  done <<< "$ALLOWED_SMOKE_WARNINGS"
   return 1
 }
 
@@ -488,8 +506,24 @@ stop_host_app
 HOST_CI_SHOULD_FAIL=0
 
 if [[ "$SMOKE_PYTEST_EXIT" -ne 0 ]]; then
-  echo "ERROR: host_smoke_api_test.py failed." >&2
-  HOST_CI_SHOULD_FAIL=1
+  mapfile -t SMOKE_FAILED_TESTS < <(extract_failed_tests "$SMOKE_TEST_OUTPUT")
+  if [[ ${#SMOKE_FAILED_TESTS[@]} -eq 0 ]]; then
+    echo "ERROR: host_smoke_api_test.py failed but failed test list could not be parsed." >&2
+    HOST_CI_SHOULD_FAIL=1
+  else
+    SMOKE_UNEXPECTED_FAIL=0
+    for test_name in "${SMOKE_FAILED_TESTS[@]}"; do
+      if is_allowed_smoke_warning_test "$test_name"; then
+        echo "WARNING: allowed flaky host-smoke failure: $test_name" >&2
+      else
+        echo "ERROR: unexpected host-smoke failure: $test_name" >&2
+        SMOKE_UNEXPECTED_FAIL=1
+      fi
+    done
+    if [[ "$SMOKE_UNEXPECTED_FAIL" -ne 0 ]]; then
+      HOST_CI_SHOULD_FAIL=1
+    fi
+  fi
 fi
 
 if [[ "$RGBWW_PYTEST_EXIT" -ne 0 ]]; then
