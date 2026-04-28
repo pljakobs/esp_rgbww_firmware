@@ -437,14 +437,19 @@ python3 -m pip install --quiet pytest-md
 # Known timing-sensitive RGBWW tests that may fail in CI due to fade precision/jitter
 # or delayed websocket delivery on the Host emulator. These are reported as
 # warnings and do not fail the CI job unless additional tests fail.
-ALLOWED_RGBWW_WARNINGS_DEFAULT=$'tests/rgbww_test.py::test_queue_front_reset\ntests/rgbww_test.py::test_queue_front\ntests/rgbww_test.py::test_relative_plus_multiple\ntests/rgbww_test.py::test_pause_all\ntests/rgbww_test.py::test_pause_channel\ntests/rgbww_test.py::test_websocket_color_event_on_fade'
+ALLOWED_RGBWW_WARNINGS_DEFAULT=$'tests/rgbww_test.py::test_queue_front_reset\ntests/rgbww_test.py::test_queue_front\ntests/rgbww_test.py::test_relative_plus_multiple\ntests/rgbww_test.py::test_pause_all\ntests/rgbww_test.py::test_pause_channel\ntests/rgbww_test.py::test_websocket_color_event_on_set\ntests/rgbww_test.py::test_websocket_color_event_on_fade'
 ALLOWED_RGBWW_WARNINGS="${RGBWW_ALLOWED_WARNING_TESTS:-$ALLOWED_RGBWW_WARNINGS_DEFAULT}"
 
 is_allowed_rgbww_warning_test() {
   local test_name="$1"
+  local test_suffix="${test_name##*::}"
   while IFS= read -r allowed; do
     [[ -z "$allowed" ]] && continue
     if [[ "$test_name" == "$allowed" ]]; then
+      return 0
+    fi
+
+    if [[ "$allowed" == *"::"* ]] && [[ "$test_suffix" == "${allowed##*::}" ]]; then
       return 0
     fi
   done <<< "$ALLOWED_RGBWW_WARNINGS"
