@@ -103,6 +103,12 @@ static uint8_t getActiveTcpConnectionCount()
 	return getTcpPcbStats().active_total;
 }
 
+static bool isWsDataMethod(const String& method)
+{
+	return method == F("info") || method == F("getInfo") || method == F("getColor") || method == F("networks") ||
+		   method == F("getNetworks");
+}
+
 //#define NOCACHE
 
 
@@ -202,7 +208,7 @@ void ApplicationWebserver::wsSendJsonRpcError(WebsocketConnection& socket, const
 
 	JsonObject error = root.createNestedObject(F("error"));
 	error[F("message")] = message;
-	if(message == F("missing method") || message == F("method not implemented")) {
+	if(message == F("missing method") || message == F("method not implemented") || message == F("method not found")) {
 		error[F("code")] = -32601;
 	} else {
 		error[F("code")] = -32600;
@@ -215,9 +221,23 @@ void ApplicationWebserver::wsMessageReceived(WebsocketConnection& socket, const 
 {
 	DynamicJsonDocument requestDoc(1024);
 	DeserializationError parseErr = deserializeJson(requestDoc, message);
-	JsonVariantConst requestId;
-	if(!parseErr) {
-		requestId = requestDoc[F("id")];
+	if(parseErr) {
+		JsonVariantConst noRequestId;
+		wsSendJsonRpcError(socket, noRequestId, F("malformed json"));
+		return;
+	}
+
+	JsonVariantConst requestId = requestDoc[F("id")];
+	String method = requestDoc[F("method")] | String::nullstr;
+	if(method.length() == 0) {
+		wsSendJsonRpcError(socket, requestId, F("missing method"));
+		return;
+	}
+
+	StaticJsonDocument<16> emptyParamsDoc;
+	JsonObject params = requestDoc[F("params")].as<JsonObject>();
+	if(params.isNull()) {
+		params = emptyParamsDoc.to<JsonObject>();
 	}
 
 	if(!app.api) {
@@ -225,13 +245,42 @@ void ApplicationWebserver::wsMessageReceived(WebsocketConnection& socket, const 
 		return;
 	}
 
+	auto response = std::make_unique<JsonObjectStream>();
+	JsonObject root = response->getRoot();
+	root[F("jsonrpc")] = F("2.0");
+	if(requestId.isNull()) {
+		root[F("id")] = nullptr;
+	} else {
+		root[F("id")] = requestId;
+	}
+
+	if(isWsDataMethod(method)) {
+		JsonObject result = root.createNestedObject(F("result"));
+		if(!app.api->dispatch(method, params, result)) {
+			String errorMsg = result[F("error")] | String::nullstr;
+			if(errorMsg.length() == 0) {
+				errorMsg = F("method not found");
+			}
+			wsSendJsonRpcError(socket, requestId, errorMsg);
+			return;
+		}
+
+		socket.send(Json::serialize(root), WS_FRAME_TEXT);
+		return;
+	}
+
 	String errorMsg;
-	if(!app.api->dispatchJsonRpc(message, errorMsg, false)) {
+	if(!app.api->dispatchCommand(method, params, errorMsg, false)) {
 		if(errorMsg.length() == 0) {
 			errorMsg = F("method not found");
 		}
 		wsSendJsonRpcError(socket, requestId, errorMsg);
+		return;
 	}
+
+	JsonObject result = root.createNestedObject(F("result"));
+	result[F("success")] = true;
+	socket.send(Json::serialize(root), WS_FRAME_TEXT);
 }
 
 /*
