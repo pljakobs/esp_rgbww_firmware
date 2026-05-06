@@ -31,6 +31,13 @@
 
 class Controllers {
 public:
+    enum HostType {
+        HOST_TYPE_UNKNOWN,
+        HOST_TYPE_ALIAS,
+        HOST_TYPE_CONTROLLER,
+        HOST_TYPE_WALLPANEL,
+    };
+
     enum ControllerState {
         NOT_FOUND, INCOMPLETE, OFFLINE, ONLINE, LOCALHOST
     };
@@ -43,6 +50,7 @@ public:
         unsigned int id = 0;
         char hostname[CONTROLLER_HOSTNAME_MAX_SIZE] = {0};
         char ipAddress[CONTROLLER_IP_MAX_SIZE] = {0};
+        HostType hostType = HOST_TYPE_UNKNOWN;
         ControllerState state = NOT_FOUND;
         int ttl = 0;
         bool pingPending = false;
@@ -51,6 +59,7 @@ public:
     struct VisibleController {
         unsigned int id;
         int ttl;
+        HostType hostType = HOST_TYPE_UNKNOWN;
         ControllerState state;
         bool pingPending = false;
     };
@@ -122,10 +131,13 @@ public:
     ~Controllers();
 
     // Core methods
-    void addOrUpdate(unsigned int id, const char* hostname, const char* ipAddress, int ttl);
-    void addOrUpdate(unsigned int id, const String& hostname, const String& ipAddress, int ttl);
+    void addOrUpdate(unsigned int id, const char* hostname, const char* ipAddress, int ttl, HostType hostType = HOST_TYPE_UNKNOWN);
+    void addOrUpdate(unsigned int id, const String& hostname, const String& ipAddress, int ttl, HostType hostType = HOST_TYPE_UNKNOWN);
     void updateFromPing(unsigned int id, int ttl);
     void removeExpired(int elapsedSeconds);
+
+    static HostType hostTypeFromString(const String& type);
+    static const char* hostTypeToString(HostType type);
     
     // Query methods
     ControllerInfo getController(unsigned int id);

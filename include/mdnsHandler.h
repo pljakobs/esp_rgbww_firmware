@@ -190,6 +190,8 @@ public:
         if (_instance.length() > 0) {
             txt.add(F("fn=") + _instance);
         }
+        txt.add(F("type=CONTROLLER"));
+        txt.add(F("host_type=CONTROLLER"));
         txt.add(F("path=/"));
         txt.add(F("v=2"));
     }
@@ -219,6 +221,8 @@ public:
         char idStr[16];
         snprintf(idStr, sizeof(idStr), "id=%u", system_get_chip_id());
         txt.add(idStr);
+        txt.add(F("type=CONTROLLER"));
+        txt.add(F("host_type=CONTROLLER"));
         txt.add(_isLeader ? F("isLeader=1") : F("isLeader=0"));
         if (_groups.size() > 0) {
             String groupList;
@@ -271,9 +275,18 @@ public:
         snprintf(idStr, sizeof(idStr), "id=%u", system_get_chip_id());
         txt.add(idStr);
         switch (_hostType) {
-            case HostType::Device: txt.add(F("type=host"));   break;
-            case HostType::Leader: txt.add(F("type=leader")); break;
-            case HostType::Group:  txt.add(F("type=group"));  break;
+            case HostType::Device:
+                txt.add(F("type=CONTROLLER"));
+                txt.add(F("host_type=CONTROLLER"));
+                break;
+            case HostType::Leader:
+                txt.add(F("type=ALIAS"));
+                txt.add(F("host_type=ALIAS"));
+                break;
+            case HostType::Group:
+                txt.add(F("type=ALIAS"));
+                txt.add(F("host_type=ALIAS"));
+                break;
         }
     }
 
@@ -356,6 +369,7 @@ private:
     String searchName;
     // Swarm gossip service type — controllers browse this exclusively
     const char* service = "_lightinator._tcp.local";
+    const char* wallPanelService = "_wall-panel-api._tcp.local";
     int _mdnsTimerInterval = 15000; // Increased from 10000
     int _mdnsPingInterval = 10000; // Ping every minute
     int conntrack = 0;

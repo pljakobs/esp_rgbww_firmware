@@ -219,10 +219,13 @@ bool mdnsHandler::onMessage(mDNS::Message& message)
     debug_i("answerName: %ssearchName: %s", answerName, searchName.c_str());
 #endif
 
-    // Check if this is a swarm service response (_lightinator._tcp)
+    // Check if this is a swarm or wall-panel service response
     const char* swarm_suffix = "._lightinator._tcp.local";
+    const char* wallpanel_suffix = "._wall-panel-api._tcp.local";
     const char* p_swarm = strstr(answerName, swarm_suffix);
-    if (p_swarm != nullptr && p_swarm[strlen(swarm_suffix)] == '\0') {
+    const char* p_wallpanel = strstr(answerName, wallpanel_suffix);
+    if ((p_swarm != nullptr && p_swarm[strlen(swarm_suffix)] == '\0') ||
+        (p_wallpanel != nullptr && p_wallpanel[strlen(wallpanel_suffix)] == '\0')) {
         return processSwarmServiceResponse(message);
     } else {
         const char* http_tcp_local = "._http._tcp.local";
@@ -301,22 +304,18 @@ bool mdnsHandler::processSwarmServiceResponse(mDNS::Message& message)
             }
 
             // Get hostname type
-            String hostnameType = txt[F("type")];
+            String hostnameType = txt[F("host_type")];
+            if (hostnameType.length() == 0) {
+                hostnameType = txt[F("type")];
+            }
             if (hostnameType.length() == 0)
                 hostnameType = F("undefined");
 #ifdef DEBUG_MDNS
             debug_i("Hostname %s, type: %s", info.hostName, hostnameType.c_str());
 #endif
 
-            // Only add to host table if this is a device hostname
-            if (hostnameType == F("host")) {
-                app.controllers->addOrUpdate(info.ID, info.hostName, info.ipAddr.toString(), info.ttl);
-            } else {
-                // For leader/group hostnames, just log them
-#ifdef DEBUG_MDNS
-                debug_i("Detected %s hostname: %s (ID: %u)", hostnameType.c_str(), info.hostName, info.ID);
-#endif
-            }
+            const Controllers::HostType hostType = Controllers::hostTypeFromString(hostnameType);
+            app.controllers->addOrUpdate(info.ID, info.hostName, info.ipAddr.toString(), info.ttl, hostType);
         }
         return true;
     } else {
@@ -419,16 +418,13 @@ bool mdnsHandler::processHostnameResponse(mDNS::Message& message, const char* ho
             debug_i("Found controller ID: %u, type: %s", controllerId, controllerType.c_str());
 #endif
 
-            // If we have an ID and it's a host type, add the host
-            if (controllerId > 0 && controllerType == "host") {
-                app.controllers->addOrUpdate(controllerId, hostname, ipAddress, ttl);
+            if (controllerId > 0) {
+                Controllers::HostType hostType = Controllers::hostTypeFromString(txt["host_type"]);
+                if (hostType == Controllers::HOST_TYPE_UNKNOWN) {
+                    hostType = Controllers::hostTypeFromString(controllerType);
+                }
+                app.controllers->addOrUpdate(controllerId, hostname, ipAddress, ttl, hostType);
                 return true;
-            } else if (controllerId > 0) {
-                // Log but don't add non-host entries
-#ifdef DEBUG_MDNS
-                debug_i("Ignoring non-host entry: %s (ID: %u, type: %s)", hostname, controllerId,
-                        controllerType.c_str());
-#endif
             }
         }
     }
@@ -447,8 +443,13 @@ void mdnsHandler::sendSearch()
 
     // Search for the service
     bool ok = mDNS::server.search(service);
+    bool wallPanelOk = mDNS::server.search(wallPanelService);
+#ifndef DEBUG_MDNS
+    (void)wallPanelOk;
+#endif
 #ifdef DEBUG_MDNS
     debug_i("search('%s'): %s", service, ok ? "OK" : "FAIL");
+    debug_i("search('%s'): %s", wallPanelService, wallPanelOk ? "OK" : "FAIL");
 #endif
 
     // Periodically check if there is still a leader in the network

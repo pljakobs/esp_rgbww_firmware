@@ -26,6 +26,34 @@
 
 extern Application app;
 
+Controllers::HostType Controllers::hostTypeFromString(const String& type)
+{
+    if(type.equalsIgnoreCase(F("ALIAS")) || type.equalsIgnoreCase(F("leader")) || type.equalsIgnoreCase(F("group"))) {
+        return HOST_TYPE_ALIAS;
+    }
+    if(type.equalsIgnoreCase(F("CONTROLLER")) || type.equalsIgnoreCase(F("host"))) {
+        return HOST_TYPE_CONTROLLER;
+    }
+    if(type.equalsIgnoreCase(F("WALLPANEL")) || type.equalsIgnoreCase(F("wall_panel"))) {
+        return HOST_TYPE_WALLPANEL;
+    }
+    return HOST_TYPE_UNKNOWN;
+}
+
+const char* Controllers::hostTypeToString(HostType type)
+{
+    switch(type) {
+    case HOST_TYPE_ALIAS:
+        return "ALIAS";
+    case HOST_TYPE_CONTROLLER:
+        return "CONTROLLER";
+    case HOST_TYPE_WALLPANEL:
+        return "WALLPANEL";
+    default:
+        return "UNKNOWN";
+    }
+}
+
 // Constructor
 Controllers::Controllers() : _pingInProgress(false), _pingIndex(0), _pingInterval(10000), _pingTimeout(5000) {
     debug_i("Controllers constructor called");
@@ -56,6 +84,7 @@ Controllers::Controllers() : _pingInProgress(false), _pingIndex(0), _pingInterva
         VisibleController localCtrl;
         localCtrl.id = localId;
         localCtrl.ttl = 0;
+        localCtrl.hostType = HOST_TYPE_CONTROLLER;
         localCtrl.state = LOCALHOST;
         localCtrl.pingPending = false;
         visibleControllers.push_back(localCtrl);
@@ -69,7 +98,7 @@ Controllers::~Controllers() {
 }
 
 // Core methods
-void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char* ipAddress, int ttl) {
+void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char* ipAddress, int ttl, HostType hostType) {
     #ifdef DEBUG_MDNS
         debug_i("Controllers::addOrUpdate id=%u, hostname=%s, ip=%s, ttl=%d", id, hostname, ipAddress, ttl);
     #endif
@@ -83,6 +112,9 @@ void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char*
     if (index != INVALID_INDEX) {
         // Update existing
         visibleControllers[index].ttl = ttl;
+        if (hostType != HOST_TYPE_UNKNOWN) {
+            visibleControllers[index].hostType = hostType;
+        }
         visibleControllers[index].state = (ttl > 0) ? ONLINE : OFFLINE;
         visibleControllers[index].pingPending = false;
     } else {
@@ -90,6 +122,7 @@ void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char*
         VisibleController newController;
         newController.id = id;
         newController.ttl = ttl;
+        newController.hostType = hostType;
         newController.state = (ttl > 0) ? ONLINE : OFFLINE;
         newController.pingPending = false;
         visibleControllers.push_back(newController);
@@ -142,8 +175,8 @@ void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char*
 
 }
 
-void Controllers::addOrUpdate(unsigned int id, const String& hostname, const String& ipAddress, int ttl) {
-    addOrUpdate(id, hostname.c_str(), ipAddress.c_str(), ttl);
+void Controllers::addOrUpdate(unsigned int id, const String& hostname, const String& ipAddress, int ttl, HostType hostType) {
+    addOrUpdate(id, hostname.c_str(), ipAddress.c_str(), ttl, hostType);
 }
 
 void Controllers::updateFromPing(unsigned int id, int ttl) {
@@ -339,11 +372,13 @@ Controllers::ControllerInfo Controllers::Iterator::operator*() {
             info.state = OFFLINE;
             info.ttl = 0;
             info.pingPending = false;
+            info.hostType = HOST_TYPE_UNKNOWN;
             
             // Check if controller is visible
             size_t visibleIndex = manager.findVisibleControllerIndex(info.id);
             if (visibleIndex != Controllers::INVALID_INDEX) {
                 info.ttl = manager.visibleControllers[visibleIndex].ttl;
+                info.hostType = manager.visibleControllers[visibleIndex].hostType;
                 info.state = (info.ttl > 0) ? ONLINE : OFFLINE;
                 info.pingPending = manager.visibleControllers[visibleIndex].pingPending;
             } else if (strlen(info.hostname) == 0 || strlen(info.ipAddress) == 0) {
@@ -400,11 +435,13 @@ Controllers::ControllerInfo Controllers::findById(unsigned int id) {
             info.state = OFFLINE;
             info.ttl = 0;
             info.pingPending = false;
+            info.hostType = HOST_TYPE_UNKNOWN;
             
             // Check if visible
             size_t visibleIndex = findVisibleControllerIndex(id);
             if (visibleIndex != INVALID_INDEX) {
                 info.ttl = visibleControllers[visibleIndex].ttl;
+                info.hostType = visibleControllers[visibleIndex].hostType;
                 info.state = (info.ttl > 0) ? ONLINE : OFFLINE;
                 info.pingPending = visibleControllers[visibleIndex].pingPending;
             } else if (strlen(info.hostname) == 0 || strlen(info.ipAddress) == 0) {
@@ -523,10 +560,12 @@ size_t Controllers::JsonPrinter::operator()() {
                 info.state = OFFLINE;
                 info.ttl = 0;
                 info.pingPending = false;
+                info.hostType = HOST_TYPE_UNKNOWN;
                 // Check if controller is visible (online)
                 size_t visibleIndex = manager.findVisibleControllerIndex(info.id);
                 if (visibleIndex != INVALID_INDEX) {
                     info.ttl = manager.visibleControllers[visibleIndex].ttl;
+                    info.hostType = manager.visibleControllers[visibleIndex].hostType;
                     if (manager.visibleControllers[visibleIndex].state == LOCALHOST) {
                         info.state = LOCALHOST;
                     } else {
@@ -561,6 +600,7 @@ size_t Controllers::JsonPrinter::operator()() {
         n += printProperty("id", (int)info.id, false, 3);
         n += printProperty("hostname", info.hostname, false, 3);
         n += printProperty("ip_address", info.ipAddress, false, 3);
+        n += printProperty("host_type", hostTypeToString(info.hostType), false, 3);
         n += printProperty("visible", (info.state == ONLINE || info.state == LOCALHOST), false, 3);
         n += printProperty("state", (int)info.state, true, 3);
         n += p->print('}');
@@ -592,6 +632,7 @@ size_t Controllers::JsonPrinter::operator()() {
             String localIp = WifiStation.getIP().toString();
             n += printProperty("hostname", localHostname.c_str(), false, 3);
             n += printProperty("ip_address", localIp.c_str(), false, 3);
+            n += printProperty("host_type", hostTypeToString(HOST_TYPE_CONTROLLER), false, 3);
             n += printProperty("visible", true, false, 3);
             n += printProperty("state", (int)LOCALHOST, true, 3);
             n += p->print('}');
