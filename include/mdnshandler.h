@@ -149,6 +149,8 @@ class LEDControllerAPIService : public mDNS::Service {
             #endif
             txt.add(F("fn=LED Controller API"));
             txt.add(F("id=") + String(system_get_chip_id()));
+            txt.add(F("type=CONTROLLER"));
+            txt.add(F("host_type=CONTROLLER"));
             
             // Add leader status if this is the leader
             if (_isLeader) {
@@ -205,13 +207,16 @@ class LEDControllerAPIService : public mDNS::Service {
                 // Add type indicator
                 switch (_hostType) {
                     case HostType::Device:
-                        txt.add(F("type=host"));
+                        txt.add(F("type=CONTROLLER"));
+                        txt.add(F("host_type=CONTROLLER"));
                         break;
                     case HostType::Leader:
-                        txt.add(F("type=leader"));
+                        txt.add(F("type=ALIAS"));
+                        txt.add(F("host_type=ALIAS"));
                         break;
                     case HostType::Group:
-                        txt.add(F("type=group"));
+                        txt.add(F("type=ALIAS"));
+                        txt.add(F("host_type=ALIAS"));
                         break;
                 }
             }
@@ -285,6 +290,7 @@ private:
     // Discovery
     SimpleTimer _mdnsSearchTimer;        
     String searchName;
+    String wallPanelSearchName = "_wall-panel-api._tcp.local";
     String service = "_http._tcp.local";
     int _mdnsTimerInterval = 60000;
 

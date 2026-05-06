@@ -12,6 +12,20 @@
 // Global pointer for leader service updates from other components
 static LEDControllerAPIService* g_ledControllerAPIService = nullptr;
 
+namespace {
+String resolveHostType(mDNS::Resource::TXT& txt)
+{
+    String hostType = txt["host_type"];
+    if (hostType.length() == 0) {
+        hostType = txt["type"];
+    }
+    if (hostType.length() == 0) {
+        hostType = F("UNKNOWN");
+    }
+    return hostType;
+}
+}
+
 mdnsHandler::mdnsHandler() {
     // Initialize with default values
 }
@@ -124,7 +138,7 @@ bool mdnsHandler::onMessage(mDNS::Message& message)
 #endif
     
     // Check if this is an API service response or a hostname response
-    if(answerName == searchName) {
+    if(answerName == searchName || answerName == wallPanelSearchName) {
         // This is an API service response - process as before
         return processApiServiceResponse(message);
     } else if(answerName.endsWith("._http._tcp.local")) {
@@ -187,18 +201,11 @@ bool mdnsHandler::processApiServiceResponse(mDNS::Message& message)
             }
             
             // Get hostname type
-            String hostnameType = txt["type"];
-            if (hostnameType=="") hostnameType="undefined";
+            String hostnameType = resolveHostType(txt);
             debug_i("Hostname %s, type: %s", info.hostName.c_str(), hostnameType.c_str());
-            
-            // Only add to host table if this is a device hostname
-            if (hostnameType == "host") {
-                addHost(info.hostName, info.ipAddr.toString(), info.ttl, info.ID);
-            } else {
-                // For leader/group hostnames, just log them
-                debug_i("Detected %s hostname: %s (ID: %u)", 
-                     hostnameType.c_str(), info.hostName.c_str(), info.ID);
-            }
+
+            // Collect all host types (ALIAS/CONTROLLER/WALLPANEL) into host table.
+            addHost(info.hostName, info.ipAddr.toString(), info.ttl, info.ID);
         }
         return true;
     } else {
@@ -279,22 +286,17 @@ bool mdnsHandler::processHostnameResponse(mDNS::Message& message, const String& 
     if (txt_answer != nullptr) {
         mDNS::Resource::TXT txt(*txt_answer);
         controllerId = txt["id"].toInt();
-        controllerType = txt["type"];
+        controllerType = resolveHostType(txt);
         debug_i("Found controller ID: %u, type: %s", controllerId, controllerType.c_str());
-        
-        // If we have an ID and it's a host type, add the host
-        if (controllerId > 0 && controllerType == "host") {
+
+        // Collect all host types (ALIAS/CONTROLLER/WALLPANEL).
+        if (controllerId > 0) {
             addHost(hostname, ipAddress, ttl, controllerId);
             return true;
-        } else if (controllerId > 0) {
-            // Log but don't add non-host entries
-            debug_i("Ignoring non-host entry: %s (ID: %u, type: %s)",
-                   hostname.c_str(), controllerId, controllerType.c_str());
         }
     }
-    
-    // No valid TXT record or not a host type - don't fall back to hostname lookup
-    debug_i("No valid host TXT record found for %s - ignoring", hostname.c_str());
+
+    debug_i("No valid TXT record found for %s - ignoring", hostname.c_str());
     return false;
 }
 
@@ -306,8 +308,12 @@ void mdnsHandler::sendSearch()
 
     // Search for the service
     bool ok = mDNS::server.search(service);
+    bool wallPanelOk = mDNS::server.search(wallPanelSearchName);
 #ifdef DEBUG_MDNS
     debug_i("search('%s'): %s", service.c_str(), ok ? "OK" : "FAIL");
+    debug_i("search('%s'): %s", wallPanelSearchName.c_str(), wallPanelOk ? "OK" : "FAIL");
+#else
+    (void)wallPanelOk;
 #endif
 
     // Query for known controllers directly to improve discovery
