@@ -10,9 +10,9 @@ This is a fork of [Patrick Jahns' original firmware](https://github.com/patrickj
 
 ## build status:
 
-- experimental: [![Build Status](https://github.com/pljakobs/esp_rgbww_firmware/actions/workflows/build_firmware.yml/badge.svg?branch=experimental)](https://github.com/pljakobs/esp_rgbww_firmware/actions/workflows/build_firmware.yml)
-- devel:        [![Build Status](https://github.com/pljakobs/esp_rgbww_firmware/actions/workflows/build_firmware.yml/badge.svg?branch=develop)](https://github.com/pljakobs/esp_rgbww_firmware/actions/workflows/build_firmware.yml)
-- testing:      [![Build Status](https://github.com/pljakobs/esp_rgbww_firmware/actions/workflows/build_firmware.yml/badge.svg?branch=testing)](https://github.com/pljakobs/esp_rgbww_firmware/actions/workflows/build_firmware.yml)
+experimental: [![Build Status experimental](https://github.com/pljakobs/esp_rgbww_firmware/actions/workflows/build_firmware.yml/badge.svg?branch=experimental)](https://github.com/pljakobs/esp_rgbww_firmware/actions/workflows/build_firmware.yml)
+devel:        [![Build Status develop](https://github.com/pljakobs/esp_rgbww_firmware/actions/workflows/build_firmware.yml/badge.svg?branch=develop)](https://github.com/pljakobs/esp_rgbww_firmware/actions/workflows/build_firmware.yml)
+testing:      [![Build Status testing](https://github.com/pljakobs/esp_rgbww_firmware/actions/workflows/build_firmware.yml/badge.svg?branch=testing)](https://github.com/pljakobs/esp_rgbww_firmware/actions/workflows/build_firmware.yml)
 
 ## Table of Contents
 
