@@ -26,7 +26,7 @@
 #include <RGBWWLed/RGBWWLedColor.h>
 #include <Network/Http/Websocket/WebsocketResource.h>
 
-//#define FILE_MAX_SIZE 4096 //max filesize for storage api files.
+#define FILE_MAX_SIZE 4096 //max filesize for storage api files.
 #define MAX_LOG_LINE_SIZE 512
 
 #define MINIMUM_HEAP_ACCEPT 8000
@@ -115,8 +115,6 @@ private:
 
     void wsConnected(WebsocketConnection& socket);
     void wsDisconnected(WebsocketConnection& socket);
-    void wsMessageReceived(WebsocketConnection& socket, const String& message);
-    void wsSendJsonRpcError(WebsocketConnection& socket, const JsonVariantConst& requestId, const String& message);
 };
 
 #endif // APP_WEBSERVER_H_

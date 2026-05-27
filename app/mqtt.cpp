@@ -540,8 +540,7 @@ void AppMqttClient::publishHomeAssistantConfig() {
     }
     
     // Publish initial state
-    HSVCT currentHsv = app.rgbwwctrl.getCurrentColor();
-    publishHAState(app.rgbwwctrl.getCurrentOutput(), &currentHsv);
+    publishHAState(app.rgbwwctrl.getCurrentOutput(), &app.rgbwwctrl.getCurrentColor());
 }
 
 void AppMqttClient::publishChannelConfig(const String& channelName) {

@@ -103,12 +103,6 @@ static uint8_t getActiveTcpConnectionCount()
 	return getTcpPcbStats().active_total;
 }
 
-static bool isWsDataMethod(const String& method)
-{
-	return method == F("info") || method == F("getInfo") || method == F("getColor") || method == F("networks") ||
-		   method == F("getNetworks");
-}
-
 //#define NOCACHE
 
 
@@ -171,9 +165,6 @@ void ApplicationWebserver::init()
 	wsResource = new WebsocketResource();
 	wsResource->setConnectionHandler([this](WebsocketConnection& socket) { this->wsConnected(socket); });
 	wsResource->setDisconnectionHandler([this](WebsocketConnection& socket) { this->wsDisconnected(socket); });
-	wsResource->setMessageHandler([this](WebsocketConnection& socket, const String& message) {
-		this->wsMessageReceived(socket, message);
-	});
 	paths.set("/ws", wsResource);
 
 	_init = true;
@@ -193,112 +184,16 @@ void ApplicationWebserver::wsDisconnected(WebsocketConnection& socket)
 	debug_i("===>nr of websockets: %i", webSockets.size());
 }
 
-void ApplicationWebserver::wsSendJsonRpcError(WebsocketConnection& socket, const JsonVariantConst& requestId,
-										 const String& message)
-{
-	auto stream = std::make_unique<JsonObjectStream>();
-	JsonObject root = stream->getRoot();
-	root[F("jsonrpc")] = F("2.0");
-
-	if(requestId.isNull()) {
-		root[F("id")] = nullptr;
-	} else {
-		root[F("id")] = requestId;
-	}
-
-	JsonObject error = root.createNestedObject(F("error"));
-	error[F("message")] = message;
-	if(message == F("missing method") || message == F("method not implemented") || message == F("method not found")) {
-		error[F("code")] = -32601;
-	} else {
-		error[F("code")] = -32600;
-	}
-
-	socket.send(Json::serialize(root), WS_FRAME_TEXT);
-}
-
-void ApplicationWebserver::wsMessageReceived(WebsocketConnection& socket, const String& message)
-{
-	DynamicJsonDocument requestDoc(1024);
-	DeserializationError parseErr = deserializeJson(requestDoc, message);
-	if(parseErr) {
-		JsonVariantConst noRequestId;
-		wsSendJsonRpcError(socket, noRequestId, F("malformed json"));
-		return;
-	}
-
-	JsonVariantConst requestId = requestDoc[F("id")];
-	String method = requestDoc[F("method")] | String::nullstr;
-	if(method.length() == 0) {
-		wsSendJsonRpcError(socket, requestId, F("missing method"));
-		return;
-	}
-
-	StaticJsonDocument<16> emptyParamsDoc;
-	JsonObject params = requestDoc[F("params")].as<JsonObject>();
-	if(params.isNull()) {
-		params = emptyParamsDoc.to<JsonObject>();
-	}
-
-	if(!app.api) {
-		wsSendJsonRpcError(socket, requestId, F("api not initialized"));
-		return;
-	}
-
-	auto response = std::make_unique<JsonObjectStream>();
-	JsonObject root = response->getRoot();
-	root[F("jsonrpc")] = F("2.0");
-	if(requestId.isNull()) {
-		root[F("id")] = nullptr;
-	} else {
-		root[F("id")] = requestId;
-	}
-
-	if(isWsDataMethod(method)) {
-		JsonObject result = root.createNestedObject(F("result"));
-		if(!app.api->dispatch(method, params, result)) {
-			String errorMsg = result[F("error")] | String::nullstr;
-			if(errorMsg.length() == 0) {
-				errorMsg = F("method not found");
-			}
-			wsSendJsonRpcError(socket, requestId, errorMsg);
-			return;
-		}
-
-		socket.send(Json::serialize(root), WS_FRAME_TEXT);
-		return;
-	}
-
-	String errorMsg;
-	if(!app.api->dispatchCommand(method, params, errorMsg, false)) {
-		if(errorMsg.length() == 0) {
-			errorMsg = F("method not found");
-		}
-		wsSendJsonRpcError(socket, requestId, errorMsg);
-		return;
-	}
-
-	JsonObject result = root.createNestedObject(F("result"));
-	result[F("success")] = true;
-	socket.send(Json::serialize(root), WS_FRAME_TEXT);
-}
-
 /*
 *	send a websocket broadcast
 */
 void ICACHE_FLASH_ATTR ApplicationWebserver::wsSendBroadcast(const char* buffer, size_t length)
 {
-	if(buffer == nullptr || length == 0 || webSockets.isEmpty()) {
-		return;
-	}
-
-	for(unsigned i = 0; i < webSockets.size(); ++i) {
-		WebsocketConnection* socket = webSockets[i];
-		if(socket == nullptr) {
-			continue;
-		}
-		socket->send(buffer, length, WS_FRAME_TEXT);
-	}
+    if (!webSockets.isEmpty()) {
+        WebsocketConnection* socket = webSockets[0];
+        // Use firstSocket as needed
+        socket->broadcast(buffer, length, WS_FRAME_TEXT);
+    }
 }
 
 unsigned ApplicationWebserver::getHttpActiveConnections() const
@@ -527,8 +422,7 @@ void ApplicationWebserver::onFile(HttpRequest& request, HttpResponse& response)
 				response.headers[HTTP_HEADER_LOCATION] = F("http://") + WifiAccessPoint.getIP().toString() + "/";
 			} else {
 #ifndef NOCACHE
-				// cache helps performance but can cause issues when updating the webapp. 
-				
+				//response.setCache(604800, true); // It's important to use cache for better performance.
 				response.setHeader(F("Cache-Control"),F("public, max-age=604800, immutable"));
 #endif
 				response.code = HTTP_STATUS_OK;

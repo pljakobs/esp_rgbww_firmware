@@ -150,45 +150,6 @@ bool Api::dispatchCommand(const String& method, const JsonObject& params, String
 			return true;
 		}
 
-		if(cmd.equals(F("debug_log"))) {
-			JsonObject logParams;
-			if(params[F("param")].is<JsonObject>()) {
-				logParams = params[F("param")].as<JsonObject>();
-			} else {
-				// Allow legacy flat payloads where lvl/text are at top level.
-				logParams = params;
-			}
-
-			int level = 0;
-			if(!Json::getValue(logParams[F("lvl")], level)) {
-				errorMsg = F("missing lvl");
-				return false;
-			}
-
-			String text = String::nullstr;
-			if(!Json::getValue(logParams[F("text")], text) || text == String::nullstr) {
-				errorMsg = F("missing text");
-				return false;
-			}
-
-			switch(level) {
-			case 1:
-				debug_i("WEBAPP: api debug_log: %s", text.c_str());
-				break;
-			case 2:
-				debug_w("WEBAPP: api debug_log: %s", text.c_str());
-				break;
-			case 3:
-				debug_e("WEBAPP: api debug_log: %s", text.c_str());
-				break;
-			default:
-				errorMsg = F("invalid lvl (use 1, 2 or 3)");
-				return false;
-			}
-
-			return true;
-		}
-
 		if(cmd.equals(F("restart"))) {
 			bool clearOta = false;
 			Json::getValue(params[F("clearOTA")], clearOta);

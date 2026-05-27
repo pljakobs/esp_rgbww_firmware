@@ -130,7 +130,14 @@ extern "C" void __wrap_user_pre_init(void)
 // ─── Crash-dump capture via RTC user memory ──────────────────────────────────
 // RTC user area: slots 64-127, each 4 bytes → 256 bytes total.
 // Layout: magic(4) + reason(4) + exccause(4) + epc1(4) + epc2(4) + epc3(4)
-//         + excvaddr(4) + depc(4) + stackBase(4) + stackCount(4)
+//         + excvaddr(4) + d#ifndef SMING_RELEASE
+MultiOutputStream debugStream;
+
+size_t debugStreamOutputCallback(const char* buffer, unsigned int length)
+{
+	return debugStream.write((const uint8_t*)buffer, length);
+}
+#endifepc(4) + stackBase(4) + stackCount(4)
 //         + stackWords[53](212) = 256 bytes exactly
 // Output format is compatible with Sming decode-stacktrace.py.
 #define CRASH_RTC_SLOT    64
@@ -349,7 +356,14 @@ bool Application::checkHeap( size_t minHeap)
 	}
 	return true;
 }
+#ifndef SMING_RELEASE
+MultiOutputStream debugStream;
 
+size_t debugStreamOutputCallback(const char* buffer, unsigned int length)
+{
+	return debugStream.write((const uint8_t*)buffer, length);
+}
+#endif
 void Application::init()
 {
 	debug_i("ESP RGBWW Controller Version %s\r\n", fw_git_version);
