@@ -120,7 +120,11 @@ void EventServer::onClientComplete(TcpClient& client, bool succesfull)
 void EventServer::publishCurrentState(const ChannelOutput& raw, const HSVCT* pHsv)
 {
 	//debug_i("EventServer::publishCurrentState\n");
-	if((raw == _lastRaw) && (pHsv == _lastpHsv)) // No change
+	const bool hasHsv = (pHsv != nullptr);
+	const bool sameRaw = (raw == _lastRaw);
+	const bool sameMode = (hasHsv == _lastHasHsv);
+	const bool sameHsv = (!hasHsv || (*pHsv == _lastHsv));
+	if(sameRaw && sameMode && sameHsv) // No change
 		return;
 	unsigned long currentTime = millis();
 	if(currentTime - _lastEventTime < _minEventInterval) {
@@ -128,7 +132,10 @@ void EventServer::publishCurrentState(const ChannelOutput& raw, const HSVCT* pHs
 		return; // Silently discard this event
 	}
 	_lastRaw = raw;
-	_lastpHsv = pHsv;
+	_lastHasHsv = hasHsv;
+	if(hasHsv) {
+		_lastHsv = *pHsv;
+	}
 	_lastEventTime = currentTime;
 
 	JsonRpcMessage msg(F("color_event"));

@@ -187,15 +187,6 @@ extern "C" void custom_crash_callback(struct rst_info* ri, uint32_t stack, uint3
 
 Application app;
 
-#ifndef SMING_RELEASE
-MultiOutputStream debugStream;
-
-size_t debugStreamOutputCallback(const char* buffer, unsigned int length)
-{
-	return debugStream.write((const uint8_t*)buffer, length);
-}
-#endif
-
 void onReady()
 {
 	
