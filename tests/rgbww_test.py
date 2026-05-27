@@ -56,8 +56,8 @@ def rgbww_set(h, s, v):
 
 def set_hue_fade(hue, ramp, sat=100, val=100, queuePolicy="back"):
     ts = time.time()
-    print u"Setting hue {} with ramp {} s".format(hue, unicode(ramp))
-    post_data = jsonTempl.format(hue=hue, val=val, sat=sat, time=unicode(int(ramp * 1000)), queue=queuePolicy, cmd="fade")
+    print("Setting hue {} with ramp {} s".format(hue, ramp))
+    post_data = jsonTempl.format(hue=hue, val=val, sat=sat, time=str(int(ramp * 1000)), queue=queuePolicy, cmd="fade")
     r = requests.request(u"POST", u"http://{}/color".format(host), data=post_data)
     if (r.status_code != 200):
         raise Exception(r.content)
@@ -65,7 +65,7 @@ def set_hue_fade(hue, ramp, sat=100, val=100, queuePolicy="back"):
 
 def set_channel_cmd(cmd, channels="'h','s','v'"):
     ts = time.time()
-    print u"Setting " + cmd
+    print("Setting " + cmd)
     post_data = jsonTemplChannels.format(channels=channels)
     r = requests.request(u"POST", u"http://{}/{}".format(host, cmd), data=post_data)
     if (r.status_code != 200):
