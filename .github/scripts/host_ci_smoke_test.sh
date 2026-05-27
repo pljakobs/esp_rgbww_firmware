@@ -350,6 +350,25 @@ fi
 
 if [[ "$HOST_CI_SKIP_BUILD" != "1" ]]; then
   echo "===== Host build output =====" > "$BUILD_LOG"
+
+  # Patch lwIP options for Host CI builds:
+  # - Increase MEMP_NUM_TCP_PCB from 4 to 32 so test connections don't exhaust
+  #   the PCB pool (each test creates 1-2 connections that stay in TIME_WAIT).
+  # - Reduce TCP_MSL from 60000ms to 5000ms so TIME_WAIT expires in 10s instead
+  #   of 120s, further preventing PCB pool exhaustion during test runs.
+  LWIPOPTS="${SMING_HOME}/Components/lwip/lwipopts.h"
+  if [[ -f "$LWIPOPTS" ]]; then
+    echo "Patching $LWIPOPTS for Host CI: MEMP_NUM_TCP_PCB=32, TCP_MSL=5000"
+    sed -i 's/^#define MEMP_NUM_TCP_PCB\b.*$/#define MEMP_NUM_TCP_PCB 32/' "$LWIPOPTS"
+    if grep -q '#define TCP_MSL' "$LWIPOPTS"; then
+      sed -i 's/^#define TCP_MSL\b.*$/#define TCP_MSL 5000/' "$LWIPOPTS"
+    else
+      echo '#define TCP_MSL 5000' >> "$LWIPOPTS"
+    fi
+  else
+    echo "WARNING: lwipopts.h not found at $LWIPOPTS" >&2
+  fi
+
   make SMING_ARCH=Host configdb-rebuild 2>&1 | tee -a "$BUILD_LOG"
   make SMING_ARCH=Host flash DISABLE_WERROR=1 COM_SPEED=115200 2>&1 | tee -a "$BUILD_LOG"
 
