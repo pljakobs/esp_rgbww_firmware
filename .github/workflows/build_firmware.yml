@@ -248,7 +248,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: host-firmware-${{ steps.sanitize_branch.outputs.sanitized_branch }}
-          path: ${{ github.workspace }}
+          path: ${{ github.workspace }}/out
 
       - name: Prepare host-ci artifact directory
         if: always()
