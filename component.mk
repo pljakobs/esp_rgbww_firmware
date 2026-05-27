@@ -67,6 +67,15 @@ endif
 
 CUSTOM_TARGETS += check_versions
 
+# For Host/Linux builds: inject the project's lwipopts_host/ directory into the
+# lwIP cmake compile path so that lwipopts_host/lwipopts.h is found *before* the
+# Sming framework's Components/lwip/lwipopts.h.  The override file uses
+# #include_next to pull in the framework defaults then raises MEMP_NUM_TCP_PCB
+# and lowers TCP_MSL to prevent PCB pool exhaustion during host CI testing.
+ifeq ($(SMING_ARCH), Host)
+LWIP_CMAKE_OPTIONS += -DCMAKE_C_FLAGS=-I$(PROJECT_DIR)/lwipopts_host
+endif
+
 #### GIT VERSION Information #####
 ifdef GITHUB_RUN_NUMBER
   GIT_VERSION = V5.0-$(GITHUB_RUN_NUMBER)-$(shell git rev-parse --abbrev-ref HEAD)
