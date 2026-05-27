@@ -34,6 +34,8 @@ WS_PORT="${WS_PORT:-80}"
 WS_PATH="${WS_PATH:-/ws}"
 COLOR_URL="http://${APP_IP}/color"
 APP_UNDER_VALGRIND=0
+HOST_CI_BUILD_ONLY="${HOST_CI_BUILD_ONLY:-0}"
+HOST_CI_SKIP_BUILD="${HOST_CI_SKIP_BUILD:-0}"
 
 cleanup() {
     set +e
@@ -342,12 +344,19 @@ set +u
 source "$export_script"
 set -u
 
-echo "===== Host build output =====" > "$BUILD_LOG"
-make SMING_ARCH=Host configdb-rebuild 2>&1 | tee -a "$BUILD_LOG"
-make SMING_ARCH=Host flash DISABLE_WERROR=1 COM_SPEED=115200 2>&1 | tee -a "$BUILD_LOG"
+if [[ "$HOST_CI_SKIP_BUILD" != "1" ]]; then
+  echo "===== Host build output =====" > "$BUILD_LOG"
+  make SMING_ARCH=Host configdb-rebuild 2>&1 | tee -a "$BUILD_LOG"
+  make SMING_ARCH=Host flash DISABLE_WERROR=1 COM_SPEED=115200 2>&1 | tee -a "$BUILD_LOG"
 
-# Collect non-fatal compiler warnings from the Host build output for CI visibility.
-grep -E '\bwarning:' "$BUILD_LOG" > "$COMPILER_WARNINGS_LOG" || true
+  # Collect non-fatal compiler warnings from the Host build output for CI visibility.
+  grep -E '\bwarning:' "$BUILD_LOG" > "$COMPILER_WARNINGS_LOG" || true
+fi
+
+if [[ "$HOST_CI_BUILD_ONLY" == "1" ]]; then
+  echo "Host build complete. Exiting build-only mode."
+  exit 0
+fi
 
 FLASH_BIN="${FIRMWARE_DIR}/flash.bin"
 PARTITIONS_BIN="${FIRMWARE_DIR}/partitions.bin"
@@ -449,10 +458,7 @@ is_allowed_rgbww_warning_test() {
       return 0
     fi
 
-    if [[ "$allowed" == *"::"* ]] && [[ "$test_suffix" == "${allowed##*::}
-  while IFS= read -r allowed; do
-    [[ -z "$allowed" ]] && continue
-    if [[ "$test_name" == "$allowed" ]]; then
+    if [[ "$allowed" == *"::"* ]] && [[ "$test_suffix" == "${allowed##*::}" ]]; then
       return 0
     fi
   done <<< "$ALLOWED_RGBWW_WARNINGS"
@@ -460,6 +466,12 @@ is_allowed_rgbww_warning_test() {
 }
 
 extract_failed_tests() {
+  local output_file="$1"
+  grep -E '^FAILED[[:space:]]+' "$output_file" | sed -E 's/^FAILED[[:space:]]+([^[:space:]]+).*/\1/' || true
+}
+
+start_host_app "$APP_LOG_SMOKE" "$VALGRIND_LOG_SMOKE" "smoke"
+collect_runtime_valgrind_snapshot "$VALGRIND_RUNTIME_LOG_SMOKE_START" "smoke_startup_idle"
 set +e
 python3 -m pytest \
   -v \
@@ -478,13 +490,7 @@ python3 -m pytest \
   --md "$RGBWW_TEST_REPORT" \
   tests/rgbww_test.py 2>&1 | tee "$RGBWW_TEST_OUTPUT"
 RGBWW_PYTEST_EXIT=${PIPESTATUS[0]}
-set -eVALGRIND_LOG_RGBWW" "rgbww"
-collect_runtime_valgrind_snapshot "$VALGRIND_RUNTIME_LOG_RGBWW_START" "rgbww_startup_idle"
-python3 -m pytest \
-  -v \
-  --md "$RGBWW_TEST_REPORT" \
-  tests/rgbww_test.py 2>&1 | tee "$RGBWW_TEST_OUTPUT"
-RGBWW_PYTEST_EXIT=${PIPESTATUS[0]}
+set -e
 collect_runtime_valgrind_snapshot "$VALGRIND_RUNTIME_LOG_RGBWW" "rgbww_post_tests"
 stop_host_app
 

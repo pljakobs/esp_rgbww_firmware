@@ -38,10 +38,9 @@ jobs:
           echo 'soc_json=["esp8266","esp32","esp32c3"]' >> $GITHUB_OUTPUT
           echo 'soc_csv=esp8266,esp32,esp32c3' >> $GITHUB_OUTPUT
 
-  host-smoke:
-
+  host-build:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 25
     steps:
       - name: Determine branch
         id: get_branch
@@ -159,7 +158,7 @@ jobs:
             echo "run_attempt=${{ github.run_attempt }}"
           } > out/host-ci/ci-bootstrap.txt
 
-      - name: Run Host smoke test in Docker Container
+      - name: Run Host build in Docker Container
         env:
           MQTT_PASS: ${{ secrets.MQTT_PASS }}
           MQTT_USER: ${{ secrets.MQTT_USER }}
@@ -167,22 +166,11 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p out/host-ci
-          echo "Starting Host smoke test at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "Starting Host build at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-          # Emit periodic output so the job never looks stalled.
-          (
-            while true; do
-              sleep 20
-              echo "[host-smoke][heartbeat] $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-            done
-          ) &
+          (while true; do sleep 30; echo "[host-build][heartbeat] $(date -u +%Y-%m-%dT%H:%M:%SZ)"; done) &
           HEARTBEAT_PID=$!
-
-          cleanup_heartbeat() {
-            kill "$HEARTBEAT_PID" >/dev/null 2>&1 || true
-            wait "$HEARTBEAT_PID" >/dev/null 2>&1 || true
-          }
-          trap cleanup_heartbeat EXIT
+          trap 'kill "$HEARTBEAT_PID" 2>/dev/null || true' EXIT
 
           set +e
           docker run --rm --privileged -v ${{ github.workspace }}:/workspace -w /workspace \
@@ -190,6 +178,110 @@ jobs:
             -e GITHUB_ACTIONS=${{ env.GITHUB_ACTIONS }} \
             -e MQTT_PASS=${{ secrets.MQTT_PASS }} \
             -e MQTT_USER=${{ secrets.MQTT_USER }} \
+            -e HOST_CI_BUILD_ONLY=1 \
+            docker.io/pjakobs/sming:latest \
+            bash -lc "git config --global --add safe.directory /workspace && bash ./.github/scripts/host_ci_smoke_test.sh" \
+            2>&1 | tee out/host-ci/docker-build.log
+          docker_exit_code=${PIPESTATUS[0]}
+          set -e
+
+          echo "$docker_exit_code" > out/host-ci/docker-build.exitcode
+          echo "Host build finished with exit code: $docker_exit_code"
+          exit "$docker_exit_code"
+
+      - name: Upload Host firmware artifact
+        if: success()
+        uses: actions/upload-artifact@v7
+        with:
+          name: host-firmware-${{ steps.sanitize_branch.outputs.sanitized_branch }}
+          path: |
+            out/Host/debug/firmware/**
+            out/Host/debug/config.mk
+            out/host-ci/build-output.txt
+            out/host-ci/build-warnings.txt
+          if-no-files-found: error
+          retention-days: 1
+
+  host-test:
+    needs: [host-build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Determine branch
+        id: get_branch
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "branch=${{ github.event.inputs.branch }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" == "repository_dispatch" ]; then
+            echo "branch=${{ github.event.client_payload.branch }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" == "push" ]; then
+            echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" == "pull_request" ]; then
+            echo "branch=${{ github.head_ref }}" >> $GITHUB_OUTPUT
+          else
+            echo "branch=develop" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Sanitize branch name for artifact
+        id: sanitize_branch
+        run: |
+          BRANCH="${{ steps.get_branch.outputs.branch }}"
+          SANITIZED_BRANCH=${BRANCH//\//-}
+          SANITIZED_BRANCH=${SANITIZED_BRANCH//\\/-}
+          SANITIZED_BRANCH=${SANITIZED_BRANCH//\?/-}
+          SANITIZED_BRANCH=${SANITIZED_BRANCH//\:/-}
+          SANITIZED_BRANCH=${SANITIZED_BRANCH//\*/-}
+          SANITIZED_BRANCH=${SANITIZED_BRANCH//\"/-}
+          SANITIZED_BRANCH=${SANITIZED_BRANCH//\</-}
+          SANITIZED_BRANCH=${SANITIZED_BRANCH//\>/-}
+          SANITIZED_BRANCH=${SANITIZED_BRANCH//\|/-}
+          echo "sanitized_branch=$SANITIZED_BRANCH" >> $GITHUB_OUTPUT
+
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.get_branch.outputs.branch }}
+          fetch-depth: 0
+
+      - name: Pull Docker Image
+        run: docker pull docker.io/pjakobs/sming:latest
+
+      - name: Download Host firmware artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: host-firmware-${{ steps.sanitize_branch.outputs.sanitized_branch }}
+
+      - name: Prepare host-ci artifact directory
+        if: always()
+        run: |
+          mkdir -p out/host-ci
+          {
+            echo "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "branch=${{ steps.get_branch.outputs.branch }}"
+            echo "run_id=${{ github.run_id }}"
+            echo "run_attempt=${{ github.run_attempt }}"
+          } >> out/host-ci/ci-bootstrap.txt
+
+      - name: Run Host smoke test in Docker Container
+        env:
+          MQTT_PASS: ${{ secrets.MQTT_PASS }}
+          MQTT_USER: ${{ secrets.MQTT_USER }}
+          GITHUB_ACTIONS: 'true'
+        run: |
+          set -euo pipefail
+          echo "Starting Host smoke tests at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          (while true; do sleep 20; echo "[host-test][heartbeat] $(date -u +%Y-%m-%dT%H:%M:%SZ)"; done) &
+          HEARTBEAT_PID=$!
+          trap 'kill "$HEARTBEAT_PID" 2>/dev/null || true' EXIT
+
+          set +e
+          docker run --rm --privileged -v ${{ github.workspace }}:/workspace -w /workspace \
+            -e GITHUB_RUN_NUMBER=${{ github.run_number }} \
+            -e GITHUB_ACTIONS=${{ env.GITHUB_ACTIONS }} \
+            -e MQTT_PASS=${{ secrets.MQTT_PASS }} \
+            -e MQTT_USER=${{ secrets.MQTT_USER }} \
+            -e HOST_CI_SKIP_BUILD=1 \
             docker.io/pjakobs/sming:latest \
             bash -lc "git config --global --add safe.directory /workspace && bash ./.github/scripts/host_ci_smoke_test.sh" \
             2>&1 | tee out/host-ci/docker-smoke.log
@@ -201,14 +293,7 @@ jobs:
 
           if [ "$docker_exit_code" -ne 0 ]; then
             echo "::group::Host smoke failure context"
-            if [ -f out/host-ci/host-smoke.log ]; then
-              echo "--- tail out/host-ci/host-smoke.log ---"
-              tail -n 200 out/host-ci/host-smoke.log || true
-            fi
-            if [ -f out/host-ci/docker-smoke.log ]; then
-              echo "--- tail out/host-ci/docker-smoke.log ---"
-              tail -n 200 out/host-ci/docker-smoke.log || true
-            fi
+            tail -n 200 out/host-ci/docker-smoke.log || true
             echo "::endgroup::"
           fi
 
@@ -398,7 +483,7 @@ jobs:
           echo "- Valgrind runtime startup log (RGBWW): valgrind-runtime-rgbww-startup.log" >> "$GITHUB_STEP_SUMMARY"
 
   build:
-    needs: [generate-matrix, host-smoke]
+    needs: [generate-matrix, host-test]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: true
