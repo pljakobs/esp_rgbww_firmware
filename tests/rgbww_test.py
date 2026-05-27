@@ -4,10 +4,11 @@ Created on 02.04.2017
 @author: Robin
 '''
 import unittest
-import requests
 import json
 import time
 import os
+import urllib.error
+import urllib.request
 
 #host = "sz-led-wall"
 host = "wz-led-tv"
@@ -32,13 +33,32 @@ jsonTemplSolid = u'''{{
 }}
 '''
 
+
+class HttpResponse:
+    def __init__(self, status_code, content):
+        self.status_code = status_code
+        self.content = content
+        self.text = content.decode("utf-8", errors="replace")
+
+
+def request(method, url, data=None):
+    if isinstance(data, str):
+        data = data.encode("utf-8")
+
+    req = urllib.request.Request(url, data=data, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=10) as response:
+            return HttpResponse(response.getcode(), response.read())
+    except urllib.error.HTTPError as error:
+        return HttpResponse(error.code, error.read())
+
 def do_post(queryParams, post_data):
-    r = requests.request(u"POST", u"http://{}/{}".format(host, queryParams), data=post_data)
+    r = request(u"POST", u"http://{}/{}".format(host, queryParams), data=post_data)
     if (r.status_code != 200):
         raise Exception("Error")
 
 def get_color():
-    r = requests.request(u"GET", u"http://{}/color".format(host))
+    r = request(u"GET", u"http://{}/color".format(host))
     return json.loads(r.text)
 
 def get_hue():
@@ -58,7 +78,7 @@ def set_hue_fade(hue, ramp, sat=100, val=100, queuePolicy="back"):
     ts = time.time()
     print("Setting hue {} with ramp {} s".format(hue, ramp))
     post_data = jsonTempl.format(hue=hue, val=val, sat=sat, time=str(int(ramp * 1000)), queue=queuePolicy, cmd="fade")
-    r = requests.request(u"POST", u"http://{}/color".format(host), data=post_data)
+    r = request(u"POST", u"http://{}/color".format(host), data=post_data)
     if (r.status_code != 200):
         raise Exception(r.content)
     return ts
@@ -67,7 +87,7 @@ def set_channel_cmd(cmd, channels="'h','s','v'"):
     ts = time.time()
     print("Setting " + cmd)
     post_data = jsonTemplChannels.format(channels=channels)
-    r = requests.request(u"POST", u"http://{}/{}".format(host, cmd), data=post_data)
+    r = request(u"POST", u"http://{}/{}".format(host, cmd), data=post_data)
     if (r.status_code != 200):
         raise Exception("Error")
     return ts
