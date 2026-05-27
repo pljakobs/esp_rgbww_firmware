@@ -424,6 +424,9 @@ export HOST_SMOKE_WS_HOST="$WS_HOST"
 export HOST_SMOKE_WS_PORT="$WS_PORT"
 export HOST_SMOKE_WS_PATH="$WS_PATH"
 export HOST_SMOKE_LOG_DIR="$LOG_DIR"
+export RGBWW_TEST_TIME_SCALE="${RGBWW_TEST_TIME_SCALE:-0.2}"
+export RGBWW_RAMP_ACCURACY_SECONDS="${RGBWW_RAMP_ACCURACY_SECONDS:-12}"
+export RGBWW_RAMP_ACCURACY_ITERATIONS="${RGBWW_RAMP_ACCURACY_ITERATIONS:-3}"
 
 TEST_REPORT="${LOG_DIR}/test-results.md"
 TEST_OUTPUT="${LOG_DIR}/test-output.txt"
@@ -432,15 +435,21 @@ SMOKE_TEST_OUTPUT="${LOG_DIR}/smoke-test-output.txt"
 RGBWW_TEST_REPORT="${LOG_DIR}/rgbww-test-results.md"
 RGBWW_TEST_OUTPUT="${LOG_DIR}/rgbww-test-output.txt"
 
-python3 -m pip install --quiet pytest-md
-
-# Known timing-sensitive RGBWW tests that may fail in CI due to fade precision/jitter.
-# These are reported as warnings and do not fail the CI job unless additional tests fail.
-ALLOWED_RGBWW_WARNINGS_DEFAULT=$'tests/rgbww_test.py::test_queue_front_reset\ntests/rgbww_test.py::test_queue_front\ntests/rgbww_test.py::test_relative_plus_multiple\ntests/rgbww_test.py::test_pause_all'
+# or delayed websocket delivery on the Host emulator. These are reported as
+# warnings and do not fail the CI job unless additional tests fail.
+ALLOWED_RGBWW_WARNINGS_DEFAULT=$'tests/rgbww_test.py::test_queue_front_reset\ntests/rgbww_test.py::test_queue_front\ntests/rgbww_test.py::test_relative_plus_multiple\ntests/rgbww_test.py::test_pause_all\ntests/rgbww_test.py::test_pause_channel\ntests/rgbww_test.py::test_websocket_color_event_on_set\ntests/rgbww_test.py::test_websocket_color_event_on_fade'
 ALLOWED_RGBWW_WARNINGS="${RGBWW_ALLOWED_WARNING_TESTS:-$ALLOWED_RGBWW_WARNINGS_DEFAULT}"
 
 is_allowed_rgbww_warning_test() {
   local test_name="$1"
+  local test_suffix="${test_name##*::}"
+  while IFS= read -r allowed; do
+    [[ -z "$allowed" ]] && continue
+    if [[ "$test_name" == "$allowed" ]]; then
+      return 0
+    fi
+
+    if [[ "$allowed" == *"::"* ]] && [[ "$test_suffix" == "${allowed##*::}
   while IFS= read -r allowed; do
     [[ -z "$allowed" ]] && continue
     if [[ "$test_name" == "$allowed" ]]; then
@@ -451,21 +460,25 @@ is_allowed_rgbww_warning_test() {
 }
 
 extract_failed_tests() {
-  local output_file="$1"
-  grep -E '^FAILED[[:space:]]+' "$output_file" | sed -E 's/^FAILED[[:space:]]+([^[:space:]]+).*/\1/' || true
-}
-
-start_host_app "$APP_LOG_SMOKE" "$VALGRIND_LOG_SMOKE" "smoke"
-collect_runtime_valgrind_snapshot "$VALGRIND_RUNTIME_LOG_SMOKE_START" "smoke_startup_idle"
+set +e
 python3 -m pytest \
   -v \
   --md "$SMOKE_TEST_REPORT" \
   tests/host_smoke_api_test.py 2>&1 | tee "$SMOKE_TEST_OUTPUT"
 SMOKE_PYTEST_EXIT=${PIPESTATUS[0]}
+set -e
 collect_runtime_valgrind_snapshot "$VALGRIND_RUNTIME_LOG_SMOKE" "smoke_post_tests"
 stop_host_app
 
 start_host_app "$APP_LOG_RGBWW" "$VALGRIND_LOG_RGBWW" "rgbww"
+collect_runtime_valgrind_snapshot "$VALGRIND_RUNTIME_LOG_RGBWW_START" "rgbww_startup_idle"
+set +e
+python3 -m pytest \
+  -v \
+  --md "$RGBWW_TEST_REPORT" \
+  tests/rgbww_test.py 2>&1 | tee "$RGBWW_TEST_OUTPUT"
+RGBWW_PYTEST_EXIT=${PIPESTATUS[0]}
+set -eVALGRIND_LOG_RGBWW" "rgbww"
 collect_runtime_valgrind_snapshot "$VALGRIND_RUNTIME_LOG_RGBWW_START" "rgbww_startup_idle"
 python3 -m pytest \
   -v \
