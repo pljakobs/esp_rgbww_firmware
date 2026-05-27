@@ -1,4 +1,4 @@
-[![Build Status](https://github.com/pljakobs/esp_rgbww_firmware/actions/workflows/build_firmware.yml/badge.svg?branch=develop)](https://github.com/pljakobs/esp_rgbww_firmware/actions/workflows/build_firmware.yml)
+
 
 # ESP RGBWW Firmware
 
@@ -7,6 +7,12 @@ Open-source firmware for ESP8266/ESP32-based RGBWW(CW) LED controllers, supporti
 This is a fork of [Patrick Jahns' original firmware](https://github.com/patrickjahns/esp_rgbww_firmware) and [VBS's extension](https://github.com/verybadsoldier/esp_rgbww_firmware), significantly extended with multi-controller synchronisation, a rich JSON HTTP API, MQTT with Home Assistant auto-discovery, OTA updates, mDNS, rsyslog support, and a modern Vue/Quasar web application.
 
 ---
+
+## build status:
+
+- experimental: [![Build Status](https://github.com/pljakobs/esp_rgbww_firmware/actions/workflows/build_firmware.yml/badge.svg?branch=experimental)](https://github.com/pljakobs/esp_rgbww_firmware/actions/workflows/build_firmware.yml)
+- devel: [![Build Status](https://github.com/pljakobs/esp_rgbww_firmware/actions/workflows/build_firmware.yml/badge.svg?branch=develop)](https://github.com/pljakobs/esp_rgbww_firmware/actions/workflows/build_firmware.yml)
+- testing: [![Build Status](https://github.com/pljakobs/esp_rgbww_firmware/actions/workflows/build_firmware.yml/badge.svg?branch=testing)](https://github.com/pljakobs/esp_rgbww_firmware/actions/workflows/build_firmware.yml)
 
 ## Table of Contents
 
