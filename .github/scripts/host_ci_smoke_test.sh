@@ -94,12 +94,12 @@ ensure_ip_tool() {
 }
 
 ensure_pytest() {
-  if python3 -c 'import pytest, requests' >/dev/null 2>&1; then
+  if python3 -c 'import pytest, pytest_md, requests' >/dev/null 2>&1; then
         return 0
     fi
 
-  echo "pytest/requests not found; installing them into the container environment" >&2
-  python3 -m pip install --quiet pytest requests
+  echo "pytest/pytest-md/requests not found; installing them into the container environment" >&2
+  python3 -m pip install --quiet pytest pytest-md requests
 }
 
 ensure_valgrind() {
@@ -330,19 +330,21 @@ if [[ ! -c /dev/net/tun ]]; then
     exit 1
 fi
 
-if [[ -f /opt/Sming/Tools/export.sh ]]; then
-    export_script="/opt/Sming/Tools/export.sh"
-elif [[ -f /opt/sming/Tools/export.sh ]]; then
-    export_script="/opt/sming/Tools/export.sh"
-else
-    echo "Unable to locate Sming export.sh" >&2
-    exit 1
-fi
+if [[ "$HOST_CI_SKIP_BUILD" != "1" ]]; then
+  if [[ -f /opt/Sming/Tools/export.sh ]]; then
+      export_script="/opt/Sming/Tools/export.sh"
+  elif [[ -f /opt/sming/Tools/export.sh ]]; then
+      export_script="/opt/sming/Tools/export.sh"
+  else
+      echo "Unable to locate Sming export.sh" >&2
+      exit 1
+  fi
 
-# Sming's export.sh references SMING_HOME directly and is not nounset-safe.
-set +u
-source "$export_script"
-set -u
+  # Sming's export.sh references SMING_HOME directly and is not nounset-safe.
+  set +u
+  source "$export_script"
+  set -u
+fi
 
 if [[ "$HOST_CI_SKIP_BUILD" != "1" ]]; then
   echo "===== Host build output =====" > "$BUILD_LOG"

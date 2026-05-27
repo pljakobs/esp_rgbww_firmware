@@ -195,7 +195,8 @@ jobs:
         with:
           name: host-firmware-${{ steps.sanitize_branch.outputs.sanitized_branch }}
           path: |
-            out/Host/debug/firmware/**
+            out/Host/debug/firmware/app
+            out/Host/debug/firmware/partitions.bin
             out/Host/debug/config.mk
             out/host-ci/build-output.txt
             out/host-ci/build-warnings.txt
@@ -243,18 +244,17 @@ jobs:
           ref: ${{ steps.get_branch.outputs.branch }}
           fetch-depth: 0
 
-      - name: Pull Docker Image
-        run: docker pull docker.io/pjakobs/sming:latest
-
       - name: Download Host firmware artifact
         uses: actions/download-artifact@v4
         with:
           name: host-firmware-${{ steps.sanitize_branch.outputs.sanitized_branch }}
+          path: ${{ github.workspace }}
 
       - name: Prepare host-ci artifact directory
         if: always()
         run: |
           mkdir -p out/host-ci
+          chmod +x out/Host/debug/firmware/app || true
           {
             echo "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
             echo "branch=${{ steps.get_branch.outputs.branch }}"
@@ -282,8 +282,8 @@ jobs:
             -e MQTT_PASS=${{ secrets.MQTT_PASS }} \
             -e MQTT_USER=${{ secrets.MQTT_USER }} \
             -e HOST_CI_SKIP_BUILD=1 \
-            docker.io/pjakobs/sming:latest \
-            bash -lc "git config --global --add safe.directory /workspace && bash ./.github/scripts/host_ci_smoke_test.sh" \
+            ubuntu:22.04 \
+            bash -c "apt-get update -q && DEBIAN_FRONTEND=noninteractive apt-get install -y python3 python3-pip iproute2 && bash ./.github/scripts/host_ci_smoke_test.sh" \
             2>&1 | tee out/host-ci/docker-smoke.log
           docker_exit_code=${PIPESTATUS[0]}
           set -e
