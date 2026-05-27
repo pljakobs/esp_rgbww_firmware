@@ -94,12 +94,12 @@ ensure_ip_tool() {
 }
 
 ensure_pytest() {
-  if python3 -c 'import pytest, pytest_md, requests' >/dev/null 2>&1; then
-        return 0
-    fi
-
-  echo "pytest/pytest-md/requests not found; installing them into the container environment" >&2
-  python3 -m pip install --quiet pytest pytest-md requests
+  if python3 -c 'import pytest, requests' >/dev/null 2>&1; then
+    return 0
+  fi
+  echo "pytest/requests not found; installing them into the container environment" >&2
+  python3 -m pip install --quiet --timeout 60 --retries 5 pytest requests
+  # pytest-md is installed separately (provides --md flag); pre-installed in CI container
 }
 
 ensure_valgrind() {

@@ -53,6 +53,16 @@ def smoke_config() -> SmokeConfig:
     )
 
 
+@pytest.fixture(autouse=True)
+def require_app_alive(smoke_config: SmokeConfig) -> None:
+    """Skip the test if the firmware app is not reachable (e.g. crashed in a previous test)."""
+    try:
+        sock = socket.create_connection((smoke_config.app_ip, 80), timeout=1.0)
+        sock.close()
+    except OSError:
+        pytest.skip(f"App at {smoke_config.app_ip}:80 is unreachable — may have crashed")
+
+
 def append_jsonl(path: Path, record: dict[str, Any]) -> None:
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(record, separators=(",", ":")) + "\n")
