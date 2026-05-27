@@ -318,16 +318,18 @@ rm -f "$VALGRIND_STATUS_FILE"
     echo "app_ip=$APP_IP"
 } > "$LOG_DIR/run-info.txt"
 
-if ! ensure_ip_tool; then
-    echo "cannot configure TAP interface without ip command" >&2
-    exit 1
-fi
+if [[ "$HOST_CI_BUILD_ONLY" != "1" ]]; then
+  if ! ensure_ip_tool; then
+      echo "cannot configure TAP interface without ip command" >&2
+      exit 1
+  fi
 
-ensure_valgrind
+  ensure_valgrind
 
-if [[ ! -c /dev/net/tun ]]; then
-    echo "/dev/net/tun is not available inside the Sming container" >&2
-    exit 1
+  if [[ ! -c /dev/net/tun ]]; then
+      echo "/dev/net/tun is not available inside the Sming container" >&2
+      exit 1
+  fi
 fi
 
 if [[ "$HOST_CI_SKIP_BUILD" != "1" ]]; then
