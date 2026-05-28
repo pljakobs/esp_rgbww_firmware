@@ -34,6 +34,8 @@ WS_PORT="${WS_PORT:-80}"
 WS_PATH="${WS_PATH:-/ws}"
 COLOR_URL="http://${APP_IP}/color"
 APP_UNDER_VALGRIND=0
+HOST_CI_SKIP_BUILD="${HOST_CI_SKIP_BUILD:-0}"
+HOST_CI_BUILD_ONLY="${HOST_CI_BUILD_ONLY:-0}"
 
 cleanup() {
   set +e
@@ -316,38 +318,53 @@ rm -f "$VALGRIND_STATUS_FILE"
     echo "app_ip=$APP_IP"
 } > "$LOG_DIR/run-info.txt"
 
-if ! ensure_ip_tool; then
-  echo "cannot configure TAP interface without ip command" >&2
-  exit 1
+if [[ "$HOST_CI_BUILD_ONLY" != "1" ]]; then
+  if ! ensure_ip_tool; then
+    echo "cannot configure TAP interface without ip command" >&2
+    exit 1
+  fi
+
+  ensure_valgrind
+
+  if [[ ! -c /dev/net/tun ]]; then
+    echo "/dev/net/tun is not available inside the Sming container" >&2
+    exit 1
+  fi
 fi
 
-ensure_valgrind
+if [[ "$HOST_CI_SKIP_BUILD" != "1" ]]; then
+  if [[ -f /opt/Sming/Tools/export.sh ]]; then
+    export_script="/opt/Sming/Tools/export.sh"
+  elif [[ -f /opt/sming/Tools/export.sh ]]; then
+    export_script="/opt/sming/Tools/export.sh"
+  else
+    echo "Unable to locate Sming export.sh" >&2
+    exit 1
+  fi
 
-if [[ ! -c /dev/net/tun ]]; then
-  echo "/dev/net/tun is not available inside the Sming container" >&2
-  exit 1
-fi
+  # Sming's export.sh references SMING_HOME directly and is not nounset-safe.
+  set +u
+  source "$export_script"
+  set -u
 
-if [[ -f /opt/Sming/Tools/export.sh ]]; then
-  export_script="/opt/Sming/Tools/export.sh"
-elif [[ -f /opt/sming/Tools/export.sh ]]; then
-  export_script="/opt/sming/Tools/export.sh"
+  echo "===== Host build output =====" > "$BUILD_LOG"
+  make SMING_ARCH=Host configdb-rebuild 2>&1 | tee -a "$BUILD_LOG"
+  make SMING_ARCH=Host flash DISABLE_WERROR=1 COM_SPEED=115200 2>&1 | tee -a "$BUILD_LOG"
+
+  # Collect non-fatal compiler warnings from the Host build output for CI visibility.
+  grep -E '\bwarning:' "$BUILD_LOG" > "$COMPILER_WARNINGS_LOG" || true
 else
-  echo "Unable to locate Sming export.sh" >&2
-  exit 1
+  {
+    echo "===== Host build output ====="
+    echo "Build skipped because HOST_CI_SKIP_BUILD=1"
+  } > "$BUILD_LOG"
+  : > "$COMPILER_WARNINGS_LOG"
 fi
 
-# Sming's export.sh references SMING_HOME directly and is not nounset-safe.
-set +u
-source "$export_script"
-set -u
-
-echo "===== Host build output =====" > "$BUILD_LOG"
-make SMING_ARCH=Host configdb-rebuild 2>&1 | tee -a "$BUILD_LOG"
-make SMING_ARCH=Host flash DISABLE_WERROR=1 COM_SPEED=115200 2>&1 | tee -a "$BUILD_LOG"
-
-# Collect non-fatal compiler warnings from the Host build output for CI visibility.
-grep -E '\bwarning:' "$BUILD_LOG" > "$COMPILER_WARNINGS_LOG" || true
+if [[ "$HOST_CI_BUILD_ONLY" == "1" ]]; then
+  echo "Host build complete. Exiting build-only mode."
+  exit 0
+fi
 
 FLASH_BIN="${FIRMWARE_DIR}/flash.bin"
 PARTITIONS_BIN="${FIRMWARE_DIR}/partitions.bin"
