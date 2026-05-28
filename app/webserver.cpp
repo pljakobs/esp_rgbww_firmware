@@ -372,7 +372,7 @@ void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, c
 }
 
 bool ApplicationWebserver::parseJsonBody(HttpRequest& request, HttpResponse& response, JsonDocument& doc,
-											 const __FlashStringHelper* noBodyMessage)
+											 const String& noBodyMessage)
 {
 	String body = request.getBody();
 	if(body == NULL) {
