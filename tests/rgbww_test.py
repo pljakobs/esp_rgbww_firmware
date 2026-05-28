@@ -11,7 +11,7 @@ import urllib.error
 import urllib.request
 
 #host = "sz-led-wall"
-host = "wz-led-tv"
+host = os.environ.get("RGBWW_TEST_HOST", "wz-led-tv")
 
 ASSERT_TOLERANCE = float(os.environ.get("RGBWW_TEST_TOLERANCE", "5.0"))
 
