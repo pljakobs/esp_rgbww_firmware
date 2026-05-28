@@ -351,9 +351,35 @@ fi
 if [[ "$HOST_CI_SKIP_BUILD" != "1" ]]; then
   echo "===== Host build output =====" > "$BUILD_LOG"
 
-  # lwIP PCB pool and TIME_WAIT overrides are now handled via the application's
-  # own lwipopts_host/lwipopts.h (injected into the lwIP cmake build through
-  # LWIP_CMAKE_OPTIONS in component.mk).  No framework file patching is needed.
+  # Patch Sming lwIP defaults with Host-only guards.
+  #
+  # Rationale:
+  # - Host smoke tests open many short-lived TCP connections.
+  # - With MEMP_NUM_TCP_PCB=4 and TCP_MSL=60000, the TIME_WAIT pool exhausts.
+  # - Apply ARCH_HOST-specific values in framework defaults during CI build.
+  #
+  # This keeps behavior unchanged for non-Host architectures.
+  LWIPOPTS="${SMING_HOME}/Components/lwip/lwipopts.h"
+  if [[ -f "$LWIPOPTS" ]]; then
+    perl -0777 -i -pe 's@#define MEMP_NUM_TCP_PCB\s+4\s*@#ifdef ARCH_HOST\n#define MEMP_NUM_TCP_PCB                32\n#else\n#define MEMP_NUM_TCP_PCB                4\n#endif\n@s' "$LWIPOPTS"
+
+    if ! grep -q "ARCH_HOST.*TCP_MSL\|TCP_MSL.*ARCH_HOST" "$LWIPOPTS"; then
+      cat >> "$LWIPOPTS" <<'EOF'
+
+/* Host CI override: reduce TIME_WAIT pressure for short-lived test connections */
+#ifdef ARCH_HOST
+#ifndef TCP_MSL
+#define TCP_MSL 5000
+#endif
+#endif
+EOF
+    fi
+
+    echo "Host lwIP overrides in ${LWIPOPTS}:"
+    grep -n "MEMP_NUM_TCP_PCB\|TCP_MSL\|ARCH_HOST" "$LWIPOPTS" | head -20 || true
+  else
+    echo "WARNING: lwipopts.h not found at $LWIPOPTS" >&2
+  fi
 
   make SMING_ARCH=Host configdb-rebuild 2>&1 | tee -a "$BUILD_LOG"
   make SMING_ARCH=Host flash DISABLE_WERROR=1 COM_SPEED=115200 2>&1 | tee -a "$BUILD_LOG"
