@@ -495,13 +495,23 @@ ALLOWED_RGBWW_WARNINGS="${RGBWW_ALLOWED_WARNING_TESTS:-$ALLOWED_RGBWW_WARNINGS_D
 is_allowed_rgbww_warning_test() {
   local test_name="$1"
   local test_suffix="${test_name##*::}"
+  local test_suffix_norm
+  test_suffix_norm="$(printf '%s' "$test_suffix" | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:]')"
+
   while IFS= read -r allowed; do
+    local allowed_suffix allowed_suffix_norm
     [[ -z "$allowed" ]] && continue
     if [[ "$test_name" == "$allowed" ]]; then
       return 0
     fi
 
-    if [[ "$allowed" == *"::"* ]] && [[ "$test_suffix" == "${allowed##*::}" ]]; then
+    allowed_suffix="${allowed##*::}"
+    if [[ "$allowed" == *"::"* ]] && [[ "$test_suffix" == "$allowed_suffix" ]]; then
+      return 0
+    fi
+
+    allowed_suffix_norm="$(printf '%s' "$allowed_suffix" | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:]')"
+    if [[ -n "$allowed_suffix_norm" ]] && [[ "$test_suffix_norm" == "$allowed_suffix_norm" ]]; then
       return 0
     fi
   done <<< "$ALLOWED_RGBWW_WARNINGS"
