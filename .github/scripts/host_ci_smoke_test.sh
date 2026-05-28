@@ -170,10 +170,6 @@ start_host_app() {
   local force_plain="${5:-0}"
   local use_valgrind=0
 
-  if [[ "$mode" == "smoke" ]]; then
-    rm -f "$HTTP_TRACE_LOG" "$MALFORMED_JSON_TRACE"
-  fi
-
   if [[ "$force_plain" != "1" ]] && [[ "$ENABLE_VALGRIND" == "1" ]] && command -v valgrind >/dev/null 2>&1; then
     use_valgrind=1
   fi
@@ -505,29 +501,88 @@ extract_failed_tests() {
   grep -E '^FAILED[[:space:]]+' "$output_file" | sed -E 's/^FAILED[[:space:]]+([^[:space:]]+).*/\1/' || true
 }
 
-start_host_app "$APP_LOG_SMOKE" "$VALGRIND_LOG_SMOKE" "smoke"
-collect_runtime_valgrind_snapshot "$VALGRIND_RUNTIME_LOG_SMOKE_START" "smoke_startup_idle"
-set +e
-python3 -m pytest \
-  -v \
-  --md "$SMOKE_TEST_REPORT" \
-  tests/host_smoke_api_test.py 2>&1 | tee "$SMOKE_TEST_OUTPUT"
-SMOKE_PYTEST_EXIT=${PIPESTATUS[0]}
-set -e
-collect_runtime_valgrind_snapshot "$VALGRIND_RUNTIME_LOG_SMOKE" "smoke_post_tests"
-stop_host_app
+collect_test_nodeids() {
+  local test_file="$1"
+  python3 -m pytest -q --collect-only "$test_file" 2>/dev/null | awk '/::/ {print $1}'
+}
 
-start_host_app "$APP_LOG_RGBWW" "$VALGRIND_LOG_RGBWW" "rgbww"
-collect_runtime_valgrind_snapshot "$VALGRIND_RUNTIME_LOG_RGBWW_START" "rgbww_startup_idle"
+create_markdown_report_from_output() {
+  local output_file="$1"
+  local report_file="$2"
+  local suite_title="$3"
+  local passed failed skipped total
+
+  passed=$(grep -cE '::[^[:space:]]+[[:space:]]+PASSED\b' "$output_file" || true)
+  failed=$(grep -cE '::[^[:space:]]+[[:space:]]+FAILED\b' "$output_file" || true)
+  skipped=$(grep -cE '::[^[:space:]]+[[:space:]]+SKIPPED\b' "$output_file" || true)
+  total=$((passed + failed + skipped))
+
+  {
+    echo "# ${suite_title} Report"
+    echo
+    echo "## Summary"
+    echo
+    echo "${total} tests ran"
+    echo
+    echo "- ${failed} failed"
+    echo "- ${passed} passed"
+    echo "- ${skipped} skipped"
+    echo
+    echo "## Details"
+    echo
+    grep -E '::[^[:space:]]+[[:space:]]+(PASSED|FAILED|SKIPPED)\b' "$output_file" || true
+  } > "$report_file"
+}
+
+run_suite_with_restart_per_test() {
+  local mode="$1"
+  local test_file="$2"
+  local app_log_path="$3"
+  local vg_log_path="$4"
+  local suite_output="$5"
+  local fail_count=0
+
+  : > "$suite_output"
+  while IFS= read -r nodeid; do
+    [[ -z "$nodeid" ]] && continue
+
+    echo "===== RUN ${nodeid} =====" | tee -a "$suite_output"
+    start_host_app "$app_log_path" "$vg_log_path" "$mode"
+
+    set +e
+    python3 -m pytest -v "$nodeid" 2>&1 | tee -a "$suite_output"
+    local rc=${PIPESTATUS[0]}
+    set -e
+
+    if [[ "$mode" == "smoke" ]]; then
+      collect_runtime_valgrind_snapshot "$VALGRIND_RUNTIME_LOG_SMOKE" "smoke_${nodeid//[^A-Za-z0-9_]/_}"
+    else
+      collect_runtime_valgrind_snapshot "$VALGRIND_RUNTIME_LOG_RGBWW" "rgbww_${nodeid//[^A-Za-z0-9_]/_}"
+    fi
+
+    stop_host_app
+
+    if [[ "$rc" -ne 0 ]]; then
+      fail_count=$((fail_count + 1))
+    fi
+  done < <(collect_test_nodeids "$test_file")
+
+  return "$fail_count"
+}
+
+rm -f "$HTTP_TRACE_LOG" "$MALFORMED_JSON_TRACE"
+
 set +e
-python3 -m pytest \
-  -v \
-  --md "$RGBWW_TEST_REPORT" \
-  tests/rgbww_test.py 2>&1 | tee "$RGBWW_TEST_OUTPUT"
-RGBWW_PYTEST_EXIT=${PIPESTATUS[0]}
+run_suite_with_restart_per_test "smoke" "tests/host_smoke_api_test.py" "$APP_LOG_SMOKE" "$VALGRIND_LOG_SMOKE" "$SMOKE_TEST_OUTPUT"
+SMOKE_PYTEST_EXIT=$?
 set -e
-collect_runtime_valgrind_snapshot "$VALGRIND_RUNTIME_LOG_RGBWW" "rgbww_post_tests"
-stop_host_app
+create_markdown_report_from_output "$SMOKE_TEST_OUTPUT" "$SMOKE_TEST_REPORT" "Smoke"
+
+set +e
+run_suite_with_restart_per_test "rgbww" "tests/rgbww_test.py" "$APP_LOG_RGBWW" "$VALGRIND_LOG_RGBWW" "$RGBWW_TEST_OUTPUT"
+RGBWW_PYTEST_EXIT=$?
+set -e
+create_markdown_report_from_output "$RGBWW_TEST_OUTPUT" "$RGBWW_TEST_REPORT" "RGBWW"
 
 HOST_CI_SHOULD_FAIL=0
 
