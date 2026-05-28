@@ -267,6 +267,62 @@ def fail_with_trace(message: str, trace: dict[str, Any], detail_path: Path | Non
     )
 
 
+def decode_json_response(response: dict[str, Any], trace: dict[str, Any], *, failure_message: str) -> Any:
+    if response["error"]:
+        fail_with_trace(failure_message, trace)
+    try:
+        return json.loads(response["body"]) if response["body"] else {}
+    except json.JSONDecodeError:
+        fail_with_trace(f"{failure_message}: invalid JSON body", trace)
+
+
+def recv_ws_text(sock: socket.socket, timeout: float = 3.0) -> str:
+    while True:
+        opcode, payload = ws_recv_frame(sock, timeout=timeout)
+        if opcode is None:
+            pytest.fail("WebSocket connection closed before a text frame was received")
+        if opcode == 1:
+            return (payload or b"").decode("utf-8", errors="replace")
+        if opcode == 9:
+            pong_payload = payload or b""
+            sock.sendall(bytes([0x8A, len(pong_payload)]) + pong_payload)
+            continue
+        if opcode == 8:
+            pytest.fail("Unexpected WebSocket close frame received")
+        pytest.fail(f"Unsupported WebSocket opcode received: {opcode}")
+
+
+def jsonrpc_error_text(payload: dict[str, Any]) -> str:
+    error_value = payload.get("error", "")
+    if isinstance(error_value, dict):
+        return f"{error_value.get('message', '')} {error_value.get('code', '')}".strip()
+    return str(error_value)
+
+
+def assert_method_error_variant(message: str, trace: dict[str, Any]) -> None:
+    normalized = message.lower()
+    if (
+        "missing method" not in normalized
+        and "method not implemented" not in normalized
+        and "method not found" not in normalized
+        and "-32601" not in normalized
+    ):
+        fail_with_trace("Unexpected JSON-RPC method error", trace)
+
+
+def ws_request(sock: socket.socket, payload: dict[str, Any], timeout: float = 3.0) -> tuple[dict[str, Any], dict[str, Any]]:
+    ws_send_text(sock, json.dumps(payload, separators=(",", ":")))
+    response_text = recv_ws_text(sock, timeout=timeout)
+    trace = {
+        "request": payload,
+        "response": {"text": response_text},
+    }
+    try:
+        return json.loads(response_text), trace
+    except json.JSONDecodeError:
+        fail_with_trace("WebSocket response was not valid JSON", trace)
+
+
 def test_websocket_handshake(smoke_config: SmokeConfig) -> None:
     sock, trace = websocket_handshake(smoke_config, b"host-ci-websocket-key")
     try:
@@ -280,6 +336,23 @@ def test_websocket_handshake(smoke_config: SmokeConfig) -> None:
             fail_with_trace("Invalid Sec-WebSocket-Accept header", trace)
     finally:
         sock.close()
+
+
+def test_ping_endpoint(smoke_config: SmokeConfig) -> None:
+    url = f"{smoke_config.base_url}/ping"
+    response = http_request("GET", url)
+    trace = record_http_probe(
+        smoke_config,
+        probe="ping",
+        method="GET",
+        url=url,
+        body=None,
+        headers={"Accept": "application/json"},
+        response=response,
+    )
+    payload = decode_json_response(response, trace, failure_message="/ping probe failed")
+    if response["status"] != 200 or payload.get("ping") != "pong":
+        fail_with_trace("Unexpected /ping response", trace)
 
 
 def test_info_endpoint(smoke_config: SmokeConfig) -> None:
@@ -366,3 +439,34 @@ def test_http_malformed_json_rejected(smoke_config: SmokeConfig, path: str) -> N
         fail_with_trace("Malformed JSON HTTP probe failed unexpectedly", trace)
     if response["status"] != 400 or "Invalid JSON" not in response["body"]:
         fail_with_trace("Malformed JSON request should be rejected with Invalid JSON", trace)
+
+
+def test_websocket_missing_method(smoke_config: SmokeConfig) -> None:
+    sock, handshake_trace = websocket_handshake(smoke_config, os.urandom(16))
+    try:
+        if "101" not in handshake_trace["response"]["status_line"]:
+            fail_with_trace("WebSocket handshake failed before missing-method probe", handshake_trace)
+        payload, trace = ws_request(sock, {"jsonrpc": "2.0", "id": 7001, "params": {}}, timeout=3.0)
+        if payload.get("id") != 7001:
+            fail_with_trace("Unexpected JSON-RPC id in missing-method response", trace)
+        assert_method_error_variant(jsonrpc_error_text(payload), trace)
+    finally:
+        sock.close()
+
+
+def test_websocket_unknown_method(smoke_config: SmokeConfig) -> None:
+    sock, handshake_trace = websocket_handshake(smoke_config, os.urandom(16))
+    try:
+        if "101" not in handshake_trace["response"]["status_line"]:
+            fail_with_trace("WebSocket handshake failed before unknown-method probe", handshake_trace)
+        probe = {
+            "jsonrpc": "2.0",
+            "id": 7002,
+            "method": "definitelyNotAMethod",
+        }
+        payload, trace = ws_request(sock, probe, timeout=3.0)
+        if payload.get("id") != 7002:
+            fail_with_trace("Unexpected JSON-RPC id in unknown-method response", trace)
+        assert_method_error_variant(jsonrpc_error_text(payload), trace)
+    finally:
+        sock.close()
