@@ -231,15 +231,26 @@ start_host_app() {
       return 1
     fi
 
-    if python3 - "$PING_URL" <<'PY'
+    if python3 - "$PING_URL" "$COLOR_URL" <<'PY'
 import json
 import sys
 import urllib.request
+import urllib.error
 
-url = sys.argv[1]
-with urllib.request.urlopen(url, timeout=2) as response:
-    payload = json.load(response)
-if payload.get("ping") != "pong":
+ping_url = sys.argv[1]
+color_url = sys.argv[2]
+
+try:
+    with urllib.request.urlopen(ping_url, timeout=2) as response:
+        ping_payload = json.load(response)
+    if ping_payload.get("ping") != "pong":
+        raise RuntimeError("ping payload invalid")
+
+    with urllib.request.urlopen(color_url, timeout=2) as response:
+        color_payload = json.load(response)
+    if "hsv" not in color_payload:
+        raise RuntimeError("color payload invalid")
+except (urllib.error.URLError, OSError, ValueError, RuntimeError):
     raise SystemExit(1)
 PY
     then
