@@ -164,6 +164,9 @@ void ApplicationWebserver::init()
 	// websocket api
 	wsResource = new WebsocketResource();
 	wsResource->setConnectionHandler([this](WebsocketConnection& socket) { this->wsConnected(socket); });
+	wsResource->setMessageHandler([this](WebsocketConnection& socket, const String& message) {
+		this->wsMessage(socket, message);
+	});
 	wsResource->setDisconnectionHandler([this](WebsocketConnection& socket) { this->wsDisconnected(socket); });
 	paths.set("/ws", wsResource);
 
@@ -182,6 +185,59 @@ void ApplicationWebserver::wsDisconnected(WebsocketConnection& socket)
 	debug_i("<===wsDisconnected");
 	webSockets.removeElement(&socket);
 	debug_i("===>nr of websockets: %i", webSockets.size());
+}
+
+void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& message)
+{
+	debug_d("ApplicationWebserver::wsMessage: %s", message.c_str());
+
+	StaticJsonDocument<1024> requestDoc;
+	StaticJsonDocument<1024> responseDoc;
+	JsonObject responseRoot = responseDoc.to<JsonObject>();
+	responseRoot[F("jsonrpc")] = F("2.0");
+
+	String errorMsg;
+
+	if(!Json::deserialize(requestDoc, message)) {
+		errorMsg = F("malformed json");
+	} else {
+		JsonObject requestRoot = requestDoc.as<JsonObject>();
+		JsonVariant requestId = requestRoot[F("id")];
+		if(!requestId.isNull()) {
+			responseRoot[F("id")] = requestId;
+		}
+
+		String method = requestRoot[F("method")] | String::nullstr;
+		if(!method.length()) {
+			errorMsg = F("missing method");
+		} else if(!app.api) {
+			errorMsg = F("api not initialized");
+		} else {
+			JsonObject params = requestRoot[F("params")];
+			const bool isColorGetter = method == F("color") && (params.isNull() || params.size() == 0);
+			const bool isDataMethod = isColorGetter || method == F("getColor") || method == F("info") ||
+							method == F("getInfo") || method == F("networks") || method == F("getNetworks");
+
+			if(isDataMethod) {
+				JsonObject result = responseRoot.createNestedObject(F("result"));
+				if(!app.api->dispatch(method, params, result)) {
+					errorMsg = result[F("error")] | String(F("method not implemented"));
+					responseRoot.remove(F("result"));
+				}
+			} else {
+				if(app.api->dispatchCommand(method, params, errorMsg, false)) {
+					JsonObject result = responseRoot.createNestedObject(F("result"));
+					result[F("success")] = true;
+				}
+			}
+		}
+	}
+
+	if(errorMsg.length()) {
+		responseRoot[F("error")] = errorMsg;
+	}
+
+	socket.sendString(Json::serialize(responseRoot));
 }
 
 /*
