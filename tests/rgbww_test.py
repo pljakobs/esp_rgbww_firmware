@@ -1,281 +1,388 @@
-'''
+"""
 Created on 02.04.2017
 
 @author: Robin
-'''
-import unittest
+
+Converted to pytest format integrated with host_smoke_api_test.py harness by pjakobs
+"""
 import json
-import time
 import os
-import urllib.error
-import urllib.request
+import socket
+import time
+from typing import Optional
+from urllib import error, request
 
-#host = "sz-led-wall"
-host = os.environ.get("RGBWW_TEST_HOST", "wz-led-tv")
+import pytest
 
+# Import helpers from host_smoke_api_test
+from host_smoke_api_test import SmokeConfig, http_request, smoke_config, websocket_handshake, ws_recv_frame, ws_send_text  # noqa: F401
+
+TIME_SCALE = float(os.environ.get("RGBWW_TEST_TIME_SCALE", "1.0"))
+RAMP_ACCURACY_RAMP_SECONDS = float(os.environ.get("RGBWW_RAMP_ACCURACY_SECONDS", "60"))
+RAMP_ACCURACY_ITERATIONS = int(os.environ.get("RGBWW_RAMP_ACCURACY_ITERATIONS", "9"))
 ASSERT_TOLERANCE = float(os.environ.get("RGBWW_TEST_TOLERANCE", "5.0"))
+RETRY_READ_ATTEMPTS = int(os.environ.get("RGBWW_TEST_READ_RETRIES", "5"))
+RETRY_READ_INTERVAL_SECONDS = float(os.environ.get("RGBWW_TEST_READ_RETRY_INTERVAL", "0.02"))
 
-jsonTempl = u'''{{
+# Buffer to ensure final animation step (step 100) completes before sampling (~20ms per update cycle)
+ANIMATION_COMPLETION_BUFFER_MS = 50  # 2-3 update cycles
+
+
+def scaled(seconds: float) -> float:
+    return max(0.0, seconds * TIME_SCALE)
+
+
+def wait_for_fade_complete(fade_duration_s: float) -> None:
+    """Wait for fade to complete plus buffer for final step execution"""
+    time.sleep(fade_duration_s + ANIMATION_COMPLETION_BUFFER_MS / 1000.0)
+
+
+def assert_eventually_close(
+    read_fn,
+    expected: float,
+    tolerance: float,
+    message: str,
+    attempts: int = RETRY_READ_ATTEMPTS,
+    interval_s: float = RETRY_READ_INTERVAL_SECONDS,
+) -> None:
+    """Retry a numeric read a few times to avoid transient early-read failures."""
+    last_value = None
+    for attempt in range(max(1, attempts)):
+        last_value = read_fn()
+        if abs(last_value - expected) < tolerance:
+            return
+        if attempt < attempts - 1:
+            time.sleep(interval_s)
+    assert False, f"{message} (after {attempts} reads/{interval_s:.3f}s), got {last_value}"
+
+# JSON templates for color commands
+jsonTempl = """{{
   "q":"{queue}",
   "hsv":{{"ct":2700,"v":"{val}","h":"{hue}","s":"{sat}"}},
   "d":1,
   "t":{time},
   "cmd":"{cmd}"
 }}
-'''
+"""
 
-jsonTemplChannels = u'''{{channels:[{channels}]}}'''
+jsonTemplChannels = """{{"channels":[{channels}]}}"""
 
-jsonTemplSolid = u'''{{
+jsonTemplSolid = """{{
   "hsv":{{"ct":2700,"v":"{v}","h":"{h}","s":"{s}"}},
   "d":1,
   "cmd":"solid"
 }}
-'''
+"""
 
 
-class HttpResponse:
-    def __init__(self, status_code, content):
-        self.status_code = status_code
-        self.content = content
-        self.text = content.decode("utf-8", errors="replace")
+def do_post(base_url: str, endpoint: str, post_data: str) -> None:
+    """Post data to endpoint, raise on error"""
+    response = http_request(
+        "POST",
+        f"{base_url}/{endpoint}",
+        body=post_data.encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    if response["status"] != 200:
+        raise Exception(f"POST {endpoint} failed: {response['status']} {response['body']}")
 
 
-def request(method, url, data=None):
-    if isinstance(data, str):
-        data = data.encode("utf-8")
+def get_color(color_url: str) -> dict:
+    """Fetch current color state"""
+    response = http_request("GET", color_url)
+    if response["status"] != 200:
+        raise Exception(f"GET /color failed: {response['status']}")
+    return json.loads(response["body"])
 
-    req = urllib.request.Request(url, data=data, method=method)
-    try:
-        with urllib.request.urlopen(req, timeout=10) as response:
-            return HttpResponse(response.getcode(), response.read())
-    except urllib.error.HTTPError as error:
-        return HttpResponse(error.code, error.read())
 
-def do_post(queryParams, post_data):
-    r = request(u"POST", u"http://{}/{}".format(host, queryParams), data=post_data)
-    if (r.status_code != 200):
-        raise Exception("Error")
+def get_hue(color_url: str) -> float:
+    """Get current hue value"""
+    return get_color(color_url)["hsv"]["h"]
 
-def get_color():
-    r = request(u"GET", u"http://{}/color".format(host))
-    return json.loads(r.text)
 
-def get_hue():
-    return get_color()['hsv']['h']
+def get_sat(color_url: str) -> float:
+    """Get current saturation value"""
+    return get_color(color_url)["hsv"]["s"]
 
-def get_sat():
-    return get_color()['hsv']['s']
 
-def get_val():
-    return get_color()['hsv']['v']
+def get_val(color_url: str) -> float:
+    """Get current value (brightness)"""
+    return get_color(color_url)["hsv"]["v"]
 
-def rgbww_set(h, s, v):
+
+def rgbww_set(base_url: str, h: float, s: float, v: float) -> None:
+    """Set solid color"""
     post_data = jsonTemplSolid.format(h=h, s=s, v=v)
-    do_post(u"color", post_data)
+    do_post(base_url, "color", post_data)
 
-def set_hue_fade(hue, ramp, sat=100, val=100, queuePolicy="back"):
+
+def set_hue_fade(base_url: str, hue: float, ramp: float, sat: float = 100, val: float = 100, queuePolicy: str = "back") -> float:
+    """Start a hue fade, return start timestamp"""
     ts = time.time()
-    print("Setting hue {} with ramp {} s".format(hue, ramp))
-    post_data = jsonTempl.format(hue=hue, val=val, sat=sat, time=str(int(ramp * 1000)), queue=queuePolicy, cmd="fade")
-    r = request(u"POST", u"http://{}/color".format(host), data=post_data)
-    if (r.status_code != 200):
-        raise Exception(r.content)
+    print(f"Setting hue {hue} with ramp {ramp} s")
+    post_data = jsonTempl.format(hue=hue, val=val, sat=sat, time=int(ramp * 1000), queue=queuePolicy, cmd="fade")
+    do_post(base_url, "color", post_data)
     return ts
 
-def set_channel_cmd(cmd, channels="'h','s','v'"):
+
+def set_channel_cmd(base_url: str, cmd: str, channels: str = '"h","s","v"') -> float:
+    """Send channel command (pause, continue, etc)"""
     ts = time.time()
-    print("Setting " + cmd)
-    post_data = jsonTemplChannels.format(channels=channels)
-    r = request(u"POST", u"http://{}/{}".format(host, cmd), data=post_data)
-    if (r.status_code != 200):
-        raise Exception("Error")
+    print(f"Setting {cmd}")
+    post_data = jsonTemplChannels.format(channels=channels.replace("'", '"'))
+    do_post(base_url, cmd, post_data)
     return ts
 
-def set_and_print(hue, ramp):
-    ts = set_hue_fade(hue, ramp)
+
+def ws_recv_color_event(sock: socket.socket, timeout: float = 2.0) -> Optional[dict]:
+    """Receive frames until a color_event is found, return the parsed JSON or None"""
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        opcode, payload = ws_recv_frame(sock, timeout=0.5)
+        if opcode is None:
+            continue
+        if opcode == 1:  # Text frame
+            try:
+                event = json.loads((payload or b"").decode("utf-8", errors="replace"))
+                if event.get("method") == "color_event":
+                    return event
+            except (json.JSONDecodeError, ValueError):
+                pass
+        elif opcode == 9:  # Ping
+            # Send pong response
+            pong_payload = payload or b""
+            sock.sendall(bytes([0x8A, len(pong_payload)]) + pong_payload)
+    return None
+
+
+# Pytest tests
+
+def test_simple_fade(smoke_config: SmokeConfig) -> None:
+    """Test a simple fade transition"""
+    rgbww_set(smoke_config.base_url, 0, 100, 100)
     
-    while True:
-        color_now = get_color()
-        cur_hue = color_now['hsv']['h']
+    new_hue = 120
+    ramp = scaled(10)
+    set_hue_fade(smoke_config.base_url, new_hue, ramp)
+    wait_for_fade_complete(ramp)
+    assert_eventually_close(
+        lambda: get_hue(smoke_config.color_url),
+        new_hue,
+        ASSERT_TOLERANCE,
+        f"Expected hue ~{new_hue}",
+    )
 
-        ts_now = time.time()
-        print("Current hue: {} - Time since ramp start: {:.2f}".format(cur_hue, ts_now - ts))
 
-        if (abs(cur_hue - hue) < ASSERT_TOLERANCE):
-            break
-        if (ts_now - ts > ramp):
-            raise Exception("!!!!!!!!! Ramp taking too long!")
-        time.sleep(3.0)
-        
-        
-class RgbwwTest(unittest.TestCase):
+def test_ramp_accuracy(smoke_config: SmokeConfig) -> None:
+    """Repeat 60-second fades and verify accuracy"""
+    ramp = scaled(RAMP_ACCURACY_RAMP_SECONDS)
+    for i in range(1, RAMP_ACCURACY_ITERATIONS + 1):
+        rgbww_set(smoke_config.base_url, 0, 100, 100)
+        set_hue_fade(smoke_config.base_url, 120, ramp)
+        wait_for_fade_complete(ramp)
+        assert_eventually_close(
+            lambda: get_hue(smoke_config.color_url),
+            120,
+            ASSERT_TOLERANCE,
+            f"Iteration {i}: Expected hue ~120",
+        )
+
+
+def test_queue_back(smoke_config: SmokeConfig) -> None:
+    """Test default queue (back) behavior"""
+    rgbww_set(smoke_config.base_url, 0, 100, 100)
     
-    def setUp(self):
-        rgbww_set(0, 100, 100)
-        
-    def testSimpleFade(self):
-        new_hue = 120
-        ramp = 10
-        set_hue_fade(new_hue, ramp)
-        time.sleep(ramp)
-        cur_hue = get_hue()
-        
-        self.assertAlmostEqual(cur_hue, new_hue, delta=ASSERT_TOLERANCE)
-
-    def testRampAccuracy(self):
-        '''Repeats multiple times a 60 seconds fade and checks the reache value'''
-        ramp = 60
-        for _ in range(1, 10):
-            rgbww_set(0, 100, 100)
-            set_hue_fade(120, ramp)
-            time.sleep(ramp)
-            cur_hue = get_hue()
-            self.assertAlmostEqual(cur_hue, 120, delta=ASSERT_TOLERANCE)
-        
-
-    def testQueueBack(self):
-        ramp = 10
-        set_hue_fade(120, ramp)
-        set_hue_fade(170, ramp)
-        time.sleep(2 * ramp)
-        
-        self.assertAlmostEqual(get_hue(), 170, delta=ASSERT_TOLERANCE)
-        
-    def testQueueFrontReset(self):
-        ramp = 12
-        delta = ASSERT_TOLERANCE
-        set_hue_fade(120, ramp)
-        time.sleep(6)
-        hue1 = get_hue() # 60
-        set_hue_fade(30, 12, queuePolicy="front_reset")
-        time.sleep(6)
-        hue2 = get_hue() # 45
-        time.sleep(6)
-        hue3 = get_hue() # 30
-        time.sleep(6)
-        hue4 = get_hue() # 75
-
-        self.assertAlmostEqual(hue1, 60, delta=delta)
-        self.assertAlmostEqual(hue2, 45, delta=delta)
-        self.assertAlmostEqual(hue3, 30, delta=delta)
-        self.assertAlmostEqual(hue4, 75, delta=delta)
-        
-    def testQueueFront(self):
-        ramp = 12
-        delta = ASSERT_TOLERANCE
-        set_hue_fade(120, ramp)
-        time.sleep(6)
-        hue1 = get_hue() # 60
-        set_hue_fade(30, 12, queuePolicy="front")
-        time.sleep(6)
-        hue2 = get_hue() # 45
-        time.sleep(6)
-        hue3 = get_hue() # 60
-        time.sleep(3)
-        hue4 = get_hue() # 60
-
-        self.assertAlmostEqual(hue1, 60, delta=delta)
-        self.assertAlmostEqual(hue2, 45, delta=delta)
-        self.assertAlmostEqual(hue3, 60, delta=delta)
-        self.assertAlmostEqual(hue4, 90, delta=delta)
-
-    def testRelativePlus(self):
-        ramp = 3
-        delta = ASSERT_TOLERANCE
-        set_hue_fade("+10", ramp)
-        time.sleep(3)
-        hue1 = get_hue() # 60
-
-        self.assertAlmostEqual(hue1, 10, delta=delta)
-  
-    def testRelativePlus_CircleTop(self):
-        set_hue_fade("350", 0)
-        ramp = 3
-        set_hue_fade("+20", ramp)
-        time.sleep(3)
-        hue1 = get_hue() # 60
-
-        delta = ASSERT_TOLERANCE
-        self.assertAlmostEqual(hue1, 10, delta=delta)
-              
-    def testRelativePlus2(self):
-        ramp = 3
-        delta = ASSERT_TOLERANCE
-        set_hue_fade("+10", ramp)
-        set_hue_fade("+10", ramp)
-        time.sleep(3)
-        hue1 = get_hue()
-        time.sleep(3)
-        hue2 = get_hue()
-
-        self.assertAlmostEqual(hue1, 10, delta=delta)  
-        self.assertAlmostEqual(hue2, 20, delta=delta)
-        
-    def testRelativeMinus(self):
-        set_hue_fade("100", 0)
-        ramp = 3
-        set_hue_fade("-10", ramp)
-        time.sleep(ramp)
-        hue1 = get_hue()
-
-        delta = ASSERT_TOLERANCE
-        self.assertAlmostEqual(hue1, 90, delta=delta)
-        
-    def testRelativeMinus_CircleBottom(self):
-        set_hue_fade("100", 0)
-        ramp = 3
-        set_hue_fade("-150", ramp)
-        time.sleep(3)
-        hue1 = get_hue()
-
-        delta = ASSERT_TOLERANCE
-        self.assertAlmostEqual(hue1, 310, delta=delta)
+    ramp = scaled(10)
+    set_hue_fade(smoke_config.base_url, 120, ramp)
+    set_hue_fade(smoke_config.base_url, 170, ramp)
+    wait_for_fade_complete(2 * ramp)
     
-    def testPauseAll(self):
-        set_hue_fade("100", val=50, sat=50, ramp=10)
-        time.sleep(5)
-        set_channel_cmd("pause")
-        time.sleep(5)
-        hue1 = get_hue()
-        sat1 = get_sat()
-        val1 = get_val()
-        set_channel_cmd("continue")
-        time.sleep(5)
-        hue2 = get_hue()
-        sat2 = get_sat()
-        val2 = get_val()
-        
-        delta = ASSERT_TOLERANCE
-        self.assertAlmostEqual(hue1, 50, delta=delta)  
-        self.assertAlmostEqual(sat1, 75, delta=delta)  
-        self.assertAlmostEqual(val1, 75, delta=delta)  
-        self.assertAlmostEqual(hue2, 100, delta=delta)  
-        self.assertAlmostEqual(sat2, 50, delta=delta)  
-        self.assertAlmostEqual(val2, 50, delta=delta)  
+    assert_eventually_close(
+        lambda: get_hue(smoke_config.color_url),
+        170,
+        ASSERT_TOLERANCE,
+        "Expected hue ~170",
+    )
 
-    def testPauseChannel(self):
-        set_hue_fade("100", val=50, sat=50, ramp=10)
-        time.sleep(5)
-        set_channel_cmd("pause", 'h')
-        time.sleep(5)
-        hue1 = get_hue()
-        sat1 = get_sat()
-        val1 = get_val()
-        set_channel_cmd("continue", 'h')
-        time.sleep(5)
-        hue2 = get_hue()
-        sat2 = get_sat()
-        val2 = get_val()
+
+def test_queue_front_reset(smoke_config: SmokeConfig) -> None:
+    """Test front_reset queue policy"""
+    rgbww_set(smoke_config.base_url, 0, 100, 100)
+    
+    ramp = scaled(12)
+    delta = ASSERT_TOLERANCE
+    set_hue_fade(smoke_config.base_url, 120, ramp)
+    time.sleep(scaled(6))
+    assert_eventually_close(lambda: get_hue(smoke_config.color_url), 60, delta, "hue1: expected ~60")
+    set_hue_fade(smoke_config.base_url, 30, ramp, queuePolicy="front_reset")
+    time.sleep(scaled(6))
+    assert_eventually_close(lambda: get_hue(smoke_config.color_url), 45, delta, "hue2: expected ~45")
+    time.sleep(scaled(6))
+    assert_eventually_close(lambda: get_hue(smoke_config.color_url), 30, delta, "hue3: expected ~30")
+    time.sleep(scaled(6))
+    assert_eventually_close(lambda: get_hue(smoke_config.color_url), 75, delta, "hue4: expected ~75")
+
+
+def test_queue_front(smoke_config: SmokeConfig) -> None:
+    """Test front queue policy"""
+    rgbww_set(smoke_config.base_url, 0, 100, 100)
+    
+    ramp = scaled(12)
+    delta = ASSERT_TOLERANCE
+    set_hue_fade(smoke_config.base_url, 120, ramp)
+    time.sleep(scaled(6))
+    assert_eventually_close(lambda: get_hue(smoke_config.color_url), 60, delta, "hue1: expected ~60")
+    set_hue_fade(smoke_config.base_url, 30, ramp, queuePolicy="front")
+    time.sleep(scaled(6))
+    assert_eventually_close(lambda: get_hue(smoke_config.color_url), 45, delta, "hue2: expected ~45")
+    time.sleep(scaled(6))
+    assert_eventually_close(lambda: get_hue(smoke_config.color_url), 60, delta, "hue3: expected ~60")
+    time.sleep(scaled(3))
+    assert_eventually_close(lambda: get_hue(smoke_config.color_url), 90, delta, "hue4: expected ~90")
+
+
+def test_relative_plus(smoke_config: SmokeConfig) -> None:
+    """Test relative hue increase"""
+    rgbww_set(smoke_config.base_url, 0, 100, 100)
+    
+    ramp = scaled(3)
+    delta = ASSERT_TOLERANCE
+    set_hue_fade(smoke_config.base_url, "+10", ramp)
+    wait_for_fade_complete(ramp)
+    assert_eventually_close(lambda: get_hue(smoke_config.color_url), 10, delta, "Expected hue ~10")
+
+
+def test_relative_plus_circle_top(smoke_config: SmokeConfig) -> None:
+    """Test relative hue increase wrapping around 360"""
+    set_hue_fade(smoke_config.base_url, "350", 0)
+    ramp = scaled(3)
+    set_hue_fade(smoke_config.base_url, "+20", ramp)
+    wait_for_fade_complete(ramp)
+    delta = ASSERT_TOLERANCE
+    assert_eventually_close(lambda: get_hue(smoke_config.color_url), 10, delta, "Expected hue ~10 (wrap)")
+
+
+def test_relative_plus_multiple(smoke_config: SmokeConfig) -> None:
+    """Test multiple relative hue increases"""
+    rgbww_set(smoke_config.base_url, 0, 100, 100)
+    
+    ramp = scaled(3)
+    delta = ASSERT_TOLERANCE
+    set_hue_fade(smoke_config.base_url, "+10", ramp)
+    set_hue_fade(smoke_config.base_url, "+10", ramp)
+    wait_for_fade_complete(ramp)
+    assert_eventually_close(lambda: get_hue(smoke_config.color_url), 10, delta, "hue1: expected ~10")
+    wait_for_fade_complete(ramp)
+    assert_eventually_close(lambda: get_hue(smoke_config.color_url), 20, delta, "hue2: expected ~20")
+
+
+def test_relative_minus(smoke_config: SmokeConfig) -> None:
+    """Test relative hue decrease"""
+    set_hue_fade(smoke_config.base_url, "100", 0)
+    ramp = scaled(3)
+    set_hue_fade(smoke_config.base_url, "-10", ramp)
+    wait_for_fade_complete(ramp)
+    delta = ASSERT_TOLERANCE
+    assert_eventually_close(lambda: get_hue(smoke_config.color_url), 90, delta, "Expected hue ~90")
+
+
+def test_relative_minus_circle_bottom(smoke_config: SmokeConfig) -> None:
+    """Test relative hue decrease wrapping around 0"""
+    set_hue_fade(smoke_config.base_url, "100", 0)
+    ramp = scaled(3)
+    set_hue_fade(smoke_config.base_url, "-150", ramp)
+    wait_for_fade_complete(ramp)
+    delta = ASSERT_TOLERANCE
+    assert_eventually_close(lambda: get_hue(smoke_config.color_url), 310, delta, "Expected hue ~310 (wrap)")
+
+
+def test_pause_all(smoke_config: SmokeConfig) -> None:
+    """Test pause/continue of all channels"""
+    rgbww_set(smoke_config.base_url, 0, 100, 100)
+    delta = ASSERT_TOLERANCE
+    
+    set_hue_fade(smoke_config.base_url, "100", val=50, sat=50, ramp=scaled(10))
+    time.sleep(scaled(5))
+    set_channel_cmd(smoke_config.base_url, "pause")
+    time.sleep(scaled(5))
+    assert_eventually_close(lambda: get_hue(smoke_config.color_url), 50, delta, "hue1: expected ~50")
+    assert_eventually_close(lambda: get_sat(smoke_config.color_url), 75, delta, "sat1: expected ~75")
+    assert_eventually_close(lambda: get_val(smoke_config.color_url), 75, delta, "val1: expected ~75")
+    set_channel_cmd(smoke_config.base_url, "continue")
+    wait_for_fade_complete(scaled(5))
+    assert_eventually_close(lambda: get_hue(smoke_config.color_url), 100, delta, "hue2: expected ~100")
+    assert_eventually_close(lambda: get_sat(smoke_config.color_url), 50, delta, "sat2: expected ~50")
+    assert_eventually_close(lambda: get_val(smoke_config.color_url), 50, delta, "val2: expected ~50")
+
+
+def test_pause_channel(smoke_config: SmokeConfig) -> None:
+    """Test pause/continue of individual channel"""
+    rgbww_set(smoke_config.base_url, 0, 100, 100)
+    delta = ASSERT_TOLERANCE
+    
+    set_hue_fade(smoke_config.base_url, "100", val=50, sat=50, ramp=scaled(10))
+    time.sleep(scaled(5))
+    set_channel_cmd(smoke_config.base_url, "pause", '"h"')
+    time.sleep(scaled(5))
+    assert_eventually_close(lambda: get_hue(smoke_config.color_url), 50, delta, "hue1: expected ~50")
+    assert_eventually_close(lambda: get_sat(smoke_config.color_url), 50, delta, "sat1: expected ~50")
+    assert_eventually_close(lambda: get_val(smoke_config.color_url), 50, delta, "val1: expected ~50")
+    set_channel_cmd(smoke_config.base_url, "continue", '"h"')
+    wait_for_fade_complete(scaled(5))
+    assert_eventually_close(lambda: get_hue(smoke_config.color_url), 100, delta, "hue2: expected ~100")
+    assert_eventually_close(lambda: get_sat(smoke_config.color_url), 50, delta, "sat2: expected ~50")
+    assert_eventually_close(lambda: get_val(smoke_config.color_url), 50, delta, "val2: expected ~50")
+
+
+def test_websocket_color_event_on_set(smoke_config: SmokeConfig) -> None:
+    """Verify websocket receives color_event when setting solid color"""
+    sock, handshake_trace = websocket_handshake(smoke_config, os.urandom(16))
+    try:
+        # Check handshake succeeded
+        status_line = handshake_trace["response"]["status_line"]
+        assert "101" in status_line, f"WebSocket handshake failed: {status_line}"
         
-        delta = ASSERT_TOLERANCE
-        self.assertAlmostEqual(hue1, 50, delta=delta)  
-        self.assertAlmostEqual(sat1, 50, delta=delta)  
-        self.assertAlmostEqual(val1, 50, delta=delta)  
-        self.assertAlmostEqual(hue2, 100, delta=delta)  
-        self.assertAlmostEqual(sat2, 50, delta=delta)  
-        self.assertAlmostEqual(val2, 50, delta=delta)  
+        # Set a color and wait for event
+        rgbww_set(smoke_config.base_url, 45, 80, 90)
         
-if __name__ == "__main__":
-    #import sys;sys.argv = ['', 'Test.testName']
-    unittest.main()
+        # Receive color event
+        event = ws_recv_color_event(sock, timeout=3.0)
+        assert event is not None, "No color_event received from WebSocket"
+        assert event.get("method") == "color_event", f"Expected color_event, got {event.get('method')}"
+        
+        # Verify params contain HSV data
+        params = event.get("params", {})
+        raw = params.get("raw", {})
+        assert "h" in raw or "hsv" in params, f"No HSV data in event: {event}"
+        
+    finally:
+        sock.close()
+
+
+def test_websocket_color_event_on_fade(smoke_config: SmokeConfig) -> None:
+    """Verify websocket receives color_event updates during fade"""
+    sock, handshake_trace = websocket_handshake(smoke_config, os.urandom(16))
+    try:
+        status_line = handshake_trace["response"]["status_line"]
+        assert "101" in status_line, f"WebSocket handshake failed: {status_line}"
+        
+        # Start a fade
+        rgbww_set(smoke_config.base_url, 0, 100, 100)
+        set_hue_fade(smoke_config.base_url, 180, scaled(5))  # 5 second fade
+        
+        # Receive multiple color events during fade
+        events_received = []
+        for _ in range(3):
+            event = ws_recv_color_event(sock, timeout=2.0)
+            if event:
+                events_received.append(event)
+        
+        assert len(events_received) > 0, "No color_event received during fade"
+        
+        # Verify all events have the expected structure
+        for event in events_received:
+            assert event.get("method") == "color_event", f"Invalid event method: {event.get('method')}"
+            assert "params" in event, f"No params in event: {event}"
+            
+    finally:
+        sock.close()

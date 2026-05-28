@@ -34,70 +34,72 @@ WS_PORT="${WS_PORT:-80}"
 WS_PATH="${WS_PATH:-/ws}"
 COLOR_URL="http://${APP_IP}/color"
 APP_UNDER_VALGRIND=0
+HOST_CI_BUILD_ONLY="${HOST_CI_BUILD_ONLY:-0}"
+HOST_CI_SKIP_BUILD="${HOST_CI_SKIP_BUILD:-0}"
 
 cleanup() {
-  set +e
-  if [[ -n "${APP_PID:-}" ]] && kill -0 "$APP_PID" 2>/dev/null; then
-    kill "$APP_PID" 2>/dev/null || true
-    wait "$APP_PID" 2>/dev/null || true
-  fi
-  if [[ -n "${IP_BIN:-}" ]] && "$IP_BIN" link show "$TAP_IF" >/dev/null 2>&1; then
-    "$IP_BIN" link del "$TAP_IF" >/dev/null 2>&1 || true
-  fi
+    set +e
+    if [[ -n "${APP_PID:-}" ]] && kill -0 "$APP_PID" 2>/dev/null; then
+        kill "$APP_PID" 2>/dev/null || true
+        wait "$APP_PID" 2>/dev/null || true
+    fi
+    if [[ -n "${IP_BIN:-}" ]] && "$IP_BIN" link show "$TAP_IF" >/dev/null 2>&1; then
+        "$IP_BIN" link del "$TAP_IF" >/dev/null 2>&1 || true
+    fi
 }
 
 trap cleanup EXIT
 
 resolve_ip_bin() {
-  if command -v ip >/dev/null 2>&1; then
-    command -v ip
-    return 0
-  fi
-
-  for path in /sbin/ip /usr/sbin/ip /bin/ip /usr/bin/ip; do
-    if [[ -x "$path" ]]; then
-      echo "$path"
-      return 0
+    if command -v ip >/dev/null 2>&1; then
+        command -v ip
+        return 0
     fi
-  done
 
-  return 1
+    for path in /sbin/ip /usr/sbin/ip /bin/ip /usr/bin/ip; do
+        if [[ -x "$path" ]]; then
+            echo "$path"
+            return 0
+        fi
+    done
+
+    return 1
 }
 
 ensure_ip_tool() {
-  if IP_BIN="$(resolve_ip_bin)"; then
-    return 0
-  fi
+    if IP_BIN="$(resolve_ip_bin)"; then
+        return 0
+    fi
 
-  echo "ip command not found; attempting to install iproute tools" >&2
+    echo "ip command not found; attempting to install iproute tools" >&2
 
-  if command -v apt-get >/dev/null 2>&1; then
-    apt-get update -y >/dev/null
-    DEBIAN_FRONTEND=noninteractive apt-get install -y iproute2 >/dev/null
-  elif command -v dnf >/dev/null 2>&1; then
-    dnf install -y iproute >/dev/null
-  elif command -v yum >/dev/null 2>&1; then
-    yum install -y iproute >/dev/null
-  elif command -v apk >/dev/null 2>&1; then
-    apk add --no-cache iproute2 >/dev/null
-  else
-    echo "No supported package manager found to install ip command" >&2
-    return 1
-  fi
+    if command -v apt-get >/dev/null 2>&1; then
+        apt-get update -y >/dev/null
+        DEBIAN_FRONTEND=noninteractive apt-get install -y iproute2 >/dev/null
+    elif command -v dnf >/dev/null 2>&1; then
+        dnf install -y iproute >/dev/null
+    elif command -v yum >/dev/null 2>&1; then
+        yum install -y iproute >/dev/null
+    elif command -v apk >/dev/null 2>&1; then
+        apk add --no-cache iproute2 >/dev/null
+    else
+        echo "No supported package manager found to install ip command" >&2
+        return 1
+    fi
 
-  if ! IP_BIN="$(resolve_ip_bin)"; then
-    echo "ip command still unavailable after installation attempt" >&2
-    return 1
-  fi
+    if ! IP_BIN="$(resolve_ip_bin)"; then
+        echo "ip command still unavailable after installation attempt" >&2
+        return 1
+    fi
 }
 
 ensure_pytest() {
-  if python3 -c 'import pytest' >/dev/null 2>&1; then
+  if python3 -c 'import pytest, requests' >/dev/null 2>&1; then
     return 0
   fi
-
-  echo "pytest not found; installing it into the container environment" >&2
-  python3 -m pip install --quiet pytest
+  echo "pytest/requests not found; installing them into the container environment" >&2
+  python3 -m pip install --quiet --timeout 60 --retries 5 pytest requests
+  # pytest-md is installed separately (provides --md flag); pre-installed in CI container
 }
 
 ensure_valgrind() {
@@ -168,10 +170,6 @@ start_host_app() {
   local force_plain="${5:-0}"
   local use_valgrind=0
 
-  if [[ "$mode" == "smoke" ]]; then
-    rm -f "$HTTP_TRACE_LOG" "$MALFORMED_JSON_TRACE"
-  fi
-
   if [[ "$force_plain" != "1" ]] && [[ "$ENABLE_VALGRIND" == "1" ]] && command -v valgrind >/dev/null 2>&1; then
     use_valgrind=1
   fi
@@ -233,15 +231,26 @@ start_host_app() {
       return 1
     fi
 
-    if python3 - "$PING_URL" <<'PY'
+    if python3 - "$PING_URL" "$COLOR_URL" <<'PY'
 import json
 import sys
 import urllib.request
+import urllib.error
 
-url = sys.argv[1]
-with urllib.request.urlopen(url, timeout=2) as response:
-    payload = json.load(response)
-if payload.get("ping") != "pong":
+ping_url = sys.argv[1]
+color_url = sys.argv[2]
+
+try:
+    with urllib.request.urlopen(ping_url, timeout=2) as response:
+        ping_payload = json.load(response)
+    if ping_payload.get("ping") != "pong":
+        raise RuntimeError("ping payload invalid")
+
+    with urllib.request.urlopen(color_url, timeout=2) as response:
+        color_payload = json.load(response)
+    if "hsv" not in color_payload:
+        raise RuntimeError("color payload invalid")
+except (urllib.error.URLError, OSError, ValueError, RuntimeError):
     raise SystemExit(1)
 PY
     then
@@ -316,60 +325,101 @@ rm -f "$VALGRIND_STATUS_FILE"
     echo "app_ip=$APP_IP"
 } > "$LOG_DIR/run-info.txt"
 
-if ! ensure_ip_tool; then
-  echo "cannot configure TAP interface without ip command" >&2
-  exit 1
+if [[ "$HOST_CI_BUILD_ONLY" != "1" ]]; then
+  if ! ensure_ip_tool; then
+      echo "cannot configure TAP interface without ip command" >&2
+      exit 1
+  fi
+
+  ensure_valgrind
+
+  if [[ ! -c /dev/net/tun ]]; then
+      echo "/dev/net/tun is not available inside the Sming container" >&2
+      exit 1
+  fi
 fi
 
-ensure_valgrind
+if [[ "$HOST_CI_SKIP_BUILD" != "1" ]]; then
+  if [[ -f /opt/Sming/Tools/export.sh ]]; then
+      export_script="/opt/Sming/Tools/export.sh"
+  elif [[ -f /opt/sming/Tools/export.sh ]]; then
+      export_script="/opt/sming/Tools/export.sh"
+  else
+      echo "Unable to locate Sming export.sh" >&2
+      exit 1
+  fi
 
-if [[ ! -c /dev/net/tun ]]; then
-  echo "/dev/net/tun is not available inside the Sming container" >&2
-  exit 1
+  # Sming's export.sh references SMING_HOME directly and is not nounset-safe.
+  set +u
+  source "$export_script"
+  set -u
 fi
 
-if [[ -f /opt/Sming/Tools/export.sh ]]; then
-  export_script="/opt/Sming/Tools/export.sh"
-elif [[ -f /opt/sming/Tools/export.sh ]]; then
-  export_script="/opt/sming/Tools/export.sh"
-else
-  echo "Unable to locate Sming export.sh" >&2
-  exit 1
+if [[ "$HOST_CI_SKIP_BUILD" != "1" ]]; then
+  echo "===== Host build output =====" > "$BUILD_LOG"
+
+  # Patch Sming lwIP defaults with Host-only guards.
+  #
+  # Rationale:
+  # - Host smoke tests open many short-lived TCP connections.
+  # - With MEMP_NUM_TCP_PCB=4 and TCP_MSL=60000, the TIME_WAIT pool exhausts.
+  # - Apply ARCH_HOST-specific values in framework defaults during CI build.
+  #
+  # This keeps behavior unchanged for non-Host architectures.
+  LWIPOPTS="${SMING_HOME}/Components/lwip/lwipopts.h"
+  if [[ -f "$LWIPOPTS" ]]; then
+    perl -0777 -i -pe 's@#define MEMP_NUM_TCP_PCB\s+4\s*@#ifdef ARCH_HOST\n#define MEMP_NUM_TCP_PCB                32\n#else\n#define MEMP_NUM_TCP_PCB                4\n#endif\n@s' "$LWIPOPTS"
+
+    if ! grep -q "ARCH_HOST.*TCP_MSL\|TCP_MSL.*ARCH_HOST" "$LWIPOPTS"; then
+      cat >> "$LWIPOPTS" <<'EOF'
+
+/* Host CI override: reduce TIME_WAIT pressure for short-lived test connections */
+#ifdef ARCH_HOST
+#ifndef TCP_MSL
+#define TCP_MSL 5000
+#endif
+#endif
+EOF
+    fi
+
+    echo "Host lwIP overrides in ${LWIPOPTS}:"
+    grep -n "MEMP_NUM_TCP_PCB\|TCP_MSL\|ARCH_HOST" "$LWIPOPTS" | head -20 || true
+  else
+    echo "WARNING: lwipopts.h not found at $LWIPOPTS" >&2
+  fi
+
+  make SMING_ARCH=Host configdb-rebuild 2>&1 | tee -a "$BUILD_LOG"
+  make SMING_ARCH=Host flash DISABLE_WERROR=1 COM_SPEED=115200 2>&1 | tee -a "$BUILD_LOG"
+
+  # Collect non-fatal compiler warnings from the Host build output for CI visibility.
+  grep -E '\bwarning:' "$BUILD_LOG" > "$COMPILER_WARNINGS_LOG" || true
 fi
 
-# Sming's export.sh references SMING_HOME directly and is not nounset-safe.
-set +u
-source "$export_script"
-set -u
-
-echo "===== Host build output =====" > "$BUILD_LOG"
-make SMING_ARCH=Host configdb-rebuild 2>&1 | tee -a "$BUILD_LOG"
-make SMING_ARCH=Host flash DISABLE_WERROR=1 COM_SPEED=115200 2>&1 | tee -a "$BUILD_LOG"
-
-# Collect non-fatal compiler warnings from the Host build output for CI visibility.
-grep -E '\bwarning:' "$BUILD_LOG" > "$COMPILER_WARNINGS_LOG" || true
+if [[ "$HOST_CI_BUILD_ONLY" == "1" ]]; then
+  echo "Host build complete. Exiting build-only mode."
+  exit 0
+fi
 
 FLASH_BIN="${FIRMWARE_DIR}/flash.bin"
 PARTITIONS_BIN="${FIRMWARE_DIR}/partitions.bin"
 HOST_CONFIG_MK="out/Host/debug/config.mk"
 
 if [[ ! -f "$PARTITIONS_BIN" ]]; then
-  echo "Missing Host partition table: $PARTITIONS_BIN" >&2
-  exit 1
+    echo "Missing Host partition table: $PARTITIONS_BIN" >&2
+    exit 1
 fi
 
 if [[ ! -f "$HOST_CONFIG_MK" ]]; then
-  echo "Missing Host build config: $HOST_CONFIG_MK" >&2
-  exit 1
+    echo "Missing Host build config: $HOST_CONFIG_MK" >&2
+    exit 1
 fi
 
 PARTITION_OFFSET_HEX="$(awk -F= '/^PARTITION_TABLE_OFFSET=/{print $2; exit}' "$HOST_CONFIG_MK")"
 if [[ -z "$PARTITION_OFFSET_HEX" ]]; then
-  echo "Could not determine PARTITION_TABLE_OFFSET from $HOST_CONFIG_MK" >&2
-  exit 1
+    echo "Could not determine PARTITION_TABLE_OFFSET from $HOST_CONFIG_MK" >&2
+    exit 1
 fi
 
-# Ensure flash.bin exists and contains partitions.bin at PARTITION_TABLE_OFFSET.
 python3 - "$FLASH_BIN" "$PARTITIONS_BIN" "$PARTITION_OFFSET_HEX" <<'PY'
 import os
 import sys
@@ -379,36 +429,36 @@ partitions_path = sys.argv[2]
 partition_offset = int(sys.argv[3], 0)
 
 with open(partitions_path, "rb") as f:
-    partitions = f.read()
+        partitions = f.read()
 
 if not partitions:
-    raise SystemExit(f"Partition table is empty: {partitions_path}")
+        raise SystemExit(f"Partition table is empty: {partitions_path}")
 
 flash_size = 4 * 1024 * 1024
 required_size = max(flash_size, partition_offset + len(partitions))
 
 if not os.path.exists(flash_path):
-    with open(flash_path, "wb") as f:
-        f.truncate(required_size)
+        with open(flash_path, "wb") as f:
+                f.truncate(required_size)
 
 with open(flash_path, "r+b") as f:
-    current_size = os.path.getsize(flash_path)
-    if current_size < required_size:
-        f.truncate(required_size)
-    f.seek(partition_offset)
-    current = f.read(len(partitions))
-    if current != partitions:
+        current_size = os.path.getsize(flash_path)
+        if current_size < required_size:
+                f.truncate(required_size)
         f.seek(partition_offset)
-        f.write(partitions)
-        f.flush()
-        os.fsync(f.fileno())
-        print(f"Injected partition table into {flash_path} at 0x{partition_offset:x}")
-    else:
-        print(f"Partition table already present in {flash_path} at 0x{partition_offset:x}")
+        current = f.read(len(partitions))
+        if current != partitions:
+                f.seek(partition_offset)
+                f.write(partitions)
+                f.flush()
+                os.fsync(f.fileno())
+                print(f"Injected partition table into {flash_path} at 0x{partition_offset:x}")
+        else:
+                print(f"Partition table already present in {flash_path} at 0x{partition_offset:x}")
 PY
 
 if "$IP_BIN" link show "$TAP_IF" >/dev/null 2>&1; then
-  "$IP_BIN" link del "$TAP_IF"
+    "$IP_BIN" link del "$TAP_IF"
 fi
 
 "$IP_BIN" tuntap add dev "$TAP_IF" mode tap user "$(id -un)"
@@ -425,20 +475,19 @@ export HOST_SMOKE_WS_HOST="$WS_HOST"
 export HOST_SMOKE_WS_PORT="$WS_PORT"
 export HOST_SMOKE_WS_PATH="$WS_PATH"
 export HOST_SMOKE_LOG_DIR="$LOG_DIR"
+export RGBWW_TEST_HOST="$APP_IP"
 export RGBWW_TEST_TIME_SCALE="${RGBWW_TEST_TIME_SCALE:-0.2}"
 export RGBWW_RAMP_ACCURACY_SECONDS="${RGBWW_RAMP_ACCURACY_SECONDS:-12}"
 export RGBWW_RAMP_ACCURACY_ITERATIONS="${RGBWW_RAMP_ACCURACY_ITERATIONS:-3}"
 
 TEST_REPORT="${LOG_DIR}/test-results.md"
+TEST_SUMMARY="${LOG_DIR}/test_summary.md"
 TEST_OUTPUT="${LOG_DIR}/test-output.txt"
 SMOKE_TEST_REPORT="${LOG_DIR}/smoke-test-results.md"
 SMOKE_TEST_OUTPUT="${LOG_DIR}/smoke-test-output.txt"
 RGBWW_TEST_REPORT="${LOG_DIR}/rgbww-test-results.md"
 RGBWW_TEST_OUTPUT="${LOG_DIR}/rgbww-test-output.txt"
 
-python3 -m pip install --quiet pytest-md
-
-# Known timing-sensitive RGBWW tests that may fail in CI due to fade precision/jitter
 # or delayed websocket delivery on the Host emulator. These are reported as
 # warnings and do not fail the CI job unless additional tests fail.
 ALLOWED_RGBWW_WARNINGS_DEFAULT=$'tests/rgbww_test.py::test_queue_front_reset\ntests/rgbww_test.py::test_queue_front\ntests/rgbww_test.py::test_relative_plus_multiple\ntests/rgbww_test.py::test_pause_all\ntests/rgbww_test.py::test_pause_channel\ntests/rgbww_test.py::test_websocket_color_event_on_set\ntests/rgbww_test.py::test_websocket_color_event_on_fade'
@@ -447,13 +496,23 @@ ALLOWED_RGBWW_WARNINGS="${RGBWW_ALLOWED_WARNING_TESTS:-$ALLOWED_RGBWW_WARNINGS_D
 is_allowed_rgbww_warning_test() {
   local test_name="$1"
   local test_suffix="${test_name##*::}"
+  local test_suffix_norm
+  test_suffix_norm="$(printf '%s' "$test_suffix" | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:]')"
+
   while IFS= read -r allowed; do
+    local allowed_suffix allowed_suffix_norm
     [[ -z "$allowed" ]] && continue
     if [[ "$test_name" == "$allowed" ]]; then
       return 0
     fi
 
-    if [[ "$allowed" == *"::"* ]] && [[ "$test_suffix" == "${allowed##*::}" ]]; then
+    allowed_suffix="${allowed##*::}"
+    if [[ "$allowed" == *"::"* ]] && [[ "$test_suffix" == "$allowed_suffix" ]]; then
+      return 0
+    fi
+
+    allowed_suffix_norm="$(printf '%s' "$allowed_suffix" | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:]')"
+    if [[ -n "$allowed_suffix_norm" ]] && [[ "$test_suffix_norm" == "$allowed_suffix_norm" ]]; then
       return 0
     fi
   done <<< "$ALLOWED_RGBWW_WARNINGS"
@@ -465,29 +524,88 @@ extract_failed_tests() {
   grep -E '^FAILED[[:space:]]+' "$output_file" | sed -E 's/^FAILED[[:space:]]+([^[:space:]]+).*/\1/' || true
 }
 
-start_host_app "$APP_LOG_SMOKE" "$VALGRIND_LOG_SMOKE" "smoke"
-collect_runtime_valgrind_snapshot "$VALGRIND_RUNTIME_LOG_SMOKE_START" "smoke_startup_idle"
-set +e
-python3 -m pytest \
-  -v \
-  --md "$SMOKE_TEST_REPORT" \
-  tests/host_smoke_api_test.py 2>&1 | tee "$SMOKE_TEST_OUTPUT"
-SMOKE_PYTEST_EXIT=${PIPESTATUS[0]}
-set -e
-collect_runtime_valgrind_snapshot "$VALGRIND_RUNTIME_LOG_SMOKE" "smoke_post_tests"
-stop_host_app
+collect_test_nodeids() {
+  local test_file="$1"
+  python3 -m pytest -q --collect-only "$test_file" 2>/dev/null | awk '/::/ {print $1}'
+}
 
-start_host_app "$APP_LOG_RGBWW" "$VALGRIND_LOG_RGBWW" "rgbww"
-collect_runtime_valgrind_snapshot "$VALGRIND_RUNTIME_LOG_RGBWW_START" "rgbww_startup_idle"
+create_markdown_report_from_output() {
+  local output_file="$1"
+  local report_file="$2"
+  local suite_title="$3"
+  local passed failed skipped total
+
+  passed=$(grep -cE '::[^[:space:]]+[[:space:]]+PASSED\b' "$output_file" || true)
+  failed=$(grep -cE '::[^[:space:]]+[[:space:]]+FAILED\b' "$output_file" || true)
+  skipped=$(grep -cE '::[^[:space:]]+[[:space:]]+SKIPPED\b' "$output_file" || true)
+  total=$((passed + failed + skipped))
+
+  {
+    echo "# ${suite_title} Report"
+    echo
+    echo "## Summary"
+    echo
+    echo "${total} tests ran"
+    echo
+    echo "- ${failed} failed"
+    echo "- ${passed} passed"
+    echo "- ${skipped} skipped"
+    echo
+    echo "## Details"
+    echo
+    grep -E '::[^[:space:]]+[[:space:]]+(PASSED|FAILED|SKIPPED)\b' "$output_file" || true
+  } > "$report_file"
+}
+
+run_suite_with_restart_per_test() {
+  local mode="$1"
+  local test_file="$2"
+  local app_log_path="$3"
+  local vg_log_path="$4"
+  local suite_output="$5"
+  local fail_count=0
+
+  : > "$suite_output"
+  while IFS= read -r nodeid; do
+    [[ -z "$nodeid" ]] && continue
+
+    echo "===== RUN ${nodeid} =====" | tee -a "$suite_output"
+    start_host_app "$app_log_path" "$vg_log_path" "$mode"
+
+    set +e
+    python3 -m pytest -v "$nodeid" 2>&1 | tee -a "$suite_output"
+    local rc=${PIPESTATUS[0]}
+    set -e
+
+    if [[ "$mode" == "smoke" ]]; then
+      collect_runtime_valgrind_snapshot "$VALGRIND_RUNTIME_LOG_SMOKE" "smoke_${nodeid//[^A-Za-z0-9_]/_}"
+    else
+      collect_runtime_valgrind_snapshot "$VALGRIND_RUNTIME_LOG_RGBWW" "rgbww_${nodeid//[^A-Za-z0-9_]/_}"
+    fi
+
+    stop_host_app
+
+    if [[ "$rc" -ne 0 ]]; then
+      fail_count=$((fail_count + 1))
+    fi
+  done < <(collect_test_nodeids "$test_file")
+
+  return "$fail_count"
+}
+
+rm -f "$HTTP_TRACE_LOG" "$MALFORMED_JSON_TRACE"
+
 set +e
-python3 -m pytest \
-  -v \
-  --md "$RGBWW_TEST_REPORT" \
-  tests/rgbww_test.py 2>&1 | tee "$RGBWW_TEST_OUTPUT"
-RGBWW_PYTEST_EXIT=${PIPESTATUS[0]}
+run_suite_with_restart_per_test "smoke" "tests/host_smoke_api_test.py" "$APP_LOG_SMOKE" "$VALGRIND_LOG_SMOKE" "$SMOKE_TEST_OUTPUT"
+SMOKE_PYTEST_EXIT=$?
 set -e
-collect_runtime_valgrind_snapshot "$VALGRIND_RUNTIME_LOG_RGBWW" "rgbww_post_tests"
-stop_host_app
+create_markdown_report_from_output "$SMOKE_TEST_OUTPUT" "$SMOKE_TEST_REPORT" "Smoke"
+
+set +e
+run_suite_with_restart_per_test "rgbww" "tests/rgbww_test.py" "$APP_LOG_RGBWW" "$VALGRIND_LOG_RGBWW" "$RGBWW_TEST_OUTPUT"
+RGBWW_PYTEST_EXIT=$?
+set -e
+create_markdown_report_from_output "$RGBWW_TEST_OUTPUT" "$RGBWW_TEST_REPORT" "RGBWW"
 
 HOST_CI_SHOULD_FAIL=0
 
@@ -526,6 +644,9 @@ fi
   echo "## RGBWW"
   cat "$RGBWW_TEST_REPORT"
 } > "$TEST_REPORT"
+
+# Backward-compatible path consumed by existing workflow log step.
+cp "$TEST_REPORT" "$TEST_SUMMARY"
 
 {
   echo "===== Host build output ====="
