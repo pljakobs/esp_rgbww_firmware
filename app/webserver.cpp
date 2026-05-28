@@ -371,6 +371,26 @@ void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, c
 	}
 }
 
+bool ApplicationWebserver::parseJsonBody(HttpRequest& request, HttpResponse& response, JsonDocument& doc,
+											 const __FlashStringHelper* noBodyMessage)
+{
+	String body = request.getBody();
+	if(body == NULL) {
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, noBodyMessage);
+		return false;
+	}
+
+	DeserializationError err = deserializeJson(doc, body);
+	if(err) {
+		String parseError = F("malformed json: ");
+		parseError += err.c_str();
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, parseError);
+		return false;
+	}
+
+	return true;
+}
+
 void ApplicationWebserver::onFile(HttpRequest& request, HttpResponse& response)
 {
 	debug_i("http onFile");
@@ -1054,17 +1074,16 @@ void ApplicationWebserver::onColorGet(HttpRequest& request, HttpResponse& respon
  */
 void ApplicationWebserver::onColorPost(HttpRequest& request, HttpResponse& response)
 {
-	String body = request.getBody();
-
-	if(body == NULL) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("no body"));
+	StaticJsonDocument<1024> doc;
+	if(!parseJsonBody(request, response, doc, F("no body"))) {
 		return;
 	}
 
-	debug_i("received color update with body legth %i and content %s", body.length(),body.c_str());
+	debug_i("received color update with body length %i", request.getBody().length());
 	String msg;
+	const bool ok = app.api->dispatchCommand(F("color"), doc.as<JsonObject>(), msg, true);
 
-	if(!app.jsonproc.onColor(body, msg)) {
+	if(!ok) {
 		debug_i("received color update with message %s", msg.c_str());
 		sendApiCode(response, API_CODES::API_BAD_REQUEST, msg);
 	} else {
@@ -1272,15 +1291,11 @@ void ApplicationWebserver::onConnect(HttpRequest& request, HttpResponse& respons
     */
 
 	if(request.method == HttpMethod::POST) {
-		String body = request.getBody();
 		debug_i("is POST");
-		if(body == NULL) {
-			sendApiCode(response, API_CODES::API_BAD_REQUEST, F("could not get HTTP body"));
+		StaticJsonDocument<512> doc;
+		if(!parseJsonBody(request, response, doc, F("could not get HTTP body"))) {
 			return;
 		}
-		// ConfigDB - CONFIG_MAX_LENGTH was no longer defined, what's the right size here?
-		StaticJsonDocument<512> doc;
-		Json::deserialize(doc, body);
 		String ssid;
 		String password;
 		if(Json::getValue(doc[F("ssid")], ssid)) {
@@ -1345,20 +1360,19 @@ void ApplicationWebserver::onSystemReq(HttpRequest& request, HttpResponse& respo
 	}
 #endif
 */
-	String body = request.getBody();
-	if(body == NULL) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("could not get HTTP body"));
-		return;
-	}
-
 	if(!app.api) {
 		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("api not initialized"));
 		return;
 	}
 
-	debug_i("ApplicationWebserver::onSystemReq: %s", body.c_str());
+	StaticJsonDocument<512> doc;
+	if(!parseJsonBody(request, response, doc, F("could not get HTTP body"))) {
+		return;
+	}
+
+	debug_i("ApplicationWebserver::onSystemReq");
 	String errorMsg;
-	const bool ok = app.api->dispatchCommand(F("system"), body, errorMsg, false);
+	const bool ok = app.api->dispatchCommand(F("system"), doc.as<JsonObject>(), errorMsg, false);
 
 	setCorsHeaders(response);
 
@@ -1409,16 +1423,10 @@ void ApplicationWebserver::onUpdate(HttpRequest& request, HttpResponse& response
 			return;
 		}
 
-		String body = request.getBody();
-		if(body == NULL) {
-			sendApiCode(response, API_CODES::API_BAD_REQUEST, F("could not parse HTTP body"));
+		StaticJsonDocument<512> doc;
+		if(!parseJsonBody(request, response, doc, F("could not parse HTTP body"))) {
 			return;
 		}
-
-		debug_i("body: %s", body.c_str());
-		// ConfigDB - CONFIG_MAX_LENGTH was no longer defined, what's the right size here?
-		StaticJsonDocument<512> doc;
-		Json::deserialize(doc, body);
 		String romurl;
 		Json::getValue(doc[F("rom")][F("url")], romurl);
 
@@ -1490,11 +1498,18 @@ void ApplicationWebserver::onStop(HttpRequest& request, HttpResponse& response)
 	}
     */
 
+	StaticJsonDocument<256> doc;
+	if(!parseJsonBody(request, response, doc, F("could not get HTTP body"))) {
+		return;
+	}
+
 	String msg;
-	if(app.jsonproc.onStop(request.getBody(), msg, true)) {
+	const bool ok = app.api->dispatchCommand(F("stop"), doc.as<JsonObject>(), msg, true);
+
+	if(ok) {
 		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 	} else {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST);
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, msg);
 	}
 }
 
@@ -1502,12 +1517,18 @@ void ApplicationWebserver::onSkip(HttpRequest& request, HttpResponse& response)
 {
     if(!preflightRequest(request, response, {HttpMethod::POST})) return;
     
+	StaticJsonDocument<256> doc;
+	if(!parseJsonBody(request, response, doc, F("could not get HTTP body"))) {
+		return;
+	}
 
 	String msg;
-	if(app.jsonproc.onSkip(request.getBody(), msg)) {
+	const bool ok = app.api->dispatchCommand(F("skip"), doc.as<JsonObject>(), msg, true);
+
+	if(ok) {
 		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 	} else {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST);
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, msg);
 	}
 }
 
@@ -1515,11 +1536,18 @@ void ApplicationWebserver::onPause(HttpRequest& request, HttpResponse& response)
 {
     if(!preflightRequest(request, response, {HttpMethod::POST})) return;
     
+	StaticJsonDocument<256> doc;
+	if(!parseJsonBody(request, response, doc, F("could not get HTTP body"))) {
+		return;
+	}
+
 	String msg;
-	if(app.jsonproc.onPause(request.getBody(), msg, true)) {
+	const bool ok = app.api->dispatchCommand(F("pause"), doc.as<JsonObject>(), msg, true);
+
+	if(ok) {
 		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 	} else {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST);
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, msg);
 	}
 }
 
@@ -1527,11 +1555,18 @@ void ApplicationWebserver::onContinue(HttpRequest& request, HttpResponse& respon
 {
     if(!preflightRequest(request, response, {HttpMethod::POST})) return;
     
+	StaticJsonDocument<256> doc;
+	if(!parseJsonBody(request, response, doc, F("could not get HTTP body"))) {
+		return;
+	}
+
 	String msg;
-	if(app.jsonproc.onContinue(request.getBody(), msg)) {
+	const bool ok = app.api->dispatchCommand(F("continue"), doc.as<JsonObject>(), msg, true);
+
+	if(ok) {
 		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 	} else {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST);
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, msg);
 	}
 }
 
@@ -1539,11 +1574,18 @@ void ApplicationWebserver::onBlink(HttpRequest& request, HttpResponse& response)
 {
     if(!preflightRequest(request, response, {HttpMethod::POST})) return;
 
+	StaticJsonDocument<256> doc;
+	if(!parseJsonBody(request, response, doc, F("could not get HTTP body"))) {
+		return;
+	}
+
 	String msg;
-	if(app.jsonproc.onBlink(request.getBody(), msg)) {
+	const bool ok = app.api->dispatchCommand(F("blink"), doc.as<JsonObject>(), msg, true);
+
+	if(ok) {
 		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 	} else {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST);
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, msg);
 	}
 }
 
@@ -1551,11 +1593,18 @@ void ApplicationWebserver::onToggle(HttpRequest& request, HttpResponse& response
 {
     if(!preflightRequest(request, response, {HttpMethod::POST})) return;
     
+	StaticJsonDocument<256> doc;
+	if(!parseJsonBody(request, response, doc, F("could not get HTTP body"))) {
+		return;
+	}
+
 	String msg;
-	if(app.jsonproc.onToggle(request.getBody(), msg)) {
+	const bool ok = app.api->dispatchCommand(F("toggle"), doc.as<JsonObject>(), msg, true);
+
+	if(ok) {
 		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 	} else {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST);
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, msg);
 	}
 }
 
@@ -1636,9 +1685,13 @@ void ApplicationWebserver::onSetOn(HttpRequest &request, HttpResponse &response)
 		return;
 	}
 
-	String body = request.getBody();
+	StaticJsonDocument<256> doc;
+	if(!parseJsonBody(request, response, doc, F("could not get HTTP body"))) {
+		return;
+	}
+
 	String msg;
-	if(app.api->dispatchCommand(F("setOn"), body, msg, true)) {
+	if(app.api->dispatchCommand(F("setOn"), doc.as<JsonObject>(), msg, true)) {
 		sendApiCode(response, API_SUCCESS, F("SetOn OK"));
 	} else {
 		sendApiCode(response, API_BAD_REQUEST, msg);
@@ -1655,9 +1708,13 @@ void ApplicationWebserver::onSetOff(HttpRequest &request, HttpResponse &response
 		return;
 	}
 
-	String body = request.getBody();
+	StaticJsonDocument<256> doc;
+	if(!parseJsonBody(request, response, doc, F("could not get HTTP body"))) {
+		return;
+	}
+
 	String msg;
-	if(app.api->dispatchCommand(F("setOff"), body, msg, true)) {
+	if(app.api->dispatchCommand(F("setOff"), doc.as<JsonObject>(), msg, true)) {
 		sendApiCode(response, API_SUCCESS, F("SetOff OK"));
 	} else {
 		sendApiCode(response, API_BAD_REQUEST, msg);

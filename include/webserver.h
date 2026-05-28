@@ -23,6 +23,7 @@
 #ifndef APP_WEBSERVER_H_
 #define APP_WEBSERVER_H_
 
+#include <ArduinoJson.h>
 #include <RGBWWLed/RGBWWLedColor.h>
 #include <Network/Http/Websocket/WebsocketResource.h>
 
@@ -102,6 +103,8 @@ private:
     void sendApiCode(HttpResponse &response, API_CODES code, const char* msg = nullptr);
     void sendApiCode(HttpResponse &response, API_CODES code, const String& msg);
     void sendApiCode(HttpResponse &response, API_CODES code, const __FlashStringHelper* msg);
+    bool parseJsonBody(HttpRequest& request, HttpResponse& response, JsonDocument& doc,
+                       const __FlashStringHelper* noBodyMessage);
 
     //void onUpload(HttpRequest &request, HttpResponse &response);
     bool checkHeap(HttpResponse &response);
