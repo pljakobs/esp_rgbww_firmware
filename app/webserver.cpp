@@ -382,7 +382,7 @@ bool ApplicationWebserver::parseJsonBody(HttpRequest& request, HttpResponse& res
 
 	DeserializationError err = deserializeJson(doc, body);
 	if(err) {
-		String parseError = F("malformed json: ");
+		String parseError = F("Invalid JSON: ");
 		parseError += err.c_str();
 		sendApiCode(response, API_CODES::API_BAD_REQUEST, parseError);
 		return false;
