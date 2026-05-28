@@ -340,3 +340,29 @@ def test_malformed_json_returns_bad_request(smoke_config: SmokeConfig) -> None:
         fail_with_trace("Malformed JSON should return HTTP 400", trace, smoke_config.malformed_json_trace)
     if "Invalid JSON" not in response["body"]:
         fail_with_trace("Malformed JSON error body missing expected text", trace, smoke_config.malformed_json_trace)
+
+
+@pytest.mark.parametrize("path", ["/color", "/on"])
+def test_http_malformed_json_rejected(smoke_config: SmokeConfig, path: str) -> None:
+    url = f"{smoke_config.base_url}{path}"
+    bad_payload = b"{bad json"
+    response = http_request(
+        "POST",
+        url,
+        body=bad_payload,
+        headers={"Content-Type": "application/json"},
+    )
+    trace = record_http_probe(
+        smoke_config,
+        probe=f"malformed_json_{path.strip('/').replace('/', '_')}",
+        method="POST",
+        url=url,
+        body=bad_payload,
+        headers={"Content-Type": "application/json"},
+        response=response,
+    )
+
+    if response["error"]:
+        fail_with_trace("Malformed JSON HTTP probe failed unexpectedly", trace)
+    if response["status"] != 400 or "Invalid JSON" not in response["body"]:
+        fail_with_trace("Malformed JSON request should be rejected with Invalid JSON", trace)

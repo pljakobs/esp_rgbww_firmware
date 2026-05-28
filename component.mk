@@ -90,8 +90,15 @@ SMING_GITVERSION =	$(shell git -C $(SMING_HOME)/.. describe --abbrev=4 --dirty -
 WEBAPP_VERSION = $(shell cat $(PROJECT_DIR)/webapp/VERSION)
 USER_CFLAGS = -DGITVERSION=\"$(GIT_VERSION)\" -DGITDATE=\"$(GIT_DATE)\" -DWEBAPP_VERSION=\"$(WEBAPP_VERSION)\" -DSMING_GITVERSION=\"$(SMING_GITVERSION)\" -DMQTT_USER=\"$(MQTT_USER)\" -DMQTT_PASS=\"$(MQTT_PASS)\"
 # Keep format-string type checking strict even when global WERROR is disabled in CI.
-USER_CFLAGS += -Wformat -Werror=format -Werror=format-security
-USER_CXXFLAGS += -Wformat -Werror=format -Werror=format-security
+USER_CFLAGS += -Wformat -Werror=format
+USER_CXXFLAGS += -Wformat -Werror=format
+
+# Esp8266 propagates USER_CFLAGS into external lwIP sources, where older GCC
+# toolchains can reject -Werror=format-security even with -Wformat enabled.
+ifneq ($(SMING_ARCH), Esp8266)
+USER_CFLAGS += -Werror=format-security
+USER_CXXFLAGS += -Werror=format-security
+endif
 COMPONENT_CPPFLAGS += -DCONFIG_ESP_CONSOLE_USB_CDC=1
 
 
