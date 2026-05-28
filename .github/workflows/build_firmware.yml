@@ -3,6 +3,9 @@ name: firmwareBuild
 permissions:
   contents: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 on:
   push:
     branches: [stable, testing, develop, experimental]
