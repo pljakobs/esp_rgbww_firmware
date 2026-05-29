@@ -157,16 +157,16 @@ jobs:
           IFS=',' read -ra soc_list <<< "${{ env.supported_socs }}"
           for soc in "${soc_list[@]}"; do
             soc=$(echo "$soc" | tr -d ' ')
-            mkdir -p download/${{ env.target_branch }}/${{ env.version }}/$soc/debug
-            mkdir -p download/${{ env.target_branch }}/${{ env.version }}/$soc/release
-            mkdir -p download/${{ env.target_branch }}/${{ env.version }}/$soc/debug/single_image
-            mkdir -p download/${{ env.target_branch }}/${{ env.version }}/$soc/release/single_image
+            mkdir -p download/firmware/${{ env.target_branch }}/${{ env.version }}/$soc/debug
+            mkdir -p download/firmware/${{ env.target_branch }}/${{ env.version }}/$soc/release
+            mkdir -p download/firmware/${{ env.target_branch }}/${{ env.version }}/$soc/debug/single_image
+            mkdir -p download/firmware/${{ env.target_branch }}/${{ env.version }}/$soc/release/single_image
           done
           
           # Create version.txt file instead of symlink
-          mkdir -p download/${{ env.target_branch }}/latest
-          echo "${{ env.version }}" > download/${{ env.target_branch }}/latest/version.txt
-          echo "<html><head><meta http-equiv=\"refresh\" content=\"0; URL=../${{ env.version }}/\"></head></html>" > download/${{ env.target_branch }}/latest/index.html
+          mkdir -p download/firmware/${{ env.target_branch }}/latest
+          echo "${{ env.version }}" > download/firmware/${{ env.target_branch }}/latest/version.txt
+          echo "<html><head><meta http-equiv=\"refresh\" content=\"0; URL=../${{ env.version }}/\"></head></html>" > download/firmware/${{ env.target_branch }}/latest/index.html
           
       # Download artifacts for the current branch
       - name: Download artifacts
@@ -179,9 +179,9 @@ jobs:
             for build_type in debug release; do
               for single_img in 0 1; do
                 if [ "$single_img" = "1" ]; then
-                  path="download/${{ env.target_branch }}/${{ env.version }}/$soc/$build_type/single_image"
+                  path="download/firmware/${{ env.target_branch }}/${{ env.version }}/$soc/$build_type/single_image"
                 else
-                  path="download/${{ env.target_branch }}/${{ env.version }}/$soc/$build_type"
+                  path="download/firmware/${{ env.target_branch }}/${{ env.version }}/$soc/$build_type"
                 fi
                 combinations+=("$soc $build_type $single_img $path")
               done
@@ -304,39 +304,39 @@ jobs:
                 map_file="app.map"
               fi
               
-              url="http://$DEPLOY_SERVER/download/$TARGET_BRANCH/$VERSION/$soc/$type/$bin_file"
+              url="http://$DEPLOY_SERVER/download/firmware/$TARGET_BRANCH/$VERSION/$soc/$type/$bin_file"
               python3 manage_version.py version.json add $soc $type $TARGET_BRANCH "$VERSION" "$url" --comment-b64 "$COMMENT_B64"
               
               # ELF and map are sibling files — URL predictable by replacing bin filename.
-              echo "ELF deployed at: http://$DEPLOY_SERVER/download/$TARGET_BRANCH/$VERSION/$soc/$type/$elf_file"
-              echo "MAP deployed at: http://$DEPLOY_SERVER/download/$TARGET_BRANCH/$VERSION/$soc/$type/$map_file"
+              echo "ELF deployed at: http://$DEPLOY_SERVER/download/firmware/$TARGET_BRANCH/$VERSION/$soc/$type/$elf_file"
+              echo "MAP deployed at: http://$DEPLOY_SERVER/download/firmware/$TARGET_BRANCH/$VERSION/$soc/$type/$map_file"
             done
           done
           
           # Update 'latest' pointer
-          mkdir -p download/$TARGET_BRANCH/latest
+          mkdir -p download/firmware/$TARGET_BRANCH/latest
           # We need to make sure the target directory structure exists before writing to it
           # validation: check if the latest version directory actually exists
-          if [ -d "download/$TARGET_BRANCH/$VERSION" ]; then
-              echo "$VERSION" > download/$TARGET_BRANCH/latest/version.txt
-              echo "<html><head><meta http-equiv=\"refresh\" content=\"0; URL=../$VERSION/\"></head></html>" > download/$TARGET_BRANCH/latest/index.html
+          if [ -d "download/firmware/$TARGET_BRANCH/$VERSION" ]; then
+              echo "$VERSION" > download/firmware/$TARGET_BRANCH/latest/version.txt
+              echo "<html><head><meta http-equiv=\"refresh\" content=\"0; URL=../$VERSION/\"></head></html>" > download/firmware/$TARGET_BRANCH/latest/index.html
           else
-              echo "Warning: Version directory download/$TARGET_BRANCH/$VERSION does not exist on remote"
+              echo "Warning: Version directory download/firmware/$TARGET_BRANCH/$VERSION does not exist on remote"
           fi
 
-          # Create/update direct download symlinks: download/<soc>/<branch>/<type>/app-merged.bin
+          # Create/update direct download symlinks: download/firmware/<soc>/<branch>/<type>/app-merged.bin
           # These match the static HTML download links and always point to the latest version.
           echo "Updating direct download symlinks..."
           IFS=',' read -ra soc_list <<< "$SUPPORTED_SOCS"
           for soc in "${soc_list[@]}"; do
             soc=$(echo "$soc" | tr -d ' ')
             for type in debug release; do
-              symlink_dir="download/$soc/$TARGET_BRANCH/$type"
+              symlink_dir="download/firmware/$soc/$TARGET_BRANCH/$type"
               mkdir -p "$symlink_dir"
-              # Relative path from download/<soc>/<branch>/<type>/ up to download/ then into versioned path
-              ln -sf "../../../$TARGET_BRANCH/$VERSION/$soc/$type/single_image/app-merged.bin" \
+              # Relative path from download/firmware/<soc>/<branch>/<type>/ up to download/firmware/ then into versioned path
+              ln -sf "../../../../firmware/$TARGET_BRANCH/$VERSION/$soc/$type/single_image/app-merged.bin" \
                 "$symlink_dir/app-merged.bin"
-              echo "Symlink: $symlink_dir/app-merged.bin -> ../../../$TARGET_BRANCH/$VERSION/$soc/$type/single_image/app-merged.bin"
+              echo "Symlink: $symlink_dir/app-merged.bin -> ../../../../firmware/$TARGET_BRANCH/$VERSION/$soc/$type/single_image/app-merged.bin"
             done
           done
 
@@ -347,7 +347,7 @@ jobs:
           # Set ownership to deploy user:nginx group
           chown -R github-deploy:nginx *
           # Ensure directories are 755 and files are 644
-          find download -type d -exec chmod 755 {} \;
+          find download/firmware -type d -exec chmod 755 {} \;
           find download -type f -exec chmod 644 {} \;
           chmod +x manage_version.py
           

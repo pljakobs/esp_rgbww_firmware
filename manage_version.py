@@ -469,6 +469,60 @@ def cull_history(data, dry_run=False):
     
     return data
 
+def add_or_update_webapp_entry(data, branch, version, base_url, files=None, comment=''):
+    """Add or update a webapp entry in version.json."""
+    if "webapp" not in data:
+        data["webapp"] = []
+    if "webapp_history" not in data:
+        data["webapp_history"] = []
+    files = files or []
+    branch = branch.strip().lower()
+    comment = comment or ''
+
+    for i, entry in enumerate(data["webapp"]):
+        if entry["branch"].strip().lower() == branch:
+            if entry["version"] == version:
+                data["webapp"][i] = {
+                    "branch": entry["branch"],
+                    "version": version,
+                    "url": base_url,
+                    "files": files,
+                    "comment": comment if comment else entry.get("comment", "")
+                }
+                print(f"Updated webapp entry for {branch} version {version} (same version, URL/files updated)")
+            else:
+                print(f"Moving webapp {branch}: {entry['version']} to history")
+                data["webapp_history"].append(dict(entry))
+                data["webapp"][i] = {
+                    "branch": branch,
+                    "version": version,
+                    "url": base_url,
+                    "files": files,
+                    "comment": comment
+                }
+                print(f"Added new webapp entry for {branch} version {version}")
+            return data
+
+    data["webapp"].append({
+        "branch": branch,
+        "version": version,
+        "url": base_url,
+        "files": files,
+        "comment": comment
+    })
+    print(f"Added new webapp entry for {branch} version {version}")
+    return data
+
+
+def list_webapp_entries(data, branch=None):
+    """List webapp entries, optionally filtered by branch."""
+    entries = data.get("webapp", [])
+    if branch:
+        branch = branch.strip().lower()
+        entries = [e for e in entries if e["branch"].strip().lower() == branch]
+    return entries
+
+
 def main():
     if len(sys.argv) < 3:
         print("Usage: script.py <json_file_or_url> [add|delete|list|cull] [arguments]")
@@ -571,7 +625,49 @@ def main():
             print(f"{history_marker}{entry['soc']}/{entry['type']}/{entry['branch']}: {entry['fw_version']}{url_status} - {entry['files']['rom']['url']}")
         return
 
-    print("Invalid action. Use add, delete, list, or cull.")
+    if action == 'add-webapp':
+        if len(sys.argv) < 6:
+            print("Usage: script.py <json_file> add-webapp <branch> <version> <base_url> [--files-json-b64 <base64>] [--comment-b64 <base64>]")
+            return
+        branch = sys.argv[3]
+        version = sys.argv[4]
+        base_url = sys.argv[5]
+        files = []
+        comment = ''
+        args = sys.argv[6:]
+        idx = 0
+        while idx < len(args):
+            if args[idx] == '--files-json-b64' and idx + 1 < len(args):
+                try:
+                    files = json.loads(base64.b64decode(args[idx + 1]).decode('utf-8'))
+                except Exception as exc:
+                    print(f"Error decoding --files-json-b64: {exc}")
+                    return
+                idx += 2
+            elif args[idx] == '--comment-b64' and idx + 1 < len(args):
+                try:
+                    comment = base64.b64decode(args[idx + 1]).decode('utf-8')
+                except Exception as exc:
+                    print(f"Error decoding --comment-b64: {exc}")
+                    return
+                idx += 2
+            else:
+                idx += 1
+        data = add_or_update_webapp_entry(data, branch, version, base_url, files, comment)
+        save_json(data, file_path_or_url)
+        print(f"Webapp entry added/updated for {branch} version {version}.")
+        return
+
+    if action == 'list-webapp':
+        branch = sys.argv[3] if len(sys.argv) > 3 else None
+        entries = list_webapp_entries(data, branch)
+        print(f"Found {len(entries)} webapp entries:")
+        for entry in sorted(entries, key=lambda e: e['branch']):
+            files_count = len(entry.get("files", []))
+            print(f"  {entry['branch']}: {entry['version']} ({files_count} files) - {entry['url']}")
+        return
+
+    print("Invalid action. Use add, delete, list, cull, add-webapp, or list-webapp.")
 
 if __name__ == "__main__":
     main()
