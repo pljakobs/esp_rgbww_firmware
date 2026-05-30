@@ -7,7 +7,7 @@ import base64
 import requests
 from urllib.parse import urlparse
 
-def update_latest_symlink(data, base_dir='download'):
+def update_latest_symlink(data, base_dir='download/firmware'):
     """
     For each branch (develop, testing, main), create or update a symlink (or copy) in download/latest-<branch>/app_merged.bin
     pointing to the latest single_image/app_merged.bin for that branch.
@@ -25,7 +25,12 @@ def update_latest_symlink(data, base_dir='download'):
         # Extract the local path to app_merged.bin
         parsed = urlparse(url)
         rel_path = parsed.path.lstrip('/')
-        src_path = os.path.join(base_dir, rel_path) if not rel_path.startswith(base_dir) else rel_path
+        if rel_path.startswith(base_dir.rstrip('/') + '/'):
+            src_path = rel_path
+        elif rel_path.startswith('download/'):
+            src_path = rel_path
+        else:
+            src_path = os.path.join(base_dir, rel_path)
         # Target symlink directory
         link_dir = os.path.join(base_dir, f'latest-{branch}')
         os.makedirs(link_dir, exist_ok=True)

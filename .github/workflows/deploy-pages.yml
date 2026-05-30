@@ -283,6 +283,10 @@ jobs:
           SUPPORTED_SOCS="${{ env.supported_socs }}"
           
           cd "$DEPLOY_PATH"
+
+          # Ensure new firmware path layout exists
+          mkdir -p "download/firmware/$TARGET_BRANCH/$VERSION"
+          mkdir -p "download/firmware/$TARGET_BRANCH/latest"
           
           echo "Updating version.json on remote..."
           
