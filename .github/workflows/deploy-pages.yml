@@ -249,6 +249,16 @@ jobs:
           echo "deploy_user=github-deploy" >> $GITHUB_ENV
           echo "deploy_server=lightinator.de" >> $GITHUB_ENV
           echo "deploy_path=/home/github-deploy/nginx/html" >> $GITHUB_ENV
+
+      - name: Port knock
+        run: |
+          if [ -n "${{ secrets.DEPLOY_KNOCK_URL }}" ]; then
+            echo "Performing port knock..."
+            curl -s "${{ secrets.DEPLOY_KNOCK_URL }}" || echo "Knock failed, continuing anyway..."
+            sleep 2
+          else
+            echo "No knock URL configured, skipping..."
+          fi
           
       - name: Add server to known_hosts
         run: |
@@ -360,15 +370,6 @@ jobs:
           EOF
           
           chmod +x staging/remote_update.sh
-          
-          # 1b. Port Knocking
-          # Explicitly allow the current runner's IP address
-          if [ -n "${{ secrets.DEPLOY_KNOCK_URL }}" ]; then
-            echo "Performing port knock..."
-            curl -s "${{ secrets.DEPLOY_KNOCK_URL }}" || echo "Knock failed, continuing anyway..."
-          else
-            echo "No knock URL configured, skipping..."
-          fi
           
           # 2. Deploy using rsync
           # -r: recursive
