@@ -135,6 +135,7 @@ void ApplicationWebserver::init()
 	paths.set(F("/networks"), HttpPathDelegate(&ApplicationWebserver::onNetworks, this));
 	paths.set(F("/scan_networks"), HttpPathDelegate(&ApplicationWebserver::onScanNetworks, this));
 	paths.set(F("/webapp_status"), HttpPathDelegate(&ApplicationWebserver::onWebappStatus, this));
+	paths.set(F("/webapp_check"), HttpPathDelegate(&ApplicationWebserver::onWebappCheck, this));
 	paths.set(F("/system"), HttpPathDelegate(&ApplicationWebserver::onSystemReq, this));
 	paths.set(F("/update"), HttpPathDelegate(&ApplicationWebserver::onUpdate, this));
 	paths.set(F("/connect"), HttpPathDelegate(&ApplicationWebserver::onConnect, this));
@@ -602,6 +603,31 @@ void ApplicationWebserver::onIndex(HttpRequest& request, HttpResponse& response)
 	setCorsHeaders(response);
 	response.code = HTTP_STATUS_PERMANENT_REDIRECT;
 	response.sendString(F("Redirecting to /index.html"));
+}
+
+void ApplicationWebserver::onWebappCheck(HttpRequest& request, HttpResponse& response)
+{
+	debug_i("http onWebappCheck");
+	if(!preflightRequest(request, response, {HttpMethod::GET, HttpMethod::POST})) return;
+	if(!checkHeap(response)) return;
+
+	if(request.method == HttpMethod::POST) {
+		if(!app.webappOta.isActive()) {
+			app.webappOta.checkForUpdate(true /* ignoreEnabled: manual trigger */);
+		}
+	}
+
+	// Return current OTA status (same as /webapp_status but cache-busted)
+	DynamicJsonDocument doc(512);
+	JsonObject json = doc.to<JsonObject>();
+	app.webappOta.fillStatusJson(json);
+	String body;
+	serializeJson(doc, body);
+
+	setCorsHeaders(response);
+	response.headers[HTTP_HEADER_CACHE_CONTROL] = F("no-store");
+	response.headers[HTTP_HEADER_CONTENT_TYPE] = F("application/json");
+	response.sendString(body);
 }
 
 void ApplicationWebserver::onWebappStatus(HttpRequest& request, HttpResponse& response)

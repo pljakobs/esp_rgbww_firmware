@@ -173,6 +173,13 @@ bool Api::dispatchCommand(const String& method, const JsonObject& params, String
 		return true;
 	}
 
+	if(method == F("webapp_check")) {
+		if(!app.webappOta.isActive()) {
+			app.webappOta.checkForUpdate(true /* ignoreEnabled: manual trigger */);
+		}
+		return true;
+	}
+
 	errorMsg = F("method not implemented");
     debug_e("Api::dispatchCommand failed: %s", errorMsg.c_str());
 	return false;
