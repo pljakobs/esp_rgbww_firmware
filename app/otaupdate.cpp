@@ -184,7 +184,7 @@ void ApplicationOTA::start(String romurl)
 	 * ############################################################
 	 * ##### HIGH RISK: CORE OTA TRANSACTION SETUP            #####
 	 * ##### Changes here can brick OTA-only recoverable      #####
-	 * ##### devices.                                          #####
+	 * ##### devices.                                         #####
 	 * ############################################################
 	 */
 	debug_i("ApplicationOTA::start");
@@ -665,6 +665,8 @@ std::vector<Storage::esp_partition_info_t> ApplicationOTA::getEditablePartitionT
 	for(auto partition : table) {
 		Storage::esp_partition_info_t entry;
 		entry.magic = 0x50AA;
+		// TODO(#138): strncpy does not guarantee null-termination if name is exactly sizeof(entry.name) bytes.
+		// Fix: use sizeof(entry.name)-1 and set entry.name[sizeof(entry.name)-1] = '\0'.
 		strncpy(entry.name, partition.name().c_str(), sizeof(entry.name));
 		entry.type = partition.type();
 		entry.subtype = partition.subType();
@@ -692,9 +694,9 @@ bool ApplicationOTA::addPartition(std::vector<Storage::esp_partition_info_t>& pa
 {
 	Storage::esp_partition_info_t newPartition;
 	newPartition.magic = 0x50AA;
+	// TODO(#138): strncpy does not guarantee null-termination — see same issue in getEditablePartitionTable.
 	strncpy(newPartition.name, name.c_str(), sizeof(newPartition.name));
 	newPartition.type = static_cast<Storage::Partition::Type>(type);
-	//newPartition.subtype=static_cast<Storage::Partition::subtype>(subType);
 	newPartition.subtype = subType;
 	newPartition.offset = start;
 	newPartition.size = size;
@@ -729,6 +731,13 @@ bool ApplicationOTA::savePartitionTable(std::vector<Storage::esp_partition_info_
 	std::sort(partitionTable.begin(), partitionTable.end(),
 			  [](const auto& a, const auto& b) { return a.offset < b.offset; });
 
+	// TODO(#136): overlap check condition is inverted — checks (B.offset + B.size) < A.end
+	// instead of (B.offset < A.end).  A partition that starts inside A but extends past it
+	// will not be detected.  Fix: replace the condition with `partition.offset < partitionEnd`.
+	// TODO(#137): no upper-bound check — a partition whose end exceeds the flash size
+	// (hardcoded 0x400000) is silently accepted.  Fix: add
+	//   if (partition.offset + partition.size > FLASH_SIZE) return false;
+	// before the overlap test.
 	// Check for overlaps
 	bool isFirst = true;
 	uint32_t partitionEnd;
@@ -736,7 +745,7 @@ bool ApplicationOTA::savePartitionTable(std::vector<Storage::esp_partition_info_
 		Serial << "Partition: " << partition.name << " start: " << partition.offset
 			   << " end: " << partition.offset + partition.size << endl;
 		if(!isFirst) {
-			if((partition.offset + partition.size) < partitionEnd) {
+			if((partition.offset + partition.size) < partitionEnd) { // TODO(#136): condition is inverted, see above
 				// Overlap detected, handle error
 				Serial << "Error: Overlapping partitions detected " << partition.name << endl;
 				return false;
@@ -769,6 +778,7 @@ bool ApplicationOTA::savePartitionTable(std::vector<Storage::esp_partition_info_
 		// Add the partition entry
 		Storage::esp_partition_info_t entry;
 		entry.magic = 0x50AA;
+		// TODO(#138): strncpy does not guarantee null-termination — see same issue in getEditablePartitionTable.
 		strncpy(entry.name, partition.name, sizeof(entry.name));
 		entry.type = partition.type;
 		entry.subtype = partition.subtype;
