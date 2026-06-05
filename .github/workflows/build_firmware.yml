@@ -51,7 +51,9 @@ jobs:
         id: get_branch
         run: |
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            echo "branch=${{ github.event.inputs.branch }}" >> $GITHUB_OUTPUT
+            # Use github.ref_name so the branch matches the ref the workflow was triggered on.
+            # inputs.branch has a default of 'develop' and would mismatch if --ref is used.
+            echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
           elif [ "${{ github.event_name }}" == "repository_dispatch" ]; then
             echo "branch=${{ github.event.client_payload.branch }}" >> $GITHUB_OUTPUT
           elif [ "${{ github.event_name }}" == "push" ]; then
@@ -431,7 +433,9 @@ jobs:
         id: get_branch
         run: |
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            echo "branch=${{ github.event.inputs.branch }}" >> $GITHUB_OUTPUT
+            # Use github.ref_name so the branch matches the ref the workflow was triggered on.
+            # inputs.branch has a default of 'develop' and would mismatch if --ref is used.
+            echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
           elif [ "${{ github.event_name }}" == "repository_dispatch" ]; then
             echo "branch=${{ github.event.client_payload.branch }}" >> $GITHUB_OUTPUT
           elif [ "${{ github.event_name }}" == "push" ]; then
