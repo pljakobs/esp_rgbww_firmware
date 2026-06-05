@@ -152,10 +152,23 @@ jobs:
           if [ "$WEBAPP_BRANCH" = "experimental" ]; then
             echo "experimental build: extracting minimal file set only"
             mkdir -p ./webapp/config
-            unzip -p spa-files.zip captive.html > ./webapp/captive.html
-            unzip -p spa-files.zip updating.html > ./webapp/updating.html
-            unzip -p spa-files.zip config/pinconfig.json > ./webapp/config/pinconfig.json
-            unzip -p spa-files.zip VERSION > ./webapp/VERSION
+            # captive.html and updating.html live at the webapp repo root and
+            # may not be present in the dist/spa zip. Try the zip first, then
+            # fall back to raw.githubusercontent.com.
+            if unzip -p spa-files.zip dist/spa/captive.html > ./webapp/captive.html 2>/dev/null; then
+              echo "captive.html from zip"
+            else
+              echo "captive.html not in zip, fetching from webapp repo"
+              curl -fsSL "https://raw.githubusercontent.com/pljakobs/esp_rgb_webapp2/${WEBAPP_BRANCH}/captive.html" > ./webapp/captive.html
+            fi
+            if unzip -p spa-files.zip dist/spa/updating.html > ./webapp/updating.html 2>/dev/null; then
+              echo "updating.html from zip"
+            else
+              echo "updating.html not in zip, fetching from webapp repo"
+              curl -fsSL "https://raw.githubusercontent.com/pljakobs/esp_rgb_webapp2/${WEBAPP_BRANCH}/updating.html" > ./webapp/updating.html
+            fi
+            unzip -p spa-files.zip dist/spa/config/pinconfig.json > ./webapp/config/pinconfig.json
+            unzip -p spa-files.zip dist/spa/VERSION > ./webapp/VERSION
           else
             unzip spa-files.zip -d ./webapp
             mv ./webapp/dist/spa/* ./webapp
@@ -622,10 +635,23 @@ jobs:
           if [ "$WEBAPP_BRANCH" = "experimental" ]; then
             echo "experimental build: extracting minimal file set only"
             mkdir -p ./webapp/config
-            unzip -p spa-files.zip captive.html > ./webapp/captive.html
-            unzip -p spa-files.zip updating.html > ./webapp/updating.html
-            unzip -p spa-files.zip config/pinconfig.json > ./webapp/config/pinconfig.json
-            unzip -p spa-files.zip VERSION > ./webapp/VERSION
+            # captive.html and updating.html live at the webapp repo root and
+            # may not be present in the dist/spa zip. Try the zip first, then
+            # fall back to raw.githubusercontent.com.
+            if unzip -p spa-files.zip dist/spa/captive.html > ./webapp/captive.html 2>/dev/null; then
+              echo "captive.html from zip"
+            else
+              echo "captive.html not in zip, fetching from webapp repo"
+              curl -fsSL "https://raw.githubusercontent.com/pljakobs/esp_rgb_webapp2/${WEBAPP_BRANCH}/captive.html" > ./webapp/captive.html
+            fi
+            if unzip -p spa-files.zip dist/spa/updating.html > ./webapp/updating.html 2>/dev/null; then
+              echo "updating.html from zip"
+            else
+              echo "updating.html not in zip, fetching from webapp repo"
+              curl -fsSL "https://raw.githubusercontent.com/pljakobs/esp_rgb_webapp2/${WEBAPP_BRANCH}/updating.html" > ./webapp/updating.html
+            fi
+            unzip -p spa-files.zip dist/spa/config/pinconfig.json > ./webapp/config/pinconfig.json
+            unzip -p spa-files.zip dist/spa/VERSION > ./webapp/VERSION
           else
             unzip spa-files.zip -d ./webapp
             mv ./webapp/dist/spa/* ./webapp
