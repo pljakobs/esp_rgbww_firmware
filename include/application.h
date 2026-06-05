@@ -22,6 +22,7 @@
 #pragma once
 #include <RGBWWCtrl.h>
 #include <otaupdate.h>
+#include <webappota.h>
 #include <controllers.h>
 #include <mdnsHandler.h>
 #ifndef SMING_RELEASE
@@ -109,6 +110,7 @@ public:
     std::unique_ptr<Controllers> controllers;
     
     ApplicationOTA ota;
+    WebappOta webappOta;
     std::unique_ptr<AppConfig> cfg;
     std::unique_ptr<AppData> data;
 

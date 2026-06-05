@@ -134,6 +134,7 @@ void ApplicationWebserver::init()
 	paths.set(F("/color"), HttpPathDelegate(&ApplicationWebserver::onColor, this));
 	paths.set(F("/networks"), HttpPathDelegate(&ApplicationWebserver::onNetworks, this));
 	paths.set(F("/scan_networks"), HttpPathDelegate(&ApplicationWebserver::onScanNetworks, this));
+	paths.set(F("/webapp_status"), HttpPathDelegate(&ApplicationWebserver::onWebappStatus, this));
 	paths.set(F("/system"), HttpPathDelegate(&ApplicationWebserver::onSystemReq, this));
 	paths.set(F("/update"), HttpPathDelegate(&ApplicationWebserver::onUpdate, this));
 	paths.set(F("/connect"), HttpPathDelegate(&ApplicationWebserver::onConnect, this));
@@ -178,6 +179,19 @@ void ApplicationWebserver::wsConnected(WebsocketConnection& socket)
 	debug_i("===>wsConnected");
 	webSockets.addElement(&socket);
 	debug_i("===>nr of websockets: %i", webSockets.size());
+
+	// If a webapp OTA is in progress, push the current state immediately so
+	// the updating page doesn't have to wait for the next timed broadcast.
+	if(app.webappOta.isActive()) {
+		StaticJsonDocument<256> doc;
+		JsonObject params = doc.to<JsonObject>();
+		app.webappOta.fillStatusJson(params);
+		JsonRpcMessage msg(F("webapp_ota_status"));
+		msg.setId(0);
+		JsonObject root = msg.getParams();
+		for(JsonPair kv : params) root[kv.key()] = kv.value();
+		socket.sendString(Json::serialize(msg.getRoot()));
+	}
 }
 
 void ApplicationWebserver::wsDisconnected(WebsocketConnection& socket)
@@ -281,8 +295,11 @@ bool ICACHE_FLASH_ATTR ApplicationWebserver::authenticateExec(HttpRequest& reque
 {
 	{
 		debug_i("ApplicationWebserver::authenticated - checking general context");
-		AppConfig::Root config(*app.cfg);
-		if(!config.security.getApiSecured())
+		if(_apiSecuredCache < 0) {
+			AppConfig::Root config(*app.cfg);
+			_apiSecuredCache = config.security.getApiSecured() ? 1 : 0;
+		}
+		if(_apiSecuredCache == 0)
 			return true;
 	} // end AppConfig general context
 
@@ -387,7 +404,11 @@ void ApplicationWebserver::addInfoFields(JsonObject& obj)
 	dev[F("current_rom")] = String(app.ota.getRomPartition().name());
 #endif
 	JsonObject application = obj.createNestedObject(F("app"));
-	application[F("webapp_version")] = WEBAPP_VERSION;
+	{
+		AppConfig::Root::Webapp webappCfg(*app.cfg);
+		String installedVer = webappCfg.getInstalledVersion();
+		application[F("webapp_version")] = installedVer.length() > 0 ? installedVer : String(WEBAPP_VERSION);
+	}
 	application[F("git_version")] = fw_git_version;
 	application[F("build_type")] = BUILD_TYPE;
 	application[F("git_date")] = fw_git_date;
@@ -450,7 +471,8 @@ bool ApplicationWebserver::parseJsonBody(HttpRequest& request, HttpResponse& res
 void ApplicationWebserver::onFile(HttpRequest& request, HttpResponse& response)
 {
 	debug_i("http onFile");
-	if(!preflightRequest(request, response, {HttpMethod::GET, HttpMethod::HEAD})) return;
+	// LittleFS file serving buffers through lwIP — require more free heap than API calls.
+	if(!preflightRequest(request, response, {HttpMethod::GET, HttpMethod::HEAD}, 10000)) return;
 
 #ifdef ARCH_ESP8266
 	if(app.ota.isProccessing()) {
@@ -501,8 +523,9 @@ void ApplicationWebserver::onFile(HttpRequest& request, HttpResponse& response)
 				//response.setCache(604800, true); // It's important to use cache for better performance.
 				response.setHeader(F("Cache-Control"),F("public, max-age=604800, immutable"));
 #endif
-				response.code = HTTP_STATUS_OK;
-				response.sendFile(fileName);
+				// sendFile with allowGzipFileCheck=true: tries fileName+".gz" first, sets
+				// Content-Encoding:gzip, and infers MIME from fileName (not fileName.gz).
+				response.sendFile(fileName, true);
 			}
 			return;
 		}
@@ -539,11 +562,68 @@ void ApplicationWebserver::onIndex(HttpRequest& request, HttpResponse& response)
 	}
 #endif
 
+	bool hasLfsIndex = app.isFilesystemMounted() &&
+	                   (fileExist(F("index.html")) || fileExist(F("index.html.gz")));
+
+	// Case 1: AP active with no WiFi credentials → serve captive portal
+	if(WifiAccessPoint.isEnabled() && !WifiStation.isConnected() && !hasLfsIndex) {
+		debug_i("onIndex: serving captive portal");
+		auto v = fileMap[F("captive.html")];
+		if(v) {
+			setCorsHeaders(response);
+			response.headers[HTTP_HEADER_CACHE_CONTROL] = F("no-store");
+			auto stream = std::make_unique<FSTR::Stream>(v.content());
+			response.sendDataStream(stream.release(), MIME_HTML);
+			return;
+		}
+	}
+
+	// Case 2: WiFi connected but webapp not yet in LFS → show progress page
+	if(WifiStation.isConnected() && !hasLfsIndex) {
+		debug_i("onIndex: serving updating page");
+		// Kick off webapp OTA if not already running
+		if(!app.webappOta.isActive()) {
+			app.webappOta.checkForUpdate();
+		}
+		auto v = fileMap[F("updating.html")];
+		if(v) {
+			setCorsHeaders(response);
+			// Must not be cached — the page content changes with firmware and its
+			// poll interval is baked in. Heuristic caching would serve a stale copy.
+			response.headers[HTTP_HEADER_CACHE_CONTROL] = F("no-store");
+			auto stream = std::make_unique<FSTR::Stream>(v.content());
+			response.sendDataStream(stream.release(), MIME_HTML);
+			return;
+		}
+	}
+
+	// Normal: LFS webapp is present, redirect to index.html
 	response.headers[HTTP_HEADER_LOCATION] = F("/index.html");
 	setCorsHeaders(response);
-
 	response.code = HTTP_STATUS_PERMANENT_REDIRECT;
 	response.sendString(F("Redirecting to /index.html"));
+}
+
+void ApplicationWebserver::onWebappStatus(HttpRequest& request, HttpResponse& response)
+{
+	debug_i("http onWebappStatus");
+	if(!preflightRequest(request, response, {HttpMethod::GET}, 12000)) return;
+
+	unsigned long now = millis();
+	// Bypass cache when OTA is idle (terminal state) so updating.html sees the final result immediately.
+	bool otaActive = app.webappOta.isActive();
+	if(_webappStatusCache.length() == 0 || !otaActive || (now - _webappStatusCacheTime) >= WEBAPP_STATUS_CACHE_MS) {
+		DynamicJsonDocument doc(512);
+		JsonObject json = doc.to<JsonObject>();
+		app.webappOta.fillStatusJson(json);
+		_webappStatusCache = String();
+		serializeJson(doc, _webappStatusCache);
+		_webappStatusCacheTime = now;
+	}
+
+	setCorsHeaders(response);
+	response.headers[HTTP_HEADER_CONTENT_TYPE] = F("application/json");
+	response.sendString(_webappStatusCache);
 }
 
 bool ApplicationWebserver::checkHeap(HttpResponse& response)
@@ -553,11 +633,14 @@ bool ApplicationWebserver::checkHeap(HttpResponse& response)
 
 bool ApplicationWebserver::checkHeap(HttpResponse& response, int minHeap)
 {
-
 	if(!app.checkHeap(minHeap) ) {
 		setCorsHeaders(response);
 		response.code = HTTP_STATUS_TOO_MANY_REQUESTS;
-		response.setHeader(F("Retry-After"), "4");
+		// If webapp OTA is active the heap stays low for ~30 s (download backoff).
+		// Tell the browser to wait that long so it doesn't hammer us with retries
+		// that each cost a TCP connection + lwIP buffers.
+		int retryAfter = app.webappOta.isActive() ? 30 : 4;
+		response.setHeader(F("Retry-After"), String(retryAfter));
 		debug_e("Not enough heap free, rejecting request. Free heap: %u", app.getFreeHeapSize());
 		return false;
 	}
@@ -650,6 +733,8 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 	if(request.method == HttpMethod::POST) {
 		debug_i("======================\nHTTP POST request received, ");
 		app.telemetryClient.log(F("onConfig POST"));
+		// Invalidate the cached security flag so any password/secured changes take effect immediately.
+		_apiSecuredCache = -1;
 
 		/* ConfigDB importFomStream */
 		String oldIP, oldSSID, oldDeviceName, oldCurrentPinConfigName, oldSyslogHost;
@@ -1047,7 +1132,11 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response){
 			data[F("git_version")] = fw_git_version;
 			data[F("build_type")] = BUILD_TYPE;
 			data[F("git_date")] = fw_git_date;
-			data[F("webapp_version")] = WEBAPP_VERSION;
+			{
+				AppConfig::Root::Webapp webappCfg(*app.cfg);
+				String installedVer = webappCfg.getInstalledVersion();
+				data[F("webapp_version")] = installedVer.length() > 0 ? installedVer : String(WEBAPP_VERSION);
+			}
 			data[F("sming")] = SMING_VERSION;
 			data[F("event_num_clients")] = app.eventserver.activeClients;
 			data[F("uptime")] = app.getUptime();

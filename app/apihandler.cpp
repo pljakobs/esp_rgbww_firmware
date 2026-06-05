@@ -127,6 +127,10 @@ bool Api::dispatchCommand(const String& method, const JsonObject& params, String
 	if(method == F("setOff") || method == F("off")) {
 		return app.jsonproc.onSetOff(params, errorMsg, relay);
 	}
+	if(method == F("keep_alive")) {
+		// No-op ping from webapp to keep the WebSocket connection alive.
+		return true;
+	}
 	if(method == F("scan_networks")) {
 		if(!app.network.isScanning()) {
 			app.network.scan(false);
@@ -350,7 +354,11 @@ bool Api::handleInfo(const JsonObject& params, JsonObject& data)
 #endif
 
 		JsonObject application = data.createNestedObject(F("app"));
-		application[F("webapp_version")] = WEBAPP_VERSION;
+		{
+			AppConfig::Root::Webapp webappCfg(*app.cfg);
+			String installedVer = webappCfg.getInstalledVersion();
+			application[F("webapp_version")] = installedVer.length() > 0 ? installedVer : String(WEBAPP_VERSION);
+		}
 		application[F("git_version")] = fw_git_version;
 		application[F("build_type")] = BUILD_TYPE;
 		application[F("git_date")] = fw_git_date;
@@ -481,7 +489,11 @@ bool Api::handleInfo(const JsonObject& params, JsonObject& data)
 	data[F("git_version")] = fw_git_version;
 	data[F("build_type")] = BUILD_TYPE;
 	data[F("git_date")] = fw_git_date;
-	data[F("webapp_version")] = WEBAPP_VERSION;
+	{
+		AppConfig::Root::Webapp webappCfg(*app.cfg);
+		String installedVer = webappCfg.getInstalledVersion();
+		data[F("webapp_version")] = installedVer.length() > 0 ? installedVer : String(WEBAPP_VERSION);
+	}
 	data[F("sming")] = SMING_VERSION;
 	data[F("event_num_clients")] = app.eventserver.activeClients;
 	data[F("uptime")] = app.getUptime();

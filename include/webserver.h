@@ -61,7 +61,14 @@ private:
 
     bool _init = false;
     bool _running = false;
-    
+
+    // Cached security flag: -1=not yet read, 0=unsecured, 1=secured
+    int _apiSecuredCache = -1;
+
+    // Rate-limiting for /webapp_status: cached serialised JSON + timestamp
+    String _webappStatusCache;
+    unsigned long _webappStatusCacheTime = 0;
+    static constexpr unsigned long WEBAPP_STATUS_CACHE_MS = 3000;
 
     WebsocketResource* wsResource = nullptr;
     WebsocketList webSockets;
@@ -72,6 +79,7 @@ private:
     void onFile(HttpRequest &request, HttpResponse &response);
     void onIndex(HttpRequest &request, HttpResponse &response);
     void onWebapp(HttpRequest &request, HttpResponse &response);
+    void onWebappStatus(HttpRequest &request, HttpResponse &response);
     void onConfig(HttpRequest &request, HttpResponse &response);
     void onInfo(HttpRequest &request, HttpResponse &response);
     void onColor(HttpRequest &request, HttpResponse &response);

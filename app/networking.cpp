@@ -376,6 +376,9 @@ void AppWIFI::_STAGotIP(IpAddress ip, IpAddress mask, IpAddress gateway)
 #ifndef SMING_RELEASE
 	app.udpSyslogStream.drainPreNetBuffer();
 #endif
+
+	// Kick off background webapp update check now that we have a routable IP.
+	app.webappOta.checkForUpdate();
 }
 
 /**
@@ -398,6 +401,16 @@ void AppWIFI::stopAp(int delay)
 	debug_i("AppWIFI::stopAp");
 	debug_i("Disabling AP");
 	_timer.stop();
+
+	// Don't shut down the AP while the webapp is still downloading — the user's
+	// browser may be connected via the AP to watch the updating page.  Poll every
+	// 10 s until the download is done, then disable the AP.
+	if(app.webappOta.isActive()) {
+		debug_i("AppWIFI::stopAp - webapp OTA in progress, deferring AP stop by 10s");
+		_timer.initializeMs(10000, std::bind(&AppWIFI::stopAp, this, 0)).startOnce();
+		return;
+	}
+
 	if(WifiAccessPoint.isEnabled()) {
 		debug_i("AppWIFI::stopAp WifiAP disable");
 		WifiAccessPoint.enable(false, false);
