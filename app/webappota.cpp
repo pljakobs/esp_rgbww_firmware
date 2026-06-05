@@ -98,7 +98,7 @@ bool WebappOta::wasInterrupted() const
     return webapp.getInProgress();
 }
 
-void WebappOta::checkForUpdate()
+void WebappOta::checkForUpdate(bool ignoreEnabled)
 {
     if(_state != State::IDLE) {
         debug_i("WebappOta::checkForUpdate - already active, skipping");
@@ -106,7 +106,7 @@ void WebappOta::checkForUpdate()
     }
 
     AppConfig::Root::Webapp webapp(*app.cfg);
-    if(!webapp.getEnabled()) {
+    if(!ignoreEnabled && !webapp.getEnabled()) {
         debug_i("WebappOta::checkForUpdate - disabled in config");
         return;
     }

@@ -54,8 +54,12 @@ public:
      * Call this once after the WiFi station has obtained an IP address.
      * Re-entrant: a second call while a check/download is in progress is
      * silently ignored.
+     *
+     * @param ignoreEnabled  When true, bypasses the enabled flag.
+     *   Use for: bootstrap fetch (no webapp present) or manual UI trigger.
+     *   Default false — respects the auto-update enabled flag.
      */
-    void checkForUpdate();
+    void checkForUpdate(bool ignoreEnabled = false);
 
     bool isActive() const
     {
