@@ -80,6 +80,7 @@ private:
     void onIndex(HttpRequest &request, HttpResponse &response);
     void onWebapp(HttpRequest &request, HttpResponse &response);
     void onWebappStatus(HttpRequest &request, HttpResponse &response);
+    void onWebappCheck(HttpRequest &request, HttpResponse &response);
     void onConfig(HttpRequest &request, HttpResponse &response);
     void onInfo(HttpRequest &request, HttpResponse &response);
     void onColor(HttpRequest &request, HttpResponse &response);

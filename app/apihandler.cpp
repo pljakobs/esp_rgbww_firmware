@@ -131,6 +131,13 @@ bool Api::dispatchCommand(const String& method, const JsonObject& params, String
 		// No-op ping from webapp to keep the WebSocket connection alive.
 		return true;
 	}
+	if(method == F("webapp_check")) {
+		// Trigger a webapp OTA check if one is not already running.
+		if(!app.webappOta.isActive()) {
+			app.webappOta.checkForUpdate();
+		}
+		return true;
+	}
 	if(method == F("scan_networks")) {
 		if(!app.network.isScanning()) {
 			app.network.scan(false);

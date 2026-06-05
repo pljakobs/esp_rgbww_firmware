@@ -135,6 +135,7 @@ void ApplicationWebserver::init()
 	paths.set(F("/networks"), HttpPathDelegate(&ApplicationWebserver::onNetworks, this));
 	paths.set(F("/scan_networks"), HttpPathDelegate(&ApplicationWebserver::onScanNetworks, this));
 	paths.set(F("/webapp_status"), HttpPathDelegate(&ApplicationWebserver::onWebappStatus, this));
+	paths.set(F("/webapp_check"), HttpPathDelegate(&ApplicationWebserver::onWebappCheck, this));
 	paths.set(F("/system"), HttpPathDelegate(&ApplicationWebserver::onSystemReq, this));
 	paths.set(F("/update"), HttpPathDelegate(&ApplicationWebserver::onUpdate, this));
 	paths.set(F("/connect"), HttpPathDelegate(&ApplicationWebserver::onConnect, this));
@@ -624,6 +625,31 @@ void ApplicationWebserver::onWebappStatus(HttpRequest& request, HttpResponse& re
 	setCorsHeaders(response);
 	response.headers[HTTP_HEADER_CONTENT_TYPE] = F("application/json");
 	response.sendString(_webappStatusCache);
+}
+
+void ApplicationWebserver::onWebappCheck(HttpRequest& request, HttpResponse& response)
+{
+	debug_i("http onWebappCheck");
+	if(!preflightRequest(request, response, {HttpMethod::POST, HttpMethod::GET})) return;
+
+	if(request.method == HttpMethod::POST) {
+		// Kick off a check if one is not already running
+		if(!app.webappOta.isActive()) {
+			app.webappOta.checkForUpdate();
+		}
+	}
+
+	// Return current webapp OTA status regardless of method
+	_webappStatusCache = String();  // invalidate cache so fresh state is returned
+	DynamicJsonDocument doc(512);
+	JsonObject json = doc.to<JsonObject>();
+	app.webappOta.fillStatusJson(json);
+	String out;
+	serializeJson(doc, out);
+
+	setCorsHeaders(response);
+	response.headers[HTTP_HEADER_CONTENT_TYPE] = F("application/json");
+	response.sendString(out);
 }
 
 bool ApplicationWebserver::checkHeap(HttpResponse& response)
