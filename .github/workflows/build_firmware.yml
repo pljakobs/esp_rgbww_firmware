@@ -39,8 +39,8 @@ jobs:
       - name: Define supported SOCs
         id: set
         run: |
-          echo 'soc_json=["esp8266","esp32","esp32c3", "esp32c6"]' >> $GITHUB_OUTPUT
-          echo 'soc_csv=esp8266,esp32,esp32c3,esp32c6' >> $GITHUB_OUTPUT
+          echo 'soc_json=["esp8266","esp32","esp32c3"]' >> $GITHUB_OUTPUT
+          echo 'soc_csv=esp8266,esp32,esp32c3' >> $GITHUB_OUTPUT
 
   host-smoke:
 
