@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Downloading Webapp&hellip;</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,sans-serif;background:#f0f2f5;color:#222;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:16px}
+.card{background:#fff;border-radius:10px;padding:28px 24px;max-width:380px;width:100%;box-shadow:0 2px 8px rgba(0,0,0,.14);text-align:center}
+h1{font-size:1.1rem;margin-bottom:6px;color:#1976d2}
+.sub{font-size:.85rem;color:#666;margin-bottom:24px}
+.spinner{display:inline-block;width:48px;height:48px;border:4px solid #bbdefb;border-top-color:#1976d2;border-radius:50%;animation:spin 1s linear infinite;margin-bottom:20px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.state{font-size:.95rem;font-weight:600;margin-bottom:8px}
+.detail{font-size:.8rem;color:#555;margin-bottom:16px;word-break:break-all}
+.progress-wrap{background:#e3f0ff;border-radius:4px;height:8px;width:100%;margin-bottom:16px;overflow:hidden}
+.progress-bar{height:8px;background:#1976d2;border-radius:4px;transition:width .4s}
+.ok{color:#2e7d32}
+.err{color:#c62828}
+.ws-indicator{display:inline-flex;align-items:center;gap:5px;font-size:.72rem;color:#888;margin-bottom:18px}
+.ws-dot{width:8px;height:8px;border-radius:50%;background:#bbb;flex-shrink:0}
+.ws-dot.connected{background:#43a047}
+.ws-dot.polling{background:#fb8c00}
+.ws-dot.connecting{background:#90caf9;animation:pulse .8s ease-in-out infinite alternate}
+@keyframes pulse{to{opacity:.3}}
+button{padding:9px 20px;border:none;border-radius:6px;background:#1976d2;color:#fff;font-size:.9rem;cursor:pointer;margin-top:8px}
+button:hover{background:#1565c0}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="spinner" id="spinner"></div>
+  <h1 id="title">Downloading webapp&hellip;</h1>
+  <div class="sub" id="sub">Please wait while the device fetches its interface files.</div>
+  <div class="state" id="stateLabel"></div>
+  <div class="progress-wrap" id="progWrap" style="display:none">
+    <div class="progress-bar" id="progBar" style="width:0%"></div>
+  </div>
+  <div class="detail" id="detail"></div>
+  <div class="ws-indicator"><span class="ws-dot connecting" id="wsDot"></span><span id="wsLabel">Connecting…</span></div>
+  <button id="retryBtn" style="display:none" onclick="location.reload()">Retry</button>
+</div>
+<script>
+var stateLabels={
+  idle:'Idle',
+  querying_api:'Checking for updates\u2026',
+  downloading:'Downloading files\u2026',
+  activating:'Activating webapp\u2026'
+};
+
+var done=false;
+
+function setWsIndicator(state){
+  var dot=document.getElementById('wsDot');
+  var lbl=document.getElementById('wsLabel');
+  dot.className='ws-dot '+state;
+  var labels={connected:'WebSocket ✓',polling:'HTTP polling',connecting:'Connecting…'};
+  lbl.textContent=labels[state]||state;
+}
+
+function applyStatus(d){
+  if(done) return;
+  var state=d.state||'idle';
+  var lbl=stateLabels[state]||state;
+  document.getElementById('stateLabel').innerHTML=lbl;
+
+  if(state==='downloading'&&d.total>0){
+    var pct=Math.round((d.file/d.total)*100);
+    document.getElementById('progWrap').style.display='block';
+    document.getElementById('progBar').style.width=pct+'%';
+    document.getElementById('detail').textContent='File '+d.file+' / '+d.total+(d.file_path?' \u2014 '+d.file_path:'');
+  } else if(state==='querying_api'||state==='activating'){
+    document.getElementById('progWrap').style.display='none';
+    document.getElementById('detail').textContent='';
+  }
+
+  if(state==='idle'){
+    if(d.last_status==='ok'||d.last_status==='no_update'){
+      done=true;
+      document.getElementById('spinner').style.display='none';
+      document.getElementById('title').innerHTML='<span class="ok">&#x2705; Ready!</span>';
+      document.getElementById('sub').textContent='Loading interface\u2026';
+      setTimeout(function(){location.replace('/');},1200);
+      return;
+    } else if(d.last_status){
+      done=true;
+      document.getElementById('spinner').style.display='none';
+      document.getElementById('title').innerHTML='<span class="err">&#x274C; Update failed</span>';
+      document.getElementById('sub').textContent='Could not download webapp files.';
+      document.getElementById('detail').textContent='Status: '+d.last_status;
+      document.getElementById('retryBtn').style.display='inline-block';
+      return;
+    }
+  }
+}
+
+// ── WebSocket path ────────────────────────────────────────────────────────────
+var ws=null;
+var wsOk=false;
+var fallbackTimer=null;
+var wsRetryTimer=null;
+
+function startFallbackPoll(){
+  setWsIndicator('polling');
+  if(fallbackTimer) return;
+  // Poll at 12 s — just above the server's 10 s keepAlive window — so the
+  // previous TCP connection fully ages out before we open a new one.
+  // This prevents connections stacking up and pressuring heap during download.
+  fallbackTimer=setTimeout(function poll(){
+    if(done||wsOk) return;
+    fetch('/webapp_status').then(function(r){return r.json();}).then(function(d){
+      applyStatus(d);
+      if(!done) fallbackTimer=setTimeout(poll,20000);
+    }).catch(function(){
+      if(!done) fallbackTimer=setTimeout(poll,20000);
+    });
+  },0);
+}
+
+function connectWs(){
+  if(done) return;
+  var proto=location.protocol==='https:'?'wss':'ws';
+  try{
+    ws=new WebSocket(proto+'://'+location.host+'/ws');
+  } catch(e){ startFallbackPoll(); return; }
+
+  // Device may be busy downloading — give it 10 s to accept the upgrade.
+  var wsTimeout=setTimeout(function(){
+    if(!wsOk){
+      startFallbackPoll();
+      // Keep retrying the WS every 15 s so we switch off polling once it connects.
+      wsRetryTimer=setInterval(function(){
+        if(done||wsOk){ clearInterval(wsRetryTimer); return; }
+        connectWs();
+      },15000);
+    }
+  },10000);
+
+  ws.onopen=function(){
+    clearTimeout(wsTimeout);
+    wsOk=true;
+    clearInterval(wsRetryTimer);
+    setWsIndicator('connected');
+    // Stop HTTP fallback polling now that WS is live.
+    if(fallbackTimer){ clearTimeout(fallbackTimer); fallbackTimer=null; }
+  };
+
+  ws.onmessage=function(ev){
+    try{
+      var msg=JSON.parse(ev.data);
+      if(msg.method==='webapp_ota_status'&&msg.params){
+        applyStatus(msg.params);
+      }
+    } catch(e){}
+  };
+
+  ws.onerror=function(){
+    if(!wsOk) startFallbackPoll();
+  };
+
+  ws.onclose=function(){
+    if(!done&&wsOk){
+      // WS dropped mid-update (device rebooted after activation) — fall back to
+      // polling so we catch the final idle/ok state after the device comes back.
+      wsOk=false;
+      startFallbackPoll();
+    }
+  };
+}
+
+window.onload=function(){
+  setWsIndicator('connecting');
+  if(typeof WebSocket!=='undefined'){
+    connectWs();
+  } else {
+    startFallbackPoll();
+  }
+};
+</script>
+</body>
+</html>

@@ -52,6 +52,35 @@
         }
       }
     },
+    "webapp":{
+      "type":"object",
+      "properties":{
+        "enabled":{
+          "type":"boolean",
+          "default":true
+        },
+        "api_base_url":{
+          "type":"string",
+          "default":"http://lightinator.de/api"
+        },
+        "installed_version":{
+          "type":"string",
+          "default":""
+        },
+        "installed_md5":{
+          "type":"string",
+          "default":""
+        },
+        "last_check_status":{
+          "type":"string",
+          "default":""
+        },
+        "in_progress":{
+          "type":"boolean",
+          "default":false
+        }
+      }
+    },
     "security": {
       "type": "object",
       "properties": {

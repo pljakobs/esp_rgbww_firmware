@@ -1,5 +1,8 @@
 name: Build Container
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 on:
   schedule:
     - cron: "2 10 * * *" # Runs daily at 2:10  UTC

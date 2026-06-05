@@ -68,6 +68,8 @@ private:
     bool _reconnectPending = false;
     SimpleTimer _reconnectGateTimer;
     static void reconnectGateTimeoutCb(void* arg);
+    Timer _reconnectTimer;
+    void doReconnect();
 
     bool _isRunning = false;
     MqttClient* mqtt = nullptr;

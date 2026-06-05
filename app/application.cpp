@@ -178,12 +178,16 @@ extern "C" void custom_crash_callback(struct rst_info* ri, uint32_t stack, uint3
 
 #endif // ARCH_ESP8266
 
-#ifndef SMING_RELEASE
-extern MultiOutputStream debugStream;
-extern size_t debugStreamOutputCallback(const char* buffer, unsigned int length);
-#endif
-
 Application app;
+
+#ifndef SMING_RELEASE
+MultiOutputStream debugStream;
+
+size_t debugStreamOutputCallback(const char* buffer, unsigned int length)
+{
+	return debugStream.write((const uint8_t*)buffer, length);
+}
+#endif
 
 void onReady()
 {
@@ -345,14 +349,7 @@ bool Application::checkHeap( size_t minHeap)
 	}
 	return true;
 }
-#ifndef SMING_RELEASE
-MultiOutputStream debugStream;
 
-size_t debugStreamOutputCallback(const char* buffer, unsigned int length)
-{
-	return debugStream.write((const uint8_t*)buffer, length);
-}
-#endif
 void Application::init()
 {
 	debug_i("ESP RGBWW Controller Version %s\r\n", fw_git_version);

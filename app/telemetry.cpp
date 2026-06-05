@@ -101,10 +101,17 @@ void TelemetryClient::connect(const String& telemetryURL, const String& telemetr
 }
 
 void TelemetryClient::reconnect() {
+    // Schedule the actual stop+connect from the top of the event loop via a
+    // 1-second timer.  Calling stop() (which deletes the MqttClient) and then
+    // delay(1000) here would yield the event loop while stale TCP callbacks
+    // still reference the deleted object → use-after-free crash.
+    _reconnectTimer.initializeMs<1000>(TimerDelegate(&TelemetryClient::doReconnect, this)).startOnce();
+}
+
+void TelemetryClient::doReconnect() {
     stop();
-    delay(1000); // brief delay before reconnecting
     connect(_telemetryURL, _telemetryUser, _telemetryPass);
- }
+}
 
 void TelemetryClient::onComplete(TcpClient& client, bool success) {
 	if (!success) {
