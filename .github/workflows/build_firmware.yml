@@ -8,9 +8,9 @@ env:
 
 on:
   push:
-    branches: [stable, testing, develop, experimental]
+    branches: [stable, testing, develop, experimental, experimental-externalUI]
   pull_request:
-    branches: [stable, testing, develop, experimental]
+    branches: [stable, testing, develop, experimental, experimental-externalUI]
   repository_dispatch:
     types: [frontend-build-completed]
   workflow_dispatch:
@@ -25,6 +25,7 @@ on:
           - testing
           - develop
           - experimental
+          - experimental-externalUI
 
 jobs:
   # Single source of truth for supported SOCs.
@@ -75,7 +76,7 @@ jobs:
             "stable")
               WEBAPP_BRANCH="stable"
               ;;
-            "experimental")
+            "experimental"|"experimental-externalUI")
               WEBAPP_BRANCH="experimental"
               ;;
             *)
@@ -454,7 +455,7 @@ jobs:
             "stable")
               WEBAPP_BRANCH="stable"
               ;;
-            "experimental")
+            "experimental"|"experimental-externalUI")
               WEBAPP_BRANCH="experimental"
               ;;
             *)
