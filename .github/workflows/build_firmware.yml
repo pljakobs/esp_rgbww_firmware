@@ -142,22 +142,22 @@ jobs:
       - name: Download webapp files artifact
         run: |
           WEBAPP_BRANCH="${{ steps.map_webapp_branch.outputs.webapp_branch }}"
-          if [ -d ./webapp ]; then
-            rm -rf ./webapp
-          fi
-          mkdir -p ./webapp
           artifact_url="https://pljakobs.github.io/esp_rgb_webapp2/${WEBAPP_BRANCH}/spa-files.zip"
           echo "Downloading webapp files from: $artifact_url"
           curl -L -o spa-files.zip "$artifact_url"
           if [ "$WEBAPP_BRANCH" = "experimental" ]; then
             echo "experimental build: extracting minimal file set only"
-            mkdir -p ./webapp/config
             # captive.html and updating.html are committed in the firmware repo
-            # (tracked via .gitignore exception) — no extraction needed.
+            # (checked out above) — keep the webapp/ dir as-is so those files survive.
             # Only pull config/pinconfig.json and VERSION from the webapp zip.
+            mkdir -p ./webapp/config
             unzip -p spa-files.zip dist/spa/config/pinconfig.json > ./webapp/config/pinconfig.json
             unzip -p spa-files.zip dist/spa/VERSION > ./webapp/VERSION
           else
+            if [ -d ./webapp ]; then
+              rm -rf ./webapp
+            fi
+            mkdir -p ./webapp
             unzip spa-files.zip -d ./webapp
             mv ./webapp/dist/spa/* ./webapp
             rm -rf ./webapp/dist/spa
@@ -612,23 +612,23 @@ jobs:
       - name: Download webapp files artifact
         run: |
           WEBAPP_BRANCH="${{ steps.map_webapp_branch.outputs.webapp_branch }}"
-          if [ -d ./webapp ]; then
-            echo "removing and re-creating webapp directory"
-            rm -rf ./webapp
-          fi
-          mkdir -p ./webapp
           artifact_url="https://pljakobs.github.io/esp_rgb_webapp2/${WEBAPP_BRANCH}/spa-files.zip"
           echo "Downloading webapp files from: $artifact_url"
           curl -L -o spa-files.zip "$artifact_url"
           if [ "$WEBAPP_BRANCH" = "experimental" ]; then
             echo "experimental build: extracting minimal file set only"
-            mkdir -p ./webapp/config
             # captive.html and updating.html are committed in the firmware repo
-            # (tracked via .gitignore exception) — no extraction needed.
+            # (checked out above) — keep the webapp/ dir as-is so those files survive.
             # Only pull config/pinconfig.json and VERSION from the webapp zip.
+            mkdir -p ./webapp/config
             unzip -p spa-files.zip dist/spa/config/pinconfig.json > ./webapp/config/pinconfig.json
             unzip -p spa-files.zip dist/spa/VERSION > ./webapp/VERSION
           else
+            if [ -d ./webapp ]; then
+              echo "removing and re-creating webapp directory"
+              rm -rf ./webapp
+            fi
+            mkdir -p ./webapp
             unzip spa-files.zip -d ./webapp
             mv ./webapp/dist/spa/* ./webapp
             rm -rf ./webapp/dist/spa
