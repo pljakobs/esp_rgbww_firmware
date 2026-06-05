@@ -474,7 +474,7 @@ def cull_history(data, dry_run=False):
     
     return data
 
-def add_or_update_webapp_entry(data, branch, version, base_url, files=None, comment=''):
+def add_or_update_webapp_entry(data, branch, version, files=None, comment='', webapp_type='debug', min_firmware=''):
     """Add or update a webapp entry in version.json."""
     if "webapp" not in data:
         data["webapp"] = []
@@ -482,26 +482,33 @@ def add_or_update_webapp_entry(data, branch, version, base_url, files=None, comm
         data["webapp_history"] = []
     files = files or []
     branch = branch.strip().lower()
+    webapp_type = webapp_type.strip().lower() if webapp_type else 'debug'
+    if webapp_type not in ('debug', 'release'):
+        print(f"Invalid webapp type '{webapp_type}', defaulting to 'debug'")
+        webapp_type = 'debug'
+    min_firmware = min_firmware.strip()
     comment = comment or ''
 
     for i, entry in enumerate(data["webapp"]):
         if entry["branch"].strip().lower() == branch:
             if entry["version"] == version:
                 data["webapp"][i] = {
-                    "branch": entry["branch"],
                     "version": version,
-                    "url": base_url,
+                    "type": webapp_type,
+                    "branch": entry["branch"],
+                    "min_firmware": min_firmware,
                     "files": files,
                     "comment": comment if comment else entry.get("comment", "")
                 }
-                print(f"Updated webapp entry for {branch} version {version} (same version, URL/files updated)")
+                print(f"Updated webapp entry for {branch} version {version} (same version, metadata/files updated)")
             else:
                 print(f"Moving webapp {branch}: {entry['version']} to history")
                 data["webapp_history"].append(dict(entry))
                 data["webapp"][i] = {
-                    "branch": branch,
                     "version": version,
-                    "url": base_url,
+                    "type": webapp_type,
+                    "branch": branch,
+                    "min_firmware": min_firmware,
                     "files": files,
                     "comment": comment
                 }
@@ -509,9 +516,10 @@ def add_or_update_webapp_entry(data, branch, version, base_url, files=None, comm
             return data
 
     data["webapp"].append({
-        "branch": branch,
         "version": version,
-        "url": base_url,
+        "type": webapp_type,
+        "branch": branch,
+        "min_firmware": min_firmware,
         "files": files,
         "comment": comment
     })
@@ -631,15 +639,16 @@ def main():
         return
 
     if action == 'add-webapp':
-        if len(sys.argv) < 6:
-            print("Usage: script.py <json_file> add-webapp <branch> <version> <base_url> [--files-json-b64 <base64>] [--comment-b64 <base64>]")
+        if len(sys.argv) < 5:
+            print("Usage: script.py <json_file> add-webapp <branch> <version> [--files-json-b64 <base64>] [--comment-b64 <base64>] [--type <debug|release>] [--min-firmware <semver>]")
             return
         branch = sys.argv[3]
         version = sys.argv[4]
-        base_url = sys.argv[5]
         files = []
         comment = ''
-        args = sys.argv[6:]
+        webapp_type = 'debug'
+        min_firmware = ''
+        args = sys.argv[5:]
         idx = 0
         while idx < len(args):
             if args[idx] == '--files-json-b64' and idx + 1 < len(args):
@@ -656,9 +665,15 @@ def main():
                     print(f"Error decoding --comment-b64: {exc}")
                     return
                 idx += 2
+            elif args[idx] == '--type' and idx + 1 < len(args):
+                webapp_type = args[idx + 1]
+                idx += 2
+            elif args[idx] == '--min-firmware' and idx + 1 < len(args):
+                min_firmware = args[idx + 1]
+                idx += 2
             else:
                 idx += 1
-        data = add_or_update_webapp_entry(data, branch, version, base_url, files, comment)
+        data = add_or_update_webapp_entry(data, branch, version, files, comment, webapp_type, min_firmware)
         save_json(data, file_path_or_url)
         print(f"Webapp entry added/updated for {branch} version {version}.")
         return
@@ -669,7 +684,10 @@ def main():
         print(f"Found {len(entries)} webapp entries:")
         for entry in sorted(entries, key=lambda e: e['branch']):
             files_count = len(entry.get("files", []))
-            print(f"  {entry['branch']}: {entry['version']} ({files_count} files) - {entry['url']}")
+            entry_type = entry.get("type", "unknown")
+            min_fw = entry.get("min_firmware", "")
+            min_fw_text = f" min_firmware={min_fw}" if min_fw else ""
+            print(f"  {entry['branch']}: {entry['version']} type={entry_type}{min_fw_text} ({files_count} files)")
         return
 
     print("Invalid action. Use add, delete, list, cull, add-webapp, or list-webapp.")
