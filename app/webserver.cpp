@@ -582,9 +582,11 @@ void ApplicationWebserver::onIndex(HttpRequest& request, HttpResponse& response)
 	// Case 2: WiFi connected but webapp not yet in LFS → show progress page
 	if(WifiStation.isConnected() && !hasLfsIndex) {
 		debug_i("onIndex: serving updating page");
-		// Kick off webapp OTA if not already running
+		// Kick off webapp fetch unconditionally — the device has no webapp at all
+		// and cannot serve anything useful until one is installed. The enabled
+		// flag controls *auto-update* of an existing webapp, not the initial fetch.
 		if(!app.webappOta.isActive()) {
-			app.webappOta.checkForUpdate();
+			app.webappOta.checkForUpdate(true /* ignoreEnabled: bootstrap fetch */);
 		}
 		auto v = fileMap[F("updating.html")];
 		if(v) {
@@ -633,9 +635,10 @@ void ApplicationWebserver::onWebappCheck(HttpRequest& request, HttpResponse& res
 	if(!preflightRequest(request, response, {HttpMethod::POST, HttpMethod::GET})) return;
 
 	if(request.method == HttpMethod::POST) {
-		// Kick off a check if one is not already running
+		// Manual trigger: bypass the enabled flag so the user can always force a
+		// check from the UI regardless of the auto-update setting.
 		if(!app.webappOta.isActive()) {
-			app.webappOta.checkForUpdate();
+			app.webappOta.checkForUpdate(true /* ignoreEnabled: manual trigger */);
 		}
 	}
 

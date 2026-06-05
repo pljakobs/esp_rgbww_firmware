@@ -133,8 +133,10 @@ bool Api::dispatchCommand(const String& method, const JsonObject& params, String
 	}
 	if(method == F("webapp_check")) {
 		// Trigger a webapp OTA check if one is not already running.
+		// ignoreEnabled=true: the user explicitly requested a check, so bypass
+		// the auto-update enabled flag.
 		if(!app.webappOta.isActive()) {
-			app.webappOta.checkForUpdate();
+			app.webappOta.checkForUpdate(true /* ignoreEnabled: manual trigger */);
 		}
 		return true;
 	}

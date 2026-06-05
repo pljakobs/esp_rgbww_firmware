@@ -32,7 +32,9 @@
  *   <path>          — active webapp files served by the webserver
  *
  * ConfigDB state (AppConfig::Root::Webapp):
- *   enabled            — master switch; checkForUpdate() is a no-op when false
+ *   enabled            — auto-update switch; checkForUpdate() respects it;
+ *                         pass ignoreEnabled=true to bypass (manual trigger or
+ *                         no-webapp-present bootstrap)
  *   api_base_url       — e.g. "https://lightinator.de/api"
  *   installed_version  — persisted after successful activation
  *   installed_md5      — persisted after successful activation (last file md5)
@@ -54,8 +56,14 @@ public:
      * Call this once after the WiFi station has obtained an IP address.
      * Re-entrant: a second call while a check/download is in progress is
      * silently ignored.
+     *
+     * @param ignoreEnabled  When true, bypass the webapp.enabled config flag.
+     *   Use this for:
+     *   - Manual UI-triggered checks (user explicitly asked, regardless of setting)
+     *   - Bootstrap: no webapp is present at all, device must fetch one
+     *   When false (default), the call is a no-op if webapp.enabled is false.
      */
-    void checkForUpdate();
+    void checkForUpdate(bool ignoreEnabled = false);
 
     bool isActive() const
     {

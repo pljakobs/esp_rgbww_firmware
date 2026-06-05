@@ -98,7 +98,7 @@ bool WebappOta::wasInterrupted() const
     return webapp.getInProgress();
 }
 
-void WebappOta::checkForUpdate()
+void WebappOta::checkForUpdate(bool ignoreEnabled)
 {
     if(_state != State::IDLE) {
         debug_i("WebappOta::checkForUpdate - already active, skipping");
@@ -106,8 +106,8 @@ void WebappOta::checkForUpdate()
     }
 
     AppConfig::Root::Webapp webapp(*app.cfg);
-    if(!webapp.getEnabled()) {
-        debug_i("WebappOta::checkForUpdate - disabled in config");
+    if(!ignoreEnabled && !webapp.getEnabled()) {
+        debug_i("WebappOta::checkForUpdate - disabled in config (use ignoreEnabled=true to bypass)");
         return;
     }
 
@@ -126,6 +126,11 @@ void WebappOta::checkForUpdate()
 
 void WebappOta::queryApi(const String& branch, const String& firmwareVersion, const String& apiBaseUrl)
 {
+    }
+
+    _state = State::DOWNLOADING;
+    _fileIndex = 0;
+    broadcastStatus();
     _state = State::QUERYING_API;
     broadcastStatus();
     _files.clear();
