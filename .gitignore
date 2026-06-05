@@ -71,7 +71,10 @@ latex
 latex/*
 
 debug_Esp32.hw
-include/fileList.h
+# fileList.h is normally downloaded from webapp CI, but for experimental
+# builds the minimal 3-entry version is committed directly in the repo.
+# The negation below allows git to track it.
+!include/fileList.h
 flashloop.sh
 colgrep
 colgrep.cfg
