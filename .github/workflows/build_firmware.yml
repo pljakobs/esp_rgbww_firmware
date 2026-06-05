@@ -152,10 +152,10 @@ jobs:
           if [ "$WEBAPP_BRANCH" = "experimental" ]; then
             echo "experimental build: extracting minimal file set only"
             mkdir -p ./webapp/config
-            unzip -p spa-files.zip dist/spa/captive.html > ./webapp/captive.html
-            unzip -p spa-files.zip dist/spa/updating.html > ./webapp/updating.html
-            unzip -p spa-files.zip dist/spa/config/pinconfig.json > ./webapp/config/pinconfig.json
-            unzip -p spa-files.zip dist/spa/VERSION > ./webapp/VERSION
+            unzip -p spa-files.zip captive.html > ./webapp/captive.html
+            unzip -p spa-files.zip updating.html > ./webapp/updating.html
+            unzip -p spa-files.zip config/pinconfig.json > ./webapp/config/pinconfig.json
+            unzip -p spa-files.zip VERSION > ./webapp/VERSION
           else
             unzip spa-files.zip -d ./webapp
             mv ./webapp/dist/spa/* ./webapp
@@ -622,10 +622,10 @@ jobs:
           if [ "$WEBAPP_BRANCH" = "experimental" ]; then
             echo "experimental build: extracting minimal file set only"
             mkdir -p ./webapp/config
-            unzip -p spa-files.zip dist/spa/captive.html > ./webapp/captive.html
-            unzip -p spa-files.zip dist/spa/updating.html > ./webapp/updating.html
-            unzip -p spa-files.zip dist/spa/config/pinconfig.json > ./webapp/config/pinconfig.json
-            unzip -p spa-files.zip dist/spa/VERSION > ./webapp/VERSION
+            unzip -p spa-files.zip captive.html > ./webapp/captive.html
+            unzip -p spa-files.zip updating.html > ./webapp/updating.html
+            unzip -p spa-files.zip config/pinconfig.json > ./webapp/config/pinconfig.json
+            unzip -p spa-files.zip VERSION > ./webapp/VERSION
           else
             unzip spa-files.zip -d ./webapp
             mv ./webapp/dist/spa/* ./webapp
