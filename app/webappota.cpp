@@ -126,11 +126,6 @@ void WebappOta::checkForUpdate(bool ignoreEnabled)
 
 void WebappOta::queryApi(const String& branch, const String& firmwareVersion, const String& apiBaseUrl)
 {
-    }
-
-    _state = State::DOWNLOADING;
-    _fileIndex = 0;
-    broadcastStatus();
     _state = State::QUERYING_API;
     broadcastStatus();
     _files.clear();
