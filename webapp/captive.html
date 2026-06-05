@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Device Setup</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,sans-serif;background:#f0f2f5;color:#222;padding:12px}
+h1{font-size:1.2rem;margin-bottom:16px;color:#1976d2}
+.card{background:#fff;border-radius:8px;padding:16px;margin-bottom:12px;box-shadow:0 1px 4px rgba(0,0,0,.12)}
+label{display:block;font-size:.8rem;color:#555;margin-bottom:4px}
+input{width:100%;padding:9px 10px;border:1px solid #ccc;border-radius:6px;font-size:.95rem;outline:none}
+input:focus{border-color:#1976d2}
+.net-list{border:1px solid #e0e0e0;border-radius:6px;max-height:200px;overflow-y:auto;margin-bottom:10px}
+.net-item{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;cursor:pointer;border-bottom:1px solid #f0f0f0;font-size:.9rem}
+.net-item:last-child{border-bottom:none}
+.net-item:hover,.net-item.sel{background:#e3f0ff}
+.bars{display:flex;align-items:flex-end;gap:2px;height:16px}
+.bar{width:4px;background:#aaa;border-radius:1px}
+.bar.on{background:#1976d2}
+.enc{font-size:.7rem;color:#888;margin-left:6px}
+.row{display:flex;gap:8px;align-items:center}
+.row label{margin:0;white-space:nowrap}
+button{padding:10px 20px;border:none;border-radius:6px;background:#1976d2;color:#fff;font-size:.95rem;cursor:pointer;width:100%}
+button:hover{background:#1565c0}
+button:disabled{background:#90b8e0;cursor:not-allowed}
+.scan-btn{background:none;border:1px solid #1976d2;color:#1976d2;padding:6px 12px;font-size:.8rem;width:auto;border-radius:6px;cursor:pointer}
+.scan-btn:hover{background:#e3f0ff}
+.msg{margin-top:10px;padding:10px;border-radius:6px;font-size:.85rem;text-align:center}
+.msg.info{background:#e3f0ff;color:#1565c0}
+.msg.ok{background:#e8f5e9;color:#2e7d32}
+.msg.err{background:#ffebee;color:#c62828}
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid #90caf9;border-top-color:#1976d2;border-radius:50%;animation:spin .8s linear infinite;vertical-align:middle;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+#done{display:none}
+a{color:#1976d2}
+</style>
+</head>
+<body>
+<h1>&#x1F4F6; Device Setup</h1>
+
+<div class="card">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+    <strong>WiFi Networks</strong>
+    <button class="scan-btn" id="scanBtn" onclick="doScan()">&#x21BB; Scan</button>
+  </div>
+  <div id="netList" class="net-list"><div style="padding:12px;color:#888;font-size:.85rem">Scanning&hellip;</div></div>
+</div>
+
+<div class="card">
+  <div style="margin-bottom:10px">
+    <label for="hn">Hostname (optional)</label>
+    <input id="hn" type="text" placeholder="e.g. rgbww-living" autocomplete="off" spellcheck="false">
+  </div>
+  <div style="margin-bottom:10px">
+    <label for="ss">Network (SSID)</label>
+    <input id="ss" type="text" placeholder="Select above or type" autocomplete="off" spellcheck="false">
+  </div>
+  <div style="margin-bottom:16px">
+    <label for="pw">Password</label>
+    <div class="row" style="gap:6px">
+      <input id="pw" type="password" autocomplete="off">
+      <button onclick="togglePwd()" style="width:auto;padding:9px 12px;background:#eee;color:#333;border:1px solid #ccc;font-size:.8rem" id="eyeBtn">Show</button>
+    </div>
+  </div>
+  <button id="connectBtn" onclick="doConnect()" disabled>Connect</button>
+</div>
+
+<div id="msg" class="msg" style="display:none"></div>
+
+<div class="card" id="done">
+  <strong>&#x2705; Connected!</strong>
+  <div style="margin-top:10px;font-size:.9rem" id="connInfo"></div>
+</div>
+
+<script>
+var nets=[],selSsid='',scanning=false,ws=null;
+
+function bars(rssi,enc){
+  var lvl=rssi>=-50?4:rssi>=-65?3:rssi>=-75?2:rssi>=-90?1:0;
+  var locked=enc&&enc!=='Open'?'&#x1F512;':'';
+  var b='<div class="bars">';
+  for(var i=1;i<=4;i++) b+='<div class="bar'+(i<=lvl?' on':'')+'" style="height:'+(i*4)+'px"></div>';
+  b+='</div>'+locked;
+  return b;
+}
+
+function renderNets(){
+  var el=document.getElementById('netList');
+  if(!nets.length){el.innerHTML='<div style="padding:12px;color:#888;font-size:.85rem">No networks found</div>';return;}
+  var h='';
+  for(var i=0;i<nets.length;i++){
+    var n=nets[i];
+    var sel=n.ssid===selSsid?' sel':'';
+    h+='<div class="net-item'+sel+'" onclick="pickNet(\''+n.ssid.replace(/'/g,"\\'")+'\')">'
+      +'<span>'+esc(n.ssid)+'<span class="enc">'+n.encryption+'</span></span>'
+      +'<span style="display:flex;align-items:center">'+bars(n.signal,n.encryption)+'</span>'
+      +'</div>';
+  }
+  el.innerHTML=h;
+  document.getElementById('connectBtn').disabled=!document.getElementById('ss').value.trim();
+}
+
+function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+function pickNet(ssid){selSsid=ssid;document.getElementById('ss').value=ssid;renderNets();document.getElementById('connectBtn').disabled=false;}
+
+document.getElementById('ss').addEventListener('input',function(){document.getElementById('connectBtn').disabled=!this.value.trim();});
+
+function togglePwd(){
+  var i=document.getElementById('pw');
+  var show=i.type==='password';
+  i.type=show?'text':'password';
+  document.getElementById('eyeBtn').textContent=show?'Hide':'Show';
+}
+
+function showMsg(txt,cls){var el=document.getElementById('msg');el.className='msg '+cls;el.innerHTML=txt;el.style.display='block';}
+function hideMsg(){document.getElementById('msg').style.display='none';}
+
+function fetchNets(){
+  fetch('/networks').then(function(r){return r.json();}).then(function(d){
+    if(d.scanning){scanning=true;setTimeout(fetchNets,1500);return;}
+    scanning=false;
+    document.getElementById('scanBtn').disabled=false;
+    if(d.available&&d.available.length){
+      nets=d.available.sort(function(a,b){return b.signal-a.signal;});
+    }
+    renderNets();
+  }).catch(function(){setTimeout(fetchNets,2000);});
+}
+
+function doScan(){
+  document.getElementById('scanBtn').disabled=true;
+  document.getElementById('netList').innerHTML='<div style="padding:12px;color:#888;font-size:.85rem"><span class="spinner"></span>Scanning&hellip;</div>';
+  nets=[];scanning=true;
+  fetch('/scan_networks',{method:'POST'}).then(function(){setTimeout(fetchNets,1000);}).catch(function(){setTimeout(fetchNets,1000);});
+}
+
+function openWs(){
+  var proto=location.protocol==='https:'?'wss':'ws';
+  ws=new WebSocket(proto+'://'+location.host+'/ws');
+  ws.onmessage=function(ev){
+    try{
+      var m=JSON.parse(ev.data);
+      if(m.method==='wifi_status'&&m.params&&m.params.station&&m.params.station.connected){
+        onConnected(m.params.station);
+      } else if(m.method==='wifi_status'&&m.params&&m.params.message){
+        showMsg('<span class="spinner"></span>'+esc(m.params.message),'info');
+      }
+    }catch(e){}
+  };
+  ws.onerror=function(){ws=null;};
+}
+
+function onConnected(sta){
+  document.getElementById('connectBtn').disabled=false;
+  document.getElementById('done').style.display='block';
+  var ip=sta.ip||'';
+  document.getElementById('connInfo').innerHTML=
+    'SSID: <b>'+esc(sta.ssid||'')+'</b><br>'
+    +'IP: <a href="http://'+ip+'">'+ip+'</a><br>'
+    +'Gateway: '+esc(sta.gateway||'');
+  showMsg('&#x2705; Connected! <a href="http://'+ip+'">Open device at '+ip+'</a>','ok');
+  // start countdown
+  var n=10;
+  var t=setInterval(function(){
+    n--;
+    if(n<=0){clearInterval(t);location.href='http://'+ip;}
+  },1000);
+}
+
+var pollTimer=null;
+function startPoll(){
+  clearInterval(pollTimer);
+  var tries=0;
+  pollTimer=setInterval(function(){
+    tries++;
+    fetch('/connect').then(function(r){return r.json();}).then(function(d){
+      if(d.status===3){clearInterval(pollTimer);onConnected({ssid:d.ssid,ip:d.ip,gateway:d.gateway||''});}
+      else if(d.status===4){clearInterval(pollTimer);showMsg('&#x274C; '+esc(d.error||'Connection failed'),'err');document.getElementById('connectBtn').disabled=false;}
+    }).catch(function(){});
+    if(tries>=30){clearInterval(pollTimer);showMsg('&#x274C; Timed out. Please try again.','err');document.getElementById('connectBtn').disabled=false;}
+  },1000);
+}
+
+async function doConnect(){
+  var ssid=document.getElementById('ss').value.trim();
+  var pw=document.getElementById('pw').value;
+  var hn=document.getElementById('hn').value.trim();
+  if(!ssid) return;
+  document.getElementById('connectBtn').disabled=true;
+  showMsg('<span class="spinner"></span>Connecting&hellip;','info');
+  try{
+    if(hn){
+      await fetch('/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({general:{device_name:hn}})}).catch(function(){});
+    }
+    var r=await fetch('/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ssid:ssid,password:pw})});
+    if(!r.ok){showMsg('&#x274C; Request failed','err');document.getElementById('connectBtn').disabled=false;return;}
+    openWs();
+    startPoll();
+  }catch(e){
+    showMsg('&#x274C; '+esc(e.message),'err');
+    document.getElementById('connectBtn').disabled=false;
+  }
+}
+
+window.onload=function(){doScan();};
+</script>
+</body>
+</html>

@@ -54,6 +54,9 @@ app-config/*
 app-data/*
 # don't include the webapp files, they need to come from the deployment
 webapp/*
+# except the static bootstrap files owned by the firmware repo
+!webapp/captive.html
+!webapp/updating.html
 include/filelist.h
 
 # exclude local script to update db that is under constant development
