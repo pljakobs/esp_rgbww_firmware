@@ -109,6 +109,7 @@ private:
 
     // --- Activation ---
     bool activateStaging();
+    void purgeOldWebapp();
     static bool moveTree(const String& srcDir, const String& dstDir);
 
     // --- Helpers ---

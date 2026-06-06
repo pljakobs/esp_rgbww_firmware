@@ -436,6 +436,69 @@ bool WebappOta::verifyFileMd5(const String& filePath, const String& expectedMd5)
 // ─── Activation ──────────────────────────────────────────────────────────────
 
 /**
+ * @brief Recursively delete all files under @p dir (non-recursive subdirs only).
+ */
+static void deleteTree(const String& dir)
+{
+    Directory d;
+    if(!d.open(dir)) {
+        return;
+    }
+    std::vector<String> entries;
+    while(d.next()) {
+        entries.push_back(dir + "/" + d.stat().name.c_str());
+    }
+    d.close();
+    for(auto& e : entries) {
+        // Try as directory first; if it opens, recurse
+        Directory sub;
+        if(sub.open(e)) {
+            sub.close();
+            deleteTree(e);
+        } else {
+            fileDelete(e);
+        }
+    }
+}
+
+/**
+ * @brief Delete old webapp files from the active filesystem before activating
+ *        a new version.  Only removes known webapp-owned directories/files so
+ *        that config/, captive.html, updating.html and other firmware files are
+ *        preserved.
+ *
+ * Content-hashed asset filenames change every build, so old chunks would
+ * otherwise accumulate and fill LittleFS.
+ */
+void WebappOta::purgeOldWebapp()
+{
+    // Directories that belong entirely to the webapp bundle
+    static const char* const WEBAPP_DIRS[] = {"assets", "icons", nullptr};
+    for(int i = 0; WEBAPP_DIRS[i] != nullptr; ++i) {
+        deleteTree(String(WEBAPP_DIRS[i]));
+    }
+
+    // Root-level gzip files from the webapp (index.html.gz etc.)
+    Directory root;
+    if(root.open("")) {
+        std::vector<String> toDelete;
+        while(root.next()) {
+            auto& stat = root.stat();
+            if(stat.attr[FileAttribute::Directory]) continue;
+            String name = stat.name.c_str();
+            if(name.endsWith(F(".gz"))) {
+                toDelete.push_back(name);
+            }
+        }
+        root.close();
+        for(auto& f : toDelete) {
+            debug_d("WebappOta::purgeOldWebapp - deleting %s", f.c_str());
+            fileDelete(f);
+        }
+    }
+}
+
+/**
  * @brief Recursively move all files from @p srcDir to @p dstDir.
  *
  * For each file found in @p srcDir (recursively), the corresponding file in
@@ -502,6 +565,10 @@ void WebappOta::activateStagingDeferred()
 bool WebappOta::activateStaging()
 {
     debug_i("WebappOta::activateStaging - activating version %s", _pendingVersion.c_str());
+
+    // Purge stale webapp files (content-hashed assets change names each build)
+    // before moving in the new version to free up space first.
+    purgeOldWebapp();
 
     // Move staged files to the filesystem root (where the webserver serves from)
     if(!moveTree(STAGING_ROOT, "")) {
