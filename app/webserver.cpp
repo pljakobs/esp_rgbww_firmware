@@ -1,4 +1,5 @@
 #include <ArduinoJson.h>
+#include <IFS/FileSystem.h>
 
 /**
  * @file
@@ -423,6 +424,19 @@ void ApplicationWebserver::addInfoFields(JsonObject& obj)
 	run[F("minimumfreeHeap10min")]=app.getMinimumHeap10min();
 	run[F("heapLowErrUptime")]=app.getHeapLowErrUptime();
 	run[F("heapLowErr10min")]=app.getHeapLowErr10min();
+
+	if(app.isFilesystemMounted()) {
+		auto* fs = IFS::getDefaultFileSystem();
+		if(fs != nullptr) {
+			IFS::FileSystem::Info fsInfo{};
+			if(fs->getinfo(fsInfo) == IFS::Error::Success) {
+				JsonObject lfs = obj.createNestedObject(F("lfs"));
+				lfs[F("total")] = (uint32_t)fsInfo.volumeSize;
+				lfs[F("used")]  = (uint32_t)fsInfo.used();
+				lfs[F("free")]  = (uint32_t)fsInfo.freeSpace;
+			}
+		}
+	}
 }
 
 void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, const char* msg)
