@@ -362,8 +362,8 @@ jobs:
             "stable")
               WEBAPP_BRANCH="stable"
               ;;
-            "experimental")
-              WEBAPP_BRANCH="devel"
+            "experimental"|"experimental-externalUI")
+              WEBAPP_BRANCH="experimental"
               ;;
             *)
               WEBAPP_BRANCH="devel"
@@ -480,29 +480,44 @@ jobs:
       - name: Download fileList.h artifact
         run: |
           WEBAPP_BRANCH="${{ steps.map_webapp_branch.outputs.webapp_branch }}"
-          if [ -f ./include/fileList.h ]; then
-            echo "removing fileList.h"
-            rm ./include/fileList.h
+          if [ "$WEBAPP_BRANCH" = "experimental" ]; then
+            echo "experimental build: keeping repo fileList.h (minimal embed set)"
+          else
+            if [ -f ./include/fileList.h ]; then
+              echo "removing fileList.h"
+              rm ./include/fileList.h
+            fi
+            artifact_url="https://pljakobs.github.io/esp_rgb_webapp2/${WEBAPP_BRANCH}/fileList.h"
+            echo "Downloading fileList.h from: $artifact_url"
+            curl -L -o fileList.h "$artifact_url"
+            mv fileList.h ./include
           fi
-          artifact_url="https://pljakobs.github.io/esp_rgb_webapp2/${WEBAPP_BRANCH}/fileList.h"
-          echo "Downloading fileList.h from: $artifact_url"
-          curl -L -o fileList.h "$artifact_url"
-          mv fileList.h ./include
 
       - name: Download webapp files artifact
         run: |
           WEBAPP_BRANCH="${{ steps.map_webapp_branch.outputs.webapp_branch }}"
-          if [ -d ./webapp ]; then
-            echo "removing and re-creating webapp directory"
-            rm -rf ./webapp
-            mkdir ./webapp
-          fi
           artifact_url="https://pljakobs.github.io/esp_rgb_webapp2/${WEBAPP_BRANCH}/spa-files.zip"
           echo "Downloading webapp files from: $artifact_url"
           curl -L -o spa-files.zip "$artifact_url"
-          unzip spa-files.zip -d ./webapp
-          mv ./webapp/dist/spa/* ./webapp
-          rm -rf ./webapp/dist/spa
+          if [ "$WEBAPP_BRANCH" = "experimental" ]; then
+            echo "experimental build: extracting minimal file set only"
+            # captive.html and updating.html are committed in the firmware repo
+            # (checked out above) — keep the webapp/ dir as-is so those files survive.
+            # Only pull config/pinconfig.json and VERSION from the webapp zip.
+            mkdir -p ./webapp/config
+            unzip -p spa-files.zip dist/spa/config/pinconfig.json > ./webapp/config/pinconfig.json
+            unzip -p spa-files.zip dist/spa/VERSION > ./webapp/VERSION
+          else
+            if [ -d ./webapp ]; then
+              echo "removing and re-creating webapp directory"
+              rm -rf ./webapp
+            fi
+            mkdir -p ./webapp
+            unzip spa-files.zip -d ./webapp
+            mv ./webapp/dist/spa/* ./webapp
+            rm -rf ./webapp/dist/spa
+          fi
+          rm spa-files.zip
           echo "webapp files version"
           cat ./webapp/VERSION
 
