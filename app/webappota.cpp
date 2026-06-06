@@ -521,8 +521,9 @@ bool WebappOta::moveTree(const String& srcDir, const String& dstDir)
     while(dir.next()) {
         auto& stat = dir.stat();
         String name = stat.name.c_str();
+        // Build paths: when dstDir is "" (root), avoid a leading slash
         String src = srcDir + "/" + name;
-        String dst = dstDir + "/" + name;
+        String dst = dstDir.length() > 0 ? (dstDir + "/" + name) : name;
 
         if(stat.attr[FileAttribute::Directory]) {
             if(!ensureParentDir(dst + "/_")) { // ensure dstDir/<subdir> exists
@@ -543,10 +544,10 @@ bool WebappOta::moveTree(const String& srcDir, const String& dstDir)
             }
             int res = fileRename(src, dst);
             if(res < 0) {
-                debug_e("WebappOta::moveTree - rename %s → %s failed (%d)", src.c_str(), dst.c_str(), res);
+                debug_e("WebappOta::moveTree - rename %s -> %s failed (%d)", src.c_str(), dst.c_str(), res);
                 ok = false;
             } else {
-                debug_d("WebappOta::moveTree - %s → %s", src.c_str(), dst.c_str());
+                debug_d("WebappOta::moveTree - %s -> %s", src.c_str(), dst.c_str());
             }
         }
     }
