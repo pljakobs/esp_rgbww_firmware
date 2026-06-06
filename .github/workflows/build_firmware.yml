@@ -11,8 +11,6 @@ on:
     branches: [stable, testing, develop, experimental, experimental-externalUI]
   pull_request:
     branches: [stable, testing, develop, experimental, experimental-externalUI]
-  repository_dispatch:
-    types: [frontend-build-completed]
   workflow_dispatch:
     inputs:
       branch:
@@ -54,8 +52,6 @@ jobs:
             # Use github.ref_name so the branch matches the ref the workflow was triggered on.
             # inputs.branch has a default of 'develop' and would mismatch if --ref is used.
             echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
-          elif [ "${{ github.event_name }}" == "repository_dispatch" ]; then
-            echo "branch=${{ github.event.client_payload.branch }}" >> $GITHUB_OUTPUT
           elif [ "${{ github.event_name }}" == "push" ]; then
             echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
           elif [ "${{ github.event_name }}" == "pull_request" ]; then
@@ -436,8 +432,6 @@ jobs:
             # Use github.ref_name so the branch matches the ref the workflow was triggered on.
             # inputs.branch has a default of 'develop' and would mismatch if --ref is used.
             echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
-          elif [ "${{ github.event_name }}" == "repository_dispatch" ]; then
-            echo "branch=${{ github.event.client_payload.branch }}" >> $GITHUB_OUTPUT
           elif [ "${{ github.event_name }}" == "push" ]; then
             echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
           elif [ "${{ github.event_name }}" == "pull_request" ]; then
