@@ -104,7 +104,9 @@ void WebappOta::checkForUpdate(bool ignoreEnabled)
     debug_i("==============================");
     debug_i("|   current directory layout |");
     debug_i("==============================");
+    #ifndef ARCH_HOST
     listDirectory("/", 0);
+    #endif
     if(_state != State::IDLE) {
         debug_i("WebappOta::checkForUpdate - already active, skipping");
         return;
@@ -178,15 +180,17 @@ int WebappOta::onApiResponse(HttpConnection& client, bool successful)
 
     debug_d("WebappOta::onApiResponse - body: %s", body.c_str());
 
-    // Parse JSON — the /webapp/latest endpoint with a fixed branch returns a
-    // single version object (not an array).
-    // Expected shape:
-    //   { "version": "5.2.0", "branch": "testing", "files": [
-    //       { "path": "index.html.gz", "md5": "abc123" },
-    //       ...
-    //   ] }
-    // Response is ~1 KB raw JSON; ArduinoJson needs ~2-3x that internally.
-    // Use DynamicJsonDocument on the heap to avoid stack overflow on ESP8266.
+    /*
+    | Parse JSON — the /webapp/latest endpoint with a fixed branch returns a
+    | single version object (not an array).
+    | Expected shape:
+    |   { "version": "5.2.0", "branch": "testing", "files": [
+    |       { "path": "index.html.gz", "md5": "abc123" },
+    |       ...
+    |   ] }
+    | Response is ~1 KB raw JSON; ArduinoJson needs ~2-3x that internally.
+    | Use DynamicJsonDocument on the heap to avoid stack overflow on ESP8266.
+    */
     DynamicJsonDocument doc(3072);
     DeserializationError err = deserializeJson(doc, body);
     if(err) {
