@@ -100,6 +100,11 @@ bool WebappOta::wasInterrupted() const
 
 void WebappOta::checkForUpdate(bool ignoreEnabled)
 {
+    debug_i("WebappOta::checkForUpdate - ignoreEnabled=%d", ignoreEnabled);
+    debug_i("==============================");
+    debug_i("|   current directory layout |");
+    debug_i("==============================");
+    listDirectory("/", 0);
     if(_state != State::IDLE) {
         debug_i("WebappOta::checkForUpdate - already active, skipping");
         return;
@@ -521,9 +526,8 @@ bool WebappOta::moveTree(const String& srcDir, const String& dstDir)
     while(dir.next()) {
         auto& stat = dir.stat();
         String name = stat.name.c_str();
-        // Build paths: when dstDir is "" (root), avoid a leading slash
         String src = srcDir + "/" + name;
-        String dst = dstDir.length() > 0 ? (dstDir + "/" + name) : name;
+        String dst = dstDir + "/" + name;
 
         if(stat.attr[FileAttribute::Directory]) {
             if(!ensureParentDir(dst + "/_")) { // ensure dstDir/<subdir> exists
@@ -544,10 +548,10 @@ bool WebappOta::moveTree(const String& srcDir, const String& dstDir)
             }
             int res = fileRename(src, dst);
             if(res < 0) {
-                debug_e("WebappOta::moveTree - rename %s -> %s failed (%d)", src.c_str(), dst.c_str(), res);
+                debug_e("WebappOta::moveTree - rename %s → %s failed (%d)", src.c_str(), dst.c_str(), res);
                 ok = false;
             } else {
-                debug_d("WebappOta::moveTree - %s -> %s", src.c_str(), dst.c_str());
+                debug_d("WebappOta::moveTree - %s → %s", src.c_str(), dst.c_str());
             }
         }
     }
@@ -652,6 +656,44 @@ void WebappOta::cleanupStaging()
     }
 }
 
+void WebappOta::listDirectory(const String& path, int depth)
+{
+    Directory dir;
+    
+    // Open the current directory path scope
+    if (!dir.open(path)) {
+        return; 
+    }
+
+    while (dir.next()) {
+        String name = String(dir.stat().name.c_str());
+        
+        // Skip hidden/special files if applicable (e.g., "." or "..")
+        if (name == "." || name == "..") {
+            continue;
+        }
+
+        printIndent(depth);
+        if(dir.stat().attr[FileAttribute::Directory])
+        {
+            debug_i("  ├── [d] %s", name.c_str());
+            
+            // Construct the next path branch
+            String nextPath = path;
+            if (!nextPath.endsWith("/")) {
+                nextPath += "/";
+            }
+            nextPath += name;
+
+            // Recurse into the sub-directory
+            listDirectory(nextPath, depth + 1);
+        } else {
+            debug_i("  ├── [f] %s (%u bytes)", name.c_str(), dir.stat().size);
+        }
+    }
+    
+    dir.close();
+}
 // ─── Status JSON ─────────────────────────────────────────────────────────────
 
 void WebappOta::fillStatusJson(JsonObject& obj) const
