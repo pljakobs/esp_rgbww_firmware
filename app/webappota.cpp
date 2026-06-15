@@ -101,6 +101,12 @@ bool WebappOta::wasInterrupted() const
 void WebappOta::checkForUpdate(bool ignoreEnabled)
 {
     debug_i("WebappOta::checkForUpdate - ignoreEnabled=%d", ignoreEnabled);
+    
+    debug_i("==============================");
+    debug_i("| file system size and usage |");
+    debug_i("==============================");
+    printFileSystemUsage();
+    
     debug_i("==============================");
     debug_i("|   current directory layout |");
     debug_i("==============================");
@@ -656,6 +662,7 @@ void WebappOta::cleanupStaging()
     dir.close();
 
     for(unsigned i = 0; i < entries.size(); ++i) {
+        debug_i("WebappOta::cleanupStaging - deleting %s", entries[i].c_str());
         fileDelete(entries[i]);
     }
 }
@@ -697,6 +704,26 @@ void WebappOta::listDirectory(const String& path, int depth)
     }
     
     dir.close();
+}
+
+void WebappOta::printFileSystemUsage() {
+    IFS::FileSystem::Info fsInfo;
+    
+    // Populate the structure with the active filesystem's data
+    int result = fileGetSystemInfo(fsInfo);
+    
+    if (result == FS_OK) {
+        // Compute metrics directly from the returned architecture fields
+        size_t totalBytes = fsInfo.volumeSize;
+        size_t freeBytes  = fsInfo.freeSpace;
+        size_t usedBytes  = totalBytes - freeBytes;
+        
+        debug_i("Total FS Size: %u bytes", totalBytes);
+        debug_i("Used Space:    %u bytes", usedBytes);
+        debug_i("Free Space:    %u bytes", freeBytes);
+    } else {
+        debug_e("Failed to retrieve filesystem information. Error code: %d", result);
+    }
 }
 // ─── Status JSON ─────────────────────────────────────────────────────────────
 

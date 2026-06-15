@@ -117,12 +117,12 @@ private:
     void saveState(const String& version, const String& md5, const String& status);
     void cleanupStaging();
     void listDirectory(const String& path, int depth=0);
+    void printFileSystemUsage();
     void printIndent(int depth) {
         for (int i = 0; i < depth; ++i) {
             Serial.print("  │");
         }
     }
-    
     static String extractBranch(const String& firmwareVersion);
     static String stagingPath(const String& relPath);
     static bool ensureParentDir(const String& path);
