@@ -17,6 +17,8 @@
 #include <Data/Stream/FileStream.h>
 #include <vector>
 
+
+// ToDo: before update, read free file system space and compare against total size of files to download. If insufficient, skip update and log error (e.g. "not enough free space for update") instead of starting download and failing midway with "download error" or "md5 error". This is especially important for ESP8266 with its smaller flash sizes and more fragmented free space after OTA firmware updates.
 /*
  * File-system layout:
  *   staging/<path>   — files being downloaded / just verified
@@ -113,6 +115,16 @@ void WebappOta::checkForUpdate(bool ignoreEnabled)
     #ifndef ARCH_HOST
     listDirectory("/", 0);
     #endif
+
+    IFS::FileSystem::Info fsInfo;
+    int result=fileGetSystemInfo(fsInfo);
+    // ToDo: this is just checking for a plain 350kB free space condition. In future, the update server shall provide
+    // the proper size of the update package and the firmware can check against that
+    if (result != FS_OK || fsInfo.freeSpace <= FS_MIN_FREE_SPACE) {
+        debug_e("WebappOta::checkForUpdate - failed to get filesystem info or no free space");
+        return;
+    }
+
     if(_state != State::IDLE) {
         debug_i("WebappOta::checkForUpdate - already active, skipping");
         return;

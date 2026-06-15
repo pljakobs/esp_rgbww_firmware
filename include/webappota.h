@@ -45,6 +45,9 @@
 #include <ArduinoJson.h>
 #include <vector>
 
+
+#define FS_MIN_FREE_SPACE 358400UL  // require at least 350KB free to attempt an update, to avoid starting an update that fails midway due to no space left
+
 class WebappOta
 {
 public:
