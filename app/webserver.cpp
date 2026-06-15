@@ -1101,7 +1101,17 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response){
 		rgbww[F("version")] = RGBWW_VERSION;
 		rgbww[F("queuesize")] = RGBWW_ANIMATIONQSIZE;
 
-
+		JsonObject fs=data.createNestedObject(F("filesystem"));
+		IFS::FileSystem::Info fsInfo;
+		int result=fileGetSystemInfo(fsInfo);
+		if (result != FS_OK) {
+			fs[F("error")] = F("failed to get filesystem info");
+		} else {
+			fs[F("total_bytes")] = fsInfo.volumeSize;
+			fs[F("free_bytes")] = fsInfo.freeSpace;
+			fs[F("used_bytes")] = fsInfo.volumeSize - fsInfo.freeSpace;
+		}
+		
 		JsonObject con = data.createNestedObject(F("connection"));
 		con[F("connected")] = WifiStation.isConnected();
 		if(WifiStation.isConnected()) {

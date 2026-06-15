@@ -373,6 +373,17 @@ bool Api::handleInfo(const JsonObject& params, JsonObject& data)
 		JsonObject sming = data.createNestedObject(F("sming"));
 		sming[F("version")] = SMING_VERSION;
 
+		JsonObject fs=data.createNestedObject(F("filesystem"));
+		IFS::FileSystem::Info fsInfo;
+		int result=fileGetSystemInfo(fsInfo);
+		if (result != FS_OK) {
+			fs[F("error")] = F("failed to get filesystem info");
+		} else {
+			fs[F("total_bytes")] = fsInfo.volumeSize;
+			fs[F("free_bytes")] = fsInfo.freeSpace;
+			fs[F("used_bytes")] = fsInfo.volumeSize - fsInfo.freeSpace;
+		}
+
 		JsonObject run = data.createNestedObject(F("runtime"));
 		run[F("uptime")] = app.getUptime();
 		run[F("heap_free")] = app.getFreeHeapSize();
