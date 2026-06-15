@@ -453,7 +453,7 @@ System control commands.
 | `debug` | Enable/disable debug output (also requires `"enable": true/false`) |
 
 ```bash
-curl -X POST http://<device>/system -d '{"cmd":"restart"}'
+curl -X POST http://<device>/system -H "Content-Type: application/json" -d '{"cmd":"restart"}'
 ```
 
 ---
