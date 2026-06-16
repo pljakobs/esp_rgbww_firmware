@@ -72,7 +72,7 @@ void AppWIFI::scan(bool connectAfterScan)
 void AppWIFI::scanCompleted(bool succeeded, BssList& list)
 {
 	if(succeeded) {
-		debug_i("AppWIFI::scanCompleted");
+		debug_i(ANSI_COLOR_BLUE "AppWIFI::scanCompleted" ANSI_COLOR_RESET);
 		_networks.clear();
 		for(size_t i = 0; i < list.count(); i++) {
 			if(!list[i].hidden && list[i].ssid.length() > 0) {
@@ -80,7 +80,7 @@ void AppWIFI::scanCompleted(bool succeeded, BssList& list)
 			}
 		}
 	}else{
-		debug_e("wifi scan failed");
+		debug_e(ANSI_COLOR_RED "wifi scan failed" ANSI_COLOR_RESET);
 	}
 	// TODO add wsBroadcast of available networks
 	_networks.sort([](const BssInfo& a, const BssInfo& b) { return b.rssi - a.rssi; });
@@ -99,7 +99,7 @@ void AppWIFI::scanCompleted(bool succeeded, BssList& list)
  */
 void AppWIFI::forgetWifi()
 {
-	debug_i("AppWIFI::forget_wifi");
+	debug_i(ANSI_COLOR_BLUE "AppWIFI::forget_wifi" ANSI_COLOR_RESET);
 	WifiStation.config("", "");
 	WifiStation.disconnect();
 	if(!WifiAccessPoint.isEnabled()) {
@@ -122,32 +122,32 @@ void AppWIFI::forgetWifi()
  */
 void AppWIFI::init()
 {
-	debug_i("AppWIFI::init");
+	debug_i(ANSI_COLOR_BLUE "AppWIFI::init" ANSI_COLOR_RESET);
 	// ESP SDK function to disable  sleep
 	wifi_set_sleep_type(NONE_SLEEP_T);
 
-	debug_i("AppWIFI::init\n    station %s\n    AP      %s", WifiStation.isEnabled()? "enabled" : "disabled", WifiAccessPoint.isEnabled()? "enabled" : "disabled");
+	debug_i(ANSI_COLOR_BLUE "AppWIFI::init\n    station " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "\n    AP      " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, WifiStation.isEnabled()? "enabled" : "disabled", WifiAccessPoint.isEnabled()? "enabled" : "disabled");
 
 	//don`t enable/disable again to save eeprom cycles
 	if(!WifiStation.isEnabled()) {
-		debug_i("AppWIFI::init enable WifiStation");
+		debug_i(ANSI_COLOR_BLUE "AppWIFI::init enable WifiStation" ANSI_COLOR_RESET);
 		WifiStation.enable(true, true);
 	}
 
 	WifiStation.enable(true);
 	if(WifiAccessPoint.isEnabled()) {
-		debug_i("AppWIFI::init WifiAccessPoint disabled");
+		debug_i(ANSI_COLOR_BLUE "AppWIFI::init WifiAccessPoint disabled" ANSI_COLOR_RESET);
 		WifiAccessPoint.enable(false, true);
 	}
 
 	_con_ctr = 0;
 	// ConfigDB adapt
 	if(app.isFirstRun()) {
-		debug_i("AppWIFI::init initial run - setting up AP, ssid: ");
+		debug_i(ANSI_COLOR_BLUE "AppWIFI::init initial run - setting up AP, ssid: " ANSI_COLOR_RESET);
 		char ssid_buf[64];
 		snprintf(ssid_buf, sizeof(ssid_buf), "%s%u", DEFAULT_AP_SSIDPREFIX, system_get_chip_id());
 		String SSID = ssid_buf;
-		debug_i("%s", SSID.c_str());
+		debug_i(ANSI_COLOR_BLUE "" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, SSID.c_str());
 
 		AppConfig::Network network(*app.cfg);
 		if(auto networkUpdate = network.update()) {
@@ -158,13 +158,13 @@ void AppWIFI::init()
 	}
 
 	// register callbacks
-	debug_i("AppWIFI::init register callbacks");
+	debug_i(ANSI_COLOR_BLUE "AppWIFI::init register callbacks" ANSI_COLOR_RESET);
 	WifiEvents.onStationDisconnect(StationDisconnectDelegate(&AppWIFI::_STADisconnect, this));
 	WifiEvents.onStationConnect(StationConnectDelegate(&AppWIFI::_STAConnected, this));
 	WifiEvents.onStationGotIP(StationGotIPDelegate(&AppWIFI::_STAGotIP, this));
 
 	if(WifiStation.getSSID() == "") {
-		debug_i("AppWIFI::init no AP to connect to - start own AP");
+		debug_i(ANSI_COLOR_BLUE "AppWIFI::init no AP to connect to - start own AP" ANSI_COLOR_RESET);
 		// No wifi to connect to - initialize AP
 		startAp();
 
@@ -177,28 +177,28 @@ void AppWIFI::init()
 		{
 			AppConfig::Network network(*app.cfg);
 			if(!network.connection.getDhcp() && !network.connection.getIp().length() == 0) {
-				debug_i("AppWIFI::init setting static ip");
+				debug_i(ANSI_COLOR_BLUE "AppWIFI::init setting static ip" ANSI_COLOR_RESET);
 				if(WifiStation.isEnabledDHCP()) {
 					// dhcp is configured off but currently enabled - disable it
-					debug_i("AppWIFI::init disabled dhcp");
+					debug_i(ANSI_COLOR_BLUE "AppWIFI::init disabled dhcp" ANSI_COLOR_RESET);
 					WifiStation.enableDHCP(false);
 				}
 				if(!(WifiStation.getIP() == network.connection.getIp()) ||
 				   !(WifiStation.getNetworkGateway() == network.connection.getGateway()) ||
 				   !(WifiStation.getNetworkMask() == network.connection.getNetmask())) {
-					debug_i("AppWIFI::init updating ip configuration");
+					debug_i(ANSI_COLOR_BLUE "AppWIFI::init updating ip configuration" ANSI_COLOR_RESET);
 					WifiStation.setIP(network.connection.getIp(), network.connection.getNetmask(),
 									  network.connection.getGateway());
 				}
 			} else {
-				debug_i("AppWIFI::init dhcp");
+				debug_i(ANSI_COLOR_BLUE "AppWIFI::init dhcp" ANSI_COLOR_RESET);
 				if(!WifiStation.isEnabledDHCP()) {
-					debug_i("AppWIFI::init enabling dhcp");
+					debug_i(ANSI_COLOR_BLUE "AppWIFI::init enabling dhcp" ANSI_COLOR_RESET);
 					WifiStation.enableDHCP(true);
 				}
 			}
 		} // end ConfigDB network context
-		debug_i("AppWifi::init - triggering wifi connect");
+		debug_i(ANSI_COLOR_BLUE "AppWifi::init - triggering wifi connect" ANSI_COLOR_RESET);
 		WifiStation.connect();
 	}
 }
@@ -221,12 +221,12 @@ void AppWIFI::connect(String ssid, bool new_con /* = false */)
  */
 void AppWIFI::connect(String ssid, String pass, bool new_con /* = false */)
 {
-	debug_i("AppWIFI::connect ssid %s newcon %d", ssid.c_str(), new_con);
+	debug_i(ANSI_COLOR_BLUE "AppWIFI::connect ssid " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " newcon " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, ssid.c_str(), new_con);
 	_con_ctr = 0;
 	_new_connection = new_con;
 	_client_status = CONNECTION_STATUS::CONNECTING;
 
-	debug_i("connecting to %s using %s", ssid.c_str(), pass.c_str());
+	debug_i(ANSI_COLOR_BLUE "connecting to " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " using " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, ssid.c_str(), pass.c_str());
 	WifiStation.config(ssid, pass);
 	WifiStation.connect();
 	broadcastWifiStatus(F("Connecting to WiFi"));
@@ -248,14 +248,14 @@ void AppWIFI::connect(String ssid, String pass, bool new_con /* = false */)
  */
 void AppWIFI::_STADisconnect(const String& ssid, MacAddress bssid, WifiDisconnectReason reason)
 {
-	debug_i("AppWIFI::_STADisconnect reason - %i - counter %i", reason, _con_ctr);
+	debug_i(ANSI_COLOR_BLUE "AppWIFI::_STADisconnect reason - " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE " - counter " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, reason, _con_ctr);
 
 	if(_con_ctr == DEFAULT_CONNECTION_RETRIES || WifiStation.getConnectionStatus() == eSCS_WrongPassword) {
 		_client_status = CONNECTION_STATUS::ERROR;
 		_client_err_msg = WifiStation.getConnectionStatusName();
-		debug_i("AppWIFI::_STADisconnect err %s - new connection: %i", _client_err_msg.c_str(), _new_connection);
+		debug_i(ANSI_COLOR_BLUE "AppWIFI::_STADisconnect err " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " - new connection: " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, _client_err_msg.c_str(), _new_connection);
 		if(_new_connection) {
-			debug_i("AppWIFI::_STADisconnect - disconnecting station");
+			debug_i(ANSI_COLOR_BLUE "AppWIFI::_STADisconnect - disconnecting station" ANSI_COLOR_RESET);
 			WifiStation.disconnect();
 			WifiStation.config("", "");
 		} else {
@@ -263,7 +263,7 @@ void AppWIFI::_STADisconnect(const String& ssid, MacAddress bssid, WifiDisconnec
 			startAp();
 		}
 	}
-	debug_i("AppWIFI::_STADisconnect - _client_err_msg: %s", _client_err_msg.c_str());
+	debug_i(ANSI_COLOR_BLUE "AppWIFI::_STADisconnect - _client_err_msg: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, _client_err_msg.c_str());
 	broadcastWifiStatus(_client_err_msg);
 	_con_ctr++;
 }
@@ -283,7 +283,7 @@ void AppWIFI::_STADisconnect(const String& ssid, MacAddress bssid, WifiDisconnec
  */
 void AppWIFI::_STAConnected(const String& ssid, MacAddress bssid, uint8_t channel)
 {
-	debug_i("AppWIFI::_STAConnected SSID - %s", ssid.c_str());
+	debug_i(ANSI_COLOR_BLUE "AppWIFI::_STAConnected SSID - " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, ssid.c_str());
 	{
 		String device_name;
 		{
@@ -294,9 +294,9 @@ void AppWIFI::_STAConnected(const String& ssid, MacAddress bssid, uint8_t channe
 			char device_name_buf[64];
 			snprintf(device_name_buf, sizeof(device_name_buf), "%s%u", DEFAULT_AP_SSIDPREFIX, system_get_chip_id());
 			device_name = device_name_buf;
-			debug_i("no device name configured, building default name");
+			debug_i(ANSI_COLOR_BLUE "no device name configured, building default name" ANSI_COLOR_RESET);
 		}
-		debug_i("AppWIFI::connect setting hostname to %s", device_name.c_str());
+		debug_i(ANSI_COLOR_BLUE "AppWIFI::connect setting hostname to " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, device_name.c_str());
 		WifiStation.setHostname(device_name);
 		{
 			AppConfig::Network::OuterUpdater network(*app.cfg);
@@ -331,7 +331,7 @@ void AppWIFI::_STAGotIP(IpAddress ip, IpAddress mask, IpAddress gateway)
 		app.udpSyslogStream.setHostname(network.mdns.getName());
 #endif
 	}
-	debug_i("AppWIFI::_STAGotIP");
+	debug_i(ANSI_COLOR_BLUE "AppWIFI::_STAGotIP" ANSI_COLOR_RESET);
 
 	if(_new_connection) {
 		stopAp(90000);
@@ -343,10 +343,10 @@ void AppWIFI::_STAGotIP(IpAddress ip, IpAddress mask, IpAddress gateway)
 	{
 		AppConfig::General general(*app.cfg);
 		AppConfig::Network network(*app.cfg);
-		debug_i("AppWIFI::_STAGotIP - device_name %s hostname %s", general.getDeviceName().c_str(),
+		debug_i(ANSI_COLOR_BLUE "AppWIFI::_STAGotIP - device_name " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " hostname " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, general.getDeviceName().c_str(),
 				network.mdns.getName().c_str());
 		if(network.mdns.getName().length() > 0) {
-			debug_i("AppWIFI::_STAGotIP - setting mdns hostname to %s", network.mdns.getName().c_str());
+			debug_i(ANSI_COLOR_BLUE "AppWIFI::_STAGotIP - setting mdns hostname to " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, network.mdns.getName().c_str());
 		}
 	} //end ConfigDB general and network context
 
@@ -359,7 +359,7 @@ void AppWIFI::_STAGotIP(IpAddress ip, IpAddress mask, IpAddress gateway)
 		
 		id = (uint32_t)system_get_chip_id();	
 
-		debug_i("adding mdns host %s with ip %s and id %s", network.mdns.getName().c_str(), ipAddress.c_str(), String(id).c_str());
+		debug_i(ANSI_COLOR_BLUE "adding mdns host " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " with ip " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " and id " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, network.mdns.getName().c_str(), ipAddress.c_str(), String(id).c_str());
 		app.controllers->addOrUpdate(id, network.mdns.getName(), ipAddress, -1);
 
 		broadcastWifiStatus();
@@ -393,26 +393,26 @@ void AppWIFI::stopAp(int delay)
 	}
 
 	if(delay > 0) {
-		debug_i("AppWIFI::stopAp delay %i", delay);
+		debug_i(ANSI_COLOR_BLUE "AppWIFI::stopAp delay " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, delay);
 		_timer.initializeMs(delay, std::bind(&AppWIFI::stopAp, this, 0)).startOnce();
 		return;
 	}
 
-	debug_i("AppWIFI::stopAp");
-	debug_i("Disabling AP");
+	debug_i(ANSI_COLOR_BLUE "AppWIFI::stopAp" ANSI_COLOR_RESET);
+	debug_i(ANSI_COLOR_BLUE "Disabling AP" ANSI_COLOR_RESET);
 	_timer.stop();
 
 	// Don't shut down the AP while the webapp is still downloading — the user's
 	// browser may be connected via the AP to watch the updating page.  Poll every
 	// 10 s until the download is done, then disable the AP.
 	if(app.webappOta.isActive()) {
-		debug_i("AppWIFI::stopAp - webapp OTA in progress, deferring AP stop by 10s");
+		debug_i(ANSI_COLOR_BLUE "AppWIFI::stopAp - webapp OTA in progress, deferring AP stop by 10s" ANSI_COLOR_RESET);
 		_timer.initializeMs(10000, std::bind(&AppWIFI::stopAp, this, 0)).startOnce();
 		return;
 	}
 
 	if(WifiAccessPoint.isEnabled()) {
-		debug_i("AppWIFI::stopAp WifiAP disable");
+		debug_i(ANSI_COLOR_BLUE "AppWIFI::stopAp WifiAP disable" ANSI_COLOR_RESET);
 		WifiAccessPoint.enable(false, false);
 	}
 	broadcastWifiStatus(F("AP stopping"));
@@ -429,13 +429,13 @@ void AppWIFI::stopAp(int delay)
 void AppWIFI::startAp()
 {
 	//String ssid="rgbww test";
-	debug_i("AppWIFI::startAp");
-	debug_i("Enabling AP");
+	debug_i(ANSI_COLOR_BLUE "AppWIFI::startAp" ANSI_COLOR_RESET);
+	debug_i(ANSI_COLOR_BLUE "Enabling AP" ANSI_COLOR_RESET);
 	if(!WifiAccessPoint.isEnabled()) {
-		debug_i("AppWIFI:: WifiAP enable");
+		debug_i(ANSI_COLOR_BLUE "AppWIFI:: WifiAP enable" ANSI_COLOR_RESET);
 		WifiAccessPoint.enable(true, false);
-		debug_i("AP enabled");
-		//debug_i("AP SSID: %s", app.cfg.network.ap.ssid);
+		debug_i(ANSI_COLOR_BLUE "AP enabled" ANSI_COLOR_RESET);
+		//debug_i(ANSI_COLOR_BLUE "AP SSID: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, app.cfg.network.ap.ssid);
 		{
 			AppConfig::Network network(*app.cfg);
 			if(network.ap.getSecured()) {
@@ -452,7 +452,7 @@ void AppWIFI::startAp()
         IpAddress apIP = WifiAccessPoint.getIP();
         if (apIP.toString() != "0.0.0.0") {
             dnsServer.start(DNS_PORT, "*", apIP);
-            debug_i("DNS server started: with address %s", apIP.toString().c_str());
+            debug_i(ANSI_COLOR_BLUE "DNS server started: with address " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, apIP.toString().c_str());
             dnsStartTimer->stop();
             delete dnsStartTimer;
         }
@@ -492,7 +492,7 @@ void AppWIFI::broadcastWifiStatus(String message)
 		ap[F("ssid")] = WifiAccessPoint.getSSID();
 		ap[F("ip")] = WifiAccessPoint.getIP().toString();
 
-		debug_i("rpc: root =%s", Json::serialize(root).c_str());
+		debug_i(ANSI_COLOR_BLUE "rpc: root =" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, Json::serialize(root).c_str());
 
 		String jsonStr = Json::serialize(msg.getRoot());
 

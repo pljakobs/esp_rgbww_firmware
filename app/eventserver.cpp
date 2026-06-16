@@ -42,10 +42,10 @@ EventServer::~EventServer()
 void EventServer::start(ApplicationWebserver& webServer)
 {
 	this->webServer = &webServer;
-	debug_i("Starting event server with webserver referal\n");
+	debug_i(ANSI_COLOR_BLUE "Starting event server with webserver referal\n" ANSI_COLOR_RESET);
 	setTimeOut(_connectionTimeout);
 	if(not listen(_tcpPort)) {
-		debug_e("EventServer failed to open listening port!");
+		debug_e(ANSI_COLOR_RED "EventServer failed to open listening port!" ANSI_COLOR_RESET);
 	}
 
 	auto fnc = TimerDelegate(&EventServer::publishKeepAlive, this);
@@ -119,7 +119,7 @@ void EventServer::onClientComplete(TcpClient& client, bool succesfull)
  */
 void EventServer::publishCurrentState(const ChannelOutput& raw, const HSVCT* pHsv)
 {
-	//debug_i("EventServer::publishCurrentState\n");
+	//debug_i(ANSI_COLOR_BLUE "EventServer::publishCurrentState\n" ANSI_COLOR_RESET);
 	const bool hasHsv = (pHsv != nullptr);
 	const bool sameRaw = (raw == _lastRaw);
 	const bool sameMode = (hasHsv == _lastHasHsv);
@@ -128,7 +128,7 @@ void EventServer::publishCurrentState(const ChannelOutput& raw, const HSVCT* pHs
 		return;
 	unsigned long currentTime = millis();
 	if(currentTime - _lastEventTime < _minEventInterval) {
-		debug_i("eventserver, droppinging currentState event");
+		debug_i(ANSI_COLOR_BLUE "eventserver, droppinging currentState event" ANSI_COLOR_RESET);
 		return; // Silently discard this event
 	}
 	_lastRaw = raw;
@@ -239,7 +239,7 @@ void EventServer::sendToClients(JsonRpcMessage& rpcMsg)
 	rpcMsg.setId(_nextId++);
 
 	String jsonStr = Json::serialize(rpcMsg.getRoot());
-	debug_i("EventServer::sendToClients: %s\n", jsonStr.c_str());
+	debug_i(ANSI_COLOR_BLUE "EventServer::sendToClients: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "\n" ANSI_COLOR_RESET, jsonStr.c_str());
 
 	for(unsigned i = 0; i < connections.size(); ++i) {
 		auto pClient = reinterpret_cast<TcpClient*>(connections[i]);

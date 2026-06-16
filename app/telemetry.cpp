@@ -58,13 +58,13 @@ void TelemetryClient::start() {
 	_telemetryLog=network.telemetry.getLogEnabled();
 
 	if((_telemetryStats  or _telemetryLog ) && strlen(_telemetryURL) > 0){
-		debug_i("Application::startServices - starting remote telemetry");
+		debug_i(ANSI_COLOR_BLUE "Application::startServices - starting remote telemetry" ANSI_COLOR_RESET);
 
-		debug_i("Application::startServices - telemetry mqtt server: %s", _telemetryURL);
+		debug_i(ANSI_COLOR_BLUE "Application::startServices - telemetry mqtt server: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, _telemetryURL);
 		connect(_telemetryURL, _telemetryUser, _telemetryPass);
 	}
 	else {
-		debug_i("Application::startServices - mqtt telemetry disabled");
+		debug_i(ANSI_COLOR_BLUE "Application::startServices - mqtt telemetry disabled" ANSI_COLOR_RESET);
 		stop();
 	}
 }
@@ -84,7 +84,7 @@ void TelemetryClient::connect(const char* telemetryURL, const char* telemetryUse
 		// Build URL: mqtt://user:pass@server:port
 		char url[256];
         snprintf(url, sizeof(url), "mqtt://%s:%s@%s", telemetryUser, telemetryPass, telemetryURL);
-        debug_i("Telemetry MQTT connecting to %s", url);
+        debug_i(ANSI_COLOR_BLUE "Telemetry MQTT connecting to " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, url);
         char clientId[64];
         snprintf(clientId, sizeof(clientId), "telemetry_client_%s", _chipId);
 		mqtt->connect(url, clientId);
@@ -142,7 +142,7 @@ bool TelemetryClient::publish(const char* topic, const JsonDocument& doc) {
 		if ((_telemetryStats || _telemetryLog ) && !_reconnectPending) {
 			unsigned long now = millis();
 			if (now - _lastReconnectAttempt > 10000) { // 10s gate
-				debug_i("TelemetryClient: attempting reconnect");
+				debug_i(ANSI_COLOR_BLUE "TelemetryClient: attempting reconnect" ANSI_COLOR_RESET);
 				_reconnectPending = true;
 				_lastReconnectAttempt = now;
 				reconnect();
@@ -155,7 +155,7 @@ bool TelemetryClient::publish(const char* topic, const JsonDocument& doc) {
 	buildTopic(topic, fullTopic, sizeof(fullTopic));
 	String payload;
 	serializeJson(doc, payload);
-	debug_i("Telemetry MQTT publishing %s to topic: %s", payload.c_str(), fullTopic);
+	debug_i(ANSI_COLOR_BLUE "Telemetry MQTT publishing " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " to topic: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, payload.c_str(), fullTopic);
 	return mqtt->publish(fullTopic, payload);
 }
 // Add to TelemetryClient class definition in telemetry.h:
@@ -174,7 +174,7 @@ bool TelemetryClient::publish(const char* topic, const char* payload) {
         // Serial.println("Telemetry MQTT not connected");
         return false;
     }
-    debug_i("Telemetry MQTT publishing %s to topic: %s", payload, topic);
+    debug_i(ANSI_COLOR_BLUE "Telemetry MQTT publishing " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " to topic: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, payload, topic);
     char fullTopic[TELEMETRY_TOPIC_MAX_SIZE];
     buildTopic(topic, fullTopic, sizeof(fullTopic));
     return mqtt->publish(fullTopic, payload);

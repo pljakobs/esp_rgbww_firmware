@@ -121,7 +121,7 @@ public:
         // by _replayingFrame) must bypass the ring buffer path and go to UDP.
         _draining = true;
 
-        debug_i("drainPreNetBuffer: %u messages, %u/%u bytes used, %u evicted",
+        debug_i(ANSI_COLOR_BLUE "drainPreNetBuffer: " ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE " messages, " ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE "/" ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE " bytes used, " ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE " evicted" ANSI_COLOR_RESET,
                 _preNetBuf->count(), _preNetBuf->used(), _preNetBuf->capacity(),
                 _preNetBuf->evictedCount());
         // Capture a random nonce; the sentinel itself is sent at the start of

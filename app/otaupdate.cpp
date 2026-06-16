@@ -187,7 +187,7 @@ void ApplicationOTA::start(String romurl)
 	 * ##### devices.                                         #####
 	 * ############################################################
 	 */
-	debug_i("ApplicationOTA::start");
+	debug_i(ANSI_COLOR_BLUE "ApplicationOTA::start" ANSI_COLOR_RESET);
 	otaUpdater.reset(new Ota::Network::HttpUpgrader);
 	status = OTASTATUS::OTA_PROCESSING;
 
@@ -204,13 +204,13 @@ void ApplicationOTA::start(String romurl)
 	 * filing system partitions, etc. which may be actively in use.
 	 */
 	if(part == ota.getRunningPartition()) {
-		debug_w("May be running in temporary mode. Please reboot and try again.");
+		debug_w(ANSI_COLOR_YELLOW "May be running in temporary mode. Please reboot and try again." ANSI_COLOR_RESET);
 		broadcastOtaStatus(0, F("OTA failed: target partition is currently running, please reboot and try again"));
 		status = OTASTATUS::OTA_FAILED;
 		return;
 	}
 
-	debug_i("ApplicationOTA::start nextBootPartition: %s %#06x", part.name().c_str(), part.address());
+	debug_i(ANSI_COLOR_BLUE "ApplicationOTA::start nextBootPartition: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " " ANSI_COLOR_CYAN "%#06x" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, part.name().c_str(), part.address());
 	// flash rom to position indicated in the rBoot config rom table(temporarily) remove the sussess requirement from deploy-pages.yml
 	otaUpdater->addItem(romurl, part);
 
@@ -229,7 +229,7 @@ void ApplicationOTA::start(String romurl)
 	 */
 	// Watchdog: if upgradeCallback has not fired within 2 minutes, reboot to recover
 	otaWatchdog.initializeMs<2 * 60 * 1000>([this]() {
-		debug_e("ApplicationOTA: watchdog timeout - OTA appears hung, rebooting to recover");
+		debug_e(ANSI_COLOR_RED "ApplicationOTA: watchdog timeout - OTA appears hung, rebooting to recover" ANSI_COLOR_RESET);
 		broadcastOtaStatus(0, F("OTA watchdog timeout - rebooting to recover"));
 		otaUpdater.reset();
 		status = OTASTATUS::OTA_FAILED;
@@ -237,20 +237,20 @@ void ApplicationOTA::start(String romurl)
 	});
 	otaWatchdog.startOnce();
 
-	debug_i("Free heap before OTA: %i", app.getFreeHeapSize());
+	debug_i(ANSI_COLOR_BLUE "Free heap before OTA: " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, app.getFreeHeapSize());
 
-	debug_i("Current running partition: %s", ota.getRunningPartition().name());
-	debug_i("OTA target partition: %s", part.name().c_str());
-	debug_i("configured OTA item list");
-	debug_i("========================");
+	debug_i(ANSI_COLOR_BLUE "Current running partition: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, ota.getRunningPartition().name());
+	debug_i(ANSI_COLOR_BLUE "OTA target partition: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, part.name().c_str());
+	debug_i(ANSI_COLOR_BLUE "configured OTA item list" ANSI_COLOR_RESET);
+	debug_i(ANSI_COLOR_BLUE "========================" ANSI_COLOR_RESET);
 	const auto& items = otaUpdater->getItems();
 	for(const auto& item : items) {
-		debug_i("  URL: %s", item.url.c_str());
-		debug_i("  Partition: %s", item.partition.name().c_str());
-		debug_i("  Size: %i", item.size);
-		debug_i("  ---------");
+		debug_i(ANSI_COLOR_BLUE "  URL: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, item.url.c_str());
+		debug_i(ANSI_COLOR_BLUE "  Partition: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, item.partition.name().c_str());
+		debug_i(ANSI_COLOR_BLUE "  Size: " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, item.size);
+		debug_i(ANSI_COLOR_BLUE "  ---------" ANSI_COLOR_RESET);
 	}
-	debug_i("Starting OTA ...");
+	debug_i(ANSI_COLOR_BLUE "Starting OTA ..." ANSI_COLOR_RESET);
 	broadcastOtaStatus(2, F("Starting OTA download"));
 	/*
 	 * ############################################################
@@ -267,13 +267,13 @@ void ApplicationOTA::doSwitch()
 	auto before = ota.getRunningPartition();
 	auto after = ota.getNextBootPartition();
 
-	debug_i("Swapping from %s @0x%s to %s @0x%s", before.name(), String(before.address(), HEX), after.name(),
+	debug_i(ANSI_COLOR_BLUE "Swapping from " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " @0x" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " to " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " @0x" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, before.name(), String(before.address(), HEX), after.name(),
 			String(after.address(), HEX));
 	if(ota.setBootPartition(after)) {
-		debug_i("Restarting...\r\n");
+		debug_i(ANSI_COLOR_BLUE "Restarting...\r\n" ANSI_COLOR_RESET);
 		System.restart();
 	} else {
-		debug_i("Switch failed.");
+		debug_i(ANSI_COLOR_BLUE "Switch failed." ANSI_COLOR_RESET);
 	}
 }
 
@@ -288,13 +288,13 @@ void ApplicationOTA::reset() {reset");
 void ApplicationOTA::beforeOTA()
 {
 	broadcastOtaStatus(1, F("Preparing OTA"));
-	debug_i("ApplicationOTA::beforeOTA");
+	debug_i(ANSI_COLOR_BLUE "ApplicationOTA::beforeOTA" ANSI_COLOR_RESET);
 	/*
     * this is being executed before otaUpdater->start
     */
    auto boot_partitions=ota.getBootPartitions();
    for (auto bootpart: boot_partitions){
-	   debug_i("ApplicationOTA::beforeOTA boot partition: %s", bootpart.name());
+	   debug_i(ANSI_COLOR_BLUE "ApplicationOTA::beforeOTA boot partition: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, bootpart.name());
    }
 
 	/*
@@ -305,14 +305,14 @@ void ApplicationOTA::beforeOTA()
          (new partition is lfs based, too - so we can copy the config)
      */
 	if(dataPartition.name() != "") {
-		debug_i("partition layout v1, saving status to old rom");
+		debug_i(ANSI_COLOR_BLUE "partition layout v1, saving status to old rom" ANSI_COLOR_RESET);
 		saveStatus(OTASTATUS::OTA_FAILED);
 	}
 }
 
 void ApplicationOTA::afterOTA()
 {
-	debug_i("ApplicationOTA::afterOTA");
+	debug_i(ANSI_COLOR_BLUE "ApplicationOTA::afterOTA" ANSI_COLOR_RESET);
 	/*
     * called by upgradeCallback
     * this is being executed after otaUpdater->start but before System.restart
@@ -328,7 +328,7 @@ void ApplicationOTA::afterOTA()
 	 * path)
 	 */
 	if(status == OTASTATUS::OTA_SUCCESS_REBOOT) {
-		debug_i("afterOta, rom Slot=%i", app.getRomSlot());
+		debug_i(ANSI_COLOR_BLUE "afterOta, rom Slot=" ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, app.getRomSlot());
 		app.wsBroadcast(F("notification"), F("OTA successful, rebooting"));
 
 
@@ -376,7 +376,7 @@ void ApplicationOTA::upgradeCallback(Ota::Network::HttpUpgrader& client, bool re
 	 * ##### Controls partition switch and restart behavior.  #####
 	 * ############################################################
 	 */
-	debug_i("ApplicationOTA::rBootCallback");
+	debug_i(ANSI_COLOR_BLUE "ApplicationOTA::rBootCallback" ANSI_COLOR_RESET);
 	otaWatchdog.stop(); // disarm watchdog regardless of outcome
 	broadcastOtaStatus(3, F("OTA download complete, verifying"));
 	if(result == true) {
@@ -385,11 +385,11 @@ void ApplicationOTA::upgradeCallback(Ota::Network::HttpUpgrader& client, bool re
 		afterOTA();
 
 		auto part = ota.getNextBootPartition();
-		debug_i("ApplicationOTA::rBootCallback next boot partition: %s", part.name().c_str());
+		debug_i(ANSI_COLOR_BLUE "ApplicationOTA::rBootCallback next boot partition: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, part.name().c_str());
 		ota.setBootPartition(part);
-		debug_i("configured next boot partition");
+		debug_i(ANSI_COLOR_BLUE "configured next boot partition" ANSI_COLOR_RESET);
 		status = OTASTATUS::OTA_SUCCESS_REBOOT;
-		debug_i("OTA callback done, rebooting");
+		debug_i(ANSI_COLOR_BLUE "OTA callback done, rebooting" ANSI_COLOR_RESET);
 		broadcastOtaStatus(4, F("OTA successful, rebooting"));
 		/*
 		 * ##########################################################
@@ -402,7 +402,7 @@ void ApplicationOTA::upgradeCallback(Ota::Network::HttpUpgrader& client, bool re
 		ota.abort();
 		otaUpdater.reset();
 		broadcastOtaStatus(0, F("OTA failed - rebooting to recover"));
-		debug_i("OTA failed, rebooting in 5s to recover network stack");
+		debug_i(ANSI_COLOR_BLUE "OTA failed, rebooting in 5s to recover network stack" ANSI_COLOR_RESET);
 		// Rearm the watchdog as a reboot timer: gives the WS message time to
 		// be delivered over the websocket before the restart, and ensures the
 		// controller always recovers from a failed download without physical
@@ -429,7 +429,7 @@ void ApplicationOTA::checkAtBoot()
 	 * ##### Influences post-update recovery behavior.        #####
 	 * ############################################################
 	 */
-	debug_i("ApplicationOTA::checkAtBoot");
+	debug_i(ANSI_COLOR_BLUE "ApplicationOTA::checkAtBoot" ANSI_COLOR_RESET);
 	status = loadStatus();
 	/*
     * after a successful OTA reboot, this should be
@@ -438,9 +438,9 @@ void ApplicationOTA::checkAtBoot()
     */
 	int rom = app.getRomSlot();
 	//Serial.systemDebugOutput(true);
-	debug_i("ApplicationOTA::checkAtBoot status: %i", status);
-	debug_i("after reboot, checking partition layout");
-	debug_i("current active rom is: %i", rom);
+	debug_i(ANSI_COLOR_BLUE "ApplicationOTA::checkAtBoot status: " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, status);
+	debug_i(ANSI_COLOR_BLUE "after reboot, checking partition layout" ANSI_COLOR_RESET);
+	debug_i(ANSI_COLOR_BLUE "current active rom is: " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, rom);
 #if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
 	Storage::Debug::listDevices(Serial);
 #endif
@@ -450,12 +450,12 @@ void ApplicationOTA::checkAtBoot()
 	// mid-flash).  We survived into a running image, so the ROM is good —
 	// clear the flag so the controller doesn't stay in a degraded state.
 	if(status == OTASTATUS::OTA_FAILED || status == OTASTATUS::OTA_PROCESSING) {
-		debug_w("checkAtBoot: boot after interrupted OTA (status=%i) — cleared, running normally", (int)status);
+		debug_w(ANSI_COLOR_YELLOW "checkAtBoot: boot after interrupted OTA (status=" ANSI_COLOR_CYAN "%i" ANSI_COLOR_YELLOW ") — cleared, running normally" ANSI_COLOR_RESET, (int)status);
 		status = OTASTATUS::OTA_NOT_UPDATING;
 	}
 
 	if(app.isTempBoot()) {
-		debug_i("ApplicationOTA::checkAtBoot permanently enabling rom %i", app.getRomSlot());
+		debug_i(ANSI_COLOR_BLUE "ApplicationOTA::checkAtBoot permanently enabling rom " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, app.getRomSlot());
 #ifdef ESP8266
 		rboot_set_current_rom(app.getRomSlot());
 #endif
@@ -531,13 +531,13 @@ bool ApplicationOTA::switchPartitions()
 
 		if(Storage::findPartition(F("spiffs1"))) {
 			if(!delPartition(partitionTable, F("spiffs1"))) {
-				debug_i("ApplicationOTA::checkAtBoot failed to delete spiffs1");
+				debug_i(ANSI_COLOR_BLUE "ApplicationOTA::checkAtBoot failed to delete spiffs1" ANSI_COLOR_RESET);
 				return false;
 			}
 		}
 		if(Storage::findPartition(F("spiffs0"))) {
 			if(!delPartition(partitionTable, F("spiffs0"))) {
-				debug_i("ApplicationOTA::checkAtBoot failed to delete spiffs0");
+				debug_i(ANSI_COLOR_BLUE "ApplicationOTA::checkAtBoot failed to delete spiffs0" ANSI_COLOR_RESET);
 				return false;
 			}
 		}
@@ -545,34 +545,34 @@ bool ApplicationOTA::switchPartitions()
 		int offset = 0x300000;
 		if(!addPartition(partitionTable, F("lfs1"), static_cast<uint8_t>(Storage::Partition::Type::data),
 						 static_cast<uint8_t>(Storage::Partition::SubType::Data::littlefs), offset, 0x0f8000, 0x00)) {
-			debug_i("ApplicationOTA::checkAtBoot failed to add lfs1");
+			debug_i(ANSI_COLOR_BLUE "ApplicationOTA::checkAtBoot failed to add lfs1" ANSI_COLOR_RESET);
 			return false;
 		}
 		offset = 0x100000;
 		if(!addPartition(partitionTable, F("lfs0"), static_cast<uint8_t>(Storage::Partition::Type::data),
 						 static_cast<uint8_t>(Storage::Partition::SubType::Data::littlefs), offset, 0x0f8000, 0x00)) {
-			debug_i("ApplicationOTA::checkAtBoot failed to add lfs0");
+			debug_i(ANSI_COLOR_BLUE "ApplicationOTA::checkAtBoot failed to add lfs0" ANSI_COLOR_RESET);
 			return false;
 		}
 
 		if(!savePartitionTable(partitionTable)) {
-			debug_i("ApplicationOTA::checkAtBoot failed to save partition table");
+			debug_i(ANSI_COLOR_BLUE "ApplicationOTA::checkAtBoot failed to save partition table" ANSI_COLOR_RESET);
 			return false;
 		}
 
-		debug_i("OTA post, switchPartition => reloading partition table");
+		debug_i(ANSI_COLOR_BLUE "OTA post, switchPartition => reloading partition table" ANSI_COLOR_RESET);
 		Storage::spiFlash->loadPartitions(PARTITION_TABLE_OFFSET); // load partition table from storage
 
 		Storage::Debug::listDevices(Serial);
 
-		debug_i("OTA_post, create new file system");
+		debug_i(ANSI_COLOR_BLUE "OTA_post, create new file system" ANSI_COLOR_RESET);
 		createLFS(1);
 		createLFS(0);
 
-		//debug_i("OTA_post, saving config");
+		//debug_i(ANSI_COLOR_BLUE "OTA_post, saving config" ANSI_COLOR_RESET);
 		//app.cfg.save();
 
-		debug_i("OTA_post, switchPartitions => restart");
+		debug_i(ANSI_COLOR_BLUE "OTA_post, switchPartitions => restart" ANSI_COLOR_RESET);
 		app.restart();
 		return true;
 	}
@@ -594,27 +594,27 @@ bool ApplicationOTA::switchPartition(uint8_t slot)
 	if(Storage::findPartition(spiffsPartName)) {
 		std::vector<Storage::esp_partition_info_t> partitionTable = getEditablePartitionTable();
 		if(!delPartition(partitionTable, spiffsPartName)) {
-			debug_i("ApplicationOTA::checkAtBoot failed to delete %s", spiffsPartName.c_str());
+			debug_i(ANSI_COLOR_BLUE "ApplicationOTA::checkAtBoot failed to delete " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, spiffsPartName.c_str());
 		} else {
 			int offset;
 			slot == 0 ? offset = 0x100000 : offset = 0x300000;
 			if(!addPartition(partitionTable, lfsPartName, static_cast<uint8_t>(Storage::Partition::Type::data),
 							 static_cast<uint8_t>(Storage::Partition::SubType::Data::littlefs), offset, 0x0f8000,
 							 0x00)) {
-				debug_i("ApplicationOTA::checkAtBoot failed to add %s", lfsPartName.c_str());
+				debug_i(ANSI_COLOR_BLUE "ApplicationOTA::checkAtBoot failed to add " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, lfsPartName.c_str());
 			} else {
 				if(!savePartitionTable(partitionTable)) {
-					debug_i("ApplicationOTA::checkAtBoot failed to save partition table");
+					debug_i(ANSI_COLOR_BLUE "ApplicationOTA::checkAtBoot failed to save partition table" ANSI_COLOR_RESET);
 				}
 			}
-			debug_i("partition update saved");
+			debug_i(ANSI_COLOR_BLUE "partition update saved" ANSI_COLOR_RESET);
 		}
 		Storage::spiFlash->loadPartitions(PARTITION_TABLE_OFFSET); // load partition table from storage
-		debug_i("OTA post, switchPartition => reloading partition table");
+		debug_i(ANSI_COLOR_BLUE "OTA post, switchPartition => reloading partition table" ANSI_COLOR_RESET);
 		Storage::Debug::listDevices(Serial);
 		return true;
 	} else {
-		debug_i("OTA post switchPartition => Partition %s not found", spiffsPartName.c_str());
+		debug_i(ANSI_COLOR_BLUE "OTA post switchPartition => Partition " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " not found" ANSI_COLOR_RESET, spiffsPartName.c_str());
 		return false;
 	}
 }
@@ -622,7 +622,7 @@ bool ApplicationOTA::switchPartition(uint8_t slot)
 
 void ApplicationOTA::saveStatus(OTASTATUS newStatus)
 {
-	debug_i("ApplicationOTA::saveStatus %i to rom partition rom%i\n", newStatus, app.getRomSlot());
+	debug_i(ANSI_COLOR_BLUE "ApplicationOTA::saveStatus " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE " to rom partition rom" ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE "\n" ANSI_COLOR_RESET, newStatus, app.getRomSlot());
 	status = newStatus;
 	StaticJsonDocument<128> doc;
 	JsonObject root = doc.to<JsonObject>();
@@ -632,7 +632,7 @@ void ApplicationOTA::saveStatus(OTASTATUS newStatus)
 
 OTASTATUS ApplicationOTA::loadStatus()
 {
-	debug_i("ApplicationOTA::loadStatus");
+	debug_i(ANSI_COLOR_BLUE "ApplicationOTA::loadStatus" ANSI_COLOR_RESET);
 	StaticJsonDocument<128> doc;
 	if(Json::loadFromFile(doc, OTA_STATUS_FILE)) {
 		OTASTATUS status = (OTASTATUS)doc[F("status")].as<int>();
@@ -648,7 +648,7 @@ Storage::Partition ApplicationOTA::findSpiffsPartition(Storage::Partition appPar
 	name += ota.getSlot(appPart);
 	auto part = Storage::findPartition(name);
 	if(!part) {
-		debug_w("Partition '%s' not found", name.c_str());
+		debug_w(ANSI_COLOR_YELLOW "Partition '" ANSI_COLOR_CYAN "%s" ANSI_COLOR_YELLOW "' not found" ANSI_COLOR_RESET, name.c_str());
 	}
 	return part;
 }
@@ -792,7 +792,7 @@ bool ApplicationOTA::savePartitionTable(std::vector<Storage::esp_partition_info_
 			printf("\n");
 		}
 	}
-	debug_i("all partitions added, going to compute md5 sum");
+	debug_i(ANSI_COLOR_BLUE "all partitions added, going to compute md5 sum" ANSI_COLOR_RESET);
 	// Compute the MD5 hash of the entries
 	crypto_md5_context_t md5Context;
 	crypto_md5_init(&md5Context);
@@ -809,10 +809,10 @@ bool ApplicationOTA::savePartitionTable(std::vector<Storage::esp_partition_info_
 	entries.insert(entries.end(), md5sum, md5sum + MD5_SIZE);
 
 	// which this, the partiton table is complete. Write it to flash:
-	debug_i("Writing partition table to flash to %0xi", PARTITION_TABLE_OFFSET);
+	debug_i(ANSI_COLOR_BLUE "Writing partition table to flash to " ANSI_COLOR_CYAN "%0x" ANSI_COLOR_BLUE "i" ANSI_COLOR_RESET, PARTITION_TABLE_OFFSET);
 	flash.erase_range(PARTITION_TABLE_OFFSET, flash.getBlockSize());
 	flash.write(PARTITION_TABLE_OFFSET, entries.data(), entries.size());
-	debug_i("done updating partition table");
+	debug_i(ANSI_COLOR_BLUE "done updating partition table" ANSI_COLOR_RESET);
 	return true;
 	//#endif
 }

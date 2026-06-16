@@ -40,7 +40,7 @@
  */
 bool JsonProcessor::onColor(const String& json, String& msg, bool relay)
 {
-	debug_e("JsonProcessor::onColor: %s", json.c_str());
+	debug_e(ANSI_COLOR_RED "JsonProcessor::onColor: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED "" ANSI_COLOR_RESET, json.c_str());
 	StaticJsonDocument<400> doc;
 	Json::deserialize(doc, json);
 	return onColor(doc.as<JsonObject>(), msg, relay);
@@ -61,7 +61,7 @@ bool JsonProcessor::onColor(JsonObject root, String& msg, bool relay)
 {
 	bool result = false;
 	if(!app.checkHeap(MIN_HEAP_FREE)) {
-		debug_i("out of memory in processing onColor");
+		debug_i(ANSI_COLOR_BLUE "out of memory in processing onColor" ANSI_COLOR_RESET);
 		msg = F("out of memory in processing onColor");
 		return false;
 	}
@@ -69,9 +69,9 @@ bool JsonProcessor::onColor(JsonObject root, String& msg, bool relay)
 	if(!cmds.isNull()) {
 		Vector<String> errors;
 		// multi command post (needs testing)
-		debug_i("  multi command post");
+		debug_i(ANSI_COLOR_BLUE "  multi command post" ANSI_COLOR_RESET);
 		for(unsigned i = 0; i < cmds.size(); ++i) {
-			debug_i("command %i: %s", i, cmds[i].as<String>().c_str());
+			debug_i(ANSI_COLOR_BLUE "command " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE ": " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, i, cmds[i].as<String>().c_str());
 			String msg;
 			if(!onSingleColorCommand(cmds[i], msg))
 				errors.add(msg);
@@ -84,10 +84,10 @@ bool JsonProcessor::onColor(JsonObject root, String& msg, bool relay)
 			for(unsigned i = 0; i < errors.size(); ++i)
 				msg += String(i) + ": " + errors[i] + "|";
 			result = false;
-			debug_i("  multi command post, %s", msg.c_str());
+			debug_i(ANSI_COLOR_BLUE "  multi command post, " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, msg.c_str());
 		}
 	} else {
-		debug_i("  single command post %s", msg.c_str());
+		debug_i(ANSI_COLOR_BLUE "  single command post " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, msg.c_str());
 		if(onSingleColorCommand(root, msg))
 			result = true;
 		else
@@ -382,7 +382,7 @@ bool JsonProcessor::onSingleColorCommand(JsonObject root, String& errorMsg)
 	RequestParameters params;
 	parseRequestParams(root, params);
 	if(params.checkParams(errorMsg) != 0) {
-		debug_i("checkParams failed:",errorMsg.c_str());
+		debug_i(ANSI_COLOR_BLUE "checkParams failed:" ANSI_COLOR_RESET,errorMsg.c_str());
 		return false;
 	}
 
@@ -411,12 +411,12 @@ bool JsonProcessor::onSingleColorCommand(JsonObject root, String& errorMsg)
 		}
 	} else {
 		errorMsg = F("No color object!");
-		debug_i("no color object");
+		debug_i(ANSI_COLOR_BLUE "no color object" ANSI_COLOR_RESET);
 		return false;
 	}
 
 	if(!queueOk) {
-		debug_i("queue full");
+		debug_i(ANSI_COLOR_BLUE "queue full" ANSI_COLOR_RESET);
 		errorMsg = F("Queue full");
 	}
 	return queueOk;
@@ -557,14 +557,14 @@ void JsonProcessor::parseRequestParams(JsonObject root, RequestParameters& param
 	Json::getValue(root[F("cmd")], params.cmd);
 
 	if(!root[F("q")].isNull()) {
-		String q = root[F("q")];
-		if(q == F("back"))
+		const char* q = root[F("q")] | "";
+		if(strcmp(q, "back") == 0)
 			params.queue = QueuePolicy::Back;
-		else if(q == F("front"))
+		else if(strcmp(q, "front") == 0)
 			params.queue = QueuePolicy::Front;
-		else if(q == F("front_reset"))
+		else if(strcmp(q, "front_reset") == 0)
 			params.queue = QueuePolicy::FrontReset;
-		else if(q == F("single"))
+		else if(strcmp(q, "single") == 0)
 			params.queue = QueuePolicy::Single;
 		else {
 			params.queue = QueuePolicy::Invalid;
@@ -574,24 +574,24 @@ void JsonProcessor::parseRequestParams(JsonObject root, RequestParameters& param
 	JsonArray arr;
 	if(Json::getValue(root[F("channels")], arr)) {
 		for(size_t i = 0; i < arr.size(); ++i) {
-			String str = arr[i];
-			if(str == F("h")) {
+			const char* str = arr[i] | "";
+			if(strcmp(str, "h") == 0) {
 				params.channels.add(CtrlChannel::Hue);
-			} else if(str == F("s")) {
+			} else if(strcmp(str, "s") == 0) {
 				params.channels.add(CtrlChannel::Sat);
-			} else if(str == F("v")) {
+			} else if(strcmp(str, "v") == 0) {
 				params.channels.add(CtrlChannel::Val);
-			} else if(str == F("ct")) {
+			} else if(strcmp(str, "ct") == 0) {
 				params.channels.add(CtrlChannel::ColorTemp);
-			} else if(str == F("r")) {
+			} else if(strcmp(str, "r") == 0) {
 				params.channels.add(CtrlChannel::Red);
-			} else if(str == F("g")) {
+			} else if(strcmp(str, "g") == 0) {
 				params.channels.add(CtrlChannel::Green);
-			} else if(str == F("b")) {
+			} else if(strcmp(str, "b") == 0) {
 				params.channels.add(CtrlChannel::Blue);
-			} else if(str == F("ww")) {
+			} else if(strcmp(str, "ww") == 0) {
 				params.channels.add(CtrlChannel::WarmWhite);
-			} else if(str == F("cw")) {
+			} else if(strcmp(str, "cw") == 0) {
 				params.channels.add(CtrlChannel::ColdWhite);
 			}
 		}
@@ -668,20 +668,20 @@ bool JsonProcessor::onJsonRpc(const String& json)
 
 	JsonRpcMessageIn rpc(json);
 	String msg;
-	String method = rpc.getMethod();
-	if(method == F("color")) {
+	const char* method = rpc.getMethod();
+	if(strcmp(method, "color") == 0) {
 		return onColor(rpc.getParams(), msg, false);
-	} else if(method == F("stop")) {
+	} else if(strcmp(method, "stop") == 0) {
 		return onStop(rpc.getParams(), msg, false);
-	} else if(method == F("blink")) {
+	} else if(strcmp(method, "blink") == 0) {
 		return onBlink(rpc.getParams(), msg, false);
-	} else if(method == F("skip")) {
+	} else if(strcmp(method, "skip") == 0) {
 		return onSkip(rpc.getParams(), msg, false);
-	} else if(method == F("pause")) {
+	} else if(strcmp(method, "pause") == 0) {
 		return onPause(rpc.getParams(), msg, false);
-	} else if(method == F("continue")) {
+	} else if(strcmp(method, "continue") == 0) {
 		return onContinue(rpc.getParams(), msg, false);
-	} else if(method == F("direct")) {
+	} else if(strcmp(method, "direct") == 0) {
 		return onDirect(rpc.getParams(), msg, false);
 	}
 

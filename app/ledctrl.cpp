@@ -63,7 +63,7 @@ APPLedCtrl::~APPLedCtrl()
 
 void APPLedCtrl::init()
 {
-	debug_i("APPLedCtrl::init");
+	debug_i(ANSI_COLOR_BLUE "APPLedCtrl::init" ANSI_COLOR_RESET);
 
 	_stepSync = new StepSync();
 
@@ -75,7 +75,7 @@ void APPLedCtrl::init()
 	String PinConfigName;
 	
 	{
-		debug_i("APPLedCtrl::init - read PinConfig");
+		debug_i(ANSI_COLOR_BLUE "APPLedCtrl::init - read PinConfig" ANSI_COLOR_RESET);
 		AppConfig::General general(*app.cfg);
 		AppConfig::Hardware hardware(*app.cfg);
 	
@@ -84,7 +84,7 @@ void APPLedCtrl::init()
 			bool found=false;
 			for(auto pinconfig : hardware.pinconfigs){
 				if(pinconfig.getName()==PinConfigName && pinconfig.getSoc()==SoC){
-					debug_i("APPLedCtrl::init - found pin config %s", PinConfigName.c_str());
+					debug_i(ANSI_COLOR_BLUE "APPLedCtrl::init - found pin config " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, PinConfigName.c_str());
 					found=true;
 					for (auto channel : pinconfig.channels) {
 						int pin=channel.getPin();
@@ -101,7 +101,7 @@ void APPLedCtrl::init()
 								pins.coldwhite = channel.getPin();
 							}
 						}else{
-							debug_e("APPLedCtrl::init - invalid pin %i for SoC %s", pin, SOC);
+							debug_e(ANSI_COLOR_RED "APPLedCtrl::init - invalid pin " ANSI_COLOR_CYAN "%i" ANSI_COLOR_RED " for SoC " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED "" ANSI_COLOR_RESET, pin, SOC);
 							pins.isValid=false;
 							if(auto generalUpdate = general.update()) {
 								generalUpdate.setCurrentPinConfigName(F("unconfigured"));
@@ -109,17 +109,17 @@ void APPLedCtrl::init()
 						}
 					}
 					if(!pins.isValid){
-						debug_e("APPLedCtrl::init - pin config %s is invalid", PinConfigName.c_str());
+						debug_e(ANSI_COLOR_RED "APPLedCtrl::init - pin config " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED " is invalid" ANSI_COLOR_RESET, PinConfigName.c_str());
 					}
 					break;
 				}
 			}
 			if(!found){
-				debug_e("APPLedCtrl::init - pin config %s not found", PinConfigName.c_str());
+				debug_e(ANSI_COLOR_RED "APPLedCtrl::init - pin config " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED " not found" ANSI_COLOR_RESET, PinConfigName.c_str());
 				pins.isValid=false;
 			}
 		} else {
-			debug_e("APPLedCtrl::init - no pin configs defined");
+			debug_e(ANSI_COLOR_RED "APPLedCtrl::init - no pin configs defined" ANSI_COLOR_RESET);
 			pins.isValid=false;
 		}
 	}
@@ -127,7 +127,7 @@ void APPLedCtrl::init()
 	
 		
 	debug_i(
-		"APPLedCtrl::init - initializing RGBWWLed\n   red: %i | green: %i | blue: %i | warmwhite: %i | coldwhite: %i, valid: [%s]",
+		ANSI_COLOR_BLUE "APPLedCtrl::init - initializing RGBWWLed\n   red: " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE " | green: " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE " | blue: " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE " | warmwhite: " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE " | coldwhite: " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE ", valid: [" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "]" ANSI_COLOR_RESET,
 		pins.red, pins.green, pins.blue, pins.warmwhite, pins.coldwhite, pins.isValid?"true":"false");
 
 	if(pins.isValid)
@@ -150,7 +150,7 @@ void APPLedCtrl::init()
 			if(speedMode == AppConfig::ContainedHardware::ContainedPwm::TimerSpeedMode::LOWSPEED){
 				config.timer.speed_mode = LEDC_LOW_SPEED_MODE;
 			} else{
-				debug_e("APPLedCtrl::init - invalid speed mode for SoC %s, using default low_speed", SOC);
+				debug_e(ANSI_COLOR_RED "APPLedCtrl::init - invalid speed mode for SoC " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED ", using default low_speed" ANSI_COLOR_RESET, SOC);
 				config.timer.speed_mode = LEDC_LOW_SPEED_MODE;
 			}
 
@@ -174,17 +174,17 @@ void APPLedCtrl::init()
 		#else
 		RGBWWLed::init(pins.red, pins.green, pins.blue, pins.warmwhite, pins.coldwhite, PWM_FREQUENCY);
 		#endif
-		debug_i("APPLedCtrl::init - finished setting up RGBWWLed");
+		debug_i(ANSI_COLOR_BLUE "APPLedCtrl::init - finished setting up RGBWWLed" ANSI_COLOR_RESET);
 		setup();
 		}
 
 	HSVCT startupColor;
 	{
-		debug_i("APPLedCtrl::init - reading startup color");
+		debug_i(ANSI_COLOR_BLUE "APPLedCtrl::init - reading startup color" ANSI_COLOR_RESET);
 		AppConfig::Color color(*app.cfg);
 		if(color.getStartupColor() == "last") {
 			AppData::Root data(*app.data);
-			debug_i("H: %i | s: %i | v: %i | ct: %i", data.lastColor.getH(), data.lastColor.getS(),
+			debug_i(ANSI_COLOR_BLUE "H: " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE " | s: " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE " | v: " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE " | ct: " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, data.lastColor.getH(), data.lastColor.getS(),
 					data.lastColor.getV(), data.lastColor.getCt());
 
 			startupColor.h = data.lastColor.getH();
@@ -215,11 +215,11 @@ bool APPLedCtrl::isPinValid(int currentPin)
 					return true;
 				}
 			}
-		debug_e("APPLedCtrl::isPinValid - invalid pin %i for SoC %s", currentPin, SOC);
+		debug_e(ANSI_COLOR_RED "APPLedCtrl::isPinValid - invalid pin " ANSI_COLOR_CYAN "%i" ANSI_COLOR_RED " for SoC " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED "" ANSI_COLOR_RESET, currentPin, SOC);
 		return false;
 		}
 	}
-	debug_e("APPLedCtrl::isPinValid - invalid SoC %s", SOC);
+	debug_e(ANSI_COLOR_RED "APPLedCtrl::isPinValid - invalid SoC " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED "" ANSI_COLOR_RESET, SOC);
 	return false;
 }
 /**
@@ -228,7 +228,7 @@ bool APPLedCtrl::isPinValid(int currentPin)
  */
 void APPLedCtrl::reconfigure()
 {
-	debug_i("APPLedCtrl::reconfigure");
+	debug_i(ANSI_COLOR_BLUE "APPLedCtrl::reconfigure" ANSI_COLOR_RESET);
 	{
 		AppConfig::Sync sync(*app.cfg);
 		clockMaster = sync.getClockMasterEnabled();
@@ -256,10 +256,10 @@ void APPLedCtrl::reconfigure()
  */
 void APPLedCtrl::setup()
 {
-	debug_i("APPLedCtrl::setup");
+	debug_i(ANSI_COLOR_BLUE "APPLedCtrl::setup" ANSI_COLOR_RESET);
 
 	{
-		debug_i("APPLedCtrl::setup - reading color config");
+		debug_i(ANSI_COLOR_BLUE "APPLedCtrl::setup - reading color config" ANSI_COLOR_RESET);
 		AppConfig::Color color(*app.cfg);
 
 		colorutils.setBrightnessCorrection(color.brightness.getRed(), color.brightness.getGreen(),
@@ -270,7 +270,7 @@ void APPLedCtrl::setup()
 
 		colorutils.setColorMode((RGBWW_COLORMODE)color.getColorMode());
 		colorutils.setHSVmodel((RGBWW_HSVMODEL)color.hsv.getModel());
-		debug_i("set RGBWW_COLORMOD %i and RGBWW_HSVMODEL %i", color.getColorMode(), color.hsv.getModel());
+		debug_i(ANSI_COLOR_BLUE "set RGBWW_COLORMOD " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE " and RGBWW_HSVMODEL " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, color.getColorMode(), color.hsv.getModel());
 
 		colorutils.setWhiteTemperature(color.colortemp.getWw(), color.colortemp.getCw());
 	} // end configdb context for color
@@ -285,7 +285,7 @@ void APPLedCtrl::setup()
 void APPLedCtrl::publishToEventServer()
 {
 	if(!app.eventserver.isEnabled()) {
-		debug_i("APPLEDCtrl - eventserver is disabled");
+		debug_i(ANSI_COLOR_BLUE "APPLEDCtrl - eventserver is disabled" ANSI_COLOR_RESET);
 		return;
 	}
 	HSVCT currentHsv;
@@ -366,7 +366,7 @@ void APPLedCtrl::updateLed()
 		if(animFinished || colorMasterInterval == 0 || ((stepLenMs * _stepCounter) % colorMasterInterval) < stepLenMs) {
 			uint32_t now = millis();
 			if(now - _lastColorEvent >= (uint32_t)colorMinInterval) {
-				// debug_i("APPLedCtrl::updateLed - publishing color event");
+				// debug_i(ANSI_COLOR_BLUE "APPLedCtrl::updateLed - publishing color event" ANSI_COLOR_RESET);
 				_lastColorEvent = now;
 				publishToEventServer();
 			}
@@ -474,17 +474,17 @@ void APPLedCtrl::publishStatus()
 
 void APPLedCtrl::start()
 {
-	debug_i("APPLedCtrl::start");
+	debug_i(ANSI_COLOR_BLUE "APPLedCtrl::start" ANSI_COLOR_RESET);
 
 	_ledTimer.setCallback(APPLedCtrl::updateLedCb, this);
 	_ledTimer.setIntervalMs(_timerInterval);
-	debug_i("_timerInterval", _timerInterval);
+	debug_i(ANSI_COLOR_BLUE "_timerInterval" ANSI_COLOR_RESET, _timerInterval);
 	_ledTimer.startOnce();
 }
 
 void APPLedCtrl::stop()
 {
-	debug_i("APPLedCtrl::stop");
+	debug_i(ANSI_COLOR_BLUE "APPLedCtrl::stop" ANSI_COLOR_RESET);
 	_ledTimer.stop();
 }
 
@@ -497,7 +497,7 @@ void APPLedCtrl::colorSave()
 		int ct;
 		HSVCT c = app.rgbwwctrl.getCurrentColor();
 		c.asRadian(h, s, v, ct);
-		debug_i("APPLedCtrl::colorSave - saving color H: %f | S: %f | V: %f | CT: %f", h, s, v, ct);
+		debug_i(ANSI_COLOR_BLUE "APPLedCtrl::colorSave - saving color H: " ANSI_COLOR_CYAN "%f" ANSI_COLOR_BLUE " | S: " ANSI_COLOR_CYAN "%f" ANSI_COLOR_BLUE " | V: " ANSI_COLOR_CYAN "%f" ANSI_COLOR_BLUE " | CT: " ANSI_COLOR_CYAN "%f" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, h, s, v, ct);
 		update.lastColor.setH(h);
 		update.lastColor.setS(s);
 		update.lastColor.setV(v);
@@ -507,7 +507,7 @@ void APPLedCtrl::colorSave()
 
 void APPLedCtrl::colorReset()
 {
-	debug_i("APPLedCtrl::colorReset");
+	debug_i(ANSI_COLOR_BLUE "APPLedCtrl::colorReset" ANSI_COLOR_RESET);
 	AppData::Root data(*app.data);
 	{
 		auto update = data.update();

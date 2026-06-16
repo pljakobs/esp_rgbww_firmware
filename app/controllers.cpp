@@ -56,19 +56,19 @@ const char* Controllers::hostTypeToString(HostType type)
 
 // Constructor
 Controllers::Controllers() : _pingInProgress(false), _pingIndex(0), _pingInterval(10000), _pingTimeout(5000) {
-    debug_i("Controllers constructor called");
+    debug_i(ANSI_COLOR_BLUE "Controllers constructor called" ANSI_COLOR_RESET);
     if (!app.data) {
-        debug_e("app.data is NULL in Controllers constructor!");
+        debug_e(ANSI_COLOR_RED "app.data is NULL in Controllers constructor!" ANSI_COLOR_RESET);
         return;
     }
-    debug_i("Controllers constructor: accessing ConfigDB...");
+    debug_i(ANSI_COLOR_BLUE "Controllers constructor: accessing ConfigDB..." ANSI_COLOR_RESET);
     AppData::Root::Controllers controllers(*app.data);
     size_t count = 0;
     for (auto it = controllers.begin(); it != controllers.end(); ++it) {
         count++;
-        debug_i("Found controller ID: %s", (*it).getId().c_str());
+        debug_i(ANSI_COLOR_BLUE "Found controller ID: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, (*it).getId().c_str());
     }
-    debug_i("Controllers constructor: found %d controllers in DB", count);
+    debug_i(ANSI_COLOR_BLUE "Controllers constructor: found " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " controllers in DB" ANSI_COLOR_RESET, count);
     visibleControllers.reserve(std::max(count, static_cast<size_t>(10)));
 
     // Ensure local controller is always present
@@ -89,7 +89,7 @@ Controllers::Controllers() : _pingInProgress(false), _pingIndex(0), _pingInterva
         localCtrl.pingPending = false;
         visibleControllers.push_back(localCtrl);
     }
-    debug_i("Controllers constructor completed");
+    debug_i(ANSI_COLOR_BLUE "Controllers constructor completed" ANSI_COLOR_RESET);
 }
 
 // Destructor
@@ -100,10 +100,10 @@ Controllers::~Controllers() {
 // Core methods
 void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char* ipAddress, int ttl, HostType hostType) {
     #ifdef DEBUG_MDNS
-        debug_i("Controllers::addOrUpdate id=%u, hostname=%s, ip=%s, ttl=%d", id, hostname, ipAddress, ttl);
+        debug_i(ANSI_COLOR_BLUE "Controllers::addOrUpdate id=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE ", hostname=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ", ip=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ", ttl=" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, id, hostname, ipAddress, ttl);
     #endif
     if(hostname == nullptr || hostname[0] == '\0' || ipAddress == nullptr || ipAddress[0] == '\0') {
-        debug_w("Empty hostname or IP address provided, skipping addOrUpdate");
+        debug_w(ANSI_COLOR_YELLOW "Empty hostname or IP address provided, skipping addOrUpdate" ANSI_COLOR_RESET);
         return;
     }
     // Find existing visible controller
@@ -137,19 +137,19 @@ void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char*
             if (controllerItem.getId() == String(id)) {
                 foundInConfig = true;
                 #ifdef DEBUG_MDNS
-                debug_i("Hostname %s already in list", hostname);
+                debug_i(ANSI_COLOR_BLUE "Hostname " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " already in list" ANSI_COLOR_RESET, hostname);
                 #endif
 
                 // Always update IP address
                 if (controllerItem.getIpAddress() != ipAddress) {
-                    debug_i("IP address changed from %s to %s", 
+                    debug_i(ANSI_COLOR_BLUE "IP address changed from " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " to " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, 
                            controllerItem.getIpAddress().c_str(), ipAddress);
                     controllerItem.setIpAddress(ipAddress);
                 }
                 
                 // Only update hostname if this is NOT a group or leader hostname
                 if ( controllerItem.getName() != hostname) {
-                    debug_i("Hostname changed from %s to %s", 
+                    debug_i(ANSI_COLOR_BLUE "Hostname changed from " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " to " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, 
                            controllerItem.getName().c_str(), hostname);
                     controllerItem.setName(hostname);
                 }
@@ -157,11 +157,11 @@ void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char*
             }
         }
     } else {
-        debug_e("error: failed to open hosts db for update");
+        debug_e(ANSI_COLOR_RED "error: failed to open hosts db for update" ANSI_COLOR_RESET);
     }
 
     if(!foundInConfig) {
-        debug_i("Hostname %s not in list adding to hostname db", hostname);
+        debug_i(ANSI_COLOR_BLUE "Hostname " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " not in list adding to hostname db" ANSI_COLOR_RESET, hostname);
 
         if(auto controllersUpdate = controllers.update()) {
             auto newController = controllersUpdate.addItem();
@@ -169,7 +169,7 @@ void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char*
             newController.setIpAddress(ipAddress);
             newController.setId(String(id));
         } else {
-            debug_e("error: failed to add host");
+            debug_e(ANSI_COLOR_RED "error: failed to add host" ANSI_COLOR_RESET);
         }
     }
 
@@ -339,9 +339,9 @@ void Controllers::forgetControllers(){
     visibleControllers.clear();
     if (auto controllersUpdate = AppData::Root::Controllers(*app.data).update()) {
         controllersUpdate.clear();
-        debug_i("Cleared all controllers from ConfigDB");
+        debug_i(ANSI_COLOR_BLUE "Cleared all controllers from ConfigDB" ANSI_COLOR_RESET);
     } else {
-        debug_e("error: failed to open hosts db for clearing, now %i controllers known", getTotalCount());
+        debug_e(ANSI_COLOR_RED "error: failed to open hosts db for clearing, now " ANSI_COLOR_CYAN "%i" ANSI_COLOR_RED " controllers known" ANSI_COLOR_RESET, getTotalCount());
     }
 }
 
@@ -520,7 +520,7 @@ bool Controllers::JsonPrinter::shouldIncludeController(const Controllers::Contro
         default:
             result = false;
     }
-    debug_i("%s controller: %u, hostname: %s, ip: %s, state: %d, ttl: %d", result?"return": "skip", info.id, info.hostname, info.ipAddress, info.state, info.ttl);
+    debug_i(ANSI_COLOR_BLUE "" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " controller: " ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE ", hostname: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ", ip: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ", state: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE ", ttl: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, result?"return": "skip", info.id, info.hostname, info.ipAddress, info.state, info.ttl);
 
     return result;
 }

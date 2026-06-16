@@ -41,12 +41,12 @@ public:
     JsonObject getParams();
 
     JsonObject getRoot();
-    String getMethod();
+    const char* getMethod() const;
     bool isValid() const { return _valid; }
     const String& getError() const { return _error; }
 
 private:
-    DynamicJsonDocument _doc;
+    StaticJsonDocument<MAX_JSON_MESSAGE_LENGTH> _doc;
     bool _valid{false};
     String _error;
 };

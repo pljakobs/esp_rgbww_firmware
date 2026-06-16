@@ -32,11 +32,11 @@ public:
 	bool dispatchJsonRpc(const String& json, String& errorMsg, bool relay = false);
 	bool dispatchStream(const String& method, const JsonObject& params, std::unique_ptr<IDataSourceStream>& out,
 					 String& errorMsg);
+	bool handleInfo(const JsonObject& params, JsonObject& out, uint32_t heapFreeSnapshot = 0);
 
 private:
 	bool dispatchDataRequest(const String& method, const JsonObject& params, JsonObject* outObject,
 						 std::unique_ptr<IDataSourceStream>* outStream, String& errorMsg);
-	bool handleInfo(const JsonObject& params, JsonObject& out);
 	bool handleColor(const JsonObject& params, JsonObject& out);
 	bool handleNetworks(const JsonObject& params, JsonObject& out);
 	bool handleHosts(const JsonObject& params, std::unique_ptr<IDataSourceStream>& out, String& errorMsg);

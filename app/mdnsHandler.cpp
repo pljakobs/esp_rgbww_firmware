@@ -92,7 +92,7 @@ void mdnsHandler::setHostname(const char* newHostname)
     primaryResponder->begin(san_buf);
 
 #ifdef DEBUG_MDNS
-    debug_i("Registered hostname: %s", san_buf);
+    debug_i(ANSI_COLOR_BLUE "Registered hostname: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, san_buf);
 #endif
 
     // Register all three services on the primary responder:
@@ -109,7 +109,7 @@ void mdnsHandler::setHostname(const char* newHostname)
 
 void mdnsHandler::setSearchName(const char* name)
 {
-    debug_i("setting searchName to %s", name);
+    debug_i(ANSI_COLOR_BLUE "setting searchName to " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, name);
     searchName = name;
 }
 
@@ -117,9 +117,9 @@ void mdnsHandler::start()
 {
     using namespace mDNS;
 
-    debug_i("########################################################");
-    debug_i("# mdns Handler initialized, Source Port: %d, TARGET Port: %d", MDNS_SOURCE_PORT, MDNS_TARGET_PORT);
-    debug_i("########################################################");
+    debug_i(ANSI_COLOR_BLUE "########################################################" ANSI_COLOR_RESET);
+    debug_i(ANSI_COLOR_BLUE "# mdns Handler initialized, Source Port: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE ", TARGET Port: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, MDNS_SOURCE_PORT, MDNS_TARGET_PORT);
+    debug_i(ANSI_COLOR_BLUE "########################################################" ANSI_COLOR_RESET);
     
     // Get device hostname from configuration and set it
     String hostName;
@@ -142,7 +142,7 @@ void mdnsHandler::start()
 
     // Set up leadership election with delay
     #ifdef DEBUG_MDNS
-    debug_i("starting leader election timer timer");
+    debug_i(ANSI_COLOR_BLUE "starting leader election timer timer" ANSI_COLOR_RESET);
     #endif 
     _leaderElectionTimer.setCallback(mdnsHandler::checkForLeadershipCb, this);
     _leaderElectionTimer.setIntervalMs(_mdnsTimerInterval * LEADER_ELECTION_DELAY);
@@ -153,7 +153,7 @@ void mdnsHandler::start()
     
     // Set up timer for periodic mDNS searches
     #ifdef DEBUG_MDNS
-    debug_i("starting mDNS search timer");
+    debug_i(ANSI_COLOR_BLUE "starting mDNS search timer" ANSI_COLOR_RESET);
     #endif 
     _mdnsSearchTimer.setCallback(mdnsHandler::sendSearchCb, this);
     _mdnsSearchTimer.setIntervalMs(_currentMdnsTimerInterval);
@@ -162,7 +162,7 @@ void mdnsHandler::start()
     // Register the main handler
     mDNS::server.addHandler(*this); 
     #ifdef DEBUG_MDNS
-    debug_i("mDNS server started");
+    debug_i(ANSI_COLOR_BLUE "mDNS server started" ANSI_COLOR_RESET);
     #endif
 }
 
@@ -186,14 +186,14 @@ bool mdnsHandler::onMessage(mDNS::Message& message)
     }
 
 #ifdef DEBUG_MDNS
-    debug_i("onMessage handler called");
+    debug_i(ANSI_COLOR_BLUE "onMessage handler called" ANSI_COLOR_RESET);
 #endif
     using namespace mDNS;
 
     // Check if we're interested in this message
     if (!message.isReply()) {
 #ifdef DEBUG_MDNS
-        debug_i("Ignoring query");
+        debug_i(ANSI_COLOR_BLUE "Ignoring query" ANSI_COLOR_RESET);
 #endif
         return false;
     }
@@ -202,7 +202,7 @@ bool mdnsHandler::onMessage(mDNS::Message& message)
     auto srv_answer = message[mDNS::ResourceType::SRV];
     if (srv_answer == nullptr) {
 #ifdef DEBUG_MDNS
-        debug_i("No SRV record in this message");
+        debug_i(ANSI_COLOR_BLUE "No SRV record in this message" ANSI_COLOR_RESET);
 #endif
         // Let's check if this is a direct A record response without SRV
         auto a_answer = message[mDNS::ResourceType::A];
@@ -216,7 +216,7 @@ bool mdnsHandler::onMessage(mDNS::Message& message)
     const String answerNameString = String(srv_answer->getName());
     const char* answerName = answerNameString.c_str();
 #ifdef DEBUG_MDNS
-    debug_i("answerName: %ssearchName: %s", answerName, searchName.c_str());
+    debug_i(ANSI_COLOR_BLUE "answerName: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "searchName: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, answerName, searchName.c_str());
 #endif
 
     // Check if this is a swarm or wall-panel service response
@@ -238,7 +238,7 @@ bool mdnsHandler::onMessage(mDNS::Message& message)
             hostname[hostname_len] = '\0';
 
 #ifdef DEBUG_MDNS
-            debug_i("Processing hostname response for: %s", hostname);
+            debug_i(ANSI_COLOR_BLUE "Processing hostname response for: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, hostname);
 #endif
 
             // Extract hostname data from the message
@@ -257,7 +257,7 @@ bool mdnsHandler::processSwarmServiceResponse(mDNS::Message& message)
     bool msgHasA = false, msgHasTXT = false;
 
 #ifdef DEBUG_MDNS
-    debug_i("Found matching SRV record");
+    debug_i(ANSI_COLOR_BLUE "Found matching SRV record" ANSI_COLOR_RESET);
 #endif
 
     // Extract required information from the message
@@ -299,7 +299,7 @@ bool mdnsHandler::processSwarmServiceResponse(mDNS::Message& message)
             if (isLeaderTxt == "1") {
                 _leaderDetected = true;
 #ifdef DEBUG_MDNS
-                debug_i("Detected leader: %s", info.hostName);
+                debug_i(ANSI_COLOR_BLUE "Detected leader: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, info.hostName);
 #endif
             }
 
@@ -311,7 +311,7 @@ bool mdnsHandler::processSwarmServiceResponse(mDNS::Message& message)
             if (hostnameType.length() == 0)
                 hostnameType = F("undefined");
 #ifdef DEBUG_MDNS
-            debug_i("Hostname %s, type: %s", info.hostName, hostnameType.c_str());
+            debug_i(ANSI_COLOR_BLUE "Hostname " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ", type: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, info.hostName, hostnameType.c_str());
 #endif
 
             const Controllers::HostType hostType = Controllers::hostTypeFromString(hostnameType);
@@ -344,7 +344,7 @@ bool mdnsHandler::processHostnameARecord(mDNS::Message& message, mDNS::Answer* a
     String ipAddress = a_answer->getRecordString();
     unsigned int ttl = a_answer->getTtl();
 #ifdef DEBUG_MDNS
-    debug_i("Got A record for hostname: %s, IP: %s", hostname, ipAddress.c_str());
+    debug_i(ANSI_COLOR_BLUE "Got A record for hostname: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ", IP: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, hostname, ipAddress.c_str());
 #endif
 
     // Look up ID by hostname in our persistent controller database
@@ -358,7 +358,7 @@ bool mdnsHandler::processHostnameARecord(mDNS::Message& message, mDNS::Answer* a
         if (strcasecmp(hostname, storedName.c_str()) == 0) {
             controllerId = (*it).getId().toInt();
 #ifdef DEBUG_MDNS
-            debug_i("Found matching controller ID: %u", controllerId);
+            debug_i(ANSI_COLOR_BLUE "Found matching controller ID: " ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, controllerId);
 #endif
             break;
         }
@@ -374,7 +374,7 @@ bool mdnsHandler::processHostnameARecord(mDNS::Message& message, mDNS::Answer* a
     //_pendingHostnameResolutions[hostname] = ipAddress;
 
 #ifdef DEBUG_MDNS
-    debug_i("Hostname stored for later ID resolution: %s", hostname);
+    debug_i(ANSI_COLOR_BLUE "Hostname stored for later ID resolution: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, hostname);
 #endif
 
     return false; // Not fully processed yet
@@ -397,7 +397,7 @@ bool mdnsHandler::processHostnameResponse(mDNS::Message& message, const char* ho
             ipAddress = a_answer->getRecordString();
             ttl = a_answer->getTtl();
 #ifdef DEBUG_MDNS
-            debug_i("Hostname IP address: %s (TTL: %u)", ipAddress.c_str(), ttl);
+            debug_i(ANSI_COLOR_BLUE "Hostname IP address: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " (TTL: " ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE ")" ANSI_COLOR_RESET, ipAddress.c_str(), ttl);
 #endif
         } else {
             // No A record, can't proceed
@@ -415,7 +415,7 @@ bool mdnsHandler::processHostnameResponse(mDNS::Message& message, const char* ho
             controllerId = txt["id"].toInt();
             controllerType = txt["type"];
 #ifdef DEBUG_MDNS
-            debug_i("Found controller ID: %u, type: %s", controllerId, controllerType.c_str());
+            debug_i(ANSI_COLOR_BLUE "Found controller ID: " ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE ", type: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, controllerId, controllerType.c_str());
 #endif
 
             if (controllerId > 0) {
@@ -430,7 +430,7 @@ bool mdnsHandler::processHostnameResponse(mDNS::Message& message, const char* ho
     }
     // No valid TXT record or not a host type - don't fall back to hostname lookup
 #ifdef DEBUG_MDNS
-    debug_i("No valid host TXT record found for %s - ignoring", hostname);
+    debug_i(ANSI_COLOR_BLUE "No valid host TXT record found for " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " - ignoring" ANSI_COLOR_RESET, hostname);
 #endif
     return false;
 }
@@ -448,8 +448,8 @@ void mdnsHandler::sendSearch()
     (void)wallPanelOk;
 #endif
 #ifdef DEBUG_MDNS
-    debug_i("search('%s'): %s", service, ok ? "OK" : "FAIL");
-    debug_i("search('%s'): %s", wallPanelService, wallPanelOk ? "OK" : "FAIL");
+    debug_i(ANSI_COLOR_BLUE "search('" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "'): " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, service, ok ? "OK" : "FAIL");
+    debug_i(ANSI_COLOR_BLUE "search('" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "'): " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, wallPanelService, wallPanelOk ? "OK" : "FAIL");
 #endif
 
     // Periodically check if there is still a leader in the network
@@ -478,7 +478,7 @@ void mdnsHandler::sendSearch()
 
 void mdnsHandler::sendSearchCb(void* pTimerArg) {
 #ifdef DEBUG_MDNS
-    debug_i("sendSearchCb called");
+    debug_i(ANSI_COLOR_BLUE "sendSearchCb called" ANSI_COLOR_RESET);
 #endif
     mdnsHandler* pThis = static_cast<mdnsHandler*>(pTimerArg);
     pThis->sendSearch();
@@ -543,12 +543,12 @@ void mdnsHandler::queryKnownControllers(uint8_t batchIndex)
         // Start ping for this controller
 
         #ifdef DEBUG_MDNS
-        debug_i("starting ping on %s[%s]", hostname, ipAddress.c_str());
+        debug_i(ANSI_COLOR_BLUE "starting ping on " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "[" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "]" ANSI_COLOR_RESET, hostname, ipAddress.c_str());
         #endif
 
        
         #ifdef DEBUG_MDNS
-        debug_i("starting mdns query for %s[%s]", hostname_local.c_str(), ipAddress.c_str());
+        debug_i(ANSI_COLOR_BLUE "starting mdns query for " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "[" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "]" ANSI_COLOR_RESET, hostname_local.c_str(), ipAddress.c_str());
         #endif
         
         // Query for this host using standard search
@@ -559,7 +559,7 @@ void mdnsHandler::queryKnownControllers(uint8_t batchIndex)
         mDNS::server.search(swarm_service, mDNS::ResourceType::PTR);
 
         #ifdef DEBUG_MDNS
-        debug_i("Querying for controller: %s", hostname.c_str());
+        debug_i(ANSI_COLOR_BLUE "Querying for controller: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, hostname.c_str());
         #endif
 
         currentIdx++;
@@ -585,7 +585,7 @@ void mdnsHandler::pingController(const String& ipAddress)
         Timer* timeoutTimer = new Timer();
         timeoutTimer->initializeMs(5000, [client, id, this, timeoutTimer]() {
             // Timeout handler: clean up
-            debug_w("Ping timeout for controller %d", id);
+            debug_w(ANSI_COLOR_YELLOW "Ping timeout for controller " ANSI_COLOR_CYAN "%d" ANSI_COLOR_YELLOW "" ANSI_COLOR_RESET, id);
             app.controllers->updateFromPing(id, 0); // Optionally mark as failed
             conntrack--;
             client->cleanup();
@@ -598,7 +598,7 @@ void mdnsHandler::pingController(const String& ipAddress)
             RequestCompletedDelegate(&mdnsHandler::pingCallback, this),128);
 
         conntrack++;
-        debug_i("Current connection track count: %d", conntrack);
+        debug_i(ANSI_COLOR_BLUE "Current connection track count: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, conntrack);
     }
 }
 */
@@ -609,7 +609,7 @@ int mdnsHandler::pingCallback(HttpConnection& connection, bool successful)
     String ip = connection.getRemoteIp().toString();
     unsigned int id = app.getControllerIdforIpAddress(ip);
     #ifdef DEBUG_MDNS
-    debug_i("Received %s ping response from controller: %s [%d]", (successful?"successful":"failed"), ip.c_str(), id);
+    debug_i(ANSI_COLOR_BLUE "Received " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " ping response from controller: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " [" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "]" ANSI_COLOR_RESET, (successful?"successful":"failed"), ip.c_str(), id);
     #endif
 
     app.controllers->updateFromPing(id, TTL_HTTP_VERIFIED);
@@ -629,14 +629,14 @@ void mdnsHandler::sendWsUpdate(const char* type, JsonObject host)
 void mdnsHandler::checkForLeadership() {
     if (_leaderDetected) {
         #ifdef DEBUG_MDNS
-        debug_i("Leader already exists in network, not becoming leader");
+        debug_i(ANSI_COLOR_BLUE "Leader already exists in network, not becoming leader" ANSI_COLOR_RESET);
         #endif
         _leaderCheckCounter = 0;  // Reset counter when a leader is detected
         return;
     }
 
     #ifdef DEBUG_MDNS
-    debug_i("No leader detected (check round %d)", _leaderCheckCounter + 1);
+    debug_i(ANSI_COLOR_BLUE "No leader detected (check round " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE ")" ANSI_COLOR_RESET, _leaderCheckCounter + 1);
     #endif
     
     // Increment leader check counter
@@ -653,11 +653,11 @@ void mdnsHandler::checkForLeadership() {
     if (hasHighestId || _leaderCheckCounter >= LEADERSHIP_MAX_FAIL_COUNT) {
         if (hasHighestId) {
             #ifdef DEBUG_MDNS
-            debug_i("No leader detected and we have highest ID, becoming leader");
+            debug_i(ANSI_COLOR_BLUE "No leader detected and we have highest ID, becoming leader" ANSI_COLOR_RESET);
             #endif
         } else {
             #ifdef DEBUG_MDNS
-            debug_i("No leader detected after %d checks, becoming leader as a failsafe", LEADERSHIP_MAX_FAIL_COUNT);
+            debug_i(ANSI_COLOR_BLUE "No leader detected after " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " checks, becoming leader as a failsafe" ANSI_COLOR_RESET, LEADERSHIP_MAX_FAIL_COUNT);
             #endif
         }
         
@@ -665,7 +665,7 @@ void mdnsHandler::checkForLeadership() {
         _leaderCheckCounter = 0;  // Reset counter
     } else {
         #ifdef DEBUG_MDNS
-        debug_i("Not becoming leader, another controller has higher ID (check %d/%d)", 
+        debug_i(ANSI_COLOR_BLUE "Not becoming leader, another controller has higher ID (check " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "/" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE ")" ANSI_COLOR_RESET, 
                 _leaderCheckCounter, LEADERSHIP_MAX_FAIL_COUNT);
         #endif
 
@@ -701,7 +701,7 @@ void mdnsHandler::becomeLeader() {
     mDNS::server.addHandler(*leaderResponder);
 
     #ifdef DEBUG_MDNS
-    debug_i("This controller is now the global leader (lightinator.local)");
+    debug_i(ANSI_COLOR_BLUE "This controller is now the global leader (lightinator.local)" ANSI_COLOR_RESET);
     #endif
 }
 
@@ -720,7 +720,7 @@ void mdnsHandler::relinquishLeadership() {
     // Clean up leader web service
     leaderWebService.reset();
     #ifdef DEBUG_MDNS
-    debug_i("This controller is no longer the global leader");
+    debug_i(ANSI_COLOR_BLUE "This controller is no longer the global leader" ANSI_COLOR_RESET);
     #endif
 }
 
@@ -781,7 +781,7 @@ void mdnsHandler::checkGroupLeadership() {
             if (hasHighestId) {
                 groupsToLead.add(groupId);
                 #ifdef DEBUG_MDNS
-                debug_i("This device should be the leader for group: %s", groupName.c_str());
+                debug_i(ANSI_COLOR_BLUE "This device should be the leader for group: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, groupName.c_str());
                 #endif
             }
         }
@@ -871,7 +871,7 @@ void mdnsHandler::updateServiceTxtRecords() {
     ledControllerSwarmService.setLeadingGroups(_leadingGroups);
 
     #ifdef DEBUG_MDNS
-    debug_i("Updated service TXT records with %d group memberships and %d leading groups", 
+    debug_i(ANSI_COLOR_BLUE "Updated service TXT records with " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " group memberships and " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " leading groups" ANSI_COLOR_RESET, 
             memberGroups.size(), _leadingGroups.size());
     #endif
 }
@@ -879,7 +879,7 @@ void mdnsHandler::updateServiceTxtRecords() {
 void mdnsHandler::becomeGroupLeader(const char* groupId, const char* groupName)
 {
 #ifdef DEBUG_MDNS
-    debug_i("Becoming leader for group: %s (ID: %s)", groupName, groupId);
+    debug_i(ANSI_COLOR_BLUE "Becoming leader for group: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " (ID: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ")" ANSI_COLOR_RESET, groupName, groupId);
 #endif
 
     // Sanitize the group name for use as a hostname
@@ -888,7 +888,7 @@ void mdnsHandler::becomeGroupLeader(const char* groupId, const char* groupName)
     Util::sanitizeHostname(san_buf, sizeof(san_buf));
 
 #ifdef DEBUG_MDNS
-    debug_i("Sanitized group name: %s", san_buf);
+    debug_i(ANSI_COLOR_BLUE "Sanitized group name: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, san_buf);
 #endif
 
     // Create responder for this group's hostname
@@ -912,7 +912,7 @@ void mdnsHandler::becomeGroupLeader(const char* groupId, const char* groupName)
     _leadingGroups.add(groupId);
 
 #ifdef DEBUG_MDNS
-    debug_i("This controller is now leader for group: %s (%s.local)", groupName, san_buf);
+    debug_i(ANSI_COLOR_BLUE "This controller is now leader for group: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " (" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ".local)" ANSI_COLOR_RESET, groupName, san_buf);
 #endif
 }
 
@@ -930,7 +930,7 @@ void mdnsHandler::relinquishGroupLeadership(const char* groupId)
     }
 
 #ifdef DEBUG_MDNS
-    debug_i("Relinquishing leadership for group: %s (ID: %s)", groupName.c_str(), groupId);
+    debug_i(ANSI_COLOR_BLUE "Relinquishing leadership for group: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " (ID: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ")" ANSI_COLOR_RESET, groupName.c_str(), groupId);
 #endif
 
     // Remove the responder from mDNS server
@@ -954,6 +954,6 @@ void mdnsHandler::relinquishGroupLeadership(const char* groupId)
 
 
 #ifdef DEBUG_MDNS
-    debug_i("This controller is no longer leader for group: %s", groupName);
+    debug_i(ANSI_COLOR_BLUE "This controller is no longer leader for group: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, groupName);
 #endif
 }

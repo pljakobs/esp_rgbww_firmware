@@ -58,7 +58,7 @@ void JsonRpcMessage::setId(int id)
 
 ////////////////////////////////////////
 
-JsonRpcMessageIn::JsonRpcMessageIn(const String& json) : _doc(1024)
+JsonRpcMessageIn::JsonRpcMessageIn(const String& json)
 {
 	const bool parsed = Json::deserialize(_doc, json);
 	if(!parsed) {
@@ -80,7 +80,8 @@ JsonObject JsonRpcMessageIn::getRoot()
 	return _doc.as<JsonObject>();
 }
 
-String JsonRpcMessageIn::getMethod()
+const char* JsonRpcMessageIn::getMethod() const
 {
-	return getRoot()[F("method")];
+	const char* method = _doc[F("method")] | "";
+	return method;
 }
