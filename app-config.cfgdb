@@ -40,7 +40,15 @@
         "allow_web_icons":{
           "type":"boolean",
           "default":true
-        }
+        },
+        "UI":{
+          "type":"object",
+          "properties":{
+            "dark_mode":{
+              "type":"boolean",
+              "default":false
+            }
+          }
       }
     },
     "ota":{
