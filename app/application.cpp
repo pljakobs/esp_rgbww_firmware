@@ -44,10 +44,6 @@
 #endif
 #endif
 
-#ifdef ENABLE_MALLOC_COUNT
-#include <malloc_count.h>
-#endif
-
 #if ARCH_ESP8266
 #define PART0 "lfs0"
 #elif ARCH_ESP32
@@ -200,10 +196,6 @@ size_t debugStreamOutputCallback(const char* buffer, unsigned int length)
 
 void onReady()
 {
-	#ifdef ENABLE_MALLOC_COUNT
-	MallocCount::enableLogging(true);
-	MallocCount::setLogThreshold(256); // log allocations larger than 100 bytes
-	#endif
 	//System.setCpuFrequencye(CF_160MHz);
 	app.rtc_info = system_get_rst_info();
 	
@@ -305,10 +297,6 @@ void Application::checkRam()
 	doc[F("build")] = BUILD_TYPE;
 	doc[F("soc")] = SOC;
 	doc[F("neighbours")]=app.controllers->getVisibleCount();
-	#ifdef ENABLE_MALLOC_COUNT
-	doc[F("peak_alloc")] = MallocCount::getPeak();
-	doc[F("current_alloc")] = MallocCount::getCurrent();
-	#endif
 	if (app.rtc_info->reason!= 0 && !_reboot_reported)
 	{
 		AppConfig::Network::Telemetry telemetryCfg(*cfg);
@@ -326,9 +314,6 @@ void Application::checkRam()
 		doc[F("mDNS")][F("replies")] = _mDNS_replies;
 
 	debug_i(ANSI_COLOR_BLUE "Free heap: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE ", uptime: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, getFreeHeapSize(), millis() / 1000);
-	#ifdef ENABLE_MALLOC_COUNT
-	debug_i(ANSI_COLOR_BLUE "MallocCount peak: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE ", current: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_RESET, MallocCount::getPeak(), MallocCount::getCurrent() );	
-	#endif
 	if (!telemetryClient.stat(doc))
 	{
 		debug_i(ANSI_COLOR_BLUE "Failed to publish monitor data to telemetry MQTT" ANSI_COLOR_RESET);

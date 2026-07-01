@@ -4,14 +4,6 @@ ifndef SMING_RELEASE
 COMPONENT_DEPENDS += HuffmanCodec
 endif
 
-# malloc_count is opt-in: only pull it in when explicitly requested with
-# ENABLE_MALLOC_COUNT=1. Its source unconditionally includes <osapi.h>, which
-# only exists on Esp8266, so an unconditional dependency breaks Host builds.
-# App code guards all usage with #ifdef ENABLE_MALLOC_COUNT.
-ifeq ($(ENABLE_MALLOC_COUNT),1)
-COMPONENT_DEPENDS += malloc_count
-endif
-
 ifeq ($(SMING_ARCH), Esp32)
     COMPONENT_DEPENDS += Esp32HardwarePwm
 endif
