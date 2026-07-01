@@ -476,13 +476,13 @@ bool ApplicationWebserver::parseJsonBody(HttpRequest& request, HttpResponse& res
 	if(body.length()) {
 		err = deserializeJson(doc, body);
 	} else {
-		auto bodyStream = request.getBodyStream();
-		if(bodyStream) {
-			err = deserializeJson(doc, *bodyStream);
+		const String& contentLength = request.getHeader(HTTP_HEADER_CONTENT_LENGTH);
+		if(contentLength.length() && contentLength.toInt() > 0) {
+			sendApiCode(response, API_CODES::API_BAD_REQUEST, F("Invalid JSON: body unavailable"));
 		} else {
 			sendApiCode(response, API_CODES::API_BAD_REQUEST, noBodyMessage);
-			return false;
 		}
+		return false;
 	}
 
 	if(err) {
