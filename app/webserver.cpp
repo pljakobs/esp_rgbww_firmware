@@ -151,11 +151,11 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
     debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::wsMessage: " ANSI_COLOR_GREEN " %s" ANSI_COLOR_RESET, message.c_str());
 
     StaticJsonDocument<1024> requestDoc;
-    String errorMsg;
+	String errorMsg;
+	int errorCode = 0;
 
     if(!Json::deserialize(requestDoc, message)) {
-        // Send immediate minimal hardcoded error payload if deserialization fails
-        socket.sendString(F("{\"jsonrpc\":\"2.0\",\"error\":\"malformed json\"}"));
+		socket.sendString(F("{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32700,\"message\":\"Parse error\"},\"id\":null}"));
         return;
     }
 
@@ -167,7 +167,7 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 
 	// Determine target stream capacity based on the specific method requested
 	size_t responseCapacity = 512; // Default for simple getters/commands
-	const bool isInfoMethod = (std::strcmp(method, "info") == 0) || (std::strcmp(method, "getInfo") == 0);
+	const bool isInfoMethod = (strcmp_P(method, PSTR("info")) == 0) || (strcmp_P(method, PSTR("getInfo")) == 0);
 	if(isInfoMethod) {
 		responseCapacity = WS_INFO_RESPONSE_CAPACITY;
 	}
@@ -177,44 +177,62 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 	JsonObject responseRoot = responseStream->getRoot();
 	responseRoot[F("jsonrpc")] = F("2.0");
 
-    if(!requestId.isNull()) {
-        responseRoot[F("id")] = requestId;
-    }
+	if(!requestId.isNull()) {
+		responseRoot[F("id")] = requestId;
+	}
 
 	if(method[0] == '\0') {
-        errorMsg = F("missing method");
-    } else if(!app.api) {
-        errorMsg = F("api not initialized");
+		errorCode = -32600;
+		errorMsg = F("missing method");
+	} else if(!app.api) {
+		errorCode = -32603;
+		errorMsg = F("api not initialized");
     } else {
         JsonObject params = requestRoot[F("params")];
-		const bool isColorGetter = (std::strcmp(method, "color") == 0) && (params.isNull() || params.size() == 0);
-		const bool isDataMethod = isColorGetter || (std::strcmp(method, "getColor") == 0) || isInfoMethod ||
-						(std::strcmp(method, "networks") == 0) || (std::strcmp(method, "getNetworks") == 0);
+		const bool isColorGetter = (strcmp_P(method, PSTR("color")) == 0) && (params.isNull() || params.size() == 0);
+		const bool isDataMethod = isColorGetter || (strcmp_P(method, PSTR("getColor")) == 0) || isInfoMethod ||
+						(strcmp_P(method, PSTR("networks")) == 0) || (strcmp_P(method, PSTR("getNetworks")) == 0);
 
 		if(isDataMethod) {
-            JsonObject result = responseRoot.createNestedObject(F("result"));
+			JsonObject result = responseRoot.createNestedObject(F("result"));
 			if(isInfoMethod) {
 				if(!app.api->handleInfo(params, result, infoHeapSnapshot)) {
-					errorMsg = result[F("error")] | "method not implemented";
+					errorCode = -32601;
+					const char* resultError = result[F("error")] | nullptr;
+					errorMsg = resultError ? String(resultError) : String(F("method not implemented"));
 					responseRoot.remove(F("result"));
 				}
 			} else {
 				if(!app.api->dispatch(method, params, result)) {
-					errorMsg = result[F("error")] | "method not implemented";
+					errorCode = -32601;
+					const char* resultError = result[F("error")] | nullptr;
+					errorMsg = resultError ? String(resultError) : String(F("method not implemented"));
 					responseRoot.remove(F("result"));
 				}
 			}
-        } else {
-            if(app.api->dispatchCommand(method, params, errorMsg, false)) {
-                JsonObject result = responseRoot.createNestedObject(F("result"));
-                result[F("success")] = true;
-            }
-        }
+		} else {
+			if(app.api->dispatchCommand(method, params, errorMsg, false)) {
+				JsonObject result = responseRoot.createNestedObject(F("result"));
+				result[F("success")] = true;
+			} else {
+				const bool methodMissing = errorMsg.length() == 0 || errorMsg.indexOf(F("method not implemented")) >= 0;
+				if(methodMissing) {
+					errorCode = -32601;
+					if(errorMsg.length() == 0) {
+						errorMsg = String(F("method not implemented: ")) + method;
+					}
+				} else {
+					errorCode = -32000;
+				}
+			}
+		}
     }
 
-    if(errorMsg.length()) {
-        responseRoot[F("error")] = errorMsg;
-    }
+	if(errorMsg.length()) {
+		JsonObject errorObj = responseRoot.createNestedObject(F("error"));
+		errorObj[F("code")] = errorCode;
+		errorObj[F("message")] = errorMsg;
+	}
 
 	debug_i(ANSI_COLOR_BLUE "Websocket response prepared" ANSI_COLOR_RESET);
 	socket.send(responseStream.release(), WS_FRAME_TEXT);
