@@ -147,12 +147,19 @@ void WebappOta::checkForUpdate(bool ignoreEnabled)
         return;
     }
 
-    if(webapp.getInProgress()) {
+    bool interrupted = webapp.getInProgress();
+    if(interrupted) {
         debug_i(ANSI_COLOR_BLUE "WebappOta::checkForUpdate - resuming interrupted download" ANSI_COLOR_RESET);
     }
 
     String apiBaseUrl = webapp.getApiBaseUrl();
     String branch = extractBranch(fw_git_version);
+
+    _resumingInterrupted = interrupted;
+    _retryAfterCleanupDone = false;
+    _lastBranch = branch;
+    _lastFirmwareVersion = fw_git_version;
+    _lastApiBaseUrl = apiBaseUrl;
 
     debug_i(ANSI_COLOR_BLUE "WebappOta::checkForUpdate - branch=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " fw=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, branch.c_str(), fw_git_version);
     queryApi(branch, fw_git_version, apiBaseUrl);
@@ -194,16 +201,14 @@ int WebappOta::onApiResponse(HttpConnection& client, bool successful)
 
     if(!successful || (code != 200 && code != 0 /* 0 = no code set */)) {
         debug_i(ANSI_COLOR_BLUE "WebappOta::onApiResponse - HTTP " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE ", no update available" ANSI_COLOR_RESET, code);
-        _state = State::IDLE;
-        saveState(String::nullstr, String::nullstr, (code == 404) ? kStatusNoUpdate : kStatusApiError);
+        failAttempt((code == 404) ? kStatusNoUpdate : kStatusApiError);
         return 0;
     }
 
     String body = response->getBody();
     if(body.length() == 0) {
         debug_e(ANSI_COLOR_RED "WebappOta::onApiResponse - empty body" ANSI_COLOR_RESET);
-        _state = State::IDLE;
-        saveState(String::nullstr, String::nullstr, kStatusApiError);
+        failAttempt(kStatusApiError);
         return 0;
     }
 
@@ -224,16 +229,14 @@ int WebappOta::onApiResponse(HttpConnection& client, bool successful)
     DeserializationError err = deserializeJson(doc, body);
     if(err) {
         debug_e(ANSI_COLOR_RED "WebappOta::onApiResponse - JSON parse error: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED "" ANSI_COLOR_RESET, err.c_str());
-        _state = State::IDLE;
-        saveState(String::nullstr, String::nullstr, kStatusApiError);
+        failAttempt(kStatusApiError);
         return 0;
     }
 
     const char* version = doc["version"];
     if(version == nullptr) {
         debug_e(ANSI_COLOR_RED "WebappOta::onApiResponse - missing 'version' field" ANSI_COLOR_RESET);
-        _state = State::IDLE;
-        saveState(String::nullstr, String::nullstr, kStatusApiError);
+        failAttempt(kStatusApiError);
         return 0;
     }
     _pendingVersion = version;
@@ -253,16 +256,14 @@ int WebappOta::onApiResponse(HttpConnection& client, bool successful)
     JsonArray files = doc["files"];
     if(files.isNull() || files.size() == 0) {
         debug_e(ANSI_COLOR_RED "WebappOta::onApiResponse - no files in response" ANSI_COLOR_RESET);
-        _state = State::IDLE;
-        saveState(String::nullstr, String::nullstr, kStatusApiError);
+        failAttempt(kStatusApiError);
         return 0;
     }
 
     const char* basepath = doc["basepath"];
     if(basepath == nullptr) {
         debug_e(ANSI_COLOR_RED "WebappOta::onApiResponse - missing basepath in response" ANSI_COLOR_RESET);
-        _state = State::IDLE;
-        saveState(String::nullstr, String::nullstr, kStatusApiError);
+        failAttempt(kStatusApiError);
         return 0;
     }
     String base(basepath);
@@ -272,8 +273,7 @@ int WebappOta::onApiResponse(HttpConnection& client, bool successful)
         const char* md5      = f["md5"];
         if(filename == nullptr || md5 == nullptr) {
             debug_e(ANSI_COLOR_RED "WebappOta::onApiResponse - file entry missing filename/md5, skipping version" ANSI_COLOR_RESET);
-        _state = State::IDLE;
-            saveState(String::nullstr, String::nullstr, kStatusApiError);
+            failAttempt(kStatusApiError);
             return 0;
         }
         FileEntry entry;
@@ -347,9 +347,7 @@ void WebappOta::startNextDownload()
         _state = State::ACTIVATING;
         broadcastStatus();
         if(!activateStaging()) {
-            cleanupStaging();
-            _state = State::IDLE;
-            saveState(String::nullstr, String::nullstr, kStatusActivationError);
+            failAttempt(kStatusActivationError);
         }
         return;
     }
@@ -374,9 +372,7 @@ void WebappOta::startNextDownload()
 
     if(!ensureParentDir(destPath)) {
         debug_e(ANSI_COLOR_RED "WebappOta::startNextDownload - makedirs failed for " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED "" ANSI_COLOR_RESET, destPath.c_str());
-        cleanupStaging();
-        _state = State::IDLE;
-        saveState(String::nullstr, String::nullstr, kStatusDownloadError);
+        failAttempt(kStatusDownloadError);
         return;
     }
 
@@ -387,9 +383,7 @@ void WebappOta::startNextDownload()
     if(!_httpClient.downloadFile(entry.url, destPath,
             RequestCompletedDelegate(&WebappOta::onFileDownloaded, this))) {
         debug_e(ANSI_COLOR_RED "WebappOta::startNextDownload - failed to queue download" ANSI_COLOR_RESET);
-        cleanupStaging();
-        _state = State::IDLE;
-        saveState(String::nullstr, String::nullstr, kStatusDownloadError);
+        failAttempt(kStatusDownloadError);
     }
 }
 
@@ -402,9 +396,7 @@ int WebappOta::onFileDownloaded(HttpConnection& client, bool successful)
         const FileEntry& entry = _files[_fileIndex];
         String destPath = stagingPath(entry.path);
         debug_e(ANSI_COLOR_RED "WebappOta::onFileDownloaded - HTTP " ANSI_COLOR_CYAN "%d" ANSI_COLOR_RED " for " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED "" ANSI_COLOR_RESET, code, destPath.c_str());
-        cleanupStaging();
-        _state = State::IDLE;
-        saveState(String::nullstr, String::nullstr, kStatusDownloadError);
+        failAttempt(kStatusDownloadError);
         return 0;
     }
 
@@ -427,9 +419,7 @@ void WebappOta::verifyAndContinue()
 
     if(!verifyFileMd5(destPath, entry.expectedMd5)) {
         debug_e(ANSI_COLOR_RED "WebappOta::verifyAndContinue - MD5 mismatch for " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED "" ANSI_COLOR_RESET, destPath.c_str());
-        cleanupStaging();
-        _state = State::IDLE;
-        saveState(String::nullstr, String::nullstr, kStatusMd5Error);
+        failAttempt(kStatusMd5Error);
         return;
     }
 
@@ -594,10 +584,45 @@ bool WebappOta::moveTree(const String& srcDir, const String& dstDir)
 void WebappOta::activateStagingDeferred()
 {
     if(!activateStaging()) {
+        failAttempt(kStatusActivationError);
+    }
+}
+
+void WebappOta::retryFromScratchDeferred()
+{
+    if(_state != State::IDLE) {
+        return;
+    }
+    if(_lastBranch.length() == 0 || _lastFirmwareVersion.length() == 0 || _lastApiBaseUrl.length() == 0) {
+        failAttempt(kStatusApiError);
+        return;
+    }
+
+    debug_i(ANSI_COLOR_BLUE "WebappOta::retryFromScratchDeferred - restarting OTA from scratch" ANSI_COLOR_RESET);
+    queryApi(_lastBranch, _lastFirmwareVersion, _lastApiBaseUrl);
+}
+
+void WebappOta::failAttempt(const char* status)
+{
+    // If we resumed an interrupted update (e.g. chip reboot mid-download) and this
+    // attempt now fails, clear staging and restart once from scratch automatically.
+    if(_resumingInterrupted && !_retryAfterCleanupDone
+            && status != nullptr
+            && std::strcmp(status, kStatusNoUpdate) != 0
+            && std::strcmp(status, kStatusOk) != 0
+            && std::strcmp(status, kStatusLowHeap) != 0) {
+        debug_w(ANSI_COLOR_YELLOW "WebappOta::failAttempt - resumed OTA failed, clearing staging and retrying once" ANSI_COLOR_RESET);
         cleanupStaging();
         _state = State::IDLE;
-        saveState(String::nullstr, String::nullstr, kStatusActivationError);
+        _resumingInterrupted = false;
+        _retryAfterCleanupDone = true;
+        _retryTimer.initializeMs<1>(TimerDelegate(&WebappOta::retryFromScratchDeferred, this));
+        _retryTimer.startOnce();
+        return;
     }
+
+    _state = State::IDLE;
+    saveState(String::nullstr, String::nullstr, status);
 }
 
 bool WebappOta::activateStaging()
@@ -676,22 +701,16 @@ void WebappOta::saveState(const String& version, const String& md5, const char* 
 void WebappOta::cleanupStaging()
 {
     // Best-effort recursive delete of staging directory contents.
-    // Errors are non-fatal; leftover staging files don't affect correctness
-    // because they are only activated by an explicit activateStaging() call.
+    // This must remove nested files, otherwise repeated failed/interrupted
+    // updates can slowly fill LittleFS and block future OTA attempts.
     Directory dir;
     if(!dir.open(STAGING_ROOT)) {
         return;
     }
-    std::vector<String> entries;
-    while(dir.next()) {
-        entries.push_back(String(STAGING_ROOT) + "/" + dir.stat().name.c_str());
-    }
     dir.close();
 
-    for(unsigned i = 0; i < entries.size(); ++i) {
-        debug_i(ANSI_COLOR_BLUE "WebappOta::cleanupStaging - deleting " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, entries[i].c_str());
-        fileDelete(entries[i]);
-    }
+    debug_i(ANSI_COLOR_BLUE "WebappOta::cleanupStaging - recursively clearing staging/" ANSI_COLOR_RESET);
+    deleteTree(STAGING_ROOT);
 }
 
 void WebappOta::listDirectory(const String& path, int depth)

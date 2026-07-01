@@ -109,6 +109,7 @@ private:
     int onFileDownloaded(HttpConnection& client, bool successful);
     void verifyAndContinue();
     void activateStagingDeferred();
+    void retryFromScratchDeferred();
 
     // --- Activation ---
     bool activateStaging();
@@ -117,6 +118,7 @@ private:
 
     // --- Helpers ---
     bool verifyFileMd5(const String& filePath, const String& expectedMd5);
+    void failAttempt(const char* status);
     void saveState(const String& version, const String& md5, const char* status);
     void cleanupStaging();
     void listDirectory(const String& path, int depth=0);
@@ -136,6 +138,11 @@ private:
     std::vector<FileEntry> _files;
     unsigned _fileIndex{0};
     unsigned _totalFiles{0};  ///< total files in this version (including already-verified ones)
+    bool _resumingInterrupted{false};
+    bool _retryAfterCleanupDone{false};
+    String _lastBranch;
+    String _lastFirmwareVersion;
+    String _lastApiBaseUrl;
     HttpClient _httpClient;
     Timer _retryTimer; ///< backoff timer for failed checks
 };
