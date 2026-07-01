@@ -2,14 +2,17 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
 TAP_IF="${TAP_IF:-tap0}"
 HOST_CIDR="${HOST_CIDR:-192.168.13.1/24}"
 HOST_IP="${HOST_IP:-192.168.13.1}"
 APP_IP="${APP_IP:-192.168.13.2}"
 NETMASK="${NETMASK:-255.255.255.0}"
-FIRMWARE_DIR="out/Host/debug/firmware"
-HOST_RUN_DIR="${HOST_RUN_DIR:-out/Host/debug}"
-LOG_DIR="${HOST_CI_LOG_DIR:-out/host-ci}"
+FIRMWARE_DIR="${FIRMWARE_DIR:-$REPO_ROOT/out/Host/debug/firmware}"
+HOST_RUN_DIR="${HOST_RUN_DIR:-$REPO_ROOT/out/Host/debug}"
+LOG_DIR="${HOST_CI_LOG_DIR:-$REPO_ROOT/out/host-ci}"
 APP_LOG="${LOG_DIR}/host-smoke.log"
 APP_LOG_SMOKE="${LOG_DIR}/host-smoke-app.log"
 APP_LOG_RGBWW="${LOG_DIR}/host-rgbww-app.log"
@@ -37,6 +40,8 @@ COLOR_URL="http://${APP_IP}/color"
 APP_UNDER_VALGRIND=0
 HOST_CI_SKIP_BUILD="${HOST_CI_SKIP_BUILD:-0}"
 HOST_CI_BUILD_ONLY="${HOST_CI_BUILD_ONLY:-0}"
+PYTEST_CMD=(python3 -m pytest)
+PYTEST_MD_AVAILABLE=0
 
 cleanup() {
   set +e
@@ -50,6 +55,8 @@ cleanup() {
 }
 
 trap cleanup EXIT
+
+cd "$REPO_ROOT"
 
 resolve_ip_bin() {
   if command -v ip >/dev/null 2>&1; then
@@ -96,11 +103,52 @@ ensure_ip_tool() {
 
 ensure_pytest() {
   if python3 -c 'import pytest' >/dev/null 2>&1; then
+    PYTEST_CMD=(python3 -m pytest)
     return 0
   fi
 
+  if command -v pytest >/dev/null 2>&1; then
+    if pytest --version >/dev/null 2>&1; then
+      PYTEST_CMD=(pytest)
+      return 0
+    fi
+  fi
+
   echo "pytest not found; installing it into the container environment" >&2
-  python3 -m pip install --quiet pytest
+  python3 -m pip install --quiet --timeout 60 --retries 5 pytest
+
+  if python3 -c 'import pytest' >/dev/null 2>&1; then
+    PYTEST_CMD=(python3 -m pytest)
+    return 0
+  fi
+
+  if command -v pytest >/dev/null 2>&1; then
+    if pytest --version >/dev/null 2>&1; then
+      PYTEST_CMD=(pytest)
+      return 0
+    fi
+  fi
+
+  echo "pytest is still unavailable after installation attempt" >&2
+  return 1
+}
+
+ensure_pytest_md() {
+  if "${PYTEST_CMD[@]}" --help 2>/dev/null | grep -q -- '--md'; then
+    PYTEST_MD_AVAILABLE=1
+    return 0
+  fi
+
+  echo "pytest-md not found; attempting installation" >&2
+  python3 -m pip install --quiet --timeout 60 --retries 5 pytest-md || true
+
+  if "${PYTEST_CMD[@]}" --help 2>/dev/null | grep -q -- '--md'; then
+    PYTEST_MD_AVAILABLE=1
+    return 0
+  fi
+
+  PYTEST_MD_AVAILABLE=0
+  echo "WARNING: pytest-md unavailable; markdown reports will be generated without plugin output" >&2
 }
 
 ensure_valgrind() {
@@ -381,7 +429,7 @@ fi
 
 FLASH_BIN="${FIRMWARE_DIR}/flash.bin"
 PARTITIONS_BIN="${FIRMWARE_DIR}/partitions.bin"
-HOST_CONFIG_MK="out/Host/debug/config.mk"
+HOST_CONFIG_MK="$REPO_ROOT/out/Host/debug/config.mk"
 
 if [[ ! -f "$PARTITIONS_BIN" ]]; then
   echo "Missing Host partition table: $PARTITIONS_BIN" >&2
@@ -446,6 +494,7 @@ fi
 "$IP_BIN" link set "$TAP_IF" up
 
 ensure_pytest
+ensure_pytest_md
 
 export HOST_SMOKE_APP_IP="$APP_IP"
 export HOST_SMOKE_BASE_URL="http://${APP_IP}"
@@ -465,8 +514,6 @@ SMOKE_TEST_REPORT="${LOG_DIR}/smoke-test-results.md"
 SMOKE_TEST_OUTPUT="${LOG_DIR}/smoke-test-output.txt"
 RGBWW_TEST_REPORT="${LOG_DIR}/rgbww-test-results.md"
 RGBWW_TEST_OUTPUT="${LOG_DIR}/rgbww-test-output.txt"
-
-python3 -m pip install --quiet pytest-md
 
 # Known timing-sensitive RGBWW tests that may fail in CI due to fade precision/jitter
 # or delayed websocket delivery on the Host emulator. These are reported as
@@ -501,27 +548,46 @@ extract_failed_tests() {
 start_host_app "$APP_LOG_SMOKE" "$VALGRIND_LOG_SMOKE" "smoke"
 collect_runtime_valgrind_snapshot "$VALGRIND_RUNTIME_LOG_SMOKE_START" "smoke_startup_idle"
 set +e
-python3 -m pytest \
-  -v \
-  --md "$SMOKE_TEST_REPORT" \
-  tests/host_smoke_api_test.py 2>&1 | tee "$SMOKE_TEST_OUTPUT"
+SMOKE_PYTEST_ARGS=("${PYTEST_CMD[@]}" -v tests/host_smoke_api_test.py)
+if [[ "$PYTEST_MD_AVAILABLE" == "1" ]]; then
+  SMOKE_PYTEST_ARGS+=(--md "$SMOKE_TEST_REPORT")
+fi
+"${SMOKE_PYTEST_ARGS[@]}" 2>&1 | tee "$SMOKE_TEST_OUTPUT"
 SMOKE_PYTEST_EXIT=${PIPESTATUS[0]}
 set -e
 collect_runtime_valgrind_snapshot "$VALGRIND_RUNTIME_LOG_SMOKE" "smoke_post_tests"
 stop_host_app
 
+if [[ "$PYTEST_MD_AVAILABLE" != "1" ]]; then
+  {
+    echo "# Smoke Test Results"
+    echo
+    echo "- Report source: fallback (pytest-md unavailable)"
+    echo "- Exit code: ${SMOKE_PYTEST_EXIT}"
+  } > "$SMOKE_TEST_REPORT"
+fi
+
 start_host_app "$APP_LOG_RGBWW" "$VALGRIND_LOG_RGBWW" "rgbww"
 collect_runtime_valgrind_snapshot "$VALGRIND_RUNTIME_LOG_RGBWW_START" "rgbww_startup_idle"
 set +e
-python3 -m pytest \
-  -v \
-  -k "$RGBWW_HOST_EXCLUDED_EXPR" \
-  --md "$RGBWW_TEST_REPORT" \
-  tests/rgbww_test.py 2>&1 | tee "$RGBWW_TEST_OUTPUT"
+RGBWW_PYTEST_ARGS=("${PYTEST_CMD[@]}" -v -k "$RGBWW_HOST_EXCLUDED_EXPR" tests/rgbww_test.py)
+if [[ "$PYTEST_MD_AVAILABLE" == "1" ]]; then
+  RGBWW_PYTEST_ARGS+=(--md "$RGBWW_TEST_REPORT")
+fi
+"${RGBWW_PYTEST_ARGS[@]}" 2>&1 | tee "$RGBWW_TEST_OUTPUT"
 RGBWW_PYTEST_EXIT=${PIPESTATUS[0]}
 set -e
 collect_runtime_valgrind_snapshot "$VALGRIND_RUNTIME_LOG_RGBWW" "rgbww_post_tests"
 stop_host_app
+
+if [[ "$PYTEST_MD_AVAILABLE" != "1" ]]; then
+  {
+    echo "# RGBWW Test Results"
+    echo
+    echo "- Report source: fallback (pytest-md unavailable)"
+    echo "- Exit code: ${RGBWW_PYTEST_EXIT}"
+  } > "$RGBWW_TEST_REPORT"
+fi
 
 HOST_CI_SHOULD_FAIL=0
 
