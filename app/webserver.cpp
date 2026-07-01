@@ -769,7 +769,9 @@ bool ApplicationWebserver::preflightRequest(HttpRequest& request, HttpResponse& 
     }
 	debug_i(ANSI_COLOR_BLUE "heap check passed, checking OPTIONS..." ANSI_COLOR_RESET);
    // 2. CORS Preflight (OPTIONS) - Must handle this before method check or Auth
-    if(request.method == HttpMethod::OPTIONS) {
+   auto method=request.method;
+   debug_i(ANSI_COLOR_BLUE "preflightRequest: %d %s - Method: %d" ANSI_COLOR_RESET, (int)request.method, request.uri.Path.c_str(), (int)method);	
+    if(method == HttpMethod::OPTIONS) {
         setCorsHeaders(response);
         sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
         debug_i(ANSI_COLOR_BLUE "Handled OPTIONS preflight (generic)" ANSI_COLOR_RESET);
@@ -1099,7 +1101,6 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
             }
             */
 
-			setCorsHeaders(response);
 			sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 		} else {
 			//CofigDB provide correct error message
@@ -1107,7 +1108,6 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 			//debug_i(ANSI_COLOR_BLUE "config api error " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET,error_msg.c_str());
 			//JsonObject root = doc.as<JsonObject>();
 			//sendApiCode(response, API_CODES::API_MISSING_PARAM, error_msg);
-			setCorsHeaders(response);
 			sendApiCode(response, API_CODES::API_MISSING_PARAM);
 		}
 
@@ -1115,7 +1115,6 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 		/*
          * /config GET
          */
-		setCorsHeaders(response);
 		app.telemetryClient.log(F("onConfig GET"));
 
 		auto configStream = app.cfg->createExportStream(ConfigDB::Json::format);
@@ -1186,8 +1185,6 @@ void ApplicationWebserver::onColorGet(HttpRequest& request, HttpResponse& respon
 	hsv[F("s")] = s;
 	hsv[F("v")] = v;
 	hsv[F("ct")] = ct;
-
-	setCorsHeaders(response);
 
 	sendApiResponse(response, stream.release());
 
@@ -1336,7 +1333,6 @@ void ApplicationWebserver::onNetworks(HttpRequest& request, HttpResponse& respon
 				break;
 		}
 	}
-	setCorsHeaders(response);
 	sendApiResponse(response, stream.release());
 
 }
