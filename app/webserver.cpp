@@ -371,6 +371,17 @@ void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, c
 void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, const __FlashStringHelper* msg)
 {
 	auto stream = std::make_unique<JsonObjectStream>();
+	if(!stream) {
+		setCorsHeaders(response);
+		response.setHeader(F("accept"), F("GET, POST, OPTIONS"));
+		response.setHeader(F("Connection"), F("close"));
+		response.code = (code == API_CODES::API_SUCCESS) ? HTTP_STATUS_OK : HTTP_STATUS_BAD_REQUEST;
+		response.setContentType(MIME_TEXT);
+		if(!response.sendString(String(F("Invalid JSON")))) {
+			response.headers[HTTP_HEADER_CONTENT_LENGTH] = "0";
+		}
+		return;
+	}
 	JsonObject json = stream->getRoot();
 
 	setCorsHeaders(response);
@@ -447,6 +458,17 @@ void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, c
 	}
 
 	auto stream = std::make_unique<JsonObjectStream>();
+	if(!stream) {
+		setCorsHeaders(response);
+		response.setHeader(F("accept"), F("GET, POST, OPTIONS"));
+		response.setHeader(F("Connection"), F("close"));
+		response.code = (code == API_CODES::API_SUCCESS) ? HTTP_STATUS_OK : HTTP_STATUS_BAD_REQUEST;
+		response.setContentType(MIME_TEXT);
+		if(!response.sendString(String(F("Invalid JSON")))) {
+			response.headers[HTTP_HEADER_CONTENT_LENGTH] = "0";
+		}
+		return;
+	}
 	JsonObject json = stream->getRoot();
 
 	setCorsHeaders(response);
