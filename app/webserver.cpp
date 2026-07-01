@@ -189,7 +189,7 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 	StaticJsonDocument<1024> requestDoc;
 	DeserializationError err = deserializeJson(requestDoc, message);
 	if(err) {
-		socket.sendString(F("{\"jsonrpc\":\"2.0\",\"error\":\"malformed json\"}"));
+		socket.sendString(F("{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32700,\"message\":\"Parse error\"},\"id\":null}"));
 		return;
 	}
 
@@ -205,7 +205,9 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 	}
 
 	if(method[0] == '\0') {
-		resp[F("error")] = F("missing method");
+		JsonObject errorObj = resp.createNestedObject(F("error"));
+		errorObj[F("code")] = -32600;
+		errorObj[F("message")] = F("missing method");
 	} else {
 		JsonObject params = req[F("params")].as<JsonObject>();
 		String msg;
@@ -233,7 +235,9 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 		if(ok) {
 			resp.createNestedObject(F("result"))[F("success")] = true;
 		} else {
-			resp[F("error")] = msg;
+			JsonObject errorObj = resp.createNestedObject(F("error"));
+			errorObj[F("code")] = -32601;
+			errorObj[F("message")] = msg;
 		}
 	}
 
