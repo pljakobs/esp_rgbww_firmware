@@ -61,6 +61,12 @@ ApplicationWebserver::ApplicationWebserver()
 	settings.maxActiveConnections = HTTP_MAX_CONNECTIONS;
 	settings.minHeapSize = MINIMUM_HEAP_ACCEPT;
 	settings.keepAliveSeconds = 5; // do not close instantly when no transmission occurs. some clients are a bit slow (like FHEM)
+#ifdef ARCH_ESP8266
+	// Stability workaround: overlapping HTTP requests have triggered lwIP crashes
+	// (ip_input / exccause=4). Serialize requests and shorten keepalive.
+	settings.maxActiveConnections = 1;
+	settings.keepAliveSeconds = 1;
+#endif
 	configure(settings);
 
 	// workaround for bug in Sming 3.5.0
