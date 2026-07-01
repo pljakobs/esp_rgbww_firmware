@@ -636,7 +636,13 @@ run_smoke_phase 0
 smoke_phase_rc=$?
 set -e
 if [[ "$smoke_phase_rc" -eq 200 ]]; then
+  set +e
   run_smoke_phase 1
+  smoke_phase_rc=$?
+  set -e
+  if [[ "$smoke_phase_rc" -ne 0 ]]; then
+    exit "$smoke_phase_rc"
+  fi
 elif [[ "$smoke_phase_rc" -ne 0 ]]; then
   exit "$smoke_phase_rc"
 fi
@@ -646,7 +652,13 @@ run_rgbww_phase 0
 rgbww_phase_rc=$?
 set -e
 if [[ "$rgbww_phase_rc" -eq 200 ]]; then
+  set +e
   run_rgbww_phase 1
+  rgbww_phase_rc=$?
+  set -e
+  if [[ "$rgbww_phase_rc" -ne 0 ]]; then
+    exit "$rgbww_phase_rc"
+  fi
 elif [[ "$rgbww_phase_rc" -ne 0 ]]; then
   exit "$rgbww_phase_rc"
 fi

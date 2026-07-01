@@ -470,18 +470,19 @@ void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, c
 bool ApplicationWebserver::parseJsonBody(HttpRequest& request, HttpResponse& response, JsonDocument& doc,
 											 const __FlashStringHelper* noBodyMessage)
 {
-	auto bodyStream = request.getBodyStream();
 	DeserializationError err = DeserializationError::EmptyInput;
+	String body = request.getBody();
 
-	if(bodyStream) {
-		err = deserializeJson(doc, *bodyStream);
+	if(body.length()) {
+		err = deserializeJson(doc, body);
 	} else {
-		String body = request.getBody();
-		if(!body.length()) {
+		auto bodyStream = request.getBodyStream();
+		if(bodyStream) {
+			err = deserializeJson(doc, *bodyStream);
+		} else {
 			sendApiCode(response, API_CODES::API_BAD_REQUEST, noBodyMessage);
 			return false;
 		}
-		err = deserializeJson(doc, body);
 	}
 
 	if(err) {
