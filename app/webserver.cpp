@@ -476,7 +476,7 @@ bool ApplicationWebserver::parseJsonBody(HttpRequest& request, HttpResponse& res
 	if(body.length()) {
 		err = deserializeJson(doc, body);
 	} else {
-		const String& contentLength = request.getHeader(HTTP_HEADER_CONTENT_LENGTH);
+		const String& contentLength = request.headers[HTTP_HEADER_CONTENT_LENGTH];
 		if(contentLength.length() && contentLength.toInt() > 0) {
 			sendApiCode(response, API_CODES::API_BAD_REQUEST, F("Invalid JSON: body unavailable"));
 		} else {
