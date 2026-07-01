@@ -174,6 +174,10 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 	const uint32_t infoHeapSnapshot = app.getFreeHeapSize();
 
 	auto responseStream = std::make_unique<JsonObjectStream>(responseCapacity);
+	if(!responseStream) {
+		socket.sendString(F("{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32603,\"message\":\"internal error: low memory\"},\"id\":null}"));
+		return;
+	}
 	JsonObject responseRoot = responseStream->getRoot();
 	responseRoot[F("jsonrpc")] = F("2.0");
 
@@ -677,6 +681,10 @@ void ApplicationWebserver::onWebappCheck(HttpRequest& request, HttpResponse& res
 	// Stream directly from a JsonObjectStream to avoid a second serialized
 	// String buffer (peak-heap reduction on the low-heap ESP8266 path).
 	auto stream = std::make_unique<JsonObjectStream>(512);
+	if(!stream) {
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("low memory"));
+		return;
+	}
 	JsonObject json = stream->getRoot();
 	app.webappOta.fillStatusJson(json);
 
@@ -1134,6 +1142,10 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response){
 
 	const bool isV2 = versionParam == "2";
 	auto stream = std::make_unique<JsonObjectStream>(isV2 ? INFO_DOC_CAPACITY_V2 : INFO_DOC_CAPACITY_V1);
+	if(!stream) {
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("low memory"));
+		return;
+	}
 	JsonObject data = stream->getRoot();
 	
 	// Call the shared handler
@@ -1152,6 +1164,10 @@ void ApplicationWebserver::onColorGet(HttpRequest& request, HttpResponse& respon
     */
 
 	auto stream = std::make_unique<JsonObjectStream>();
+	if(!stream) {
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("low memory"));
+		return;
+	}
 	JsonObject json = stream->getRoot();
 
 	JsonObject raw = json.createNestedObject("raw");
@@ -1282,6 +1298,10 @@ void ApplicationWebserver::onNetworks(HttpRequest& request, HttpResponse& respon
 #endif
 
 	auto stream = std::make_unique<JsonObjectStream>();
+	if(!stream) {
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("low memory"));
+		return;
+	}
 	JsonObject json = stream->getRoot();
 
 	bool error = false;
@@ -1428,6 +1448,10 @@ void ApplicationWebserver::onConnect(HttpRequest& request, HttpResponse& respons
 		}
 	} else {
 		auto stream = std::make_unique<JsonObjectStream>();
+		if(!stream) {
+			sendApiCode(response, API_CODES::API_BAD_REQUEST, F("low memory"));
+			return;
+		}
 		JsonObject json = stream->getRoot();
 
 		CONNECTION_STATUS status = app.network.get_con_status();
@@ -1562,6 +1586,10 @@ void ApplicationWebserver::onUpdate(HttpRequest& request, HttpResponse& response
 		return;
 	}
 	auto stream = std::make_unique<JsonObjectStream>();
+	if(!stream) {
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("low memory"));
+		return;
+	}
 	JsonObject json = stream->getRoot();
 	json[F("status")] = int(app.ota.getStatus());
 	sendApiResponse(response, stream.release());
@@ -1596,6 +1624,11 @@ void ApplicationWebserver::onPing(HttpRequest& request, HttpResponse& response)
 	}
     */
 	auto stream = std::make_unique<JsonObjectStream>();
+	if(!stream) {
+		response.code = HTTP_STATUS_BAD_REQUEST;
+		response.sendString(F("{\"error\":\"low memory\"}"));
+		return;
+	}
 	JsonObject json = stream->getRoot();
 	json[F("ping")] = "pong";
 	sendApiResponse(response, stream.release());
@@ -1752,6 +1785,10 @@ void ApplicationWebserver::onHosts(HttpRequest& request, HttpResponse& response)
 
     // Use the JsonStream for automatic streaming
     auto stream = app.controllers->createJsonStream(filter, false); // Compact format for HTTP
+	if(!stream) {
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("low memory"));
+		return;
+	}
     response.sendDataStream(stream.release(), MIME_JSON);
 
 //todo 
@@ -1766,6 +1803,10 @@ void ApplicationWebserver::onData(HttpRequest& request, HttpResponse& response){
 		response.setContentType(F("application/json"));
 
 		auto dataStream = app.data->createExportStream(ConfigDB::Json::format);
+		if(!dataStream) {
+			sendApiCode(response, API_CODES::API_BAD_REQUEST, F("low memory"));
+			return;
+		}
 		response.sendDataStream(dataStream.release(), MIME_JSON);
 
 	} else if (request.method==HttpMethod::POST){
