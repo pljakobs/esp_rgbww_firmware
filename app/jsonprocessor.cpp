@@ -27,6 +27,43 @@
 #include <apihandler.h>
 
 #define MIN_HEAP_FREE 8192
+
+namespace {
+bool parseAbsOrRelValue(const JsonVariantConst& source, Optional<AbsOrRelValue>& target,
+						AbsOrRelValue::Type type = AbsOrRelValue::Type::Percent)
+{
+	if(source.isNull()) {
+		return false;
+	}
+
+	if(source.is<const char*>()) {
+		const char* value = source.as<const char*>();
+		if(value != nullptr && value[0] != '\0') {
+			target = AbsOrRelValue(value, type);
+			return true;
+		}
+		return false;
+	}
+
+	if(source.is<float>() || source.is<double>()) {
+		target = AbsOrRelValue(static_cast<float>(source.as<double>()), type);
+		return true;
+	}
+
+	if(source.is<int>() || source.is<long>() || source.is<unsigned int>() || source.is<unsigned long>()) {
+		target = AbsOrRelValue(static_cast<int>(source.as<long>()), type);
+		return true;
+	}
+
+	String value;
+	if(Json::getValue(source, value)) {
+		target = AbsOrRelValue(value, type);
+		return true;
+	}
+
+	return false;
+}
+}
 /**
  * @brief Processes the color JSON data.
  *
@@ -42,7 +79,10 @@ bool JsonProcessor::onColor(const String& json, String& msg, bool relay)
 {
 	debug_e(ANSI_COLOR_RED "JsonProcessor::onColor: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED "" ANSI_COLOR_RESET, json.c_str());
 	StaticJsonDocument<400> doc;
-	Json::deserialize(doc, json);
+	if(!Json::deserialize(doc, json)) {
+		msg = F("malformed json");
+		return false;
+	}
 	return onColor(doc.as<JsonObject>(), msg, relay);
 }
 
@@ -506,59 +546,39 @@ bool JsonProcessor::onDirect(JsonObject root, String& msg, bool relay)
  */
 void JsonProcessor::parseRequestParams(JsonObject root, RequestParameters& params)
 {
-	String value;
-
 	JsonObject hsv = root[F("hsv")];
 	if(!hsv.isNull()) {
 		params.mode = RequestParameters::Mode::Hsv;
-		if(Json::getValue(hsv[F("h")], value))
-			params.hsv.h = AbsOrRelValue(value, AbsOrRelValue::Type::Hue);
-		if(Json::getValue(hsv[F("s")], value))
-			params.hsv.s = AbsOrRelValue(value);
-		if(Json::getValue(hsv[F("v")], value))
-			params.hsv.v = AbsOrRelValue(value);
-		if(Json::getValue(hsv[F("ct")], value))
-			params.hsv.ct = AbsOrRelValue(value, AbsOrRelValue::Type::Ct);
+		parseAbsOrRelValue(hsv[F("h")], params.hsv.h, AbsOrRelValue::Type::Hue);
+		parseAbsOrRelValue(hsv[F("s")], params.hsv.s);
+		parseAbsOrRelValue(hsv[F("v")], params.hsv.v);
+		parseAbsOrRelValue(hsv[F("ct")], params.hsv.ct, AbsOrRelValue::Type::Ct);
 
 		JsonObject from = hsv[F("from")];
 		if(!from.isNull()) {
 			params.hasHsvFrom = true;
-			if(Json::getValue(from[F("h")], value))
-				params.hsv.h = AbsOrRelValue(value, AbsOrRelValue::Type::Hue);
-			if(Json::getValue(from[F("s")], value))
-				params.hsv.s = AbsOrRelValue(value);
-			if(Json::getValue(from[F("v")], value))
-				params.hsv.v = AbsOrRelValue(value);
-			if(Json::getValue(from[F("ct")], value))
-				params.hsv.ct = AbsOrRelValue(value, AbsOrRelValue::Type::Ct);
+			parseAbsOrRelValue(from[F("h")], params.hsv.h, AbsOrRelValue::Type::Hue);
+			parseAbsOrRelValue(from[F("s")], params.hsv.s);
+			parseAbsOrRelValue(from[F("v")], params.hsv.v);
+			parseAbsOrRelValue(from[F("ct")], params.hsv.ct, AbsOrRelValue::Type::Ct);
 		}
 	} else if(!root[F("raw")].isNull()) {
 		JsonObject raw = root[F("raw")];
 		params.mode = RequestParameters::Mode::Raw;
-		if(Json::getValue(raw[F("r")], value))
-			params.raw.r = AbsOrRelValue(value, AbsOrRelValue::Type::Raw);
-		if(Json::getValue(raw[F("g")], value))
-			params.raw.g = AbsOrRelValue(value, AbsOrRelValue::Type::Raw);
-		if(Json::getValue(raw[F("b")], value))
-			params.raw.b = AbsOrRelValue(value, AbsOrRelValue::Type::Raw);
-		if(Json::getValue(raw[F("ww")], value))
-			params.raw.ww = AbsOrRelValue(value, AbsOrRelValue::Type::Raw);
-		if(Json::getValue(raw[F("cw")], value))
-			params.raw.cw = AbsOrRelValue(value, AbsOrRelValue::Type::Raw);
+		parseAbsOrRelValue(raw[F("r")], params.raw.r, AbsOrRelValue::Type::Raw);
+		parseAbsOrRelValue(raw[F("g")], params.raw.g, AbsOrRelValue::Type::Raw);
+		parseAbsOrRelValue(raw[F("b")], params.raw.b, AbsOrRelValue::Type::Raw);
+		parseAbsOrRelValue(raw[F("ww")], params.raw.ww, AbsOrRelValue::Type::Raw);
+		parseAbsOrRelValue(raw[F("cw")], params.raw.cw, AbsOrRelValue::Type::Raw);
 
 		JsonObject from = raw[F("from")];
 		if(!from.isNull()) {
 			params.hasRawFrom = true;
-			if(Json::getValue(from[F("r")], value))
-				params.rawFrom.r = AbsOrRelValue(value, AbsOrRelValue::Type::Raw);
-			if(Json::getValue(from[F("g")], value))
-				params.rawFrom.g = AbsOrRelValue(value, AbsOrRelValue::Type::Raw);
-			if(Json::getValue(from[F("b")], value))
-				params.rawFrom.b = AbsOrRelValue(value, AbsOrRelValue::Type::Raw);
-			if(Json::getValue(from[F("ww")], value))
-				params.rawFrom.ww = AbsOrRelValue(value, AbsOrRelValue::Type::Raw);
-			if(Json::getValue(from[F("cw")], value))
-				params.rawFrom.cw = AbsOrRelValue(value, AbsOrRelValue::Type::Raw);
+			parseAbsOrRelValue(from[F("r")], params.rawFrom.r, AbsOrRelValue::Type::Raw);
+			parseAbsOrRelValue(from[F("g")], params.rawFrom.g, AbsOrRelValue::Type::Raw);
+			parseAbsOrRelValue(from[F("b")], params.rawFrom.b, AbsOrRelValue::Type::Raw);
+			parseAbsOrRelValue(from[F("ww")], params.rawFrom.ww, AbsOrRelValue::Type::Raw);
+			parseAbsOrRelValue(from[F("cw")], params.rawFrom.cw, AbsOrRelValue::Type::Raw);
 		}
 	}
 

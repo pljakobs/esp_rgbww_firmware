@@ -26,6 +26,7 @@
 #include <RGBWWCtrl.h>
 #include <apihandler.h>
 #include <Data/WebHelpers/base64.h>
+#include <cstring>
 #include <memory>
 #include <stdio.h>
 
@@ -59,7 +60,7 @@ ApplicationWebserver::ApplicationWebserver()
 	HttpServerSettings settings;
 	settings.maxActiveConnections = HTTP_MAX_CONNECTIONS;
 	settings.minHeapSize = MINIMUM_HEAP_ACCEPT;
-	settings.keepAliveSeconds = 10; // do not close instantly when no transmission occurs. some clients are a bit slow (like FHEM)
+	settings.keepAliveSeconds = 5; // do not close instantly when no transmission occurs. some clients are a bit slow (like FHEM)
 	configure(settings);
 
 	// workaround for bug in Sming 3.5.0
@@ -159,14 +160,15 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
     }
 
     JsonObject requestRoot = requestDoc.as<JsonObject>();
-    String method = requestRoot[F("method")] | String::nullstr;
+	const char* method = requestRoot[F("method")] | "";
     JsonVariant requestId = requestRoot[F("id")];
 
-	debug_i(ANSI_COLOR_BLUE "Websocket message: method= " ANSI_COLOR_GREEN "%s" ANSI_COLOR_RESET, method.c_str());
+	debug_i(ANSI_COLOR_BLUE "Websocket message: method= " ANSI_COLOR_GREEN "%s" ANSI_COLOR_RESET, method);
 
 	// Determine target stream capacity based on the specific method requested
 	size_t responseCapacity = 512; // Default for simple getters/commands
-	if(method == F("info") || method == F("getInfo")) {
+	const bool isInfoMethod = (std::strcmp(method, "info") == 0) || (std::strcmp(method, "getInfo") == 0);
+	if(isInfoMethod) {
 		responseCapacity = WS_INFO_RESPONSE_CAPACITY;
 	}
 	const uint32_t infoHeapSnapshot = app.getFreeHeapSize();
@@ -179,26 +181,26 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
         responseRoot[F("id")] = requestId;
     }
 
-    if(!method.length()) {
+	if(method[0] == '\0') {
         errorMsg = F("missing method");
     } else if(!app.api) {
         errorMsg = F("api not initialized");
     } else {
         JsonObject params = requestRoot[F("params")];
-        const bool isColorGetter = method == F("color") && (params.isNull() || params.size() == 0);
-        const bool isDataMethod = isColorGetter || method == F("getColor") || method == F("info") ||
-                        method == F("getInfo") || method == F("networks") || method == F("getNetworks");
+		const bool isColorGetter = (std::strcmp(method, "color") == 0) && (params.isNull() || params.size() == 0);
+		const bool isDataMethod = isColorGetter || (std::strcmp(method, "getColor") == 0) || isInfoMethod ||
+						(std::strcmp(method, "networks") == 0) || (std::strcmp(method, "getNetworks") == 0);
 
 		if(isDataMethod) {
             JsonObject result = responseRoot.createNestedObject(F("result"));
-			if(method == F("info") || method == F("getInfo")) {
+			if(isInfoMethod) {
 				if(!app.api->handleInfo(params, result, infoHeapSnapshot)) {
-					errorMsg = result[F("error")] | String(F("method not implemented"));
+					errorMsg = result[F("error")] | "method not implemented";
 					responseRoot.remove(F("result"));
 				}
 			} else {
 				if(!app.api->dispatch(method, params, result)) {
-					errorMsg = result[F("error")] | String(F("method not implemented"));
+					errorMsg = result[F("error")] | "method not implemented";
 					responseRoot.remove(F("result"));
 				}
 			}
@@ -450,13 +452,20 @@ void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, c
 bool ApplicationWebserver::parseJsonBody(HttpRequest& request, HttpResponse& response, JsonDocument& doc,
 											 const __FlashStringHelper* noBodyMessage)
 {
-	String body = request.getBody();
-	if(body == NULL) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, noBodyMessage);
-		return false;
+	auto bodyStream = request.getBodyStream();
+	DeserializationError err = DeserializationError::EmptyInput;
+
+	if(bodyStream) {
+		err = deserializeJson(doc, *bodyStream);
+	} else {
+		String body = request.getBody();
+		if(!body.length()) {
+			sendApiCode(response, API_CODES::API_BAD_REQUEST, noBodyMessage);
+			return false;
+		}
+		err = deserializeJson(doc, body);
 	}
 
-	DeserializationError err = deserializeJson(doc, body);
 	if(err) {
 		char parseError[96];
 		snprintf(parseError, sizeof(parseError), "Invalid JSON: %s", err.c_str());
@@ -623,17 +632,16 @@ void ApplicationWebserver::onWebappCheck(HttpRequest& request, HttpResponse& res
 		}
 	}
 
-	// Return current OTA status (same as /webapp_status but cache-busted)
-	DynamicJsonDocument doc(512);
-	JsonObject json = doc.to<JsonObject>();
+	// Return current OTA status (same as /webapp_status but cache-busted).
+	// Stream directly from a JsonObjectStream to avoid a second serialized
+	// String buffer (peak-heap reduction on the low-heap ESP8266 path).
+	auto stream = std::make_unique<JsonObjectStream>(512);
+	JsonObject json = stream->getRoot();
 	app.webappOta.fillStatusJson(json);
-	String body;
-	serializeJson(doc, body);
 
 	setCorsHeaders(response);
 	response.headers[HTTP_HEADER_CACHE_CONTROL] = F("no-store");
-	response.headers[HTTP_HEADER_CONTENT_TYPE] = F("application/json");
-	response.sendString(body);
+	response.sendDataStream(stream.release(), MIME_JSON);
 }
 
 void ApplicationWebserver::onWebappStatus(HttpRequest& request, HttpResponse& response)
@@ -1147,7 +1155,7 @@ void ApplicationWebserver::onColorPost(HttpRequest& request, HttpResponse& respo
 		return;
 	}
 
-	debug_i(ANSI_COLOR_BLUE "received color update with body length" ANSI_COLOR_CYAN " %i " ANSI_COLOR_RESET, request.getBody().length());
+	debug_i(ANSI_COLOR_BLUE "received color update" ANSI_COLOR_RESET);
 	String msg;
 	const bool ok = app.api->dispatchCommand(F("color"), doc.as<JsonObject>(), msg, true);
 

@@ -3,6 +3,12 @@
 #include <application.h>
 #include <cstring>
 
+// Stringify an integer macro so it can be embedded in a compile-time JSON literal.
+#ifndef RGBWW_STRINGIFY
+#define RGBWW_STRINGIFY_(x) #x
+#define RGBWW_STRINGIFY(x) RGBWW_STRINGIFY_(x)
+#endif
+
 #if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
 extern "C" {
 #include <lwip/tcp.h>
@@ -187,15 +193,23 @@ TcpPcbStats getTcpPcbStats()
 
 bool Api::dispatch(const String& method, const JsonObject& params, JsonObject& out)
 {
-	debug_i(ANSI_COLOR_BLUE "Api::dispatch: method=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, method.c_str());
+	return dispatch(method.c_str(), params, out);
+}
+
+bool Api::dispatch(const char* method, const JsonObject& params, JsonObject& out)
+{
+	const char* methodName = (method != nullptr) ? method : "";
+	debug_i(ANSI_COLOR_BLUE "Api::dispatch: method=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET,
+			methodName);
 	String errorMsg;
-	if(dispatchDataRequest(method, params, &out, nullptr, errorMsg)) {
+	if(dispatchDataRequest(methodName, params, &out, nullptr, errorMsg)) {
 		return true;
 	}
 
 	out[F("error")] = errorMsg;
-	out[F("method")] = method;
-	debug_i(ANSI_COLOR_BLUE "Api::dispatch failed: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, errorMsg.c_str());
+	out[F("method")] = methodName;
+	debug_i(ANSI_COLOR_BLUE "Api::dispatch failed: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET,
+			errorMsg.c_str());
 	return false;
 }
 
@@ -298,34 +312,15 @@ bool Api::dispatchCommand(const char* method, const JsonObject& params, String& 
 bool Api::dispatchCommand(const String& method, const String& params, String& errorMsg, bool relay)
 {
 	debug_i(ANSI_COLOR_BLUE "Api::dispatchCommand(str): method=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ", params=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, method.c_str(), params.c_str());
-	switch(getCommandMethodId(method.c_str())) {
-	case CommandMethodId::Color:
-		return app.jsonproc.onColor(params, errorMsg, relay);
-	case CommandMethodId::Stop:
-		return app.jsonproc.onStop(params, errorMsg, relay);
-	case CommandMethodId::Skip:
-		return app.jsonproc.onSkip(params, errorMsg, relay);
-	case CommandMethodId::Pause:
-		return app.jsonproc.onPause(params, errorMsg, relay);
-	case CommandMethodId::Continue:
-		return app.jsonproc.onContinue(params, errorMsg, relay);
-	case CommandMethodId::Blink:
-		return app.jsonproc.onBlink(params, errorMsg, relay);
-	case CommandMethodId::Toggle:
-		return app.jsonproc.onToggle(params, errorMsg, relay);
-	case CommandMethodId::Direct:
-		return app.jsonproc.onDirect(params, errorMsg, relay);
-	case CommandMethodId::SetOn:
-		return app.jsonproc.onSetOn(params, errorMsg, relay);
-	case CommandMethodId::SetOff:
-		return app.jsonproc.onSetOff(params, errorMsg, relay);
-	case CommandMethodId::Unknown:
-	case CommandMethodId::KeepAlive:
-	case CommandMethodId::ScanNetworks:
-	case CommandMethodId::System:
-	case CommandMethodId::WebappCheck:
-	default:
-		break;
+	const auto methodId = getCommandMethodId(method.c_str());
+	if(methodId == CommandMethodId::KeepAlive) {
+		return true;
+	}
+
+	if(methodId == CommandMethodId::Unknown) {
+		errorMsg = F("method not implemented: ");
+		errorMsg.concat(method.c_str());
+		return false;
 	}
 
 	StaticJsonDocument<512> doc;
@@ -424,10 +419,17 @@ bool Api::dispatchStream(const String& method, const JsonObject& params, std::un
 bool Api::dispatchDataRequest(const String& method, const JsonObject& params, JsonObject* outObject,
 						 std::unique_ptr<IDataSourceStream>* outStream, String& errorMsg)
 {
-	const auto dataMethodId = getDataMethodId(method.c_str());
+	return dispatchDataRequest(method.c_str(), params, outObject, outStream, errorMsg);
+}
+
+bool Api::dispatchDataRequest(const char* method, const JsonObject& params, JsonObject* outObject,
+						 std::unique_ptr<IDataSourceStream>* outStream, String& errorMsg)
+{
+	const char* methodName = (method != nullptr) ? method : "";
+	const auto dataMethodId = getDataMethodId(methodName);
 
 	if(outObject != nullptr) {
-		debug_i(ANSI_COLOR_BLUE "Api::dispatchDataRequest: method=" ANSI_COLOR_RED "%s" ANSI_COLOR_RESET, method.c_str());
+		debug_i(ANSI_COLOR_BLUE "Api::dispatchDataRequest: method=" ANSI_COLOR_RED "%s" ANSI_COLOR_RESET, methodName);
 		if(dataMethodId == DataMethodId::Info) {
 			return handleInfo(params, *outObject);
 		}
@@ -479,20 +481,33 @@ bool Api::handleInfo(const JsonObject& params, JsonObject& data, uint32_t heapFr
 	if(isV2) {
 		debug_i(ANSI_COLOR_BLUE "Api::handleInfo: version 2 detected" ANSI_COLOR_RESET);
 
-		data[F("version")] = 2;
-
-		{
-			JsonObject dev = data.createNestedObject(F("device"));
+		// device is a runtime-but-per-boot-constant fragment (chip id + running ROM).
+		// It is formatted once into a static buffer (BSS, no heap) and linked in via
+		// serialized(). sming/rgbww are pure build-time constants and live in flash.
+		static char s_infoDeviceV2[80];
+		if(s_infoDeviceV2[0] == '\0') {
 	#if defined(ARCH_ESP8266)
-			dev[F("deviceid")] = system_get_chip_id();
+			m_snprintf(s_infoDeviceV2, sizeof(s_infoDeviceV2),
+				"{\"deviceid\":%u,\"soc\":\"" SOC "\",\"current_rom\":\"%s\"}",
+				(unsigned)system_get_chip_id(), app.ota.getRomPartition().name().c_str());
+	#elif defined(ARCH_ESP32)
+			m_snprintf(s_infoDeviceV2, sizeof(s_infoDeviceV2),
+				"{\"deviceid\":0,\"soc\":\"" SOC "\",\"current_rom\":\"%s\"}",
+				app.ota.getRomPartition().name().c_str());
 	#else
-			dev[F("deviceid")] = 0;
-	#endif
-			dev[F("soc")] = SOC;
-	#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
-			dev[F("current_rom")] = String(app.ota.getRomPartition().name());
+			m_snprintf(s_infoDeviceV2, sizeof(s_infoDeviceV2),
+				"{\"deviceid\":0,\"soc\":\"" SOC "\"}");
 	#endif
 		}
+
+		// sming/rgbww are pure build-time constants: keep the JSON fragments in flash
+		// (PROGMEM) and let ArduinoJson copy them straight from flash into the pool.
+		static const char kInfoSmingV2[] PROGMEM = "{\"version\":\"" SMING_VERSION "\"}";
+		static const char kInfoRgbwwV2[] PROGMEM =
+			"{\"version\":\"" RGBWW_VERSION "\",\"queuesize\":" RGBWW_STRINGIFY(RGBWW_ANIMATIONQSIZE) "}";
+
+		data[F("version")] = 2;
+		data[F("device")] = serialized((const char*)s_infoDeviceV2);
 
 		{
 			JsonObject application = data.createNestedObject(F("app"));
@@ -506,10 +521,7 @@ bool Api::handleInfo(const JsonObject& params, JsonObject& data, uint32_t heapFr
 			application[F("git_date")] = fw_git_date;
 		}
 
-		{
-			JsonObject sming = data.createNestedObject(F("sming"));
-			sming[F("version")] = SMING_VERSION;
-		}
+		data[F("sming")] = serialized(FPSTR(kInfoSmingV2));
 
 		{
 			JsonObject fs=data.createNestedObject(F("filesystem"));
@@ -548,11 +560,8 @@ bool Api::handleInfo(const JsonObject& params, JsonObject& data, uint32_t heapFr
 			debug[F("tcp_active_estimated_bytes")] = 0;
 	#endif
 		}
+			data[F("rgbww")] = serialized(FPSTR(kInfoRgbwwV2));
 			{
-			JsonObject rgbww = data.createNestedObject(F("rgbww"));
-			rgbww[F("version")] = RGBWW_VERSION;
-			rgbww[F("queuesize")] = RGBWW_ANIMATIONQSIZE;
-
 			JsonObject con = data.createNestedObject(F("connection"));
 			con[F("connected")] = WifiStation.isConnected();
 			if(WifiStation.isConnected()) {

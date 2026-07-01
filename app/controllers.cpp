@@ -629,8 +629,10 @@ size_t Controllers::JsonPrinter::operator()() {
             n += p->print('{');
             n += printProperty("id", (int)localId, false, 3);
             // Avoid temporary String allocations — use const char* directly
-            const char* localHostname = WifiStation.getHostname().c_str();
-            const char* localIp = WifiStation.getIP().toString().c_str();
+            String localHostnameStr = WifiStation.getHostname();
+            const char* localHostname = localHostnameStr.c_str();
+            String localIpStr = WifiStation.getIP().toString();
+            const char* localIp = localIpStr.c_str();
             n += printProperty("hostname", localHostname, false, 3);
             n += printProperty("ip_address", localIp, false, 3);
             n += printProperty("host_type", hostTypeToString(HOST_TYPE_CONTROLLER), false, 3);

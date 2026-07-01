@@ -117,7 +117,7 @@ private:
 
     // --- Helpers ---
     bool verifyFileMd5(const String& filePath, const String& expectedMd5);
-    void saveState(const String& version, const String& md5, const String& status);
+    void saveState(const String& version, const String& md5, const char* status);
     void cleanupStaging();
     void listDirectory(const String& path, int depth=0);
     void printFileSystemUsage();

@@ -4,6 +4,14 @@ ifndef SMING_RELEASE
 COMPONENT_DEPENDS += HuffmanCodec
 endif
 
+# malloc_count is opt-in: only pull it in when explicitly requested with
+# ENABLE_MALLOC_COUNT=1. Its source unconditionally includes <osapi.h>, which
+# only exists on Esp8266, so an unconditional dependency breaks Host builds.
+# App code guards all usage with #ifdef ENABLE_MALLOC_COUNT.
+ifeq ($(ENABLE_MALLOC_COUNT),1)
+COMPONENT_DEPENDS += malloc_count
+endif
+
 ifeq ($(SMING_ARCH), Esp32)
     COMPONENT_DEPENDS += Esp32HardwarePwm
 endif
@@ -95,11 +103,24 @@ USER_CXXFLAGS += -Wformat -Werror=format
 
 # Esp8266 propagates USER_CFLAGS into external lwIP sources, where older GCC
 # toolchains can reject -Werror=format-security even with -Wformat enabled.
+
+CUSTOM_LWIP_OPTS += -DLWIP_IPV6=0 \
+	       -DLWIP_IGMP=1 \
+	       -DLWIP_DNS=1 \
+	       -DLWIP_DHCP=1 \
+	       -DMIN_TCP_MSS=512 \
+	       -DPBUF_POOL_SIZE=8 \
+	       -DMEMP_NUM_UDP_PCB=2 \
+	       -DMEMP_NUM_TCP_PCB=5 \
+	       -DMEM_LIBC_MALLOC=0 \
+               -DMEMP_MEM_MALLOC=0 
+	       
+		
 ifneq ($(SMING_ARCH), Esp8266)
 USER_CFLAGS += -Werror=format-security
 USER_CXXFLAGS += -Werror=format-security
 endif
-COMPONENT_CPPFLAGS += -DCONFIG_ESP_CONSOLE_USB_CDC=1
+COMPONENT_CPPFLAGS += -DCONFIG_ESP_CONSOLE_USB_CDC=1 
 
 
 #ifdef MDNS_DEBUG

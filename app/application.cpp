@@ -34,9 +34,18 @@
 #include <FlashString/Stream.hpp>
 #include <fileMap.h>
 #include <apihandler.h>
+
+#undef UDP_DEBUG
+
+#ifdef UDP_DEBUG
 #ifndef SMING_RELEASE
 #include <MultiOutputStream.h>
 #include <udpSyslogStream.h>
+#endif
+#endif
+
+#ifdef ENABLE_MALLOC_COUNT
+#include <malloc_count.h>
 #endif
 
 #if ARCH_ESP8266
@@ -180,7 +189,7 @@ extern "C" void custom_crash_callback(struct rst_info* ri, uint32_t stack, uint3
 
 Application app;
 
-#ifndef SMING_RELEASE
+#if !(defined SMING_RELEASE) && (defined UDP_DEBUG)
 MultiOutputStream debugStream;
 
 size_t debugStreamOutputCallback(const char* buffer, unsigned int length)
@@ -191,7 +200,10 @@ size_t debugStreamOutputCallback(const char* buffer, unsigned int length)
 
 void onReady()
 {
-	
+	#ifdef ENABLE_MALLOC_COUNT
+	MallocCount::enableLogging(true);
+	MallocCount::setLogThreshold(256); // log allocations larger than 100 bytes
+	#endif
 	//System.setCpuFrequencye(CF_160MHz);
 	app.rtc_info = system_get_rst_info();
 	
@@ -204,7 +216,7 @@ void onReady()
 #ifdef ARCH_ESP32
 	esp_wifi_set_ps (WIFI_PS_NONE);
 #endif
-#ifndef SMING_RELEASE
+#if !(defined SMING_RELEASE) && (defined UDP_DEBUG)
 	Serial.systemDebugOutput(false); // disable direct Serial hook; output now goes through debugStreamOutputCallback only
 	auto oldCallback = m_setPuts(&debugStreamOutputCallback);
 	debugStream.addStream(&Serial, false);
@@ -285,15 +297,18 @@ void Application::checkRam()
 	doc[F("uptime")] = _uptimeMinutes*60;
 	doc[F("ip")] = WifiStation.getIP().toString();
 	doc[F("freeHeap")] = getFreeHeapSize();
-	doc[F("minimumfreeHeapRuntime")]=_minimumHeapUptime;
-	doc[F("minimumfreeHeap10min")]=_minimumHeap10min;
+	doc[F("minHeapRuntime")]=_minimumHeapUptime;
+	doc[F("minHeap10min")]=_minimumHeap10min;
 	doc[F("heapLowErrUptime")]=_HeapLowErrUptime;
 	doc[F("heapLowErr10min")]=_HeapLowErr10min;
 	doc[F("firmware")] = fw_git_version;
 	doc[F("build")] = BUILD_TYPE;
 	doc[F("soc")] = SOC;
 	doc[F("neighbours")]=app.controllers->getVisibleCount();
-	
+	#ifdef ENABLE_MALLOC_COUNT
+	doc[F("peak_alloc")] = MallocCount::getPeak();
+	doc[F("current_alloc")] = MallocCount::getCurrent();
+	#endif
 	if (app.rtc_info->reason!= 0 && !_reboot_reported)
 	{
 		AppConfig::Network::Telemetry telemetryCfg(*cfg);
@@ -307,10 +322,13 @@ void Application::checkRam()
 		doc[F("reboot")][F("excvaddr")] = app.rtc_info->excvaddr;
 		doc[F("reboot")][F("depc")] = app.rtc_info->depc;
 	}
-	doc[F("mDNS")][F("received")] = _mDNS_received;
-	doc[F("mDNS")][F("replies")] = _mDNS_replies;
+		doc[F("mDNS")][F("received")] = _mDNS_received;
+		doc[F("mDNS")][F("replies")] = _mDNS_replies;
 
 	debug_i(ANSI_COLOR_BLUE "Free heap: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE ", uptime: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, getFreeHeapSize(), millis() / 1000);
+	#ifdef ENABLE_MALLOC_COUNT
+	debug_i(ANSI_COLOR_BLUE "MallocCount peak: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE ", current: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_RESET, MallocCount::getPeak(), MallocCount::getCurrent() );	
+	#endif
 	if (!telemetryClient.stat(doc))
 	{
 		debug_i(ANSI_COLOR_BLUE "Failed to publish monitor data to telemetry MQTT" ANSI_COLOR_RESET);
@@ -342,7 +360,13 @@ size_t Application::getFreeHeapSize(){
 
 bool Application::checkHeap( size_t minHeap)
 {
-	if(getFreeHeapSize()<minHeap){
+	int fh = getFreeHeapSize();
+	if (fh<6000)
+	{
+		// minimize heap usage by halving the minHeap threshold when we're critical anyway. This should preserve some heap for receive packet buffers and thus improve stability
+		minHeap=minHeap/2;
+	}
+	if(fh<minHeap){
 		_HeapLowErrUptime++;
 		_HeapLowErr10min++;
 		return false;
@@ -590,7 +614,7 @@ debug_i(ANSI_COLOR_BLUE "Application::init - running partition " ANSI_COLOR_CYAN
 			AppConfig::General general(*cfg);
 			String myName=general.getDeviceName();
 			debug_i(ANSI_COLOR_BLUE "Initializing remote syslog with host " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " and port " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, host.c_str(), port);
-#ifndef SMING_RELEASE
+#if !(defined SMING_RELEASE) && (defined UDP_DEBUG)
 			app.udpSyslogStream.begin(host, port, myName, F("Lightinator"));
 #endif
 		}
