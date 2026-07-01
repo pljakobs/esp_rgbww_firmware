@@ -65,7 +65,10 @@ ApplicationWebserver::ApplicationWebserver()
 
 	// workaround for bug in Sming 3.5.0
 	// https://github.com/SmingHub/Sming/issues/1236
-	setBodyParser("*", bodyToStringParser);
+	// NOTE: setBodyParser("*", bodyToStringParser) was removed - that workaround
+	// pre-buffered ALL POST bodies into heap Strings before handlers ran,
+	// causing heap exhaustion on the ESP8266. Modern Sming (6.x) provides
+	// request.getBody() reliably without this workaround.
 }
 
 void ApplicationWebserver::init()
@@ -1156,10 +1159,6 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response){
 void ApplicationWebserver::onColorGet(HttpRequest& request, HttpResponse& response)
 {
 	debug_i(ANSI_COLOR_BLUE "onColorGet" ANSI_COLOR_RESET);
-    /*
-	if(!checkHeap(response,2000))
-		return;
-    */
 
 	auto stream = std::make_unique<JsonObjectStream>();
 	if(!stream) {
