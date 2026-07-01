@@ -2,6 +2,10 @@
 
 set -euo pipefail
 
+# Ensure CI artifacts stay readable and avoid giant/unreadable core files.
+umask 022
+ulimit -c 0 >/dev/null 2>&1 || true
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
@@ -367,6 +371,88 @@ stop_host_app() {
   APP_PID=""
 }
 
+run_smoke_phase() {
+  local force_plain="${1:-0}"
+  local app_crashed=0
+
+  start_host_app "$APP_LOG_SMOKE" "$VALGRIND_LOG_SMOKE" "smoke" "1" "$force_plain"
+  collect_runtime_valgrind_snapshot "$VALGRIND_RUNTIME_LOG_SMOKE_START" "smoke_startup_idle"
+
+  set +e
+  SMOKE_PYTEST_ARGS=("${PYTEST_CMD[@]}" -v tests/host_smoke_api_test.py)
+  if [[ "$PYTEST_MD_AVAILABLE" == "1" ]]; then
+    SMOKE_PYTEST_ARGS+=(--md "$SMOKE_TEST_REPORT")
+  fi
+  "${SMOKE_PYTEST_ARGS[@]}" 2>&1 | tee "$SMOKE_TEST_OUTPUT"
+  SMOKE_PYTEST_EXIT=${PIPESTATUS[0]}
+  set -e
+
+  if [[ -n "${APP_PID:-}" ]] && ! kill -0 "$APP_PID" 2>/dev/null; then
+    app_crashed=1
+  fi
+
+  collect_runtime_valgrind_snapshot "$VALGRIND_RUNTIME_LOG_SMOKE" "smoke_post_tests"
+  stop_host_app
+
+  if [[ "$PYTEST_MD_AVAILABLE" != "1" ]]; then
+    {
+      echo "# Smoke Test Results"
+      echo
+      echo "- Report source: fallback (pytest-md unavailable)"
+      echo "- Exit code: ${SMOKE_PYTEST_EXIT}"
+    } > "$SMOKE_TEST_REPORT"
+  fi
+
+  if [[ "$SMOKE_PYTEST_EXIT" -ne 0 ]] && [[ "$app_crashed" -eq 1 ]] && [[ "$APP_UNDER_VALGRIND" == "1" ]] && [[ "$force_plain" != "1" ]]; then
+    echo "Host app crashed during smoke tests while under valgrind; retrying smoke phase without valgrind" >&2
+    printf "mode=%s\n" "fallback-plain-runtime-crash-smoke" > "$VALGRIND_STATUS_FILE"
+    return 200
+  fi
+
+  return 0
+}
+
+run_rgbww_phase() {
+  local force_plain="${1:-0}"
+  local app_crashed=0
+
+  start_host_app "$APP_LOG_RGBWW" "$VALGRIND_LOG_RGBWW" "rgbww" "1" "$force_plain"
+  collect_runtime_valgrind_snapshot "$VALGRIND_RUNTIME_LOG_RGBWW_START" "rgbww_startup_idle"
+
+  set +e
+  RGBWW_PYTEST_ARGS=("${PYTEST_CMD[@]}" -v -k "$RGBWW_HOST_EXCLUDED_EXPR" tests/rgbww_test.py)
+  if [[ "$PYTEST_MD_AVAILABLE" == "1" ]]; then
+    RGBWW_PYTEST_ARGS+=(--md "$RGBWW_TEST_REPORT")
+  fi
+  "${RGBWW_PYTEST_ARGS[@]}" 2>&1 | tee "$RGBWW_TEST_OUTPUT"
+  RGBWW_PYTEST_EXIT=${PIPESTATUS[0]}
+  set -e
+
+  if [[ -n "${APP_PID:-}" ]] && ! kill -0 "$APP_PID" 2>/dev/null; then
+    app_crashed=1
+  fi
+
+  collect_runtime_valgrind_snapshot "$VALGRIND_RUNTIME_LOG_RGBWW" "rgbww_post_tests"
+  stop_host_app
+
+  if [[ "$PYTEST_MD_AVAILABLE" != "1" ]]; then
+    {
+      echo "# RGBWW Test Results"
+      echo
+      echo "- Report source: fallback (pytest-md unavailable)"
+      echo "- Exit code: ${RGBWW_PYTEST_EXIT}"
+    } > "$RGBWW_TEST_REPORT"
+  fi
+
+  if [[ "$RGBWW_PYTEST_EXIT" -ne 0 ]] && [[ "$app_crashed" -eq 1 ]] && [[ "$APP_UNDER_VALGRIND" == "1" ]] && [[ "$force_plain" != "1" ]]; then
+    echo "Host app crashed during RGBWW tests while under valgrind; retrying RGBWW phase without valgrind" >&2
+    printf "mode=%s\n" "fallback-plain-runtime-crash-rgbww" > "$VALGRIND_STATUS_FILE"
+    return 200
+  fi
+
+  return 0
+}
+
 mkdir -p "$LOG_DIR"
 rm -f "$APP_LOG" "$APP_LOG_SMOKE" "$APP_LOG_RGBWW" "$LOG_DIR/info.json" "$HTTP_TRACE_LOG" "$MALFORMED_JSON_TRACE" "$VALGRIND_LOG_SMOKE" "$VALGRIND_LOG_RGBWW" "$VALGRIND_RUNTIME_LOG_SMOKE_START" "$VALGRIND_RUNTIME_LOG_SMOKE" "$VALGRIND_RUNTIME_LOG_RGBWW_START" "$VALGRIND_RUNTIME_LOG_RGBWW" "$BUILD_LOG" "$COMPILER_WARNINGS_LOG"
 rm -f "$VALGRIND_STATUS_FILE"
@@ -545,48 +631,24 @@ extract_failed_tests() {
   grep -E '^FAILED[[:space:]]+' "$output_file" | sed -E 's/^FAILED[[:space:]]+([^[:space:]]+).*/\1/' || true
 }
 
-start_host_app "$APP_LOG_SMOKE" "$VALGRIND_LOG_SMOKE" "smoke"
-collect_runtime_valgrind_snapshot "$VALGRIND_RUNTIME_LOG_SMOKE_START" "smoke_startup_idle"
 set +e
-SMOKE_PYTEST_ARGS=("${PYTEST_CMD[@]}" -v tests/host_smoke_api_test.py)
-if [[ "$PYTEST_MD_AVAILABLE" == "1" ]]; then
-  SMOKE_PYTEST_ARGS+=(--md "$SMOKE_TEST_REPORT")
-fi
-"${SMOKE_PYTEST_ARGS[@]}" 2>&1 | tee "$SMOKE_TEST_OUTPUT"
-SMOKE_PYTEST_EXIT=${PIPESTATUS[0]}
+run_smoke_phase 0
+smoke_phase_rc=$?
 set -e
-collect_runtime_valgrind_snapshot "$VALGRIND_RUNTIME_LOG_SMOKE" "smoke_post_tests"
-stop_host_app
-
-if [[ "$PYTEST_MD_AVAILABLE" != "1" ]]; then
-  {
-    echo "# Smoke Test Results"
-    echo
-    echo "- Report source: fallback (pytest-md unavailable)"
-    echo "- Exit code: ${SMOKE_PYTEST_EXIT}"
-  } > "$SMOKE_TEST_REPORT"
+if [[ "$smoke_phase_rc" -eq 200 ]]; then
+  run_smoke_phase 1
+elif [[ "$smoke_phase_rc" -ne 0 ]]; then
+  exit "$smoke_phase_rc"
 fi
 
-start_host_app "$APP_LOG_RGBWW" "$VALGRIND_LOG_RGBWW" "rgbww"
-collect_runtime_valgrind_snapshot "$VALGRIND_RUNTIME_LOG_RGBWW_START" "rgbww_startup_idle"
 set +e
-RGBWW_PYTEST_ARGS=("${PYTEST_CMD[@]}" -v -k "$RGBWW_HOST_EXCLUDED_EXPR" tests/rgbww_test.py)
-if [[ "$PYTEST_MD_AVAILABLE" == "1" ]]; then
-  RGBWW_PYTEST_ARGS+=(--md "$RGBWW_TEST_REPORT")
-fi
-"${RGBWW_PYTEST_ARGS[@]}" 2>&1 | tee "$RGBWW_TEST_OUTPUT"
-RGBWW_PYTEST_EXIT=${PIPESTATUS[0]}
+run_rgbww_phase 0
+rgbww_phase_rc=$?
 set -e
-collect_runtime_valgrind_snapshot "$VALGRIND_RUNTIME_LOG_RGBWW" "rgbww_post_tests"
-stop_host_app
-
-if [[ "$PYTEST_MD_AVAILABLE" != "1" ]]; then
-  {
-    echo "# RGBWW Test Results"
-    echo
-    echo "- Report source: fallback (pytest-md unavailable)"
-    echo "- Exit code: ${RGBWW_PYTEST_EXIT}"
-  } > "$RGBWW_TEST_REPORT"
+if [[ "$rgbww_phase_rc" -eq 200 ]]; then
+  run_rgbww_phase 1
+elif [[ "$rgbww_phase_rc" -ne 0 ]]; then
+  exit "$rgbww_phase_rc"
 fi
 
 HOST_CI_SHOULD_FAIL=0
@@ -655,6 +717,11 @@ fi
 
 echo "Host smoke test completed"
 tail -n 40 "$APP_LOG_RGBWW"
+
+# Valgrind may emit *.core.* side-files; make them readable and remove them so
+# artifact zipping cannot fail due to permissions.
+find "$LOG_DIR" -maxdepth 1 -type f -name '*.core.*' -exec chmod a+r {} \; >/dev/null 2>&1 || true
+find "$LOG_DIR" -maxdepth 1 -type f -name '*.core.*' -delete >/dev/null 2>&1 || true
 
 if [[ "$HOST_CI_SHOULD_FAIL" -ne 0 ]]; then
   exit 1

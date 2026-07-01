@@ -3,13 +3,14 @@ name: firmwareBuild
 permissions:
   contents: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 on:
   push:
-    branches: [stable, testing, develop, experimental]
+    branches: [stable, testing, develop, experimental, experimental-externalUI]
   pull_request:
-    branches: [stable, testing, develop, experimental]
-  repository_dispatch:
-    types: [frontend-build-completed]
+    branches: [stable, testing, develop, experimental, experimental-externalUI]
   workflow_dispatch:
     inputs:
       branch:
@@ -22,6 +23,7 @@ on:
           - testing
           - develop
           - experimental
+          - experimental-externalUI
 
 jobs:
   # Single source of truth for supported SOCs.
@@ -39,6 +41,7 @@ jobs:
           echo 'soc_csv=esp8266,esp32,esp32c3' >> $GITHUB_OUTPUT
 
   host-smoke:
+
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -46,9 +49,9 @@ jobs:
         id: get_branch
         run: |
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            echo "branch=${{ github.event.inputs.branch }}" >> $GITHUB_OUTPUT
-          elif [ "${{ github.event_name }}" == "repository_dispatch" ]; then
-            echo "branch=${{ github.event.client_payload.branch }}" >> $GITHUB_OUTPUT
+            # Use github.ref_name so the branch matches the ref the workflow was triggered on.
+            # inputs.branch has a default of 'develop' and would mismatch if --ref is used.
+            echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
           elif [ "${{ github.event_name }}" == "push" ]; then
             echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
           elif [ "${{ github.event_name }}" == "pull_request" ]; then
@@ -71,7 +74,7 @@ jobs:
             "stable")
               WEBAPP_BRANCH="stable"
               ;;
-            "experimental")
+            "experimental"|"experimental-externalUI")
               WEBAPP_BRANCH="experimental"
               ;;
             *)
@@ -122,57 +125,147 @@ jobs:
       - name: Download fileList.h artifact
         run: |
           WEBAPP_BRANCH="${{ steps.map_webapp_branch.outputs.webapp_branch }}"
-          if [ -f ./include/fileList.h ]; then
-            rm ./include/fileList.h
+          if [ "$WEBAPP_BRANCH" = "experimental" ]; then
+            echo "experimental build: keeping repo fileList.h (minimal embed set)"
+          else
+            if [ -f ./include/fileList.h ]; then
+              rm ./include/fileList.h
+            fi
+            artifact_url="https://pljakobs.github.io/esp_rgb_webapp2/${WEBAPP_BRANCH}/fileList.h"
+            echo "Downloading fileList.h from: $artifact_url"
+            curl -L -o fileList.h "$artifact_url"
+            mv fileList.h ./include
           fi
-          artifact_url="https://pljakobs.github.io/esp_rgb_webapp2/${WEBAPP_BRANCH}/fileList.h"
-          echo "Downloading fileList.h from: $artifact_url"
-          curl -L -o fileList.h "$artifact_url"
-          mv fileList.h ./include
 
       - name: Download webapp files artifact
         run: |
           WEBAPP_BRANCH="${{ steps.map_webapp_branch.outputs.webapp_branch }}"
-          if [ -d ./webapp ]; then
-            rm -rf ./webapp
-          fi
-          mkdir -p ./webapp
           artifact_url="https://pljakobs.github.io/esp_rgb_webapp2/${WEBAPP_BRANCH}/spa-files.zip"
           echo "Downloading webapp files from: $artifact_url"
           curl -L -o spa-files.zip "$artifact_url"
-          unzip spa-files.zip -d ./webapp
-          mv ./webapp/dist/spa/* ./webapp
-          rm -rf ./webapp/dist/spa
+          if [ "$WEBAPP_BRANCH" = "experimental" ]; then
+            echo "experimental build: extracting minimal file set only"
+            # captive.html and updating.html are committed in the firmware repo
+            # (checked out above) — keep the webapp/ dir as-is so those files survive.
+            # Only pull config/pinconfig.json and VERSION from the webapp zip.
+            mkdir -p ./webapp/config
+            unzip -p spa-files.zip dist/spa/config/pinconfig.json > ./webapp/config/pinconfig.json
+            unzip -p spa-files.zip dist/spa/VERSION > ./webapp/VERSION
+          else
+            if [ -d ./webapp ]; then
+              rm -rf ./webapp
+            fi
+            mkdir -p ./webapp
+            unzip spa-files.zip -d ./webapp
+            mv ./webapp/dist/spa/* ./webapp
+            rm -rf ./webapp/dist/spa
+          fi
+          rm spa-files.zip
           echo "webapp files version"
           cat ./webapp/VERSION
+
+      - name: Prepare host-smoke artifact directory
+        if: always()
+        run: |
+          mkdir -p out/host-ci
+          {
+            echo "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "branch=${{ steps.get_branch.outputs.branch }}"
+            echo "webapp_branch=${{ steps.map_webapp_branch.outputs.webapp_branch }}"
+            echo "run_id=${{ github.run_id }}"
+            echo "run_attempt=${{ github.run_attempt }}"
+          } > out/host-ci/ci-bootstrap.txt
 
       - name: Run Host smoke test in Docker Container
         env:
           MQTT_PASS: ${{ secrets.MQTT_PASS }}
           MQTT_USER: ${{ secrets.MQTT_USER }}
+          GITHUB_ACTIONS: 'true'
         run: |
+          set -euo pipefail
+          mkdir -p out/host-ci
+          echo "Starting Host smoke test at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          # Emit periodic output so the job never looks stalled.
+          (
+            while true; do
+              sleep 20
+              echo "[host-smoke][heartbeat] $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            done
+          ) &
+          HEARTBEAT_PID=$!
+
+          cleanup_heartbeat() {
+            kill "$HEARTBEAT_PID" >/dev/null 2>&1 || true
+            wait "$HEARTBEAT_PID" >/dev/null 2>&1 || true
+          }
+          trap cleanup_heartbeat EXIT
+
+          set +e
           docker run --rm --privileged -v ${{ github.workspace }}:/workspace -w /workspace \
             -e GITHUB_RUN_NUMBER=${{ github.run_number }} \
+            -e GITHUB_ACTIONS=${{ env.GITHUB_ACTIONS }} \
             -e MQTT_PASS=${{ secrets.MQTT_PASS }} \
             -e MQTT_USER=${{ secrets.MQTT_USER }} \
             docker.io/pjakobs/sming:latest \
-            bash -lc "git config --global --add safe.directory /workspace && bash ./.github/scripts/host_ci_smoke_test.sh"
+            bash -lc "git config --global --add safe.directory /workspace && bash ./.github/scripts/host_ci_smoke_test.sh" \
+            2>&1 | tee out/host-ci/docker-smoke.log
+          docker_exit_code=${PIPESTATUS[0]}
+          set -e
 
-      - name: Upload Host smoke logs
-        id: upload_host_smoke
+          echo "$docker_exit_code" > out/host-ci/docker-smoke.exitcode
+          echo "Host smoke test finished with exit code: $docker_exit_code"
+
+          if [ "$docker_exit_code" -ne 0 ]; then
+            echo "::group::Host smoke failure context"
+            if [ -f out/host-ci/host-smoke.log ]; then
+              echo "--- tail out/host-ci/host-smoke.log ---"
+              tail -n 200 out/host-ci/host-smoke.log || true
+            fi
+            if [ -f out/host-ci/docker-smoke.log ]; then
+              echo "--- tail out/host-ci/docker-smoke.log ---"
+              tail -n 200 out/host-ci/docker-smoke.log || true
+            fi
+            echo "::endgroup::"
+          fi
+
+          exit "$docker_exit_code"
+
+      - name: Display Host smoke test results
+        if: always()
+        run: |
+          echo "::group::Host Emulator Smoke Test - Full Results"
+          if [ -f out/host-ci/test_summary.md ]; then
+            cat out/host-ci/test_summary.md
+          else
+            echo "⚠️  Test summary not found"
+          fi
+          echo "::endgroup::"
+          
+          echo "::group::Host Emulator Application Log"
+          if [ -f out/host-ci/host-smoke.log ]; then
+            tail -n 50 out/host-ci/host-smoke.log
+          fi
+          echo "::endgroup::"
+
+      - name: Upload Host smoke logs and results
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: host-smoke-${{ steps.sanitize_branch.outputs.sanitized_branch }}
           path: |
-            out/host-ci/
-            out/Host/debug/firmware/app.cfg
-            out/Host/debug/firmware/partitions.bin
+            out/host-ci/**
+            !out/host-ci/*.core.*
+            out/Host/debug/firmware/**
+            out/Host/debug/config.mk
           if-no-files-found: warn
+          retention-days: 30
 
-      - name: Add Host smoke artifact summary
+      - name: Create Job Summary
         if: always()
         run: |
+          echo "## 🧪 Host Emulator Smoke Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
           TEST_REPORT="out/host-ci/test-results.md"
           TEST_OUTPUT="out/host-ci/test-output.txt"
           VALGRIND_SMOKE_LOG="out/host-ci/valgrind-smoke.log"
@@ -219,23 +312,23 @@ jobs:
             fi
           }
           
-          echo "## Test Results 📊" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          
-          if [[ -f "$TEST_REPORT" ]]; then
-            cat "$TEST_REPORT" >> "$GITHUB_STEP_SUMMARY"
+          # Include pytest-md formatted results if available
+          if [ -f out/host-ci/test-results.md ]; then
+            cat out/host-ci/test-results.md >> $GITHUB_STEP_SUMMARY
+          elif [ -f out/host-ci/test_summary.md ]; then
+            cat out/host-ci/test_summary.md >> $GITHUB_STEP_SUMMARY
           else
-            echo "⚠️ No test report found" >> "$GITHUB_STEP_SUMMARY"
+            echo "⚠️  Test results not found" >> $GITHUB_STEP_SUMMARY
           fi
           
-          # Extract failure details from test output
-          if [[ -f "$TEST_OUTPUT" ]] && grep -q "FAILED\|AssertionError" "$TEST_OUTPUT"; then
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "### Failure Details" >> "$GITHUB_STEP_SUMMARY"
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo '```' >> "$GITHUB_STEP_SUMMARY"
-            grep -A 2 "AssertionError\|assert" "$TEST_OUTPUT" | head -50 >> "$GITHUB_STEP_SUMMARY" || true
-            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          # Extract and display failure details
+          if [ -f out/host-ci/test-output.txt ] && grep -q "FAILED\|AssertionError" out/host-ci/test-output.txt; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Failure Details" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            grep -A 2 "AssertionError\|assert" out/host-ci/test-output.txt | head -50 >> $GITHUB_STEP_SUMMARY || true
+            echo '```' >> $GITHUB_STEP_SUMMARY
           fi
 
           echo "" >> "$GITHUB_STEP_SUMMARY"
@@ -337,9 +430,9 @@ jobs:
         id: get_branch
         run: |
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            echo "branch=${{ github.event.inputs.branch }}" >> $GITHUB_OUTPUT
-          elif [ "${{ github.event_name }}" == "repository_dispatch" ]; then
-            echo "branch=${{ github.event.client_payload.branch }}" >> $GITHUB_OUTPUT
+            # Use github.ref_name so the branch matches the ref the workflow was triggered on.
+            # inputs.branch has a default of 'develop' and would mismatch if --ref is used.
+            echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
           elif [ "${{ github.event_name }}" == "push" ]; then
             echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
           elif [ "${{ github.event_name }}" == "pull_request" ]; then
@@ -427,9 +520,8 @@ jobs:
           git fetch --tags --force
 
           branch="${{ steps.sanitize_branch.outputs.sanitized_branch }}"
-          build_num="${{ github.run_number }}"
 
-          # Base version source: latest stable release-like tag v5.x.y (without build suffix)
+          # Base version source: latest stable/testing release-like tag v5.x.y.
           latest_base_tag=$(git tag --list 'v5.*' | grep -E '^v5\.[0-9]+\.[0-9]+$' | sort -V | tail -n1)
           if [ -z "$latest_base_tag" ]; then
             latest_base_tag="v5.0.0"
@@ -441,23 +533,46 @@ jobs:
           x="${rest%%.*}"
           y="${rest#*.}"
 
+          effective_branch="${{ steps.get_branch.outputs.branch }}"
           event_name="${{ github.event_name }}"
-          ref_name="${{ github.ref_name }}"
 
           # Branch policy:
-          # - push testing: bump y
-          # - push stable: bump x, reset y
-          # - push develop/experimental: keep base and only increment build
-          if [ "$event_name" = "push" ] && [ "$ref_name" = "stable" ]; then
+          # - push stable: bump x, reset y, emit clean release version/tag
+          # - push testing: bump y, emit clean release version/tag
+          # - push develop/experimental: emit prerelease version/tag for the
+          #   active line. Preserve the current legacy v5.0.0-N-* stream until
+          #   a clean testing/stable tag advances the line, then reset the
+          #   prerelease sequence for the next patch line.
+          if [ "$event_name" = "push" ] && [ "$effective_branch" = "stable" ]; then
             x=$((x + 1))
             y=0
-          elif [ "$event_name" = "push" ] && [ "$ref_name" = "testing" ]; then
+          elif [ "$event_name" = "push" ] && [ "$effective_branch" = "testing" ]; then
             y=$((y + 1))
+          elif [ "$effective_branch" = "develop" ] || [ "$effective_branch" = "experimental" ]; then
+            prerelease_current=$(git tag --list | grep -E "^v${major}\.${x}\.${y}-[0-9]+(-[A-Za-z0-9._-]+)?$" | sort -V | tail -n1)
+            if [ -n "$prerelease_current" ] && [ "$y" -eq 0 ]; then
+              :
+            else
+              y=$((y + 1))
+            fi
           fi
 
           semver_base="${major}.${x}.${y}"
-          version="V${semver_base}-${build_num}-${branch}"
-          build_tag="v${semver_base}-${build_num}"
+
+          if [ "$effective_branch" = "stable" ] || [ "$effective_branch" = "testing" ]; then
+            version="V${semver_base}"
+            build_tag="v${semver_base}"
+          else
+            prerelease_last=$(git tag --list | grep -E "^v${semver_base}-[0-9]+(-[A-Za-z0-9._-]+)?$" | sed -E 's/^v[0-9]+\.[0-9]+\.[0-9]+-([0-9]+)(-[A-Za-z0-9._-]+)?$/\1/' | sort -n | tail -n1)
+            if [ -z "$prerelease_last" ]; then
+              prerelease_seq=1
+            else
+              prerelease_seq=$((prerelease_last + 1))
+            fi
+
+            version="V${semver_base}-${prerelease_seq}-${branch}"
+            build_tag="v${semver_base}-${prerelease_seq}-${branch}"
+          fi
 
           echo "fw_version=$version" >> $GITHUB_OUTPUT
           echo "fw_semver_base=$semver_base" >> $GITHUB_OUTPUT
