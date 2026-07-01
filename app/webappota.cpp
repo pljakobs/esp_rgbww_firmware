@@ -29,6 +29,56 @@ static constexpr const char STAGING_ROOT[] = "staging";
 // Retry interval on transient failures (ms)
 static constexpr uint32_t RETRY_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
+namespace {
+const String& kEmpty()
+{
+    static const String v = F("");
+    return v;
+}
+
+const String& kStatusOk()
+{
+    static const String v = F("ok");
+    return v;
+}
+
+const String& kStatusNoUpdate()
+{
+    static const String v = F("no_update");
+    return v;
+}
+
+const String& kStatusApiError()
+{
+    static const String v = F("api_error");
+    return v;
+}
+
+const String& kStatusDownloadError()
+{
+    static const String v = F("download_error");
+    return v;
+}
+
+const String& kStatusMd5Error()
+{
+    static const String v = F("md5_error");
+    return v;
+}
+
+const String& kStatusActivationError()
+{
+    static const String v = F("activation_error");
+    return v;
+}
+
+const String& kStatusLowHeap()
+{
+    static const String v = F("low_heap");
+    return v;
+}
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 String WebappOta::stagingPath(const String& relPath)
@@ -165,7 +215,7 @@ void WebappOta::queryApi(const String& branch, const String& firmwareVersion, co
             RequestCompletedDelegate(&WebappOta::onApiResponse, this), 4096)) {
         debug_e(ANSI_COLOR_RED "WebappOta::queryApi - failed to queue request" ANSI_COLOR_RESET);
         _state = State::IDLE;
-        saveState("", "", "api_error");
+        saveState(kEmpty(), kEmpty(), kStatusApiError());
     }
 }
 
@@ -175,7 +225,7 @@ int WebappOta::onApiResponse(HttpConnection& client, bool successful)
     if(!response) {
         debug_e(ANSI_COLOR_RED "WebappOta::onApiResponse - no response object" ANSI_COLOR_RESET);
         _state = State::IDLE;
-        saveState("", "", "api_error");
+        saveState(kEmpty(), kEmpty(), kStatusApiError());
         return 0;
     }
 
@@ -184,7 +234,7 @@ int WebappOta::onApiResponse(HttpConnection& client, bool successful)
     if(!successful || (code != 200 && code != 0 /* 0 = no code set */)) {
         debug_i(ANSI_COLOR_BLUE "WebappOta::onApiResponse - HTTP " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE ", no update available" ANSI_COLOR_RESET, code);
         _state = State::IDLE;
-        saveState("", "", (code == 404) ? "no_update" : "api_error");
+        saveState(kEmpty(), kEmpty(), (code == 404) ? kStatusNoUpdate() : kStatusApiError());
         return 0;
     }
 
@@ -192,7 +242,7 @@ int WebappOta::onApiResponse(HttpConnection& client, bool successful)
     if(body.length() == 0) {
         debug_e(ANSI_COLOR_RED "WebappOta::onApiResponse - empty body" ANSI_COLOR_RESET);
         _state = State::IDLE;
-        saveState("", "", "api_error");
+        saveState(kEmpty(), kEmpty(), kStatusApiError());
         return 0;
     }
 
@@ -214,7 +264,7 @@ int WebappOta::onApiResponse(HttpConnection& client, bool successful)
     if(err) {
         debug_e(ANSI_COLOR_RED "WebappOta::onApiResponse - JSON parse error: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED "" ANSI_COLOR_RESET, err.c_str());
         _state = State::IDLE;
-        saveState("", "", "api_error");
+        saveState(kEmpty(), kEmpty(), kStatusApiError());
         return 0;
     }
 
@@ -222,7 +272,7 @@ int WebappOta::onApiResponse(HttpConnection& client, bool successful)
     if(version == nullptr) {
         debug_e(ANSI_COLOR_RED "WebappOta::onApiResponse - missing 'version' field" ANSI_COLOR_RESET);
         _state = State::IDLE;
-        saveState("", "", "api_error");
+        saveState(kEmpty(), kEmpty(), kStatusApiError());
         return 0;
     }
     _pendingVersion = version;
@@ -233,7 +283,7 @@ int WebappOta::onApiResponse(HttpConnection& client, bool successful)
         if(webapp.getInstalledVersion() == _pendingVersion) {
             debug_i(ANSI_COLOR_BLUE "WebappOta::onApiResponse - already up to date (" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ")" ANSI_COLOR_RESET, _pendingVersion.c_str());
             _state = State::IDLE;
-            saveState(_pendingVersion, webapp.getInstalledMd5(), "no_update");
+            saveState(_pendingVersion, webapp.getInstalledMd5(), kStatusNoUpdate());
             return 0;
         }
     }
@@ -243,7 +293,7 @@ int WebappOta::onApiResponse(HttpConnection& client, bool successful)
     if(files.isNull() || files.size() == 0) {
         debug_e(ANSI_COLOR_RED "WebappOta::onApiResponse - no files in response" ANSI_COLOR_RESET);
         _state = State::IDLE;
-        saveState("", "", "api_error");
+        saveState(kEmpty(), kEmpty(), kStatusApiError());
         return 0;
     }
 
@@ -251,7 +301,7 @@ int WebappOta::onApiResponse(HttpConnection& client, bool successful)
     if(basepath == nullptr) {
         debug_e(ANSI_COLOR_RED "WebappOta::onApiResponse - missing basepath in response" ANSI_COLOR_RESET);
         _state = State::IDLE;
-        saveState("", "", "api_error");
+        saveState(kEmpty(), kEmpty(), kStatusApiError());
         return 0;
     }
     String base(basepath);
@@ -262,7 +312,7 @@ int WebappOta::onApiResponse(HttpConnection& client, bool successful)
         if(filename == nullptr || md5 == nullptr) {
             debug_e(ANSI_COLOR_RED "WebappOta::onApiResponse - file entry missing filename/md5, skipping version" ANSI_COLOR_RESET);
         _state = State::IDLE;
-            saveState("", "", "api_error");
+            saveState(kEmpty(), kEmpty(), kStatusApiError());
             return 0;
         }
         FileEntry entry;
@@ -338,7 +388,7 @@ void WebappOta::startNextDownload()
         if(!activateStaging()) {
             cleanupStaging();
             _state = State::IDLE;
-            saveState("", "", "activation_error");
+            saveState(kEmpty(), kEmpty(), kStatusActivationError());
         }
         return;
     }
@@ -350,7 +400,7 @@ void WebappOta::startNextDownload()
     if(app.getFreeHeapSize() < MIN_DOWNLOAD_HEAP) {
         debug_w(ANSI_COLOR_YELLOW "WebappOta::startNextDownload - low heap (" ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW "), backing off 30s" ANSI_COLOR_RESET,
                 app.getFreeHeapSize());
-        saveState("", "", "low_heap");
+        saveState(kEmpty(), kEmpty(), kStatusLowHeap());
         // Don't broadcastStatus here — we already checked heap is low and broadcastStatus
         // itself allocates.  The updating page will get the next push when download resumes.
         _retryTimer.initializeMs(30000, TimerDelegate(&WebappOta::startNextDownload, this));
@@ -365,7 +415,7 @@ void WebappOta::startNextDownload()
         debug_e(ANSI_COLOR_RED "WebappOta::startNextDownload - makedirs failed for " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED "" ANSI_COLOR_RESET, destPath.c_str());
         cleanupStaging();
         _state = State::IDLE;
-        saveState("", "", "download_error");
+        saveState(kEmpty(), kEmpty(), kStatusDownloadError());
         return;
     }
 
@@ -378,7 +428,7 @@ void WebappOta::startNextDownload()
         debug_e(ANSI_COLOR_RED "WebappOta::startNextDownload - failed to queue download" ANSI_COLOR_RESET);
         cleanupStaging();
         _state = State::IDLE;
-        saveState("", "", "download_error");
+        saveState(kEmpty(), kEmpty(), kStatusDownloadError());
     }
 }
 
@@ -393,7 +443,7 @@ int WebappOta::onFileDownloaded(HttpConnection& client, bool successful)
         debug_e(ANSI_COLOR_RED "WebappOta::onFileDownloaded - HTTP " ANSI_COLOR_CYAN "%d" ANSI_COLOR_RED " for " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED "" ANSI_COLOR_RESET, code, destPath.c_str());
         cleanupStaging();
         _state = State::IDLE;
-        saveState("", "", "download_error");
+        saveState(kEmpty(), kEmpty(), kStatusDownloadError());
         return 0;
     }
 
@@ -418,7 +468,7 @@ void WebappOta::verifyAndContinue()
         debug_e(ANSI_COLOR_RED "WebappOta::verifyAndContinue - MD5 mismatch for " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED "" ANSI_COLOR_RESET, destPath.c_str());
         cleanupStaging();
         _state = State::IDLE;
-        saveState("", "", "md5_error");
+        saveState(kEmpty(), kEmpty(), kStatusMd5Error());
         return;
     }
 
@@ -585,7 +635,7 @@ void WebappOta::activateStagingDeferred()
     if(!activateStaging()) {
         cleanupStaging();
         _state = State::IDLE;
-        saveState("", "", "activation_error");
+        saveState(kEmpty(), kEmpty(), kStatusActivationError());
     }
 }
 
@@ -613,7 +663,7 @@ bool WebappOta::activateStaging()
     }
 
     _state = State::IDLE;
-    saveState(_pendingVersion, bundleMd5, "ok");
+    saveState(_pendingVersion, bundleMd5, kStatusOk());
 
     debug_i(ANSI_COLOR_BLUE "WebappOta::activateStaging - webapp updated to " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, _pendingVersion.c_str());
     app.wsBroadcast(F("notification"),
@@ -643,8 +693,8 @@ void WebappOta::saveState(const String& version, const String& md5, const String
         update.webapp.setLastCheckStatus(status);
         // Clear in_progress whenever we reach a terminal state.
         // It is set to true by checkForUpdate() when a download begins.
-        if(status == "ok" || status == "no_update" || status == "api_error" ||
-           status == "download_error" || status == "md5_error" || status == "activation_error") {
+          if(status == kStatusOk() || status == kStatusNoUpdate() || status == kStatusApiError() ||
+              status == kStatusDownloadError() || status == kStatusMd5Error() || status == kStatusActivationError()) {
             update.webapp.setInProgress(false);
         }
     }
@@ -653,7 +703,7 @@ void WebappOta::saveState(const String& version, const String& md5, const String
     // Push updated state to all websocket clients so the updating page
     // reacts immediately without waiting for the next HTTP poll.
     // Skip for transient backoff states where heap is already known to be low.
-    if(status != "low_heap") {
+    if(status != kStatusLowHeap()) {
         broadcastStatus();
     }
 }

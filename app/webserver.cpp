@@ -27,6 +27,7 @@
 #include <apihandler.h>
 #include <Data/WebHelpers/base64.h>
 #include <memory>
+#include <stdio.h>
 
 #include <Network/Http/Websocket/WebsocketResource.h>
 #include <Storage.h>
@@ -349,12 +350,30 @@ void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, c
 
 void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, const __FlashStringHelper* msg)
 {
-	if(msg == nullptr) {
-		sendApiCode(response, code, getApiCodeMsg(code));
+	auto stream = std::make_unique<JsonObjectStream>();
+	JsonObject json = stream->getRoot();
+
+	setCorsHeaders(response);
+	response.setHeader(F("accept"), F("GET, POST, OPTIONS"));
+
+	if(code == API_CODES::API_SUCCESS) {
+		json[F("success")] = true;
+		sendApiResponse(response, stream.release(), HTTP_STATUS_OK);
 		return;
 	}
-	String flashMsg(msg);
-	sendApiCode(response, code, flashMsg);
+
+	if(code == API_CODES::API_UPDATE_IN_PROGRESS) {
+		debug_i(ANSI_COLOR_BLUE "API update in progress, adding info to response" ANSI_COLOR_RESET);
+		JsonObject data = json.createNestedObject(F("info"));
+		addInfoFields(data);
+	}
+
+	if(msg == nullptr) {
+		json[F("error")] = getApiCodeMsg(code);
+	} else {
+		json[F("error")] = msg;
+	}
+	sendApiResponse(response, stream.release(), HTTP_STATUS_BAD_REQUEST);
 }
 
 void ApplicationWebserver::addInfoFields(JsonObject& obj)
@@ -402,7 +421,11 @@ void ApplicationWebserver::addInfoFields(JsonObject& obj)
 
 void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, const char* msg)
 {
-	const String stableMsg = (msg == nullptr) ? String(getApiCodeMsg(code)) : String(msg);
+	if(msg == nullptr) {
+		sendApiCode(response, code, (const __FlashStringHelper*)nullptr);
+		return;
+	}
+
 	auto stream = std::make_unique<JsonObjectStream>();
 	JsonObject json = stream->getRoot();
 
@@ -419,13 +442,13 @@ void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, c
 			addInfoFields(data);
 		}
 
-		json[F("error")] = stableMsg;
+		json[F("error")] = msg;
 		sendApiResponse(response, stream.release(), HTTP_STATUS_BAD_REQUEST);
 	}
 }
 
 bool ApplicationWebserver::parseJsonBody(HttpRequest& request, HttpResponse& response, JsonDocument& doc,
-											 const String& noBodyMessage)
+											 const __FlashStringHelper* noBodyMessage)
 {
 	String body = request.getBody();
 	if(body == NULL) {
@@ -435,13 +458,20 @@ bool ApplicationWebserver::parseJsonBody(HttpRequest& request, HttpResponse& res
 
 	DeserializationError err = deserializeJson(doc, body);
 	if(err) {
-		String parseError = F("Invalid JSON: ");
-		parseError += err.c_str();
+		char parseError[96];
+		snprintf(parseError, sizeof(parseError), "Invalid JSON: %s", err.c_str());
 		sendApiCode(response, API_CODES::API_BAD_REQUEST, parseError);
 		return false;
 	}
 
 	return true;
+}
+
+bool ApplicationWebserver::parseJsonBody(HttpRequest& request, HttpResponse& response, JsonDocument& doc,
+											 const String& noBodyMessage)
+{
+	return parseJsonBody(request, response, doc,
+					 noBodyMessage.length() ? noBodyMessage.c_str() : nullptr);
 }
 
 void ApplicationWebserver::onFile(HttpRequest& request, HttpResponse& response)
@@ -454,7 +484,7 @@ void ApplicationWebserver::onFile(HttpRequest& request, HttpResponse& response)
 	if(app.ota.isProccessing()) {
 		response.setContentType(MIME_TEXT);
 		response.code = HTTP_STATUS_SERVICE_UNAVAILABLE;
-		response.sendString("OTA in progress");
+		response.sendString(F("OTA in progress"));
 		return;
 	}
 #endif
@@ -638,12 +668,27 @@ bool ApplicationWebserver::checkHeap(HttpResponse& response, int minHeap)
 	if(!app.checkHeap(minHeap) ) {
 		setCorsHeaders(response);
 		response.code = HTTP_STATUS_TOO_MANY_REQUESTS;
-		// If webapp OTA is active the heap stays low for ~30 s (download backoff).
-		// Tell the browser to wait that long so it doesn't hammer us with retries
-		// that each cost a TCP connection + lwIP buffers.
-		int retryAfter = app.webappOta.isActive() ? 30 : 4;
-		response.setHeader(F("Retry-After"), String(retryAfter));
-		debug_e(ANSI_COLOR_RED "Not enough heap free, rejecting request. Free heap: " ANSI_COLOR_CYAN "%u" ANSI_COLOR_RED "" ANSI_COLOR_RESET, app.getFreeHeapSize());
+		
+		// Smart backoff: scale based on how far we are below threshold
+		// If OTA is active, wait longer to avoid hammering during download
+		// Otherwise, backoff increases with severity of heap shortage
+		const char* retryAfterHeader;
+		if(app.webappOta.isActive()) {
+			retryAfterHeader = "30";  // OTA download: give 30 seconds
+		} else {
+			// Scale backoff: 4s for slightly low, 10s for critically low
+			uint32_t freeHeap = app.getFreeHeapSize();
+			if(freeHeap < (minHeap / 2)) {
+				retryAfterHeader = "10";  // Critical: wait 10 seconds
+			} else if(freeHeap < (minHeap * 3 / 4)) {
+				retryAfterHeader = "5";   // Moderate: wait 6 seconds
+			} else {
+				retryAfterHeader = "2";   // Light: wait 4 seconds
+			}
+		}
+		
+		response.setHeader(F("Retry-After"), retryAfterHeader);
+		debug_e(ANSI_COLOR_RED "Not enough heap free, rejecting request. Free heap: " ANSI_COLOR_CYAN "%u" ANSI_COLOR_RED " bytes" ANSI_COLOR_RESET, app.getFreeHeapSize());
 		return false;
 	}
 	return true;
@@ -659,14 +704,14 @@ bool ApplicationWebserver::preflightRequest(HttpRequest& request, HttpResponse& 
 {
     // Default to no-cache for API/dynamic checks. 
     // Static file handler (onFile) will override this if caching is desired.
-    debug_i(ANSI_COLOR_BLUE "preflightRequest: %s %s" ANSI_COLOR_RESET, String((int)request.method).c_str(), request.uri.Path.c_str());
+	debug_i(ANSI_COLOR_BLUE "preflightRequest: %d %s" ANSI_COLOR_RESET, (int)request.method, request.uri.Path.c_str());
     response.setHeader(F("Cache-Control"), F("no-cache, no-store, must-revalidate"));
     response.setHeader(F("Pragma"), F("no-cache"));
     response.setHeader(F("Expires"), F("0"));
 
     // 1. Heap Check
     if(!checkHeap(response, minHeap)) {
-        debug_i(ANSI_COLOR_RED "preflightRequest: %s %s - Not enough heap, rejecting request" ANSI_COLOR_RESET, String((int)request.method).c_str(), request.uri.Path.c_str());
+		debug_i(ANSI_COLOR_RED "preflightRequest: %d %s - Not enough heap, rejecting request" ANSI_COLOR_RESET, (int)request.method, request.uri.Path.c_str());
 		return false;
     }
 
@@ -681,15 +726,20 @@ bool ApplicationWebserver::preflightRequest(HttpRequest& request, HttpResponse& 
     // 3. Method validation
     bool methodAllowed = false;
 
-    String allowedMethodsStr;
-    bool first = true;
-    for(auto m : allowedMethods) {
-        if (!first) {
-             allowedMethodsStr += ", ";
-        }
-        allowedMethodsStr += String((int)m);
-        first = false;
-    }
+	char allowedMethodsStr[64] = {0};
+	size_t allowedPos = 0;
+	for(auto m : allowedMethods) {
+		int written = snprintf(allowedMethodsStr + allowedPos, sizeof(allowedMethodsStr) - allowedPos,
+						   (allowedPos == 0) ? "%d" : ", %d", (int)m);
+		if(written <= 0) {
+			break;
+		}
+		if((size_t)written >= (sizeof(allowedMethodsStr) - allowedPos)) {
+			allowedPos = sizeof(allowedMethodsStr) - 1;
+			break;
+		}
+		allowedPos += (size_t)written;
+	}
     
     for(auto m : allowedMethods) {
         if(request.method == m) {
@@ -700,12 +750,12 @@ bool ApplicationWebserver::preflightRequest(HttpRequest& request, HttpResponse& 
 
     if(!methodAllowed) {
         setCorsHeaders(response);
-        String msg = F("Method not allowed. Allowed: ") ;
-        msg += allowedMethodsStr;
-        msg += F(". Current: ");
-        msg += String((int)request.method);
-		debug_i(ANSI_COLOR_RED "preflightRequest: %s %s - %s" ANSI_COLOR_RESET, String((int)request.method).c_str(), request.uri.Path.c_str(), msg.c_str());
-        sendApiCode(response, API_CODES::API_BAD_REQUEST, msg.c_str());
+		char msg[128];
+		snprintf(msg, sizeof(msg), "Method not allowed. Allowed: %s. Current: %d", allowedMethodsStr,
+				 (int)request.method);
+		debug_i(ANSI_COLOR_RED "preflightRequest: %d %s - %s" ANSI_COLOR_RESET, (int)request.method,
+				request.uri.Path.c_str(), msg);
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, msg);
         return false;
     }
 
@@ -713,7 +763,7 @@ bool ApplicationWebserver::preflightRequest(HttpRequest& request, HttpResponse& 
     // Responds with 401 if security is enabled and auth fails
 	
     if(!authenticated(request, response)) {
-		debug_i(ANSI_COLOR_RED "preflightRequest: %s %s - Authentication failed" ANSI_COLOR_RESET, String((int)request.method).c_str(), request.uri.Path.c_str());
+		debug_i(ANSI_COLOR_RED "preflightRequest: %d %s - Authentication failed" ANSI_COLOR_RESET, (int)request.method, request.uri.Path.c_str());
         return false;
     }
 

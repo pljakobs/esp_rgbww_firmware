@@ -29,6 +29,7 @@
 #include <Network/Http/HttpClient.h>
 
 
+//ToDo: verify if mDNS with group names can be implemented with a single handler instance and multiple responders, or if we need to create separate handler instances for each group (potentially with shared responder logic) to properly manage group-specific state and avoid conflicts in service registration and message handling.
 //#define DEBUG_MDNS 
 
 // No global pointer needed — swarm state is managed via the
@@ -63,8 +64,11 @@ void mdnsHandler::setHostname(const char* newHostname)
     // Relinquish all leadership roles before changing hostname
     relinquishLeadership();
 
-    // Create a copy of the group IDs to avoid iterator invalidation
-    Vector<String> groupsToRelinquish = _leadingGroups;
+    // Create a copy of the group IDs to avoid iterator invalidation only if needed
+    Vector<String> groupsToRelinquish;
+    for (size_t i = 0; i < _leadingGroups.size(); ++i) {
+        groupsToRelinquish.add(_leadingGroups[i]);
+    }
     for (const String& groupId : groupsToRelinquish) {
         relinquishGroupLeadership(groupId.c_str());
     }
@@ -110,7 +114,7 @@ void mdnsHandler::setHostname(const char* newHostname)
 void mdnsHandler::setSearchName(const char* name)
 {
     debug_i(ANSI_COLOR_BLUE "setting searchName to " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, name);
-    searchName = name;
+    searchName = String(name);
 }
 
 void mdnsHandler::start()
@@ -733,7 +737,7 @@ void mdnsHandler::checkGroupLeadership() {
     // Get access to all groups and track our memberships
     AppData::Root::Groups groups(*app.data);
     
-    // Build map of group ID -> group name for easier reference
+    // Build map of group ID -> group name for easier reference (avoid redundant String copies)
     std::map<String, String> groupNames;
     
     // Scan for our group memberships
@@ -789,7 +793,7 @@ void mdnsHandler::checkGroupLeadership() {
     
     // Step 3: Set up leadership for groups where we should be leader
     for (size_t i = 0; i < groupsToLead.size(); i++) {
-        String groupId = groupsToLead[i];
+        const String& groupId = groupsToLead[i];
         String groupName = groupNames[groupId];
 
         // Only set up leadership if we're not already leader for this group
@@ -809,7 +813,7 @@ void mdnsHandler::checkGroupLeadership() {
     Vector<String> groupsToRelinquish;
 
     for (size_t i = 0; i < _leadingGroups.size(); i++) {
-        String groupId = _leadingGroups[i];
+        const String& groupId = _leadingGroups[i];  // Use const ref instead of copy
 
         // If we're no longer a member or shouldn't be leader, relinquish
         bool shouldRelinquish = true;
@@ -858,7 +862,8 @@ void mdnsHandler::updateServiceTxtRecords() {
              controllerIt != currentGroup.controllerIds.end(); 
              ++controllerIt) {
             
-            if (String(*controllerIt).toInt() == myId) {
+            // Use const String& to access iterator; toInt() avoids extra String temp
+            if ((*controllerIt).toInt() == (int)myId) {
                 memberGroups.add(currentGroup.getId());
                 break;
             }

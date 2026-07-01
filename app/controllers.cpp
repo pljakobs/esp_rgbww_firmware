@@ -134,7 +134,7 @@ void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char*
     if (auto controllersUpdate = controllers.update()) {
         // Find the specific controller to update (must iterate)
         for (auto controllerItem : controllersUpdate) {
-            if (controllerItem.getId() == String(id)) {
+            if (controllerItem.getId().toInt() == id) {
                 foundInConfig = true;
                 #ifdef DEBUG_MDNS
                 debug_i(ANSI_COLOR_BLUE "Hostname " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " already in list" ANSI_COLOR_RESET, hostname);
@@ -628,10 +628,11 @@ size_t Controllers::JsonPrinter::operator()() {
             n += printIndent(2);
             n += p->print('{');
             n += printProperty("id", (int)localId, false, 3);
-            String localHostname = WifiStation.getHostname();
-            String localIp = WifiStation.getIP().toString();
-            n += printProperty("hostname", localHostname.c_str(), false, 3);
-            n += printProperty("ip_address", localIp.c_str(), false, 3);
+            // Avoid temporary String allocations — use const char* directly
+            const char* localHostname = WifiStation.getHostname().c_str();
+            const char* localIp = WifiStation.getIP().toString().c_str();
+            n += printProperty("hostname", localHostname, false, 3);
+            n += printProperty("ip_address", localIp, false, 3);
             n += printProperty("host_type", hostTypeToString(HOST_TYPE_CONTROLLER), false, 3);
             n += printProperty("visible", true, false, 3);
             n += printProperty("state", (int)LOCALHOST, true, 3);

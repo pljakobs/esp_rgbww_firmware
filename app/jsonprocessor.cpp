@@ -67,24 +67,27 @@ bool JsonProcessor::onColor(JsonObject root, String& msg, bool relay)
 	}
 	auto cmds = root[F("cmds")].as<JsonArray>();
 	if(!cmds.isNull()) {
-		Vector<String> errors;
+		String errors;  // Accumulate directly without Vector
 		// multi command post (needs testing)
 		debug_i(ANSI_COLOR_BLUE "  multi command post" ANSI_COLOR_RESET);
 		for(unsigned i = 0; i < cmds.size(); ++i) {
 			debug_i(ANSI_COLOR_BLUE "command " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE ": " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, i, cmds[i].as<String>().c_str());
-			String msg;
-			if(!onSingleColorCommand(cmds[i], msg))
-				errors.add(msg);
+			String errorMsg;
+			if(!onSingleColorCommand(cmds[i], errorMsg)) {
+				// Build error message directly without Vector copy
+				if(errors.length() > 0) errors += "|";
+				errors.concat(i);
+				errors += ": ";
+				errors += errorMsg;
+				result = false;
+			}
 		}
 
-		if(errors.size() == 0)
+		if(!errors.length())
 			result = true;
 		else {
-			String msg;
-			for(unsigned i = 0; i < errors.size(); ++i)
-				msg += String(i) + ": " + errors[i] + "|";
 			result = false;
-			debug_i(ANSI_COLOR_BLUE "  multi command post, " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, msg.c_str());
+			debug_i(ANSI_COLOR_BLUE "  multi command post, " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, errors.c_str());
 		}
 	} else {
 		debug_i(ANSI_COLOR_BLUE "  single command post " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, msg.c_str());
@@ -115,7 +118,10 @@ bool JsonProcessor::onColor(JsonObject root, String& msg, bool relay)
 bool JsonProcessor::onStop(const String& json, String& msg, bool relay)
 {
 	StaticJsonDocument<256> doc;
-	Json::deserialize(doc, json);
+	if(!Json::deserialize(doc, json)) {
+		msg = F("malformed json");
+		return false;
+	}
 	return onStop(doc.as<JsonObject>(), msg, relay);
 }
 
@@ -160,7 +166,10 @@ bool JsonProcessor::onStop(JsonObject root, String& msg, bool relay)
 bool JsonProcessor::onSkip(const String& json, String& msg, bool relay)
 {
 	StaticJsonDocument<256> doc;
-	Json::deserialize(doc, json);
+	if(!Json::deserialize(doc, json)) {
+		msg = F("malformed json");
+		return false;
+	}
 	return onSkip(doc.as<JsonObject>(), msg, relay);
 }
 
@@ -207,7 +216,10 @@ bool JsonProcessor::onSkip(JsonObject root, String& msg, bool relay)
 bool JsonProcessor::onPause(const String& json, String& msg, bool relay)
 {
 	StaticJsonDocument<256> doc;
-	Json::deserialize(doc, json);
+	if(!Json::deserialize(doc, json)) {
+		msg = F("malformed json");
+		return false;
+	}
 	return onPause(doc.as<JsonObject>(), msg, relay);
 }
 
@@ -256,7 +268,10 @@ bool JsonProcessor::onPause(JsonObject root, String& msg, bool relay)
 bool JsonProcessor::onContinue(const String& json, String& msg, bool relay)
 {
 	StaticJsonDocument<256> doc;
-	Json::deserialize(doc, json);
+	if(!Json::deserialize(doc, json)) {
+		msg = F("malformed json");
+		return false;
+	}
 	return onContinue(doc.as<JsonObject>(), msg, relay);
 }
 
@@ -298,7 +313,10 @@ bool JsonProcessor::onContinue(JsonObject root, String& msg, bool relay)
 bool JsonProcessor::onBlink(const String& json, String& msg, bool relay)
 {
 	StaticJsonDocument<256> doc;
-	Json::deserialize(doc, json);
+	if(!Json::deserialize(doc, json)) {
+		msg = F("malformed json");
+		return false;
+	}
 	return onBlink(doc.as<JsonObject>(), msg, relay);
 }
 
@@ -343,7 +361,10 @@ bool JsonProcessor::onBlink(JsonObject root, String& msg, bool relay)
 bool JsonProcessor::onToggle(const String& json, String& msg, bool relay)
 {
 	StaticJsonDocument<256> doc;
-	Json::deserialize(doc, json);
+	if(!Json::deserialize(doc, json)) {
+		msg = F("malformed json");
+		return false;
+	}
 	return onToggle(doc.as<JsonObject>(), msg, relay);
 }
 
@@ -438,7 +459,10 @@ bool JsonProcessor::onSingleColorCommand(JsonObject root, String& errorMsg)
 bool JsonProcessor::onDirect(const String& json, String& msg, bool relay)
 {
 	StaticJsonDocument<256> doc;
-	Json::deserialize(doc, json);
+	if(!Json::deserialize(doc, json)) {
+		msg = F("malformed json");
+		return false;
+	}
 	return onDirect(doc.as<JsonObject>(), msg, relay);
 }
 
@@ -735,7 +759,10 @@ void JsonProcessor::addChannelStatesToCmd(JsonObject root, const RGBWWLed::Chann
 bool JsonProcessor::onSetOn(const String& json, String& msg, bool relay)
 {
 	StaticJsonDocument<512> doc;
-	Json::deserialize(doc, json);
+	if(!Json::deserialize(doc, json)) {
+		msg = F("malformed json");
+		return false;
+	}
 	return onSetOn(doc.as<JsonObject>(), msg, relay);
 }
 
@@ -758,7 +785,10 @@ bool JsonProcessor::onSetOn(JsonObject root, String& msg, bool relay) {
 bool JsonProcessor::onSetOff(const String& json, String& msg, bool relay)
 {
 	StaticJsonDocument<512> doc;
-	Json::deserialize(doc, json);
+	if(!Json::deserialize(doc, json)) {
+		msg = F("malformed json");
+		return false;
+	}
 	return onSetOff(doc.as<JsonObject>(), msg, relay);
 }
 

@@ -35,6 +35,7 @@ public:
 	bool handleInfo(const JsonObject& params, JsonObject& out, uint32_t heapFreeSnapshot = 0);
 
 private:
+	bool dispatchCommand(const char* method, const JsonObject& params, String& errorMsg, bool relay);
 	bool dispatchDataRequest(const String& method, const JsonObject& params, JsonObject* outObject,
 						 std::unique_ptr<IDataSourceStream>* outStream, String& errorMsg);
 	bool handleColor(const JsonObject& params, JsonObject& out);

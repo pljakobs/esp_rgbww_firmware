@@ -1,6 +1,7 @@
 #include <apihandler.h>
 
 #include <application.h>
+#include <cstring>
 
 #if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
 extern "C" {
@@ -9,6 +10,110 @@ extern "C" {
 #endif
 
 namespace {
+enum class CommandMethodId : uint8_t {
+	Unknown,
+	Color,
+	Stop,
+	Skip,
+	Pause,
+	Continue,
+	Blink,
+	Toggle,
+	Direct,
+	SetOn,
+	SetOff,
+	KeepAlive,
+	ScanNetworks,
+	System,
+	WebappCheck,
+};
+
+enum class DataMethodId : uint8_t {
+	Unknown,
+	Info,
+	Color,
+	Networks,
+	Hosts,
+	Config,
+};
+
+CommandMethodId getCommandMethodId(const char* method)
+{
+	if(method == nullptr || method[0] == '\0') {
+		return CommandMethodId::Unknown;
+	}
+
+	if(std::strcmp(method, "color") == 0) {
+		return CommandMethodId::Color;
+	}
+	if(std::strcmp(method, "stop") == 0) {
+		return CommandMethodId::Stop;
+	}
+	if(std::strcmp(method, "skip") == 0) {
+		return CommandMethodId::Skip;
+	}
+	if(std::strcmp(method, "pause") == 0) {
+		return CommandMethodId::Pause;
+	}
+	if(std::strcmp(method, "continue") == 0) {
+		return CommandMethodId::Continue;
+	}
+	if(std::strcmp(method, "blink") == 0) {
+		return CommandMethodId::Blink;
+	}
+	if(std::strcmp(method, "toggle") == 0) {
+		return CommandMethodId::Toggle;
+	}
+	if(std::strcmp(method, "direct") == 0) {
+		return CommandMethodId::Direct;
+	}
+	if(std::strcmp(method, "setOn") == 0 || std::strcmp(method, "on") == 0) {
+		return CommandMethodId::SetOn;
+	}
+	if(std::strcmp(method, "setOff") == 0 || std::strcmp(method, "off") == 0) {
+		return CommandMethodId::SetOff;
+	}
+	if(std::strcmp(method, "keep_alive") == 0) {
+		return CommandMethodId::KeepAlive;
+	}
+	if(std::strcmp(method, "scan_networks") == 0) {
+		return CommandMethodId::ScanNetworks;
+	}
+	if(std::strcmp(method, "system") == 0) {
+		return CommandMethodId::System;
+	}
+	if(std::strcmp(method, "webapp_check") == 0) {
+		return CommandMethodId::WebappCheck;
+	}
+
+	return CommandMethodId::Unknown;
+}
+
+DataMethodId getDataMethodId(const char* method)
+{
+	if(method == nullptr || method[0] == '\0') {
+		return DataMethodId::Unknown;
+	}
+
+	if(std::strcmp(method, "info") == 0 || std::strcmp(method, "getInfo") == 0) {
+		return DataMethodId::Info;
+	}
+	if(std::strcmp(method, "color") == 0 || std::strcmp(method, "getColor") == 0) {
+		return DataMethodId::Color;
+	}
+	if(std::strcmp(method, "networks") == 0 || std::strcmp(method, "getNetworks") == 0) {
+		return DataMethodId::Networks;
+	}
+	if(std::strcmp(method, "hosts") == 0 || std::strcmp(method, "getHosts") == 0) {
+		return DataMethodId::Hosts;
+	}
+	if(std::strcmp(method, "config") == 0 || std::strcmp(method, "getConfig") == 0) {
+		return DataMethodId::Config;
+	}
+
+	return DataMethodId::Unknown;
+}
+
 bool isPrintableSsid(const String& str)
 {
 	for(unsigned int i = 0; i < str.length(); ++i) {
@@ -96,48 +201,44 @@ bool Api::dispatch(const String& method, const JsonObject& params, JsonObject& o
 
 bool Api::dispatchCommand(const String& method, const JsonObject& params, String& errorMsg, bool relay)
 {
-	debug_i(ANSI_COLOR_BLUE "Api::dispatchCommand: method=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, method.c_str());
-	if(method == F("color")) {
+	return dispatchCommand(method.c_str(), params, errorMsg, relay);
+}
+
+bool Api::dispatchCommand(const char* method, const JsonObject& params, String& errorMsg, bool relay)
+{
+	const char* methodName = (method != nullptr) ? method : "";
+	debug_i(ANSI_COLOR_BLUE "Api::dispatchCommand: method=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, methodName);
+
+	switch(getCommandMethodId(method)) {
+	case CommandMethodId::Color:
 		return app.jsonproc.onColor(params, errorMsg, relay);
-	}
-	if(method == F("stop")) {
+	case CommandMethodId::Stop:
 		return app.jsonproc.onStop(params, errorMsg, relay);
-	}
-	if(method == F("skip")) {
+	case CommandMethodId::Skip:
 		return app.jsonproc.onSkip(params, errorMsg, relay);
-	}
-	if(method == F("pause")) {
+	case CommandMethodId::Pause:
 		return app.jsonproc.onPause(params, errorMsg, relay);
-	}
-	if(method == F("continue")) {
+	case CommandMethodId::Continue:
 		return app.jsonproc.onContinue(params, errorMsg, relay);
-	}
-	if(method == F("blink")) {
+	case CommandMethodId::Blink:
 		return app.jsonproc.onBlink(params, errorMsg, relay);
-	}
-	if(method == F("toggle")) {
+	case CommandMethodId::Toggle:
 		return app.jsonproc.onToggle(params, errorMsg, relay);
-	}
-	if(method == F("direct")) {
+	case CommandMethodId::Direct:
 		return app.jsonproc.onDirect(params, errorMsg, relay);
-	}
-	if(method == F("setOn") || method == F("on")) {
+	case CommandMethodId::SetOn:
 		return app.jsonproc.onSetOn(params, errorMsg, relay);
-	}
-	if(method == F("setOff") || method == F("off")) {
+	case CommandMethodId::SetOff:
 		return app.jsonproc.onSetOff(params, errorMsg, relay);
-	}
-	if(method == F("keep_alive")) {
+	case CommandMethodId::KeepAlive:
 		// No-op ping from webapp to keep the WebSocket connection alive.
 		return true;
-	}
-	if(method == F("scan_networks")) {
+	case CommandMethodId::ScanNetworks:
 		if(!app.network.isScanning()) {
 			app.network.scan(false);
 		}
 		return true;
-	}
-	if(method == F("system")) {
+	case CommandMethodId::System: {
 		String cmd = params[F("cmd")] | String::nullstr;
 		if(cmd == String::nullstr) {
 			errorMsg = F("missing cmd");
@@ -157,10 +258,16 @@ bool Api::dispatchCommand(const String& method, const JsonObject& params, String
 		if(cmd.equals(F("restart"))) {
 			bool clearOta = false;
 			Json::getValue(params[F("clearOTA")], clearOta);
-			String restartCmd = clearOta ? F("clear_ota_restart") : F("restart");
-			if(!app.delayedCMD(restartCmd, 1500)) {
-				errorMsg = F("system command failed");
-				return false;
+			if(clearOta) {
+				if(!app.delayedCMD(F("clear_ota_restart"), 1500)) {
+					errorMsg = F("system command failed");
+					return false;
+				}
+			} else {
+				if(!app.delayedCMD(F("restart"), 1500)) {
+					errorMsg = F("system command failed");
+					return false;
+				}
 			}
 			return true;
 		}
@@ -172,51 +279,53 @@ bool Api::dispatchCommand(const String& method, const JsonObject& params, String
 
 		return true;
 	}
-
-	if(method == F("webapp_check")) {
+	case CommandMethodId::WebappCheck:
 		if(!app.webappOta.isActive()) {
 			app.webappOta.checkForUpdate(true /* ignoreEnabled: manual trigger */);
 		}
 		return true;
+	case CommandMethodId::Unknown:
+	default:
+		break;
 	}
 
-	errorMsg = F("method not implemented") + String(": ") + method;
-    debug_e(ANSI_COLOR_RED "Api::dispatchCommand failed: %s" ANSI_COLOR_RESET, errorMsg.c_str());
+	errorMsg = F("method not implemented: ");
+	errorMsg.concat(methodName);
+	debug_e(ANSI_COLOR_RED "Api::dispatchCommand failed: %s" ANSI_COLOR_RESET, errorMsg.c_str());
 	return false;
 }
 
 bool Api::dispatchCommand(const String& method, const String& params, String& errorMsg, bool relay)
 {
 	debug_i(ANSI_COLOR_BLUE "Api::dispatchCommand(str): method=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ", params=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, method.c_str(), params.c_str());
-	if(method == F("color")) {
+	switch(getCommandMethodId(method.c_str())) {
+	case CommandMethodId::Color:
 		return app.jsonproc.onColor(params, errorMsg, relay);
-	}
-	if(method == F("stop")) {
+	case CommandMethodId::Stop:
 		return app.jsonproc.onStop(params, errorMsg, relay);
-	}
-	if(method == F("skip")) {
+	case CommandMethodId::Skip:
 		return app.jsonproc.onSkip(params, errorMsg, relay);
-	}
-	if(method == F("pause")) {
+	case CommandMethodId::Pause:
 		return app.jsonproc.onPause(params, errorMsg, relay);
-	}
-	if(method == F("continue")) {
+	case CommandMethodId::Continue:
 		return app.jsonproc.onContinue(params, errorMsg, relay);
-	}
-	if(method == F("blink")) {
+	case CommandMethodId::Blink:
 		return app.jsonproc.onBlink(params, errorMsg, relay);
-	}
-	if(method == F("toggle")) {
+	case CommandMethodId::Toggle:
 		return app.jsonproc.onToggle(params, errorMsg, relay);
-	}
-	if(method == F("direct")) {
+	case CommandMethodId::Direct:
 		return app.jsonproc.onDirect(params, errorMsg, relay);
-	}
-	if(method == F("setOn") || method == F("on")) {
+	case CommandMethodId::SetOn:
 		return app.jsonproc.onSetOn(params, errorMsg, relay);
-	}
-	if(method == F("setOff") || method == F("off")) {
+	case CommandMethodId::SetOff:
 		return app.jsonproc.onSetOff(params, errorMsg, relay);
+	case CommandMethodId::Unknown:
+	case CommandMethodId::KeepAlive:
+	case CommandMethodId::ScanNetworks:
+	case CommandMethodId::System:
+	case CommandMethodId::WebappCheck:
+	default:
+		break;
 	}
 
 	StaticJsonDocument<512> doc;
@@ -226,7 +335,7 @@ bool Api::dispatchCommand(const String& method, const String& params, String& er
 		return false;
 	}
 
-	return dispatchCommand(method, doc.as<JsonObject>(), errorMsg, relay);
+	return dispatchCommand(method.c_str(), doc.as<JsonObject>(), errorMsg, relay);
 }
 
 bool Api::handleColor(const JsonObject& params, JsonObject& out)
@@ -302,7 +411,7 @@ bool Api::dispatchJsonRpc(const String& json, String& errorMsg, bool relay)
 		return false;
 	}
 
-	return dispatchCommand(String(method), rpc.getParams(), errorMsg, relay);
+	return dispatchCommand(method, rpc.getParams(), errorMsg, relay);
 }
 
 bool Api::dispatchStream(const String& method, const JsonObject& params, std::unique_ptr<IDataSourceStream>& out,
@@ -315,24 +424,26 @@ bool Api::dispatchStream(const String& method, const JsonObject& params, std::un
 bool Api::dispatchDataRequest(const String& method, const JsonObject& params, JsonObject* outObject,
 						 std::unique_ptr<IDataSourceStream>* outStream, String& errorMsg)
 {
+	const auto dataMethodId = getDataMethodId(method.c_str());
+
 	if(outObject != nullptr) {
 		debug_i(ANSI_COLOR_BLUE "Api::dispatchDataRequest: method=" ANSI_COLOR_RED "%s" ANSI_COLOR_RESET, method.c_str());
-		if(method == F("info") || method == F("getInfo")) {
+		if(dataMethodId == DataMethodId::Info) {
 			return handleInfo(params, *outObject);
 		}
-		if(method == F("color") || method == F("getColor")) {
+		if(dataMethodId == DataMethodId::Color) {
 			return handleColor(params, *outObject);
 		}
-		if(method == F("networks") || method == F("getNetworks")) {
+		if(dataMethodId == DataMethodId::Networks) {
 			return handleNetworks(params, *outObject);
 		}
 	}
 
 	if(outStream != nullptr) {
-		if(method == F("hosts") || method == F("getHosts")) {
+		if(dataMethodId == DataMethodId::Hosts) {
 			return handleHosts(params, *outStream, errorMsg);
 		}
-		if(method == F("config") || method == F("getConfig")) {
+		if(dataMethodId == DataMethodId::Config) {
 			return handleConfig(params, *outStream, errorMsg);
 		}
 	}
@@ -421,7 +532,7 @@ bool Api::handleInfo(const JsonObject& params, JsonObject& data, uint32_t heapFr
 			run[F("minimumfreeHeap10min")] = app.getMinimumHeap10min();
 			run[F("heapLowErrUptime")] = app.getHeapLowErrUptime();
 			run[F("heapLowErr10min")] = app.getHeapLowErr10min();
-		}
+		}	
 
 		{
 			JsonObject debug = data.createNestedObject(F("debug"));
