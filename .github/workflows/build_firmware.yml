@@ -645,7 +645,7 @@ jobs:
             docker.io/pjakobs/sming:latest \
             bash -c "git config --global --add safe.directory /workspace && \
                source /opt/Sming/Tools/export.sh && \
-               make partmap-build GIT_VERSION='${{ steps.get_fw_info.outputs.fw_version }}' SMING_SOC=${{ matrix.soc }} SMING_RELEASE=${{ matrix.release }}"
+               make buildmap GIT_VERSION='${{ steps.get_fw_info.outputs.fw_version }}' SMING_SOC=${{ matrix.soc }} SMING_RELEASE=${{ matrix.release }}"
 
       - name: Run Build in Docker Container
         env:
