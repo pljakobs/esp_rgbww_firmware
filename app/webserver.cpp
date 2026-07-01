@@ -164,6 +164,7 @@ void ApplicationWebserver::init()
 	wsResource = new WebsocketResource();
 	wsResource->setConnectionHandler([this](WebsocketConnection& socket) { this->wsConnected(socket); });
 	wsResource->setDisconnectionHandler([this](WebsocketConnection& socket) { this->wsDisconnected(socket); });
+	wsResource->setMessageHandler([this](WebsocketConnection& socket, const String& message) { this->wsMessage(socket, message); });
 	paths.set("/ws", wsResource);
 
 	_init = true;
@@ -181,6 +182,68 @@ void ApplicationWebserver::wsDisconnected(WebsocketConnection& socket)
 	debug_i("<===wsDisconnected");
 	webSockets.removeElement(&socket);
 	debug_i("===>nr of websockets: %i", webSockets.size());
+}
+
+void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& message)
+{
+	StaticJsonDocument<1024> requestDoc;
+	DeserializationError err = deserializeJson(requestDoc, message);
+	if(err) {
+		socket.sendString(F("{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32700,\"message\":\"Parse error\"},\"id\":null}"));
+		return;
+	}
+
+	JsonObject req = requestDoc.as<JsonObject>();
+	const char* method = req[F("method")] | "";
+	JsonVariant id = req[F("id")];
+
+	StaticJsonDocument<512> responseDoc;
+	JsonObject resp = responseDoc.to<JsonObject>();
+	resp[F("jsonrpc")] = F("2.0");
+	if(!id.isNull()) {
+		resp[F("id")] = id;
+	}
+
+	if(method[0] == '\0') {
+		JsonObject errorObj = resp.createNestedObject(F("error"));
+		errorObj[F("code")] = -32600;
+		errorObj[F("message")] = F("missing method");
+	} else {
+		JsonObject params = req[F("params")].as<JsonObject>();
+		String msg;
+		bool ok = false;
+		if(strcmp_P(method, PSTR("color")) == 0) {
+			ok = app.jsonproc.onColor(params, msg, false);
+		} else if(strcmp_P(method, PSTR("stop")) == 0) {
+			ok = app.jsonproc.onStop(params, msg, false);
+		} else if(strcmp_P(method, PSTR("skip")) == 0) {
+			ok = app.jsonproc.onSkip(params, msg, false);
+		} else if(strcmp_P(method, PSTR("pause")) == 0) {
+			ok = app.jsonproc.onPause(params, msg, false);
+		} else if(strcmp_P(method, PSTR("continue")) == 0) {
+			ok = app.jsonproc.onContinue(params, msg, false);
+		} else if(strcmp_P(method, PSTR("blink")) == 0) {
+			ok = app.jsonproc.onBlink(params, msg, false);
+		} else if(strcmp_P(method, PSTR("toggle")) == 0) {
+			ok = app.jsonproc.onToggle(params, msg, false);
+		} else if(strcmp_P(method, PSTR("direct")) == 0) {
+			ok = app.jsonproc.onDirect(params, msg, false);
+		} else {
+			msg = String(F("method not implemented: ")) + method;
+		}
+
+		if(ok) {
+			resp.createNestedObject(F("result"))[F("success")] = true;
+		} else {
+			JsonObject errorObj = resp.createNestedObject(F("error"));
+			errorObj[F("code")] = -32601;
+			errorObj[F("message")] = msg;
+		}
+	}
+
+	String responseStr;
+	serializeJson(responseDoc, responseStr);
+	socket.sendString(responseStr);
 }
 
 /*

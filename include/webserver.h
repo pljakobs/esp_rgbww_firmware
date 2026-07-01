@@ -113,6 +113,7 @@ private:
 
     void wsConnected(WebsocketConnection& socket);
     void wsDisconnected(WebsocketConnection& socket);
+    void wsMessage(WebsocketConnection& socket, const String& message);
 };
 
 #endif // APP_WEBSERVER_H_
