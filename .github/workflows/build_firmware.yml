@@ -257,6 +257,7 @@ jobs:
           name: host-smoke-${{ steps.sanitize_branch.outputs.sanitized_branch }}
           path: |
             out/host-ci/**
+            !out/host-ci/*.core.*
             out/Host/debug/firmware/**
             out/Host/debug/config.mk
           if-no-files-found: warn
