@@ -763,6 +763,7 @@ bool ApplicationWebserver::checkHeap(HttpResponse& response, int minHeap)
 bool ApplicationWebserver::preflightRequest(HttpRequest& request, HttpResponse& response, std::initializer_list<HttpMethod> allowedMethods, int minHeap)
 {
 	debug_i(ANSI_COLOR_BLUE "preflightRequest: %d %s" ANSI_COLOR_RESET, (int)request.method, request.uri.Path.c_str());
+	const HttpMethod reqMethod = request.method;
 
 	debug_i(ANSI_COLOR_BLUE "checking heap..." ANSI_COLOR_RESET);
     // 1. Heap Check
@@ -772,9 +773,7 @@ bool ApplicationWebserver::preflightRequest(HttpRequest& request, HttpResponse& 
     }
 	debug_i(ANSI_COLOR_BLUE "heap check passed, checking OPTIONS..." ANSI_COLOR_RESET);
    // 2. CORS Preflight (OPTIONS) - Must handle this before method check or Auth
-   auto method=request.method;
-   debug_i(ANSI_COLOR_BLUE "preflightRequest: %d %s - Method: %d" ANSI_COLOR_RESET, (int)request.method, request.uri.Path.c_str(), (int)method);	
-    if(method == HttpMethod::OPTIONS) {
+    if(reqMethod == HttpMethod::OPTIONS) {
         setCorsHeaders(response);
         sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
         debug_i(ANSI_COLOR_BLUE "Handled OPTIONS preflight (generic)" ANSI_COLOR_RESET);
@@ -784,23 +783,9 @@ bool ApplicationWebserver::preflightRequest(HttpRequest& request, HttpResponse& 
     // 3. Method validation
     bool methodAllowed = false;
 
-	char allowedMethodsStr[64] = {0};
-	size_t allowedPos = 0;
-	for(auto m : allowedMethods) {
-		int written = snprintf(allowedMethodsStr + allowedPos, sizeof(allowedMethodsStr) - allowedPos,
-						   (allowedPos == 0) ? "%d" : ", %d", (int)m);
-		if(written <= 0) {
-			break;
-		}
-		if((size_t)written >= (sizeof(allowedMethodsStr) - allowedPos)) {
-			allowedPos = sizeof(allowedMethodsStr) - 1;
-			break;
-		}
-		allowedPos += (size_t)written;
-	}
     debug_i(ANSI_COLOR_BLUE "Method check passed, checking authentication..." ANSI_COLOR_RESET);
     for(auto m : allowedMethods) {
-        if(request.method == m) {
+		if(reqMethod == m) {
             methodAllowed = true;
             break;
         }
@@ -808,12 +793,7 @@ bool ApplicationWebserver::preflightRequest(HttpRequest& request, HttpResponse& 
 
     if(!methodAllowed) {
         setCorsHeaders(response);
-		char msg[128];
-		snprintf(msg, sizeof(msg), "Method not allowed. Allowed: %s. Current: %d", allowedMethodsStr,
-				 (int)request.method);
-		debug_i(ANSI_COLOR_RED "preflightRequest: %d %s - %s" ANSI_COLOR_RESET, (int)request.method,
-				request.uri.Path.c_str(), msg);
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, msg);
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("Method not allowed"));
         return false;
     }
 
