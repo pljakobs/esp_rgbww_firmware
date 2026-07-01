@@ -8,6 +8,7 @@ HOST_IP="${HOST_IP:-192.168.13.1}"
 APP_IP="${APP_IP:-192.168.13.2}"
 NETMASK="${NETMASK:-255.255.255.0}"
 FIRMWARE_DIR="out/Host/debug/firmware"
+HOST_RUN_DIR="${HOST_RUN_DIR:-out/Host/debug}"
 LOG_DIR="${HOST_CI_LOG_DIR:-out/host-ci}"
 APP_LOG="${LOG_DIR}/host-smoke.log"
 APP_LOG_SMOKE="${LOG_DIR}/host-smoke-app.log"
@@ -169,6 +170,13 @@ start_host_app() {
   local retry_attempt="${4:-1}"
   local force_plain="${5:-0}"
   local use_valgrind=0
+  local app_bin="firmware/app"
+  local flash_bin="firmware/flash.bin"
+
+  if [[ ! -d "$HOST_RUN_DIR" ]]; then
+    echo "Host run directory not found: $HOST_RUN_DIR" >&2
+    return 1
+  fi
 
   if [[ "$mode" == "smoke" ]]; then
     rm -f "$HTTP_TRACE_LOG" "$MALFORMED_JSON_TRACE"
@@ -181,24 +189,29 @@ start_host_app() {
 
   if [[ "$use_valgrind" == "1" ]]; then
     # shellcheck disable=SC2086
-    valgrind $VALGRIND_OPTIONS --log-file="$vg_log_path" \
-      "${FIRMWARE_DIR}/app" \
-      --flashfile="${FIRMWARE_DIR}/flash.bin" \
-      --flashsize=4M \
-      --ifname="$TAP_IF" \
-      --ipaddr="$APP_IP" \
-      --gateway="$HOST_IP" \
-      --netmask="$NETMASK" \
-      >"$app_log_path" 2>&1 &
+    (
+      cd "$HOST_RUN_DIR"
+      # shellcheck disable=SC2086
+      valgrind $VALGRIND_OPTIONS --log-file="$vg_log_path" \
+        "$app_bin" \
+        --flashfile="$flash_bin" \
+        --flashsize=4M \
+        --ifname="$TAP_IF" \
+        --ipaddr="$APP_IP" \
+        --gateway="$HOST_IP" \
+        --netmask="$NETMASK"
+    ) >"$app_log_path" 2>&1 &
   else
-    "${FIRMWARE_DIR}/app" \
-      --flashfile="${FIRMWARE_DIR}/flash.bin" \
-      --flashsize=4M \
-      --ifname="$TAP_IF" \
-      --ipaddr="$APP_IP" \
-      --gateway="$HOST_IP" \
-      --netmask="$NETMASK" \
-      >"$app_log_path" 2>&1 &
+    (
+      cd "$HOST_RUN_DIR"
+      "$app_bin" \
+        --flashfile="$flash_bin" \
+        --flashsize=4M \
+        --ifname="$TAP_IF" \
+        --ipaddr="$APP_IP" \
+        --gateway="$HOST_IP" \
+        --netmask="$NETMASK"
+    ) >"$app_log_path" 2>&1 &
   fi
   APP_PID=$!
 
