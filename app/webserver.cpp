@@ -289,6 +289,7 @@ bool ICACHE_FLASH_ATTR ApplicationWebserver::authenticateExec(HttpRequest& reque
 		if(_apiSecuredCache < 0) {
 			AppConfig::Root config(*app.cfg);
 			_apiSecuredCache = config.security.getApiSecured() ? 1 : 0;
+			_apiPasswordCache = config.security.getApiPassword();
 		}
 		if(_apiSecuredCache == 0)
 			return true;
@@ -309,18 +310,13 @@ bool ICACHE_FLASH_ATTR ApplicationWebserver::authenticateExec(HttpRequest& reque
 	if(userPass.length() > 50) {
 		return false;
 	}
-	{
-		debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::authenticated - getting password" ANSI_COLOR_RESET);
-		AppConfig::Root config(*app.cfg);
-		userPass = base64_decode(userPass);
-		//debug_d("ApplicationWebserver::authenticated Password: '%s' - Expected password: '%s'", userPass.c_str(), config.security.getApiPassword.c_str());
 
-		if(userPass.endsWith(config.security.getApiPassword())) {
-			return true;
-		}
-		return false;
-
-	} //end AppConfig general context
+	debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::authenticated - getting password" ANSI_COLOR_RESET);
+	userPass = base64_decode(userPass);
+	if(userPass.endsWith(_apiPasswordCache)) {
+		return true;
+	}
+	return false;
 }
 
 bool ICACHE_FLASH_ATTR ApplicationWebserver::authenticated(HttpRequest& request, HttpResponse& response)
@@ -1083,6 +1079,10 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 
             }
             */
+
+			// Security settings may have changed (apiSecured/password), refresh lazily on next request.
+			_apiSecuredCache = -1;
+			_apiPasswordCache = String::nullstr;
 
 			sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 		} else {

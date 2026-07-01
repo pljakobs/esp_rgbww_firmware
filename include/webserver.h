@@ -64,6 +64,7 @@ private:
 
     // Cached security flag: -1=not yet read, 0=unsecured, 1=secured
     int _apiSecuredCache = -1;
+    String _apiPasswordCache;
 
     // Rate-limiting for /webapp_status: cached serialised JSON + timestamp
     String _webappStatusCache;
