@@ -759,19 +759,15 @@ bool ApplicationWebserver::checkHeap(HttpResponse& response, int minHeap)
  */
 bool ApplicationWebserver::preflightRequest(HttpRequest& request, HttpResponse& response, std::initializer_list<HttpMethod> allowedMethods, int minHeap)
 {
-    // Default to no-cache for API/dynamic checks. 
-    // Static file handler (onFile) will override this if caching is desired.
 	debug_i(ANSI_COLOR_BLUE "preflightRequest: %d %s" ANSI_COLOR_RESET, (int)request.method, request.uri.Path.c_str());
-    response.setHeader(F("Cache-Control"), F("no-cache, no-store, must-revalidate"));
-    response.setHeader(F("Pragma"), F("no-cache"));
-    response.setHeader(F("Expires"), F("0"));
 
+	debug_i(ANSI_COLOR_BLUE "checking heap..." ANSI_COLOR_RESET);
     // 1. Heap Check
     if(!checkHeap(response, minHeap)) {
 		debug_i(ANSI_COLOR_RED "preflightRequest: %d %s - Not enough heap, rejecting request" ANSI_COLOR_RESET, (int)request.method, request.uri.Path.c_str());
 		return false;
     }
-
+	debug_i(ANSI_COLOR_BLUE "heap check passed, checking OPTIONS..." ANSI_COLOR_RESET);
    // 2. CORS Preflight (OPTIONS) - Must handle this before method check or Auth
     if(request.method == HttpMethod::OPTIONS) {
         setCorsHeaders(response);
@@ -779,7 +775,7 @@ bool ApplicationWebserver::preflightRequest(HttpRequest& request, HttpResponse& 
         debug_i(ANSI_COLOR_BLUE "Handled OPTIONS preflight (generic)" ANSI_COLOR_RESET);
         return false; // Handled, stop processing
     }
-
+	debug_i(ANSI_COLOR_BLUE "OPTIONS check passed, checking method..." ANSI_COLOR_RESET);
     // 3. Method validation
     bool methodAllowed = false;
 
@@ -797,7 +793,7 @@ bool ApplicationWebserver::preflightRequest(HttpRequest& request, HttpResponse& 
 		}
 		allowedPos += (size_t)written;
 	}
-    
+    debug_i(ANSI_COLOR_BLUE "Method check passed, checking authentication..." ANSI_COLOR_RESET);
     for(auto m : allowedMethods) {
         if(request.method == m) {
             methodAllowed = true;
@@ -818,14 +814,17 @@ bool ApplicationWebserver::preflightRequest(HttpRequest& request, HttpResponse& 
 
     // 4. Global Authentication
     // Responds with 401 if security is enabled and auth fails
-	
+	debug_i(ANSI_COLOR_BLUE "Checking authentication..." ANSI_COLOR_RESET);
     if(!authenticated(request, response)) {
 		debug_i(ANSI_COLOR_RED "preflightRequest: %d %s - Authentication failed" ANSI_COLOR_RESET, (int)request.method, request.uri.Path.c_str());
         return false;
     }
 
-    // 5. Ensure CORS headers for actual response
-
+    // 5. Set cache-control headers and CORS headers only if all checks pass
+    // This prevents committed response headers from interfering with error responses downstream
+    response.setHeader(F("Cache-Control"), F("no-cache, no-store, must-revalidate"));
+    response.setHeader(F("Pragma"), F("no-cache"));
+    response.setHeader(F("Expires"), F("0"));
     setCorsHeaders(response);
     return true;
 }
@@ -1207,13 +1206,17 @@ void ApplicationWebserver::onColorGet(HttpRequest& request, HttpResponse& respon
  */
 void ApplicationWebserver::onColorPost(HttpRequest& request, HttpResponse& response)
 {
-	StaticJsonDocument<1024> doc;
+	debug_i(ANSI_COLOR_BLUE "onColorPost" ANSI_COLOR_RESET);
+	debug_i(ANSI_COLOR_BLUE "create json document" ANSI_COLOR_RESET);
+	StaticJsonDocument<256> doc;
+	debug_i(ANSI_COLOR_BLUE "parse json body" ANSI_COLOR_RESET);
 	if(!parseJsonBody(request, response, doc, F("no body"))) {
 		return;
 	}
-
+	
 	debug_i(ANSI_COLOR_BLUE "received color update" ANSI_COLOR_RESET);
 	String msg;
+	debug_i(ANSI_COLOR_BLUE "dispatching color update" ANSI_COLOR_RESET);
 	const bool ok = app.api->dispatchCommand(F("color"), doc.as<JsonObject>(), msg, true);
 
 	if(!ok) {
@@ -1506,7 +1509,7 @@ void ApplicationWebserver::onSystemReq(HttpRequest& request, HttpResponse& respo
 		return;
 	}
 
-	StaticJsonDocument<512> doc;
+	StaticJsonDocument<128> doc;
 	if(!parseJsonBody(request, response, doc, F("could not get HTTP body"))) {
 		return;
 	}
