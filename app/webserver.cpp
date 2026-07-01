@@ -212,21 +212,21 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 		JsonObject params = req[F("params")].as<JsonObject>();
 		String msg;
 		bool ok = false;
-		if(strcmp(method, "color") == 0) {
+		if(strcmp_P(method, PSTR("color")) == 0) {
 			ok = app.jsonproc.onColor(params, msg, false);
-		} else if(strcmp(method, "stop") == 0) {
+		} else if(strcmp_P(method, PSTR("stop")) == 0) {
 			ok = app.jsonproc.onStop(params, msg, false);
-		} else if(strcmp(method, "skip") == 0) {
+		} else if(strcmp_P(method, PSTR("skip")) == 0) {
 			ok = app.jsonproc.onSkip(params, msg, false);
-		} else if(strcmp(method, "pause") == 0) {
+		} else if(strcmp_P(method, PSTR("pause")) == 0) {
 			ok = app.jsonproc.onPause(params, msg, false);
-		} else if(strcmp(method, "continue") == 0) {
+		} else if(strcmp_P(method, PSTR("continue")) == 0) {
 			ok = app.jsonproc.onContinue(params, msg, false);
-		} else if(strcmp(method, "blink") == 0) {
+		} else if(strcmp_P(method, PSTR("blink")) == 0) {
 			ok = app.jsonproc.onBlink(params, msg, false);
-		} else if(strcmp(method, "toggle") == 0) {
+		} else if(strcmp_P(method, PSTR("toggle")) == 0) {
 			ok = app.jsonproc.onToggle(params, msg, false);
-		} else if(strcmp(method, "direct") == 0) {
+		} else if(strcmp_P(method, PSTR("direct")) == 0) {
 			ok = app.jsonproc.onDirect(params, msg, false);
 		} else {
 			msg = String(F("method not implemented: ")) + method;
