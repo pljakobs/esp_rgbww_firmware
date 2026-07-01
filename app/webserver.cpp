@@ -499,7 +499,9 @@ bool ApplicationWebserver::parseJsonBody(HttpRequest& request, HttpResponse& res
 	String body = request.getBody();
 
 	if(body.length()) {
-		err = deserializeJson(doc, body);
+		// Parse using explicit buffer+length to avoid ArduinoJson's String reader path,
+		// which has shown crashes on ESP8266 in parseNumericValue.
+		err = deserializeJson(doc, body.c_str(), body.length());
 	} else {
 		const String& contentLength = request.headers[HTTP_HEADER_CONTENT_LENGTH];
 		if(contentLength.length() && contentLength.toInt() > 0) {
