@@ -62,10 +62,11 @@ ApplicationWebserver::ApplicationWebserver()
 	settings.minHeapSize = MINIMUM_HEAP_ACCEPT;
 	settings.keepAliveSeconds = 5; // do not close instantly when no transmission occurs. some clients are a bit slow (like FHEM)
 #ifdef ARCH_ESP8266
-	// Stability workaround: overlapping HTTP requests have triggered lwIP crashes
-	// (ip_input / exccause=4). Serialize requests and shorten keepalive.
-	settings.maxActiveConnections = 1;
-	settings.keepAliveSeconds = 1;
+	// Stability workaround: reduce overlap pressure without starving browser traffic.
+	// Keep enough concurrent HTTP slots for page/API usage, but disable keepalive
+	// reuse on ESP8266 so sockets close immediately after each response.
+	settings.maxActiveConnections = 4;
+	settings.keepAliveSeconds = 0;
 #endif
 	configure(settings);
 
@@ -1148,12 +1149,8 @@ void ApplicationWebserver::onColorGet(HttpRequest& request, HttpResponse& respon
 {
 	debug_i(ANSI_COLOR_BLUE "onColorGet" ANSI_COLOR_RESET);
 
-	auto stream = std::make_unique<JsonObjectStream>();
-	if(!stream) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("low memory"));
-		return;
-	}
-	JsonObject json = stream->getRoot();
+	StaticJsonDocument<256> doc;
+	JsonObject json = doc.to<JsonObject>();
 
 	JsonObject raw = json.createNestedObject("raw");
 	ChannelOutput output = app.rgbwwctrl.getCurrentOutput();
@@ -1173,7 +1170,13 @@ void ApplicationWebserver::onColorGet(HttpRequest& request, HttpResponse& respon
 	hsv[F("v")] = v;
 	hsv[F("ct")] = ct;
 
-	sendApiResponse(response, stream.release());
+	String payload;
+	payload.reserve(128);
+	serializeJson(doc, payload);
+
+	response.code = HTTP_STATUS_OK;
+	response.setContentType(MIME_JSON);
+	response.sendString(payload);
 
 }
 
