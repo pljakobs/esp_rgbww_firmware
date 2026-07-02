@@ -70,12 +70,9 @@ ApplicationWebserver::ApplicationWebserver()
 #endif
 	configure(settings);
 
-	// workaround for bug in Sming 3.5.0
-	// https://github.com/SmingHub/Sming/issues/1236
-	// NOTE: setBodyParser("*", bodyToStringParser) was removed - that workaround
-	// pre-buffered ALL POST bodies into heap Strings before handlers ran,
-	// causing heap exhaustion on the ESP8266. Modern Sming (6.x) provides
-	// request.getBody() reliably without this workaround.
+	// Only JSON POST endpoints need the request body buffered into a String.
+	// The old wildcard parser caused heap pressure for every POST request.
+	setBodyParser(MIME_JSON, bodyToStringParser);
 }
 
 void ApplicationWebserver::init()
