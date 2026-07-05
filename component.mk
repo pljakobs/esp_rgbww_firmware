@@ -89,6 +89,8 @@ GIT_DATE = $(firstword $(shell git --no-pager show --date=short --format="%ad" -
 SMING_GITVERSION =	$(shell git -C $(SMING_HOME)/.. describe --abbrev=4 --dirty --always --tags)"-["$(shell git -C $(SMING_HOME)/.. rev-parse --abbrev-ref HEAD)"]"
 WEBAPP_VERSION = $(shell cat $(PROJECT_DIR)/webapp/VERSION)
 USER_CFLAGS = -DGITVERSION=\"$(GIT_VERSION)\" -DGITDATE=\"$(GIT_DATE)\" -DWEBAPP_VERSION=\"$(WEBAPP_VERSION)\" -DSMING_GITVERSION=\"$(SMING_GITVERSION)\" -DMQTT_USER=\"$(MQTT_USER)\" -DMQTT_PASS=\"$(MQTT_PASS)\"
+# For ENABLE_GDB=1 sessions, don't halt inside gdbstub_init() on attach.
+USER_CFLAGS += -DGDBSTUB_BREAK_ON_INIT=0
 # Keep format-string type checking strict even when global WERROR is disabled in CI.
 USER_CFLAGS += -Wformat -Werror=format
 USER_CXXFLAGS += -Wformat -Werror=format

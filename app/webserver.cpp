@@ -499,21 +499,39 @@ void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, c
 bool ApplicationWebserver::parseJsonBody(HttpRequest& request, HttpResponse& response, JsonDocument& doc,
 											 const __FlashStringHelper* noBodyMessage)
 {
+	debug_i(ANSI_COLOR_BLUE "parseJsonBody: begin" ANSI_COLOR_RESET);
 	DeserializationError err = DeserializationError::EmptyInput;
-	String body = request.getBody();
-
-	if(body.length()) {
-		// Parse using explicit buffer+length to avoid ArduinoJson's String reader path,
-		// which has shown crashes on ESP8266 in parseNumericValue.
-		err = deserializeJson(doc, body.c_str(), body.length());
+	auto bodyStream = request.getBodyStream();
+	if(bodyStream != nullptr) {
+		debug_i(ANSI_COLOR_BLUE "parseJsonBody: deserializeJson(stream), freeHeap=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_RESET,
+				app.getFreeHeapSize());
+		err = deserializeJson(doc, *bodyStream);
+		debug_i(ANSI_COLOR_BLUE "parseJsonBody: deserializeJson(stream) done" ANSI_COLOR_RESET);
 	} else {
-		const String& contentLength = request.headers[HTTP_HEADER_CONTENT_LENGTH];
-		if(contentLength.length() && contentLength.toInt() > 0) {
-			sendApiCode(response, API_CODES::API_BAD_REQUEST, F("Invalid JSON: body unavailable"));
+		debug_i(ANSI_COLOR_BLUE "parseJsonBody: bodyStream unavailable, fallback to getBody" ANSI_COLOR_RESET);
+		String body = request.getBody();
+		debug_i(ANSI_COLOR_BLUE "parseJsonBody: body length=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE ", freeHeap=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_RESET,
+				(unsigned)body.length(), app.getFreeHeapSize());
+
+		if(body.length()) {
+			debug_i(ANSI_COLOR_BLUE "parseJsonBody: deserializeJson(buffer)" ANSI_COLOR_RESET);
+			err = deserializeJson(doc, body.c_str(), body.length());
+			debug_i(ANSI_COLOR_BLUE "parseJsonBody: deserializeJson(buffer) done" ANSI_COLOR_RESET);
 		} else {
-			sendApiCode(response, API_CODES::API_BAD_REQUEST, noBodyMessage);
+			const String& contentLength = request.headers[HTTP_HEADER_CONTENT_LENGTH];
+			const String& contentType = request.headers[HTTP_HEADER_CONTENT_TYPE];
+			if(contentLength.length() && contentLength.toInt() > 0) {
+				if(contentType.indexOf(F("application/json")) != 0) {
+					sendApiCode(response, API_CODES::API_BAD_REQUEST,
+							F("Invalid JSON: send Content-Type: application/json"));
+				} else {
+					sendApiCode(response, API_CODES::API_BAD_REQUEST, F("Invalid JSON: body unavailable"));
+				}
+			} else {
+				sendApiCode(response, API_CODES::API_BAD_REQUEST, noBodyMessage);
+			}
+			return false;
 		}
-		return false;
 	}
 
 	if(err) {
@@ -1126,8 +1144,22 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response){
 		params[F("V")] = versionParam;
 	}
 	const uint32_t infoHeapSnapshot = app.getFreeHeapSize();
-
 	const bool isV2 = versionParam == "2";
+	String* cachePayload = isV2 ? &_infoV2Cache : &_infoV1Cache;
+	unsigned long* cacheTime = isV2 ? &_infoV2CacheTime : &_infoV1CacheTime;
+	const unsigned long nowMs = millis();
+
+	// Frequent UI polling can trigger repeated ConfigDB store opens;
+	// use a short cache window to lower pressure on FS/event queue.
+	if(!app.ota.isProccessing() && cachePayload->length() > 0 && (nowMs - *cacheTime) < INFO_CACHE_MS) {
+		setCorsHeaders(response);
+		response.setHeader(F("accept"), F("GET, POST, OPTIONS"));
+		response.code = HTTP_STATUS_OK;
+		response.setContentType(MIME_JSON);
+		response.sendString(*cachePayload);
+		return;
+	}
+
 	auto stream = std::make_unique<JsonObjectStream>(isV2 ? INFO_DOC_CAPACITY_V2 : INFO_DOC_CAPACITY_V1);
 	if(!stream) {
 		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("low memory"));
@@ -1137,8 +1169,26 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response){
 	
 	// Call the shared handler
 	app.api->handleInfo(params, data, infoHeapSnapshot);
-	
-	sendApiResponse(response, stream.release());
+
+	String payload;
+	if(!serializeJson(data, payload)) {
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("serialize failed"));
+		return;
+	}
+
+	if(!app.ota.isProccessing()) {
+		*cachePayload = payload;
+		*cacheTime = nowMs;
+	}
+
+	if(!checkHeap(response)) {
+		return;
+	}
+	setCorsHeaders(response);
+	response.setHeader(F("accept"), F("GET, POST, OPTIONS"));
+	response.code = HTTP_STATUS_OK;
+	response.setContentType(MIME_JSON);
+	response.sendString(payload);
 }
 
 
@@ -1191,17 +1241,15 @@ void ApplicationWebserver::onColorGet(HttpRequest& request, HttpResponse& respon
 void ApplicationWebserver::onColorPost(HttpRequest& request, HttpResponse& response)
 {
 	debug_i(ANSI_COLOR_BLUE "onColorPost" ANSI_COLOR_RESET);
-	debug_i(ANSI_COLOR_BLUE "create json document" ANSI_COLOR_RESET);
-	StaticJsonDocument<256> doc;
-	debug_i(ANSI_COLOR_BLUE "parse json body" ANSI_COLOR_RESET);
-	if(!parseJsonBody(request, response, doc, F("no body"))) {
+	_colorPostDoc.clear();
+	if(!parseJsonBody(request, response, _colorPostDoc, F("no body"))) {
 		return;
 	}
-	
+
 	debug_i(ANSI_COLOR_BLUE "received color update" ANSI_COLOR_RESET);
 	String msg;
 	debug_i(ANSI_COLOR_BLUE "dispatching color update" ANSI_COLOR_RESET);
-	const bool ok = app.api->dispatchCommand(F("color"), doc.as<JsonObject>(), msg, true);
+	const bool ok = app.api->dispatchCommand(F("color"), _colorPostDoc.as<JsonObject>(), msg, true);
 
 	if(!ok) {
 		debug_i(ANSI_COLOR_BLUE "received color update with message " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, msg.c_str());

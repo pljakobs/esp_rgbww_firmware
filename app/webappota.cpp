@@ -354,15 +354,15 @@ void WebappOta::startNextDownload()
 
     // Require at least 16 KB free heap before starting a download.
     // The HttpClient + lwIP TCP buffers + FileStream need headroom.
-    // Back off for 30 s and retry — the system may free heap after GC.
+    // Back off briefly and retry — each retry re-checks heap availability.
     static constexpr size_t MIN_DOWNLOAD_HEAP = 12000;
     if(app.getFreeHeapSize() < MIN_DOWNLOAD_HEAP) {
-        debug_w(ANSI_COLOR_YELLOW "WebappOta::startNextDownload - low heap (" ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW "), backing off 30s" ANSI_COLOR_RESET,
+        debug_w(ANSI_COLOR_YELLOW "WebappOta::startNextDownload - low heap (" ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW "), backing off 5s" ANSI_COLOR_RESET,
                 app.getFreeHeapSize());
         saveState(String::nullstr, String::nullstr, kStatusLowHeap);
         // Don't broadcastStatus here — we already checked heap is low and broadcastStatus
         // itself allocates.  The updating page will get the next push when download resumes.
-        _retryTimer.initializeMs(30000, TimerDelegate(&WebappOta::startNextDownload, this));
+        _retryTimer.initializeMs(5000, TimerDelegate(&WebappOta::startNextDownload, this));
         _retryTimer.startOnce();
         return;
     }

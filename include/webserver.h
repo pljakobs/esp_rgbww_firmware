@@ -71,6 +71,16 @@ private:
     unsigned long _webappStatusCacheTime = 0;
     static constexpr unsigned long WEBAPP_STATUS_CACHE_MS = 3000;
 
+    // Short-lived /info cache to avoid heavy per-request ConfigDB churn when UI polls frequently.
+    String _infoV1Cache;
+    String _infoV2Cache;
+    unsigned long _infoV1CacheTime = 0;
+    unsigned long _infoV2CacheTime = 0;
+    static constexpr unsigned long INFO_CACHE_MS = 1000;
+
+    // Reused for /color POST to avoid per-request stack/heap churn on ESP8266.
+    StaticJsonDocument<256> _colorPostDoc;
+
     WebsocketResource* wsResource = nullptr;
     WebsocketList webSockets;
 

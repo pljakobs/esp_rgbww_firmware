@@ -602,6 +602,8 @@ debug_i(ANSI_COLOR_BLUE "Application::init - running partition " ANSI_COLOR_CYAN
 #if !(defined SMING_RELEASE) && (defined UDP_DEBUG)
 			app.udpSyslogStream.begin(host, port, myName, F("Lightinator"));
 #endif
+		} else {
+			debug_i(ANSI_COLOR_BLUE "Remote syslog disabled" ANSI_COLOR_RESET);
 		}
 	}
 	
