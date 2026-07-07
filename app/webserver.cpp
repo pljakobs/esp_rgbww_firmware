@@ -135,7 +135,7 @@ void ApplicationWebserver::wsConnected(WebsocketConnection& socket)
 	// If a webapp OTA is in progress, push the current state immediately so
 	// the updating page doesn't have to wait for the next timed broadcast.
 	if(app.webappOta.isActive()) {
-		StaticJsonDocument<256> doc;
+		DynamicJsonDocument doc(256);
 		JsonObject params = doc.to<JsonObject>();
 		app.webappOta.fillStatusJson(params);
 		JsonRpcMessage msg(F("webapp_ota_status"));
@@ -157,7 +157,10 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 {
     debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::wsMessage: " ANSI_COLOR_GREEN " %s" ANSI_COLOR_RESET, message.c_str());
 
-    StaticJsonDocument<1024> requestDoc;
+    // Size the parse buffer from the incoming message so large payloads don't
+    // overflow a fixed capacity. Heap-allocated to keep it off the small stack.
+    const size_t requestCapacity = std::max<size_t>(1024, message.length() * 2);
+    DynamicJsonDocument requestDoc(requestCapacity);
 	String errorMsg;
 	int errorCode = 0;
 
@@ -1423,22 +1426,6 @@ void ApplicationWebserver::onConnect(HttpRequest& request, HttpResponse& respons
 	debug_i(ANSI_COLOR_BLUE "onConnect" ANSI_COLOR_RESET);
     if(!preflightRequest(request, response, {HttpMethod::POST, HttpMethod::GET})) return;
 
-    /*
-	if(!checkHeap(response)) {
-		return;
-	}
-	debug_i(ANSI_COLOR_BLUE "onConnect request.method: " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, request.method);
-	if(request.method == HttpMethod::OPTIONS) {
-		setCorsHeaders(response);
-		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
-		return;
-	}
-	
-	if(!authenticated(request, response)) {
-		return;
-	}
-    */
-
 	debug_i(ANSI_COLOR_BLUE "passed checks" ANSI_COLOR_RESET);
 #ifdef ARCH_ESP8266
 	if(app.ota.isProccessing()) {
@@ -1447,17 +1434,9 @@ void ApplicationWebserver::onConnect(HttpRequest& request, HttpResponse& respons
 	}
 #endif
 
-    /*
-	if(request.method != HttpMethod::POST && request.method != HttpMethod::GET) {
-		debug_i(ANSI_COLOR_BLUE "not HTTP POST or GET" ANSI_COLOR_RESET);
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not HTTP POST or GET"));
-		return;
-	}
-    */
-
 	if(request.method == HttpMethod::POST) {
 		debug_i(ANSI_COLOR_BLUE "is POST" ANSI_COLOR_RESET);
-		StaticJsonDocument<512> doc;
+		DynamicJsonDocument doc(256);
 		if(!parseJsonBody(request, response, doc, F("could not get HTTP body"))) {
 			return;
 		}
