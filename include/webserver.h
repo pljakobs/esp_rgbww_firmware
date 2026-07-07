@@ -33,6 +33,13 @@
 #define MINIMUM_HEAP_ACCEPT 8000
 #define MINIMUM_HEAP 8000
 
+// While the webapp OTA is downloading, the HTTP client + filesystem writes hold
+// a large chunk of heap. Any additional JSON endpoint served on top of that
+// (e.g. repeated /info polls from the browser) can push the device into OOM.
+// During the download we therefore raise the heap floor so non-essential
+// requests are shed with 429 instead of being processed into a crash.
+#define WEBAPP_OTA_MIN_HEAP 12000
+
 enum API_CODES {
     API_SUCCESS = 0,
     API_BAD_REQUEST = 1,
@@ -53,6 +60,12 @@ public:
     unsigned getHttpActiveConnections() const;
     unsigned getWebsocketConnectionCount() const;
 
+    // Change the max number of simultaneously accepted TCP connections at
+    // runtime. Read live by TcpServer::onAccept, so the new limit applies to
+    // the next incoming connection; existing connections are untouched. Note
+    // that WebSocket connections count toward this same limit.
+    void setMaxActiveConnections(uint16_t n);
+
     void wsSendBroadcast(const char* buffer, size_t length);
 
     const char* getApiCodeMsg(API_CODES code);
@@ -61,6 +74,10 @@ private:
 
     bool _init = false;
     bool _running = false;
+
+    // Base HTTP server settings, retained so setMaxActiveConnections() can
+    // adjust the connection limit without discarding heap/keep-alive config.
+    HttpServerSettings _serverSettings;
 
     // Cached security flag: -1=not yet read, 0=unsecured, 1=secured
     int _apiSecuredCache = -1;
@@ -89,6 +106,7 @@ private:
 
     void onFile(HttpRequest &request, HttpResponse &response);
     void onIndex(HttpRequest &request, HttpResponse &response);
+    void onRedirector(HttpRequest &request, HttpResponse &response);
     void onWebapp(HttpRequest &request, HttpResponse &response);
     void onWebappCheck(HttpRequest &request, HttpResponse &response);
     void onWebappStatus(HttpRequest &request, HttpResponse &response);

@@ -68,12 +68,29 @@ ApplicationWebserver::ApplicationWebserver()
 	settings.maxActiveConnections = 4;
 	settings.keepAliveSeconds = 0;
 #endif
+	// Retain a copy so setMaxActiveConnections() can re-configure the limit at
+	// runtime without losing the heap/keep-alive settings established here.
+	_serverSettings = settings;
 	configure(settings);
 
 	// Only JSON POST endpoints need the request body buffered into a String.
 	// The old wildcard parser caused heap pressure for every POST request.
 	setBodyParser(MIME_JSON, bodyToStringParser);
 }
+
+void ApplicationWebserver::setMaxActiveConnections(uint16_t n)
+{
+	if(_serverSettings.maxActiveConnections == n) {
+		return;
+	}
+	debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::setMaxActiveConnections " ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE " -> " ANSI_COLOR_CYAN "%u" ANSI_COLOR_RESET,
+			_serverSettings.maxActiveConnections, n);
+	_serverSettings.maxActiveConnections = n;
+	// configure() reassigns the live limit read by TcpServer::onAccept; it only
+	// adds body parsers, so the JSON body parser set in the constructor is kept.
+	configure(_serverSettings);
+}
+
 
 void ApplicationWebserver::init()
 {
@@ -107,12 +124,12 @@ void ApplicationWebserver::init()
 	paths.set(F("/toggle"), HttpPathDelegate(&ApplicationWebserver::onToggle, this));
 
 	// redirectors for initial configuration
-	paths.set(F("/canonical.html"), HttpPathDelegate(&ApplicationWebserver::onIndex, this)); 
-	paths.set(F("/generate_204"), HttpPathDelegate(&ApplicationWebserver::onIndex, this)); //android
-	paths.set(F("/static/hotspot.txt"), HttpPathDelegate(&ApplicationWebserver::onIndex, this));
-	paths.set(F("/connecttest.txt"), HttpPathDelegate(&ApplicationWebserver::onIndex, this)); //Windows
-	paths.set(F("/hotspot-detect.html"), HttpPathDelegate(&ApplicationWebserver::onIndex, this)); //iOS/macOS
-	paths.set(F("/nmcheck.gnome.org"), HttpPathDelegate(&ApplicationWebserver::onIndex, this)); //Linux (NetworkManager)
+	paths.set(F("/canonical.html"), HttpPathDelegate(&ApplicationWebserver::onRedirector, this)); 
+	paths.set(F("/generate_204"), HttpPathDelegate(&ApplicationWebserver::onRedirector, this)); //android
+	paths.set(F("/static/hotspot.txt"), HttpPathDelegate(&ApplicationWebserver::onRedirector, this));
+	paths.set(F("/connecttest.txt"), HttpPathDelegate(&ApplicationWebserver::onRedirector, this)); //Windows
+	paths.set(F("/hotspot-detect.html"), HttpPathDelegate(&ApplicationWebserver::onRedirector, this)); //iOS/macOS
+	paths.set(F("/nmcheck.gnome.org"), HttpPathDelegate(&ApplicationWebserver::onRedirector, this)); //Linux (NetworkManager)
 
 	// websocket api
 	wsResource = new WebsocketResource();
@@ -552,7 +569,7 @@ void ApplicationWebserver::onFile(HttpRequest& request, HttpResponse& response)
 {
 	debug_i(ANSI_COLOR_BLUE "http onFile" ANSI_COLOR_RESET);
 	// LittleFS file serving buffers through lwIP — require more free heap than API calls.
-	if(!preflightRequest(request, response, {HttpMethod::GET, HttpMethod::HEAD}, 10000)) return;
+	if(!preflightRequest(request, response, {HttpMethod::GET, HttpMethod::HEAD}, 12000)) return;
 
 #ifdef ARCH_ESP8266
 	if(app.ota.isProccessing()) {
@@ -627,6 +644,23 @@ void ApplicationWebserver::onWebapp(HttpRequest& request, HttpResponse& response
 
 	response.code = HTTP_STATUS_PERMANENT_REDIRECT;
 	response.sendString(F("Redirecting to /index.html"));
+}
+
+void ApplicationWebserver::onRedirector(HttpRequest& request, HttpResponse& response)
+{
+	// OS/browser connectivity probes (generate_204, hotspot-detect, connecttest,
+	// nmcheck, ...) hit these paths repeatedly. While the webapp is downloading
+	// the heap is scarce, so shed them with 429 to make the client back off
+	// instead of driving the device into OOM. Kept deliberately allocation-light:
+	// no stream, no body.
+	if(app.webappOta.isActive()) {
+		debug_i(ANSI_COLOR_YELLOW "onRedirector: webapp download active, shedding probe %s (429)" ANSI_COLOR_RESET, request.uri.Path.c_str());
+		response.code = HTTP_STATUS_TOO_MANY_REQUESTS;
+		response.setHeader(F("Retry-After"), F("10"));
+		response.setHeader(F("Connection"), F("close"));
+		return;
+	}
+	onIndex(request, response);
 }
 
 void ApplicationWebserver::onIndex(HttpRequest& request, HttpResponse& response)
@@ -747,6 +781,16 @@ bool ApplicationWebserver::checkHeap(HttpResponse& response, int minHeap)
 	// — including those relying on the default — is actually heap-gated.
 	if(minHeap <= 0) {
 		minHeap = MINIMUM_HEAP;
+	}
+	// While the webapp is downloading, the OTA client and filesystem writes hold
+	// a large chunk of heap. Serving additional JSON endpoints (e.g. repeated
+	// /info polls from the browser) on top of that pushes the device into OOM —
+	// we've observed onInfo drop the connection at ~6.8 KB free and the immediate
+	// client retry then crash the allocator. Raise the floor during the download
+	// so non-essential requests are shed with 429 (client backs off via
+	// Retry-After) instead of being processed into an out-of-memory crash.
+	if(app.webappOta.isActive() && minHeap < WEBAPP_OTA_MIN_HEAP) {
+		minHeap = WEBAPP_OTA_MIN_HEAP;
 	}
 	if(!app.checkHeap(minHeap) ) {
 		setCorsHeaders(response);
@@ -1134,7 +1178,7 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 
 void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response){
 	debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::onInfo" ANSI_COLOR_RESET);
-	if(!preflightRequest(request, response, { HttpMethod::GET },app.ota.isProccessing() ? 8000 : 0)) return;
+	if(!preflightRequest(request, response, { HttpMethod::GET },app.ota.isProccessing() ? 10000 : 0)) return;
 
 	// Build params from query string
 	StaticJsonDocument<64> paramsDoc;
