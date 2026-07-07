@@ -742,6 +742,12 @@ bool ApplicationWebserver::checkHeap(HttpResponse& response)
 
 bool ApplicationWebserver::checkHeap(HttpResponse& response, int minHeap)
 {
+	// A non-positive request means "use the default floor". This matches the
+	// documented preflightRequest(minHeap=0) contract and ensures every handler
+	// — including those relying on the default — is actually heap-gated.
+	if(minHeap <= 0) {
+		minHeap = MINIMUM_HEAP;
+	}
 	if(!app.checkHeap(minHeap) ) {
 		setCorsHeaders(response);
 		response.code = HTTP_STATUS_TOO_MANY_REQUESTS;
