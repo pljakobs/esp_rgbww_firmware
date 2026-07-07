@@ -511,7 +511,11 @@ void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, c
 			addInfoFields(data);
 		}
 
-		json[F("error")] = msg;
+		// ArduinoJson stores a const char* by reference (no copy). Callers may pass a
+		// pointer to a stack buffer (e.g. parseJsonBody's parseError[]) that is gone by
+		// the time JsonObjectStream is serialized asynchronously, yielding a dangling
+		// read and a truncated response. Wrap in String to force a copy into the pool.
+		json[F("error")] = String(msg);
 		sendApiResponse(response, stream.release(), HTTP_STATUS_BAD_REQUEST);
 	}
 }
