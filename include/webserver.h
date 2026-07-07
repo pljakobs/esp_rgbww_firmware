@@ -124,8 +124,6 @@ private:
     void sendApiCode(HttpResponse &response, API_CODES code, const String& msg);
     void sendApiCode(HttpResponse &response, API_CODES code, const __FlashStringHelper* msg);
     bool parseJsonBody(HttpRequest& request, HttpResponse& response, JsonDocument& doc,
-                       const __FlashStringHelper* noBodyMessage);
-    bool parseJsonBody(HttpRequest& request, HttpResponse& response, JsonDocument& doc,
                        const String& noBodyMessage);
 
     //void onUpload(HttpRequest &request, HttpResponse &response);

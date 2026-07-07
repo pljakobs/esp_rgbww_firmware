@@ -497,7 +497,7 @@ void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, c
 }
 
 bool ApplicationWebserver::parseJsonBody(HttpRequest& request, HttpResponse& response, JsonDocument& doc,
-											 const __FlashStringHelper* noBodyMessage)
+											 const String& noBodyMessage)
 {
 	debug_i(ANSI_COLOR_BLUE "parseJsonBody: begin" ANSI_COLOR_RESET);
 	DeserializationError err = DeserializationError::EmptyInput;
@@ -528,7 +528,8 @@ bool ApplicationWebserver::parseJsonBody(HttpRequest& request, HttpResponse& res
 					sendApiCode(response, API_CODES::API_BAD_REQUEST, F("Invalid JSON: body unavailable"));
 				}
 			} else {
-				sendApiCode(response, API_CODES::API_BAD_REQUEST, noBodyMessage);
+				sendApiCode(response, API_CODES::API_BAD_REQUEST,
+						noBodyMessage.length() ? noBodyMessage.c_str() : (const char*)nullptr);
 			}
 			return false;
 		}
@@ -542,13 +543,6 @@ bool ApplicationWebserver::parseJsonBody(HttpRequest& request, HttpResponse& res
 	}
 
 	return true;
-}
-
-bool ApplicationWebserver::parseJsonBody(HttpRequest& request, HttpResponse& response, JsonDocument& doc,
-											 const String& noBodyMessage)
-{
-	return parseJsonBody(request, response, doc,
-					 noBodyMessage.length() ? noBodyMessage.c_str() : nullptr);
 }
 
 void ApplicationWebserver::onFile(HttpRequest& request, HttpResponse& response)
