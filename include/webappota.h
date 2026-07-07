@@ -46,7 +46,9 @@
 #include <vector>
 
 
-#define FS_MIN_FREE_SPACE 358400UL  // require at least 350KB free to attempt an update, to avoid starting an update that fails midway due to no space left
+#define FS_MIN_FREE_SPACE 358400UL  // informational: a full webapp bundle is ~350KB
+#define FS_EMERGENCY_FREE_SPACE 102400UL  // below this free space, force-clear staging/ to recover from a stuck, full filesystem
+#define FS_DOWNLOAD_MARGIN 32768UL  // extra headroom (bytes) required on top of the reported bundle size to allow for filesystem overhead
 
 class WebappOta
 {
@@ -98,6 +100,7 @@ private:
         String path;        ///< relative path, e.g. "assets/index.js.gz"
         String expectedMd5; ///< lowercase hex MD5 from API response
         String url;         ///< absolute download URL
+        size_t size{0};     ///< file size in bytes from API (0 if not provided)
     };
 
     // --- API query ---

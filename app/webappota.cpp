@@ -38,6 +38,7 @@ constexpr const char* kStatusDownloadError = "download_error";
 constexpr const char* kStatusMd5Error = "md5_error";
 constexpr const char* kStatusActivationError = "activation_error";
 constexpr const char* kStatusLowHeap = "low_heap";
+constexpr const char* kStatusLowSpace = "low_space";
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -128,13 +129,24 @@ void WebappOta::checkForUpdate(bool ignoreEnabled)
     #endif
 
     IFS::FileSystem::Info fsInfo;
-    int result=fileGetSystemInfo(fsInfo);
-    // ToDo: this is just checking for a plain 350kB free space condition. In future, the update server shall provide
-    // the proper size of the update package and the firmware can check against that
-    if (result != FS_OK || fsInfo.freeSpace <= FS_MIN_FREE_SPACE) {
-        debug_e(ANSI_COLOR_RED "WebappOta::checkForUpdate - failed to get filesystem info or no free space" ANSI_COLOR_RESET);
+    int result = fileGetSystemInfo(fsInfo);
+    if(result != FS_OK) {
+        debug_e(ANSI_COLOR_RED "WebappOta::checkForUpdate - failed to get filesystem info" ANSI_COLOR_RESET);
         return;
     }
+
+    // (c) Emergency reclaim: a previous interrupted download can leave a partial
+    // staging/ tree that fills LittleFS and blocks every future update (and even
+    // config writes).  If free space is critically low, drop staging first so we
+    // can recover on this boot instead of being stuck forever.
+    if(fsInfo.freeSpace < FS_EMERGENCY_FREE_SPACE) {
+        debug_w(ANSI_COLOR_YELLOW "WebappOta::checkForUpdate - emergency low space (" ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW " bytes), clearing staging" ANSI_COLOR_RESET, fsInfo.freeSpace);
+        cleanupStaging();
+        fileGetSystemInfo(fsInfo);
+    }
+    // Note: we no longer bail out on low free space here.  Old webapp assets are
+    // purged before the new version is downloaded (see onApiResponse), so the
+    // active bundle is only replaced once we know a different version exists.
 
     if(_state != State::IDLE) {
         debug_i(ANSI_COLOR_BLUE "WebappOta::checkForUpdate - already active, skipping" ANSI_COLOR_RESET);
@@ -280,7 +292,19 @@ int WebappOta::onApiResponse(HttpConnection& client, bool successful)
         entry.path        = filename;
         entry.expectedMd5 = md5;
         entry.url         = base + filename;
+        entry.size        = f["size"].as<size_t>();
         _files.push_back(entry);
+    }
+
+    // Optional size hints from the API: a top-level "total_size" and/or a per-file
+    // "size".  Used below to verify the bundle can fit before we touch the active
+    // webapp.  Older servers omit these → bundleTotalSize stays 0 and the space
+    // check is skipped (backward compatible).
+    size_t bundleTotalSize = doc["total_size"].as<size_t>();
+    if(bundleTotalSize == 0) {
+        for(const auto& f : _files) {
+            bundleTotalSize += f.size;
+        }
     }
 
     debug_i(ANSI_COLOR_BLUE "WebappOta::onApiResponse - will download " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " files for version " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET,
@@ -317,6 +341,26 @@ int WebappOta::onApiResponse(HttpConnection& client, bool successful)
     debug_i(ANSI_COLOR_BLUE "WebappOta::onApiResponse - " ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE " files to download (" ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE " already staged)" ANSI_COLOR_RESET,
             (unsigned)_files.size(), _totalFiles - (unsigned)_files.size());
 
+    // Verify the whole bundle can fit before we purge the currently-active
+    // webapp.  We compare against the total volume size (not free space) because
+    // purgeOldWebapp() reclaims the old bundle first.  Skipping here — rather than
+    // purging and then failing mid-download — keeps the working webapp intact when
+    // a bundle is simply too large for this partition.
+    if(bundleTotalSize > 0) {
+        IFS::FileSystem::Info fsInfo;
+        if(fileGetSystemInfo(fsInfo) == FS_OK) {
+            size_t needed = bundleTotalSize + FS_DOWNLOAD_MARGIN;
+            debug_i(ANSI_COLOR_BLUE "WebappOta::onApiResponse - bundle " ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE " bytes (+" ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE " margin), volume " ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE " bytes, free " ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE " bytes" ANSI_COLOR_RESET,
+                    (unsigned)bundleTotalSize, (unsigned)FS_DOWNLOAD_MARGIN, (unsigned)fsInfo.volumeSize, (unsigned)fsInfo.freeSpace);
+            if(needed > fsInfo.volumeSize) {
+                debug_e(ANSI_COLOR_RED "WebappOta::onApiResponse - bundle too large for filesystem (" ANSI_COLOR_CYAN "%u" ANSI_COLOR_RED " > " ANSI_COLOR_CYAN "%u" ANSI_COLOR_RED "), skipping update" ANSI_COLOR_RESET,
+                        (unsigned)needed, (unsigned)fsInfo.volumeSize);
+                failAttempt(kStatusLowSpace);
+                return 0;
+            }
+        }
+    }
+
     // Mark download as in-progress in persistent config so a reboot can resume.
     {
         AppConfig::Root root(*app.cfg);
@@ -324,6 +368,13 @@ int WebappOta::onApiResponse(HttpConnection& client, bool successful)
             update.webapp.setInProgress(true);
         }
     }
+
+    // (b) A different version is available: free the old webapp assets NOW so the
+    // new bundle has room to download on the small LittleFS partition (old and new
+    // content-hashed bundles cannot coexist).  The update UI is served from a
+    // firmware-embedded page, so the device stays reachable while downloading.
+    debug_i(ANSI_COLOR_BLUE "WebappOta::onApiResponse - purging old webapp assets before download" ANSI_COLOR_RESET);
+    purgeOldWebapp();
 
     _state = State::DOWNLOADING;
     _fileIndex = 0;
@@ -464,7 +515,14 @@ bool WebappOta::verifyFileMd5(const String& filePath, const String& expectedMd5)
 // ─── Activation ──────────────────────────────────────────────────────────────
 
 /**
- * @brief Recursively delete all files under @p dir (non-recursive subdirs only).
+ * @brief Recursively delete everything under @p dir (files and subdirectories),
+ *        then remove @p dir itself.
+ *
+ * Directory type is taken from the entry's stat attribute rather than probing
+ * with Directory::open(), which is both faster and avoids misclassifying files.
+ * LittleFS' lfs_remove() deletes empty directories, so once a subtree has been
+ * emptied the directory node is removed as well — otherwise stale empty dirs
+ * would accumulate across repeated updates.
  */
 static void deleteTree(const String& dir)
 {
@@ -472,21 +530,25 @@ static void deleteTree(const String& dir)
     if(!d.open(dir)) {
         return;
     }
-    std::vector<String> entries;
+    struct Entry {
+        String path;
+        bool isDir;
+    };
+    std::vector<Entry> entries;
     while(d.next()) {
-        entries.push_back(dir + "/" + d.stat().name.c_str());
+        const auto& stat = d.stat();
+        entries.push_back({dir + "/" + stat.name.c_str(), stat.attr[FileAttribute::Directory]});
     }
     d.close();
     for(auto& e : entries) {
-        // Try as directory first; if it opens, recurse
-        Directory sub;
-        if(sub.open(e)) {
-            sub.close();
-            deleteTree(e);
+        if(e.isDir) {
+            deleteTree(e.path);
         } else {
-            fileDelete(e);
+            fileDelete(e.path);
         }
     }
+    // Remove the now-empty directory node itself.
+    fileDelete(dir);
 }
 
 /**
