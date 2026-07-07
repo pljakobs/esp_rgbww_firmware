@@ -54,8 +54,9 @@ public:
     static const uint16_t SYSLOG_PORT = 514;
     // Max message payload — leaves ~40 bytes headroom for RFC 3164 header within 512-byte UDP
     static const size_t MAX_MSG_LEN = 470;
-    // Experimental branch: disable pre-network Huffman buffering to validate heap impact.
-    static constexpr bool PRE_NET_HUFFMAN_ENABLED = false;
+    // Pre-network Huffman buffering: capture boot-time log output (incl. crash dumps)
+    // before the UDP route exists, then replay it on drainPreNetBuffer() after GotIP.
+    static constexpr bool PRE_NET_HUFFMAN_ENABLED = true;
 
     UdpSyslogStream()
     {
