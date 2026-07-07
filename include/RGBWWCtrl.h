@@ -130,3 +130,5 @@
 
 #define configDB_PATH "app-config"
 #define dataDB_PATH "app-data"
+
+#define RSYSLOG 1

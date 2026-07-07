@@ -35,9 +35,7 @@
 #include <fileMap.h>
 #include <apihandler.h>
 
-#undef UDP_DEBUG
-
-#ifdef UDP_DEBUG
+#ifdef RSYSLOG
 #ifndef SMING_RELEASE
 #include <MultiOutputStream.h>
 #include <udpSyslogStream.h>
@@ -185,7 +183,7 @@ extern "C" void custom_crash_callback(struct rst_info* ri, uint32_t stack, uint3
 
 Application app;
 
-#if !(defined SMING_RELEASE) && (defined UDP_DEBUG)
+#if !(defined SMING_RELEASE) && (defined RSYSLOG)
 MultiOutputStream debugStream;
 
 size_t debugStreamOutputCallback(const char* buffer, unsigned int length)
@@ -208,7 +206,7 @@ void onReady()
 #ifdef ARCH_ESP32
 	esp_wifi_set_ps (WIFI_PS_NONE);
 #endif
-#if !(defined SMING_RELEASE) && (defined UDP_DEBUG)
+#if !(defined SMING_RELEASE) && (defined RSYSLOG)
 	Serial.systemDebugOutput(false); // disable direct Serial hook; output now goes through debugStreamOutputCallback only
 	auto oldCallback = m_setPuts(&debugStreamOutputCallback);
 	debugStream.addStream(&Serial, false);
@@ -599,7 +597,7 @@ debug_i(ANSI_COLOR_BLUE "Application::init - running partition " ANSI_COLOR_CYAN
 			AppConfig::General general(*cfg);
 			String myName=general.getDeviceName();
 			debug_i(ANSI_COLOR_BLUE "Initializing remote syslog with host " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " and port " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, host.c_str(), port);
-#if !(defined SMING_RELEASE) && (defined UDP_DEBUG)
+#if !(defined SMING_RELEASE) && (defined RSYSLOG)
 			app.udpSyslogStream.begin(host, port, myName, F("Lightinator"));
 #endif
 		} else {
