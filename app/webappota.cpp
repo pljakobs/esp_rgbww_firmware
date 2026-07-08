@@ -179,9 +179,22 @@ void WebappOta::checkForUpdate(bool ignoreEnabled)
 
 // ─── API query ───────────────────────────────────────────────────────────────
 
+void WebappOta::setState(State newState)
+{
+    const bool wasActive = (_state != State::IDLE);
+    _state = newState;
+    const bool nowActive = (_state != State::IDLE);
+
+    // Only touch the webserver on genuine active<->idle transitions to avoid
+    // reconfiguring the TCP accept limit on every intermediate state change.
+    if(wasActive != nowActive) {
+        app.webserver.applyOtaLoadShedding(nowActive);
+    }
+}
+
 void WebappOta::queryApi(const String& branch, const String& firmwareVersion, const String& apiBaseUrl)
 {
-    _state = State::QUERYING_API;
+    setState(State::QUERYING_API);
     broadcastStatus();
     _files.clear();
     _fileIndex = 0;
@@ -194,7 +207,7 @@ void WebappOta::queryApi(const String& branch, const String& firmwareVersion, co
     if(!_httpClient.downloadString(url,
             RequestCompletedDelegate(&WebappOta::onApiResponse, this), 4096)) {
         debug_e(ANSI_COLOR_RED "WebappOta::queryApi - failed to queue request" ANSI_COLOR_RESET);
-        _state = State::IDLE;
+        setState(State::IDLE);
         saveState(String::nullstr, String::nullstr, kStatusApiError);
     }
 }
@@ -204,7 +217,7 @@ int WebappOta::onApiResponse(HttpConnection& client, bool successful)
     auto* response = client.getResponse();
     if(!response) {
         debug_e(ANSI_COLOR_RED "WebappOta::onApiResponse - no response object" ANSI_COLOR_RESET);
-        _state = State::IDLE;
+        setState(State::IDLE);
         saveState(String::nullstr, String::nullstr, kStatusApiError);
         return 0;
     }
@@ -258,7 +271,7 @@ int WebappOta::onApiResponse(HttpConnection& client, bool successful)
         AppConfig::Root::Webapp webapp(*app.cfg);
         if(webapp.getInstalledVersion() == _pendingVersion) {
             debug_i(ANSI_COLOR_BLUE "WebappOta::onApiResponse - already up to date (" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ")" ANSI_COLOR_RESET, _pendingVersion.c_str());
-            _state = State::IDLE;
+            setState(State::IDLE);
             saveState(_pendingVersion, webapp.getInstalledMd5(), kStatusNoUpdate);
             return 0;
         }
@@ -330,7 +343,7 @@ int WebappOta::onApiResponse(HttpConnection& client, bool successful)
     if(_files.empty()) {
         // All files already staged and verified — go straight to activation.
         debug_i(ANSI_COLOR_BLUE "WebappOta::onApiResponse - all files already staged, activating" ANSI_COLOR_RESET);
-        _state = State::ACTIVATING;
+        setState(State::ACTIVATING);
         _fileIndex = 0;
         broadcastStatus();
         _retryTimer.initializeMs<1>(TimerDelegate(&WebappOta::activateStagingDeferred, this));
@@ -376,7 +389,7 @@ int WebappOta::onApiResponse(HttpConnection& client, bool successful)
     debug_i(ANSI_COLOR_BLUE "WebappOta::onApiResponse - purging old webapp assets before download" ANSI_COLOR_RESET);
     purgeOldWebapp();
 
-    _state = State::DOWNLOADING;
+    setState(State::DOWNLOADING);
     _fileIndex = 0;
     broadcastStatus();
     // Defer startNextDownload out of the HTTP callback context.
@@ -395,7 +408,7 @@ void WebappOta::startNextDownload()
 {
     if(_fileIndex >= (unsigned)_files.size()) {
         // All files downloaded; move to activation
-        _state = State::ACTIVATING;
+        setState(State::ACTIVATING);
         broadcastStatus();
         if(!activateStaging()) {
             failAttempt(kStatusActivationError);
@@ -675,7 +688,7 @@ void WebappOta::failAttempt(const char* status)
             && std::strcmp(status, kStatusLowHeap) != 0) {
         debug_w(ANSI_COLOR_YELLOW "WebappOta::failAttempt - resumed OTA failed, clearing staging and retrying once" ANSI_COLOR_RESET);
         cleanupStaging();
-        _state = State::IDLE;
+        setState(State::IDLE);
         _resumingInterrupted = false;
         _retryAfterCleanupDone = true;
         _retryTimer.initializeMs<1>(TimerDelegate(&WebappOta::retryFromScratchDeferred, this));
@@ -683,7 +696,7 @@ void WebappOta::failAttempt(const char* status)
         return;
     }
 
-    _state = State::IDLE;
+    setState(State::IDLE);
     saveState(String::nullstr, String::nullstr, status);
 }
 
@@ -710,7 +723,7 @@ bool WebappOta::activateStaging()
         bundleMd5 = _files[_files.size() - 1].expectedMd5;
     }
 
-    _state = State::IDLE;
+    setState(State::IDLE);
     saveState(_pendingVersion, bundleMd5, kStatusOk);
 
     debug_i(ANSI_COLOR_BLUE "WebappOta::activateStaging - webapp updated to " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, _pendingVersion.c_str());

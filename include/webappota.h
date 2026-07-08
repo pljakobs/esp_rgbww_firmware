@@ -96,6 +96,12 @@ private:
         ACTIVATING,
     };
 
+    // Single choke point for all _state changes. Keeps the inbound HTTP
+    // connection limit in sync with OTA activity (clamped while active,
+    // restored when returning to IDLE) so the download cannot be starved of
+    // heap by concurrent browser polling on ESP8266.
+    void setState(State newState);
+
     struct FileEntry {
         String path;        ///< relative path, e.g. "assets/index.js.gz"
         String expectedMd5; ///< lowercase hex MD5 from API response

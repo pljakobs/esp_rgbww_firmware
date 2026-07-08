@@ -104,7 +104,7 @@ ApplicationWebserver::ApplicationWebserver()
 	// Stability workaround: reduce overlap pressure without starving browser traffic.
 	// Keep enough concurrent HTTP slots for page/API usage, but disable keepalive
 	// reuse on ESP8266 so sockets close immediately after each response.
-	settings.maxActiveConnections = 4;
+	settings.maxActiveConnections = WEBSERVER_MAX_CONN_DEFAULT;
 	settings.keepAliveSeconds = 0;
 #endif
 	// Retain a copy so setMaxActiveConnections() can re-configure the limit at
@@ -128,6 +128,20 @@ void ApplicationWebserver::setMaxActiveConnections(uint16_t n)
 	// configure() reassigns the live limit read by TcpServer::onAccept; it only
 	// adds body parsers, so the JSON body parser set in the constructor is kept.
 	configure(_serverSettings);
+}
+
+void ApplicationWebserver::applyOtaLoadShedding(bool otaActive)
+{
+#ifdef ARCH_ESP8266
+	// During the OTA download the outbound HTTP client + LittleFS writes hold most
+	// of the free heap. Clamp inbound connections to a single slot so a burst of
+	// browser polls (/info, /webapp_status) cannot allocate the device into OOM;
+	// restore the normal limit once the download completes. setMaxActiveConnections
+	// no-ops when the value is unchanged, so repeated calls are cheap.
+	setMaxActiveConnections(otaActive ? WEBAPP_OTA_MAX_CONN : WEBSERVER_MAX_CONN_DEFAULT);
+#else
+	(void)otaActive;
+#endif
 }
 
 
@@ -382,7 +396,12 @@ void ICACHE_FLASH_ATTR ApplicationWebserver::wsSendBroadcast(const char* buffer,
 
 unsigned ApplicationWebserver::getHttpActiveConnections() const
 {
-	return activeClients;
+	// Report the authoritative live connection count (added on accept, removed on
+	// destroy — this is what enforces maxConnections). The inherited activeClients
+	// counter can drift upward because onClientComplete is not guaranteed to fire
+	// for every accepted connection (aborted/reset sockets), which made the debug
+	// figure look like an unbounded "connection leak".
+	return getConnections().count();
 }
 
 unsigned ApplicationWebserver::getWebsocketConnectionCount() const

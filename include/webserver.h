@@ -40,6 +40,14 @@
 // requests are shed with 429 instead of being processed into a crash.
 #define WEBAPP_OTA_MIN_HEAP 12000
 
+// Inbound HTTP connection limits (ESP8266). Each accepted connection holds lwIP
+// TCP buffers + an HttpServerConnection worth of heap. During a webapp OTA the
+// outbound download client + LittleFS writes already consume most of the free
+// heap, so inbound browser connections are clamped hard for the duration of the
+// download to leave headroom and avoid OOM crashes. Restored when OTA finishes.
+#define WEBSERVER_MAX_CONN_DEFAULT 4
+#define WEBAPP_OTA_MAX_CONN 1
+
 enum API_CODES {
     API_SUCCESS = 0,
     API_BAD_REQUEST = 1,
@@ -65,6 +73,10 @@ public:
     // the next incoming connection; existing connections are untouched. Note
     // that WebSocket connections count toward this same limit.
     void setMaxActiveConnections(uint16_t n);
+
+    // Clamp/restore the inbound connection limit around a webapp OTA download.
+    // No-op on non-ESP8266 targets where heap is plentiful.
+    void applyOtaLoadShedding(bool otaActive);
 
     void wsSendBroadcast(const char* buffer, size_t length);
 
