@@ -975,22 +975,6 @@ void Application::switchRom()
 {
 	//ToDo - rewrite to use ota.getRunningPartition() and ota.getNextBootPartition()
 	debug_i(ANSI_COLOR_BLUE "Application::switchRom" ANSI_COLOR_RESET);
-
-	/* old
-
-    int slot = getRomSlot();
-    debug_i(ANSI_COLOR_BLUE "    current ROM: " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, slot);
-    if (slot == 0) {
-        slot = 1;
-    } else {
-        slot = 0;
-    }
-#ifdef ARCH_ESP8266
-    debug_i(ANSI_COLOR_BLUE "    switching to ROM " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE "\r\n" ANSI_COLOR_RESET,slot);
-    rboot_set_current_rom(slot);
-
-#endif
-    */
 	app.ota.doSwitch();
 }
 #else
