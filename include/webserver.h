@@ -80,7 +80,7 @@ public:
 
     void wsSendBroadcast(const char* buffer, size_t length);
 
-    const char* getApiCodeMsg(API_CODES code);
+    String getApiCodeMsg(API_CODES code);
 
 private:
 

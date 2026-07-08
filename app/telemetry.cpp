@@ -92,7 +92,7 @@ void TelemetryClient::connect(const char* telemetryURL, const char* telemetryUse
 		mqtt->setConnectedHandler([this](MqttClient& client, mqtt_message_t* message) { return this->onConnected(client, message); });
 		mqtt->setMessageHandler([this](MqttClient& client, mqtt_message_t* message) { return this->onMessageReceived(client, message); });
 	} else {
-		Serial.println("Telemetry MQTT not configured properly");
+		debug_i(ANSI_COLOR_BLUE "Telemetry MQTT not configured properly" ANSI_COLOR_RESET);
 	}
 }
 
@@ -115,13 +115,13 @@ void TelemetryClient::doReconnect() {
 
 void TelemetryClient::onComplete(TcpClient& client, bool success) {
 	if (!success) {
-		Serial.println("Telemetry MQTT connection failed");
+		debug_i(ANSI_COLOR_BLUE "Telemetry MQTT connection failed" ANSI_COLOR_RESET);
 		_isRunning = false;
 	}
 }
 
 int TelemetryClient::onConnected(MqttClient& client, mqtt_message_t* message) {
-	Serial.println("Telemetry MQTT connected");
+	debug_i(ANSI_COLOR_BLUE "Telemetry MQTT connected" ANSI_COLOR_RESET);
     _isRunning = true;
 	return 0;
 }
@@ -171,7 +171,6 @@ bool TelemetryClient::publish(const String& topic, const JsonDocument& doc) {
 
 bool TelemetryClient::publish(const char* topic, const char* payload) {
     if (!_isRunning || !mqtt || mqtt->getConnectionState() != eTCS_Connected) {
-        // Serial.println("Telemetry MQTT not connected");
         return false;
     }
     debug_i(ANSI_COLOR_BLUE "Telemetry MQTT publishing " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " to topic: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, payload, topic);

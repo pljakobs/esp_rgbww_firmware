@@ -483,17 +483,17 @@ bool ICACHE_FLASH_ATTR ApplicationWebserver::authenticated(HttpRequest& request,
 	return authenticated;
 }
 
-const char* ApplicationWebserver::getApiCodeMsg(API_CODES code)
+String ApplicationWebserver::getApiCodeMsg(API_CODES code)
 {
 	switch(code) {
 	case API_CODES::API_MISSING_PARAM:
-		return "missing param";
+		return F("missing param");
 	case API_CODES::API_UNAUTHORIZED:
-		return "authorization required";
+		return F("authorization required");
 	case API_CODES::API_UPDATE_IN_PROGRESS:
-		return "update in progress";
+		return F("update in progress");
 	default:
-		return "bad request";
+		return F("bad request");
 	}
 }
 
