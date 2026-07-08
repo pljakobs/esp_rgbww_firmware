@@ -103,6 +103,9 @@ private:
 
     bool authenticated(HttpRequest &request, HttpResponse &response);
     bool authenticateExec(HttpRequest &request, HttpResponse &response);
+    // Lazily load _apiSecuredCache / _apiPasswordCache from ConfigDB. Cache is
+    // invalidated (set to -1) whenever security settings change (see onConfig).
+    void ensureSecurityCache();
 
     void onFile(HttpRequest &request, HttpResponse &response);
     void onIndex(HttpRequest &request, HttpResponse &response);

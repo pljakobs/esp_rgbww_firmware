@@ -346,8 +346,8 @@ bool Application::checkHeap( size_t minHeap)
 	int fh = getFreeHeapSize();
 	if (fh<6000)
 	{
-		// minimize heap usage by halving the minHeap threshold when we're critical anyway. This should preserve some heap for receive packet buffers and thus improve stability
-		minHeap=minHeap/2;
+		// minimize heap usage by increasing the minHeap threshold when we're critical anyway. This should preserve some heap for receive packet buffers and thus improve stability
+		minHeap=minHeap*1.5;
 	}
 	if(fh<minHeap){
 		_HeapLowErrUptime++;

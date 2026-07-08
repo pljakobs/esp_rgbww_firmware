@@ -781,8 +781,14 @@ The socket serves two roles:
 | `continue` | Resume paused queue |
 | `blink` | Trigger blink |
 | `direct` | Apply direct color change |
+| `authenticate` | Complete the challenge-response auth handshake (see [Security](#security)) |
 
 The `keep_alive` message is reserved for connection maintenance and is handled automatically by the webapp.
+
+When `security.api_secured` is enabled, every method except `authenticate` and
+`keep_alive` requires the connection to first complete the challenge-response
+handshake described in [Security](#security). Unauthenticated calls are rejected
+with JSON-RPC error `-32001` and a fresh `challenge`.
 
 ### Push events
 
@@ -800,15 +806,88 @@ The webapp uses this connection both for live status updates and for request/res
 
 ## Security
 
-Disabled by default. Enable via:
+API access can be protected by a single shared password. It is **disabled by
+default**. Enable it and set the password via the configuration API:
 
 ```json
 { "security": { "api_secured": true, "api_password": "mysecret" } }
 ```
 
-When enabled, every HTTP request must include `Authorization: Basic <base64(:<password>)>`. There is no username — use just the password preceded by a colon in the base64-encoded string.
+There is **no username** — the password is the only shared secret. It is used
+by both the HTTP REST API (HTTP Basic) and the WebSocket JSON-RPC API
+(challenge-response). When `api_secured` is `false`, all endpoints are open and
+no credentials are checked.
+
+### HTTP REST API — HTTP Basic
+
+When enabled, every HTTP request must include an `Authorization` header:
+
+```
+Authorization: Basic <base64(":" + password)>
+```
+
+The username portion is ignored, so the base64 payload is simply a colon
+followed by the password (e.g. `base64(":mysecret")`). A request without valid
+credentials is answered with:
+
+```
+HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Basic realm="RGBWW Server"
+Connection: close
+```
+
+### WebSocket JSON-RPC API — challenge-response
+
+The WebSocket API does **not** use HTTP Basic. Instead each connection must
+complete a per-connection challenge-response handshake before any state-changing
+method is accepted. The `authenticate` method and `keep_alive` pings are always
+allowed through; every other method requires an authenticated connection.
+
+**1. Trigger a challenge.** Send any secured method (or an `authenticate`
+request with no hash). If the connection is not yet authenticated, the
+controller replies with JSON-RPC error code `-32001` and a top-level
+`challenge` — a 32-character lowercase-hex nonce (16 random bytes):
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "error": { "code": -32001, "message": "authentication required" },
+  "challenge": "3f9a1c...e7"
+}
+```
+
+**2. Compute the response hash.** Concatenate the challenge and the password
+with a colon separator and take the lowercase-hex SHA-256 digest:
+
+```
+hash = SHA256( challenge + ":" + password )   // lowercase hex
+```
+
+**3. Send the `authenticate` request** with the computed hash:
+
+```json
+{ "jsonrpc": "2.0", "id": 2, "method": "authenticate", "params": { "hash": "<hash>" } }
+```
+
+**4. Result.** On success the controller marks the connection authenticated and
+consumes the nonce:
+
+```json
+{ "jsonrpc": "2.0", "id": 2, "result": { "authenticated": true } }
+```
+
+On failure it returns error `-32001` again together with a **fresh** `challenge`
+(the previous nonce is single-use), so the client can retry. Because the
+challenge is per-connection and single-use, the hash cannot be replayed on a new
+connection.
+
+> Browsers compute the digest with `crypto.subtle.digest("SHA-256", ...)`; the
+> firmware uses the same `SHA256(challenge + ":" + password)` formula, so both
+> sides must produce identical lowercase-hex output.
 
 The AP password defaults to `configesp` and should be changed before deployment.
+
 
 ---
 

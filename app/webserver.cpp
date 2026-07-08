@@ -26,6 +26,7 @@
 #include <RGBWWCtrl.h>
 #include <apihandler.h>
 #include <Data/WebHelpers/base64.h>
+#include <Crypto/Sha2.h>
 #include <cstring>
 #include <memory>
 #include <stdio.h>
@@ -48,6 +49,44 @@ constexpr size_t INFO_DOC_CAPACITY_V1 = 1536;
 constexpr size_t INFO_DOC_CAPACITY_V2 = 2048;
 constexpr size_t WS_INFO_RESPONSE_OVERHEAD = 300;
 constexpr size_t WS_INFO_RESPONSE_CAPACITY = INFO_DOC_CAPACITY_V1 + WS_INFO_RESPONSE_OVERHEAD;
+
+// Per-connection WebSocket authentication state, attached via setUserData().
+// Allocated in wsConnected(), released in wsDisconnected(). The challenge is a
+// one-shot nonce handed to the client in an "authentication required" reply and
+// consumed by the next "authenticate" message.
+struct WsAuthState {
+	bool authenticated = false;
+	String challenge;
+};
+
+// Generate a 16-byte random nonce as a 32-char lowercase hex string.
+String wsMakeChallenge()
+{
+	static const char hex[] = "0123456789abcdef";
+	char buf[33];
+	for(int i = 0; i < 16; i++) {
+		uint8_t b = static_cast<uint8_t>(os_random() & 0xFF);
+		buf[i * 2] = hex[b >> 4];
+		buf[i * 2 + 1] = hex[b & 0x0F];
+	}
+	buf[32] = '\0';
+	return String(buf);
+}
+
+// Shared-secret challenge-response digest used by the WebSocket auth handshake.
+// Canonical input is "<challenge>:<password>" (SHA-256, lowercase hex).
+// The client must compute the identical string to authenticate.
+String wsComputeAuthHash(const String& challenge, const String& password)
+{
+	String canonical;
+	canonical.reserve(challenge.length() + password.length() + 1);
+	canonical += challenge;
+	canonical += ':';
+	canonical += password;
+	Crypto::Sha256 ctx;
+	ctx.update(canonical.c_str(), canonical.length());
+	return Crypto::toString(ctx.getHash());
+}
 }
 
 // ToDo: think about implementing a parameterized API to read objects from appData by id
@@ -146,6 +185,10 @@ void ApplicationWebserver::init()
 void ApplicationWebserver::wsConnected(WebsocketConnection& socket)
 {
 	debug_i(ANSI_COLOR_BLUE "===>wsConnected" ANSI_COLOR_RESET);
+	// Attach per-connection auth state. A fresh connection starts unauthenticated;
+	// it must complete the challenge-response handshake before mutating commands
+	// are accepted when the API is secured.
+	socket.setUserData(new WsAuthState());
 	webSockets.addElement(&socket);
 	debug_i(ANSI_COLOR_BLUE "===>nr of websockets: " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, webSockets.size());
 
@@ -166,6 +209,9 @@ void ApplicationWebserver::wsConnected(WebsocketConnection& socket)
 void ApplicationWebserver::wsDisconnected(WebsocketConnection& socket)
 {
 	debug_i(ANSI_COLOR_BLUE "<===wsDisconnected" ANSI_COLOR_RESET);
+	// Release the per-connection auth state allocated in wsConnected().
+	delete static_cast<WsAuthState*>(socket.getUserData());
+	socket.setUserData(nullptr);
 	webSockets.removeElement(&socket);
 	debug_i(ANSI_COLOR_BLUE "===>nr of websockets: " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, webSockets.size());
 }
@@ -212,7 +258,60 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 		responseRoot[F("id")] = requestId;
 	}
 
-	if(method[0] == '\0') {
+	// ---- WebSocket authentication gate ----------------------------------
+	// When the API is secured, a connection must complete the challenge-
+	// response handshake before any state-changing method is accepted. The
+	// "authenticate" method and "keep_alive" pings are always allowed through.
+	ensureSecurityCache();
+	const bool wsSecured = (_apiSecuredCache == 1);
+	WsAuthState* wsAuth = static_cast<WsAuthState*>(socket.getUserData());
+	const bool isAuthMethod = strcmp_P(method, PSTR("authenticate")) == 0;
+	const bool isKeepAlive = strcmp_P(method, PSTR("keep_alive")) == 0;
+
+	if(isAuthMethod) {
+		JsonObject params = requestRoot[F("params")];
+		const String clientHash = params[F("hash")] | "";
+		if(!wsSecured) {
+			// Nothing to prove when security is disabled.
+			if(wsAuth) {
+				wsAuth->authenticated = true;
+			}
+			JsonObject result = responseRoot.createNestedObject(F("result"));
+			result[F("authenticated")] = true;
+		} else if(wsAuth == nullptr) {
+			errorCode = -32603;
+			errorMsg = F("internal error: no auth state");
+		} else if(wsAuth->challenge.length() == 0) {
+			// No outstanding challenge — issue one and ask the client to retry.
+			wsAuth->challenge = wsMakeChallenge();
+			errorCode = -32001;
+			errorMsg = F("authentication required");
+			responseRoot[F("challenge")] = wsAuth->challenge;
+		} else {
+			const String expected = wsComputeAuthHash(wsAuth->challenge, _apiPasswordCache);
+			if(expected.length() && clientHash.equalsIgnoreCase(expected)) {
+				wsAuth->authenticated = true;
+				wsAuth->challenge = ""; // consume the nonce
+				JsonObject result = responseRoot.createNestedObject(F("result"));
+				result[F("authenticated")] = true;
+			} else {
+				// Wrong hash — hand out a fresh challenge for the next attempt.
+				wsAuth->challenge = wsMakeChallenge();
+				errorCode = -32001;
+				errorMsg = F("authentication failed");
+				responseRoot[F("challenge")] = wsAuth->challenge;
+			}
+		}
+	} else if(wsSecured && !isKeepAlive && (wsAuth == nullptr || !wsAuth->authenticated)) {
+		// Unauthenticated request on a secured API: refuse and issue a challenge.
+		const String challenge = wsMakeChallenge();
+		if(wsAuth) {
+			wsAuth->challenge = challenge;
+		}
+		errorCode = -32001;
+		errorMsg = F("authentication required");
+		responseRoot[F("challenge")] = challenge;
+	} else if(method[0] == '\0') {
 		errorCode = -32600;
 		errorMsg = F("missing method");
 	} else if(!app.api) {
@@ -306,15 +405,20 @@ void ApplicationWebserver::stop()
 	_running = false;
 }
 
+void ApplicationWebserver::ensureSecurityCache()
+{
+	if(_apiSecuredCache < 0) {
+		AppConfig::Root config(*app.cfg);
+		_apiSecuredCache = config.security.getApiSecured() ? 1 : 0;
+		_apiPasswordCache = config.security.getApiPassword();
+	}
+}
+
 bool ICACHE_FLASH_ATTR ApplicationWebserver::authenticateExec(HttpRequest& request, HttpResponse& response)
 {
 	{
 		debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::authenticated - checking general context" ANSI_COLOR_RESET);
-		if(_apiSecuredCache < 0) {
-			AppConfig::Root config(*app.cfg);
-			_apiSecuredCache = config.security.getApiSecured() ? 1 : 0;
-			_apiPasswordCache = config.security.getApiPassword();
-		}
+		ensureSecurityCache();
 		if(_apiSecuredCache == 0)
 			return true;
 	} // end AppConfig general context
@@ -352,6 +456,10 @@ bool ICACHE_FLASH_ATTR ApplicationWebserver::authenticated(HttpRequest& request,
 		response.setHeader(F("WWW-Authenticate"), F("Basic realm=\"RGBWW Server\""));
 		response.setHeader(F("401 wrong credentials"), F("wrong credentials"));
 		response.setHeader(F("Connection"), F("close"));
+		// CORS headers must be present on the 401 too, otherwise a cross-origin
+		// browser blocks the response and fetch() rejects before the client can
+		// see the 401 and prompt for credentials.
+		setCorsHeaders(response);
 	}
 	return authenticated;
 }
@@ -1943,5 +2051,5 @@ void ApplicationWebserver::onSetOff(HttpRequest &request, HttpResponse &response
 void ApplicationWebserver::setCorsHeaders(HttpResponse& response)
 {
 	response.setAllowCrossDomainOrigin("*");
-	response.setHeader(F("Access-Control-Allow-Headers"), F("Content-Type, Cache-Control"));
+	response.setHeader(F("Access-Control-Allow-Headers"), F("Content-Type, Cache-Control, Authorization"));
 }
