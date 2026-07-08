@@ -45,7 +45,7 @@
 // outbound download client + LittleFS writes already consume most of the free
 // heap, so inbound browser connections are clamped hard for the duration of the
 // download to leave headroom and avoid OOM crashes. Restored when OTA finishes.
-#define WEBSERVER_MAX_CONN_DEFAULT 4
+#define WEBSERVER_MAX_CONN_DEFAULT 3
 #define WEBAPP_OTA_MAX_CONN 1
 
 enum API_CODES {
