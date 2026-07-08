@@ -134,7 +134,7 @@ private:
     void printFileSystemUsage();
     void printIndent(int depth) {
         for (int i = 0; i < depth; ++i) {
-            Serial.print("  │");
+            Serial.print(F("  │"));
         }
     }
     static String extractBranch(const String& firmwareVersion);

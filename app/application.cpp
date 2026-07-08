@@ -239,10 +239,8 @@ void init(){
 	Serial.systemDebugOutput(true);
 	
 	// System.setCpuFrequency(CpuCycleClockFast::cpuFrequency());
-
-	Serial.print(_F("Available heap: "));
-	Serial.println(app.getFreeHeapSize());
-	Serial.println("===starting cpu profiling===");
+	debug_i(ANSI_COLOR_BLUE "Available heap: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "\r\n" ANSI_COLOR_RESET, app.getFreeHeapSize());
+	debug_i(ANSI_COLOR_BLUE "===starting cpu profiling===" ANSI_COLOR_RESET);
 	onReady(); // this is just in preparation for cpu profiling
 }
 
@@ -414,7 +412,7 @@ debug_i(ANSI_COLOR_BLUE "Application::init - running partition " ANSI_COLOR_CYAN
 		Directory dir;
 		if(dir.open()) {
 			while(dir.next()) {
-				Serial.print("  ");
+				Serial.print(_F("  "));
 				Serial.println(dir.stat().name);
 			}
 		}
@@ -946,11 +944,10 @@ void Application::listFiles()
 	Directory dir;
 	if(dir.open()) {
 		while(dir.next()) {
-			Serial.print("  ");
-			Serial.println(dir.stat().name);
+			debug_i(F(" %s"), dir.stat().name);
 		}
 	}
-	debug_i(ANSI_COLOR_BLUE "" ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE " files found" ANSI_COLOR_RESET, dir.count());
+	debug_i( ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE " files found" ANSI_COLOR_RESET, dir.count());
 }
 
 void Application::umountfs()

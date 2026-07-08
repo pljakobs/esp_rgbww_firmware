@@ -235,7 +235,6 @@ void EventServer::publishTransitionFinished(const String& name, bool requeued)
  */
 void EventServer::sendToClients(JsonRpcMessage& rpcMsg)
 {
-	//Serial.printf("EventServer: sendToClient: %x, Vector: %x Tests: %d\n", _client, _clients.elementAt(0), _tests[0]);
 	rpcMsg.setId(_nextId++);
 
 	String jsonStr = Json::serialize(rpcMsg.getRoot());

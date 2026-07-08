@@ -258,8 +258,7 @@ int AppMqttClient::onMessageReceived(MqttClient& client, mqtt_message_t* msg)
 
 void AppMqttClient::publish(const String& topic, const String& data, bool retain)
 {
-	//Serial.printf("AppMqttClient::publish: Topic: %s | Data: %s\n", topic.c_str(), data.c_str());
-
+	
 	if(!mqtt) {
 		debug_w(ANSI_COLOR_YELLOW "ApplicationMQTTClient::publish: no MQTT object\n" ANSI_COLOR_RESET);
 		return;
