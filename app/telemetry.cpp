@@ -48,20 +48,17 @@ TelemetryClient::~TelemetryClient() {
 void TelemetryClient::start() {
 	
 	AppConfig::Network network(*app.cfg);
-	strncpy(_telemetryURL, network.telemetry.getUrl().c_str(), TELEMETRY_URL_MAX_SIZE);
-    _telemetryURL[TELEMETRY_URL_MAX_SIZE - 1] = '\0';
-	strncpy(_telemetryUser, network.telemetry.getUser().c_str(), TELEMETRY_USER_MAX_SIZE);
-    _telemetryUser[TELEMETRY_USER_MAX_SIZE - 1] = '\0';
-	strncpy(_telemetryPass, network.telemetry.getPassword().c_str(), TELEMETRY_PASS_MAX_SIZE);
-    _telemetryPass[TELEMETRY_PASS_MAX_SIZE - 1] = '\0';
+	String telemetryURL = network.telemetry.getUrl();
+	String telemetryUser = network.telemetry.getUser();
+	String telemetryPass = network.telemetry.getPassword();
 	_telemetryStats=network.telemetry.getStatsEnabled();
 	_telemetryLog=network.telemetry.getLogEnabled();
 
-	if((_telemetryStats  or _telemetryLog ) && strlen(_telemetryURL) > 0){
+	if((_telemetryStats  or _telemetryLog ) && telemetryURL.length() > 0){
 		debug_i(ANSI_COLOR_BLUE "Application::startServices - starting remote telemetry" ANSI_COLOR_RESET);
 
-		debug_i(ANSI_COLOR_BLUE "Application::startServices - telemetry mqtt server: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, _telemetryURL);
-		connect(_telemetryURL, _telemetryUser, _telemetryPass);
+		debug_i(ANSI_COLOR_BLUE "Application::startServices - telemetry mqtt server: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, telemetryURL.c_str());
+		connect(telemetryURL, telemetryUser, telemetryPass);
 	}
 	else {
 		debug_i(ANSI_COLOR_BLUE "Application::startServices - mqtt telemetry disabled" ANSI_COLOR_RESET);
@@ -110,7 +107,8 @@ void TelemetryClient::reconnect() {
 
 void TelemetryClient::doReconnect() {
     stop();
-    connect(_telemetryURL, _telemetryUser, _telemetryPass);
+    AppConfig::Network network(*app.cfg);
+    connect(network.telemetry.getUrl(), network.telemetry.getUser(), network.telemetry.getPassword());
 }
 
 void TelemetryClient::onComplete(TcpClient& client, bool success) {
