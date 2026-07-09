@@ -162,17 +162,17 @@ private:
     Timer _checkRamTimer;
     Timer _resetPinTimer;
 
-    uint32_t _uptimeMinutes = 0;
-    size_t _minimumHeapUptime = 32768;
-    size_t _minimumHeap10min=32768;
-    size_t _HeapLowErrUptime=0;
-    size_t _HeapLowErr10min=0;
+    uint32_t _uptimeMinutes   = 0;
+    size_t _minimumHeapUptime = 0x80000;
+    size_t _minimumHeap10min  = 0x80000;
+    size_t _HeapLowErrUptime  = 0;
+    size_t _HeapLowErr10min   = 0;
 
     std::array<int, 17> _lastToggles;
 
     uint32_t jsonrpc_id = 0;
 
-    int8_t clearPin = 16; //  GPIO16 is the default for the old mrpj boards, newer boards will load from pinconfig 
+    int8_t clearPin  = 16; //  GPIO16 is the default for the old mrpj boards, newer boards will load from pinconfig 
     int8_t _clearPin = -1;
 
     bool _reboot_reported=false;
