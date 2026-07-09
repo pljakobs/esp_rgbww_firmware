@@ -27,7 +27,6 @@
 #include <RGBWWLed/RGBWWLedColor.h>
 #include <Network/Http/Websocket/WebsocketResource.h>
 
-#define FILE_MAX_SIZE 4096 //max filesize for storage api files.
 #define MAX_LOG_LINE_SIZE 512
 
 #define MINIMUM_HEAP_ACCEPT 8000
@@ -45,8 +44,16 @@
 // outbound download client + LittleFS writes already consume most of the free
 // heap, so inbound browser connections are clamped hard for the duration of the
 // download to leave headroom and avoid OOM crashes. Restored when OTA finishes.
-#define WEBSERVER_MAX_CONN_DEFAULT 3
-#define WEBAPP_OTA_MAX_CONN 1
+#ifdef ARCH_ESP8266
+    #define WEBSERVER_MAX_CONN_OTA 3
+#define WEBSERVER_MAX_CONN_DEFAULT 4
+#define WEBAPP_OTA_MAX_CONN 3
+else
+    #define WEBSERVER_MAX_CONN_OTA 5
+    #define WEBSERVER_MAX_CONN_DEFAULT 10
+    #define WEBAPP_OTA_MAX_CONN 5
+#endif
+
 
 enum API_CODES {
     API_SUCCESS = 0,
