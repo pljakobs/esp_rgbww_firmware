@@ -121,13 +121,14 @@ void WebappOta::checkForUpdate(bool ignoreEnabled)
     debug_i(ANSI_COLOR_BLUE "==============================" ANSI_COLOR_RESET);
     printFileSystemUsage();
     
+    /*
     debug_i(ANSI_COLOR_BLUE "==============================" ANSI_COLOR_RESET);
     debug_i(ANSI_COLOR_BLUE "|   current directory layout |" ANSI_COLOR_RESET);
     debug_i(ANSI_COLOR_BLUE "==============================" ANSI_COLOR_RESET);
     #ifndef ARCH_HOST
     listDirectory("/", 0);
     #endif
-
+    */
     IFS::FileSystem::Info fsInfo;
     int result = fileGetSystemInfo(fsInfo);
     if(result != FS_OK) {
