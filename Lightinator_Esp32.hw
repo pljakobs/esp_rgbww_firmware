@@ -1,0 +1,57 @@
+{
+    "name": "two roms, two lfs partitions",
+    "comment": "Should work with any Esp32 variant",
+    "base_config": "standard",
+    "options": [
+        "4m"
+    ],
+    "partitions": {
+        "factory":{
+            "size": 0
+        },
+        "rom0": {
+            "device": "spiFlash",
+            "address": "0x010000",
+            "size": "1408K",
+            "type": "app",
+            "subtype": "ota_0",
+            "readonly": false,
+            "encrypted": false,
+            "filename": "$(TARGET_BIN)"
+        },
+        "lfs0": {
+            "device": "spiFlash",
+            "address": "0x00170000",
+            "size": "1152K",
+            "type": "data",
+            "subtype": "littlefs",
+            "readonly": false,
+            "encrypted": false,
+            "filename": ""
+        },
+        "rom1": {
+            "device": "spiFlash",
+            "address": "0x00290000",
+            "size": "1408K",
+            "type": "app",
+            "subtype": "ota_1",
+            "readonly": false,
+            "encrypted": false,
+            "filename": ""
+        },
+        "coredump": {
+            "device": "spiFlash",
+            "address": "0x3FA000", 
+            "size": "16K",
+            "type": "data",
+            "subtype": "coredump" 
+        },
+        "otadata": {
+            "device": "spiFlash",
+            "address": "0x3FE000",
+            "size": "8K",
+            "type": "data",
+            "subtype": "ota"
+        }
+    }
+}

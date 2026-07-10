@@ -13,7 +13,7 @@ endif
 NUM_JOBS := $(shell echo $(($(nproc) + 2)))
 MAKEFLAGS += -j$(NUM_JOBS)
 
-HWCONFIG :=two_roms_two_lfs_$(SMING_ARCH)
+HWCONFIG :=Lightinator_$(SMING_ARCH)
 #HWCONFIG:=debug_Esp32
 
 #### rBoot options ####
