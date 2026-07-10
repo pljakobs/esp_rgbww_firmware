@@ -540,8 +540,8 @@ bool Api::handleInfo(const JsonObject& params, JsonObject& data, uint32_t heapFr
 			JsonObject run = data.createNestedObject(F("runtime"));
 			run[F("uptime")] = app.getUptime();
 			run[F("heap_free")] = heapFreeReported;
-			run[F("minimumfreeHeapRuntime")] = app.getMinimumHeapUptime();
-			run[F("minimumfreeHeap10min")] = app.getMinimumHeap10min();
+			run[F("minfreeHeapRuntime")] = app.getMinimumHeapUptime();
+			run[F("minfreeHeap10min")] = app.getMinimumHeap10min();
 			run[F("heapLowErrUptime")] = app.getHeapLowErrUptime();
 			run[F("heapLowErr10min")] = app.getHeapLowErr10min();
 		}	
@@ -572,22 +572,6 @@ bool Api::handleInfo(const JsonObject& params, JsonObject& data, uint32_t heapFr
 				con[F("gateway")] = WifiStation.getNetworkGateway().toString();
 				con[F("mac")] = WifiStation.getMAC();
 				con[F("rssi")] = WifiStation.getRssi();
-
-			/*
-				JsonObject net = data.createNestedObject(F("network"));
-				net[F("tcp_connections")] = tcpStats.active_total;
-				net[F("tcp_active")] = tcpStats.active_total;
-				net[F("tcp_established")] = tcpStats.established;
-				net[F("tcp_syn_sent")] = tcpStats.syn_sent;
-				net[F("tcp_syn_rcvd")] = tcpStats.syn_rcvd;
-				net[F("tcp_fin_wait_1")] = tcpStats.fin_wait_1;
-				net[F("tcp_fin_wait_2")] = tcpStats.fin_wait_2;
-				net[F("tcp_close_wait")] = tcpStats.close_wait;
-				net[F("tcp_closing")] = tcpStats.closing;
-				net[F("tcp_last_ack")] = tcpStats.last_ack;
-				net[F("tcp_time_wait")] = tcpStats.time_wait;
-				net[F("tcp_closed")] = tcpStats.closed;
-			*/
 			}
 		}
 
