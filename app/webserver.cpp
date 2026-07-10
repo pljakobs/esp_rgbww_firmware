@@ -905,7 +905,7 @@ bool ApplicationWebserver::checkHeap(HttpResponse& response)
 	return checkHeap(response, MINIMUM_HEAP);
 }
 
-bool ApplicationWebserver::checkHeap(HttpResponse& response, uint minHeap)
+bool ApplicationWebserver::checkHeap(HttpResponse& response, uint32_t minHeap)
 {
 	// A zero request means "use the default floor". This matches the
 	// documented preflightRequest(minHeap=0) contract and ensures every handler
@@ -958,7 +958,7 @@ bool ApplicationWebserver::checkHeap(HttpResponse& response, uint minHeap)
  * @param minHeap Optional minimum heap required (default 0 loops back to _minimumHeap)
  * @return true if request is valid and should proceed. false if response handled (e.g. error or options)
  */
-bool ApplicationWebserver::preflightRequest(HttpRequest& request, HttpResponse& response, std::initializer_list<HttpMethod> allowedMethods, uint minHeap)
+bool ApplicationWebserver::preflightRequest(HttpRequest& request, HttpResponse& response, std::initializer_list<HttpMethod> allowedMethods, uint32_t minHeap)
 {
 	debug_i(ANSI_COLOR_BLUE "preflightRequest: %d %s" ANSI_COLOR_RESET, (int)request.method, request.uri.Path.c_str());
 	const HttpMethod reqMethod = request.method;
