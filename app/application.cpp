@@ -339,9 +339,9 @@ size_t Application::getFreeHeapSize(){
 	return fh;
 }
 
-bool Application::checkHeap( uint minHeap)
+bool Application::checkHeap( uint32_t minHeap)
 {
-	uint fh = getFreeHeapSize();
+	uint32_t fh = getFreeHeapSize();
 	if (fh<6000)
 	{
 		// minimize heap usage by increasing the minHeap threshold when we're critical anyway. This should preserve some heap for receive packet buffers and thus improve stability
