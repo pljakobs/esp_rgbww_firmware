@@ -649,6 +649,8 @@ void Application::startServices()
 {
 	debug_i(ANSI_COLOR_BLUE "Application::startServices" ANSI_COLOR_RESET);
 
+	app.reportCrashDump(); // report crash dump if available
+
 	rgbwwctrl.start();
 	webserver.start();
 
@@ -738,6 +740,7 @@ void Application::reportCrashDump()
 {
 	bool fullDumpReported = false;
 #ifdef ARCH_ESP8266
+	debug_i
 	if(g_crashDumpValid) {
 		g_crashDumpValid = false;
 		fullDumpReported = true;
@@ -773,6 +776,7 @@ void Application::reportCrashDump()
 		        rtc_info->reason, rtc_info->exccause, rtc_info->epc1, rtc_info->excvaddr);
 	}
 }
+
 void Application::restart()
 {
 	static bool gracefulRestartInProgress = false;
