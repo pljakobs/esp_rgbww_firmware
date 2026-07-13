@@ -195,7 +195,9 @@ size_t debugStreamOutputCallback(const char* buffer, unsigned int length)
 void onReady()
 {
 	//System.setCpuFrequencye(CF_160MHz);
+	debug_i(ANSI_COLOR_BLUE "getting reset info from rtc" ANSI_COLOR_RESET);
 	app.rtc_info = system_get_rst_info();
+	debug_i(ANSI_COLOR_BLUE "Reboot reason: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE ", exccause: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, app.rtc_info->reason, app.rtc_info->exccause);
 	
 #ifdef ARCH_ESP8266
 	app.readCrashDump();
@@ -322,6 +324,7 @@ void Application::checkRam()
 	}
 	
 	if (app.rtc_info->reason!= 0 && !_reboot_reported){
+		debug_i(ANSI_COLOR_BLUE "Reboot reason: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE ", exccause: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, app.rtc_info->reason, app.rtc_info->exccause);
 		_reboot_reported=true;	
 		AppConfig::Network::Telemetry telemetryCfg(*cfg);
 		auto reboots=telemetryCfg.getNumReboots();
