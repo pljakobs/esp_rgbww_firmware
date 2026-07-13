@@ -218,6 +218,7 @@ void onReady()
 	// seperated application init
 	app.init();
 
+	app.reportCrashDump(); // report crash dump if available
 	// Run Services on system ready
 	//System.onReady(SystemReadyDelegate(&Application::startServices, &app));
 	app.startServices();
