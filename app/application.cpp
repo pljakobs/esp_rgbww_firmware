@@ -739,8 +739,9 @@ void Application::readCrashDump()
 void Application::reportCrashDump()
 {
 	bool fullDumpReported = false;
-#ifdef ARCH_ESP8266
-	debug_i
+	debug_i(ANSI_COLOR_BLUE "Application::reportCrashDump" ANSI_COLOR_RESET);
+	#ifdef ARCH_ESP8266
+	debug_i(ANSI_COLOR_BLUE "esp8266 codepath" ANSI_COLOR_RESET);
 	if(g_crashDumpValid) {
 		g_crashDumpValid = false;
 		fullDumpReported = true;
@@ -763,6 +764,8 @@ void Application::reportCrashDump()
 			uint32_t w3 = (i + 3 < g_crashDump.stackCount) ? g_crashDump.stackWords[i + 3] : 0;
 			debug_w(ANSI_COLOR_YELLOW "" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW ":  " ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " " ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " " ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " " ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW "" ANSI_COLOR_RESET, addr, w0, w1, w2, w3);
 		}
+	}else{
+		debug_i(ANSI_COLOR_BLUE "Application::reportCrashDump - no crash dump found" ANSI_COLOR_RESET);
 	}
 #endif
 	// Fallback: emit reason/registers if we didn't already emit a full dump above.
@@ -774,6 +777,8 @@ void Application::reportCrashDump()
 	    rtc_info->reason == REASON_WDT_RST)) {
 		debug_w(ANSI_COLOR_YELLOW "*** CRASH REBOOT: reason=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW " exccause=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW " epc1=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " excvaddr=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW "" ANSI_COLOR_RESET,
 		        rtc_info->reason, rtc_info->exccause, rtc_info->epc1, rtc_info->excvaddr);
+	}else{
+		debug_i(ANSI_COLOR_BLUE "Application::reportCrashDump - no crash detected" ANSI_COLOR_RESET);
 	}
 }
 
