@@ -130,65 +130,6 @@ bool isPrintableSsid(const String& str)
 	return true;
 }
 
-struct TcpPcbStats
-{
-	uint8_t active_total{0};
-	uint8_t established{0};
-	uint8_t syn_sent{0};
-	uint8_t syn_rcvd{0};
-	uint8_t fin_wait_1{0};
-	uint8_t fin_wait_2{0};
-	uint8_t close_wait{0};
-	uint8_t closing{0};
-	uint8_t last_ack{0};
-	uint8_t time_wait{0};
-	uint8_t closed{0};
-};
-
-TcpPcbStats getTcpPcbStats()
-{
-	TcpPcbStats stats;
-#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
-	for(const tcp_pcb* pcb = tcp_active_pcbs; pcb != nullptr; pcb = pcb->next) {
-		++stats.active_total;
-		switch(pcb->state) {
-		case ESTABLISHED:
-			++stats.established;
-			break;
-		case SYN_SENT:
-			++stats.syn_sent;
-			break;
-		case SYN_RCVD:
-			++stats.syn_rcvd;
-			break;
-		case FIN_WAIT_1:
-			++stats.fin_wait_1;
-			break;
-		case FIN_WAIT_2:
-			++stats.fin_wait_2;
-			break;
-		case CLOSE_WAIT:
-			++stats.close_wait;
-			break;
-		case CLOSING:
-			++stats.closing;
-			break;
-		case LAST_ACK:
-			++stats.last_ack;
-			break;
-		case TIME_WAIT:
-			++stats.time_wait;
-			break;
-		case CLOSED:
-			++stats.closed;
-			break;
-		default:
-			break;
-		}
-	}
-#endif
-	return stats;
-}
 } // namespace
 
 bool Api::dispatch(const String& method, const JsonObject& params, JsonObject& out)
@@ -476,8 +417,6 @@ bool Api::handleInfo(const JsonObject& params, JsonObject& data, uint32_t heapFr
 		}
 	}
 
-	const auto tcpStats = getTcpPcbStats();
-
 	if(isV2) {
 		debug_i(ANSI_COLOR_BLUE "Api::handleInfo: version 2 detected" ANSI_COLOR_RESET);
 
@@ -552,13 +491,9 @@ bool Api::handleInfo(const JsonObject& params, JsonObject& data, uint32_t heapFr
 			debug[F("http_active_connections")] = app.webserver.getHttpActiveConnections();
 			debug[F("websocket_connections")] = app.webserver.getWebsocketConnectionCount();
 			debug[F("eventserver_clients")] = app.eventserver.activeClients;
-	#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
-			debug[F("tcp_pcb_size")] = sizeof(tcp_pcb);
-			debug[F("tcp_active_estimated_bytes")] = static_cast<uint32_t>(tcpStats.active_total) * sizeof(tcp_pcb);
-	#else
+	
 			debug[F("tcp_pcb_size")] = 0;
 			debug[F("tcp_active_estimated_bytes")] = 0;
-	#endif
 		}
 			data[F("rgbww")] = serialized(FPSTR(kInfoRgbwwV2));
 			{
