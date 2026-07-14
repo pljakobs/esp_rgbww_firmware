@@ -42,10 +42,10 @@
     #define SOC "unknown"
 #endif
 
-#if defined(ARCH_ESP32)
-    #define HTTP_MAX_CONNECTIONS 10
-#else
+#if defined(ARCH_ESP8266)
     #define HTTP_MAX_CONNECTIONS 4
+#else
+    #define HTTP_MAX_CONNECTIONS 10
 #endif
 
 #if defined(SMING_RELEASE)
