@@ -883,15 +883,6 @@ bool Application::delayedCMD(String cmd, int delay)
 	return true;
 }
 
-void Application::listSpiffsPartitions()
-{
-	Serial.println(_F("** Enumerate registered partitions"));
-	mountfs(1);
-	listFiles();
-	mountfs(0);
-	listFiles();
-}
-
 bool Application::mountfs(int slot)
 {
 	/*
@@ -900,7 +891,6 @@ bool Application::mountfs(int slot)
     * system could be spiffs or LitleFS
     *
     */
-
 #ifdef ARCH_HOST
 	/*
      * host file system
@@ -909,7 +899,8 @@ bool Application::mountfs(int slot)
 	fileSetFileSystem(&IFS::Host::getFileSystem());
 	_fs_mounted = true;
 	return _fs_mounted;
-#else
+#endif
+
 	/*
      * on device file system
      */
@@ -943,7 +934,7 @@ bool Application::mountfs(int slot)
 		_fs_mounted = false;
 		return _fs_mounted;
 	}
-#endif
+
 }
 
 void Application::listFiles()
