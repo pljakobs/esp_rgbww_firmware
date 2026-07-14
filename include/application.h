@@ -70,6 +70,7 @@ public:
 
     void checkRam();
     void reportCrashDump();
+    
 #ifdef ARCH_ESP8266
     void readCrashDump();
     inline bool isTempBoot() { return _bootmode == MODE_TEMP_ROM; };

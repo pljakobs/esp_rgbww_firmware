@@ -218,7 +218,6 @@ void onReady()
 	// seperated application init
 	app.init();
 
-	app.reportCrashDump(); // report crash dump if available
 	// Run Services on system ready
 	//System.onReady(SystemReadyDelegate(&Application::startServices, &app));
 	app.startServices();
@@ -738,48 +737,62 @@ void Application::readCrashDump()
 
 void Application::reportCrashDump()
 {
-	bool fullDumpReported = false;
-	debug_i(ANSI_COLOR_BLUE "Application::reportCrashDump" ANSI_COLOR_RESET);
-	#ifdef ARCH_ESP8266
-	debug_i(ANSI_COLOR_BLUE "esp8266 codepath" ANSI_COLOR_RESET);
-	if(g_crashDumpValid) {
-		g_crashDumpValid = false;
-		fullDumpReported = true;
-		// Emit in the format that Sming decode-stacktrace.py recognises.
-		// "pc=" line puts the tool into IN_REGISTERS state.
-		debug_w(ANSI_COLOR_YELLOW "pc=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " sp=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " excvaddr=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW "" ANSI_COLOR_RESET,
-		        g_crashDump.epc1, g_crashDump.stackBase, g_crashDump.excvaddr);
-		// Emit remaining exception registers on a separate line
-		// (the tool picks these up as generic r00/r01 style or passes them through)
-		debug_w(ANSI_COLOR_YELLOW "epc2=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " epc3=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " exccause=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW " depc=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " reason=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW "" ANSI_COLOR_RESET,
-		        g_crashDump.epc2, g_crashDump.epc3,
-		        g_crashDump.exccause, g_crashDump.depc, g_crashDump.reason);
-		// Stack dump in the format "xxxxxxxx:  XXXXXXXX XXXXXXXX XXXXXXXX XXXXXXXX"
-		debug_w(ANSI_COLOR_YELLOW "Stack dump:" ANSI_COLOR_RESET);
-		uint32_t addr = g_crashDump.stackBase;
-		for(uint32_t i = 0; i < g_crashDump.stackCount; i += 4, addr += 16) {
-			uint32_t w0 = g_crashDump.stackWords[i];
-			uint32_t w1 = (i + 1 < g_crashDump.stackCount) ? g_crashDump.stackWords[i + 1] : 0;
-			uint32_t w2 = (i + 2 < g_crashDump.stackCount) ? g_crashDump.stackWords[i + 2] : 0;
-			uint32_t w3 = (i + 3 < g_crashDump.stackCount) ? g_crashDump.stackWords[i + 3] : 0;
-			debug_w(ANSI_COLOR_YELLOW "" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW ":  " ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " " ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " " ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " " ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW "" ANSI_COLOR_RESET, addr, w0, w1, w2, w3);
-		}
-	}else{
-		debug_i(ANSI_COLOR_BLUE "Application::reportCrashDump - no crash dump found" ANSI_COLOR_RESET);
-	}
+    bool fullDumpReported = false;
+    debug_i(ANSI_COLOR_BLUE "Application::reportCrashDump" ANSI_COLOR_RESET);
+    
+#ifdef ARCH_ESP8266
+    debug_i(ANSI_COLOR_BLUE "esp8266 codepath" ANSI_COLOR_RESET);
+    if(g_crashDumpValid) {
+        g_crashDumpValid = false;
+        fullDumpReported = true;
+        
+        // Emit in the format that Sming decode-stacktrace.py recognises.
+        // "pc=" line puts the tool into IN_REGISTERS state.
+        debug_w(ANSI_COLOR_YELLOW "pc=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " sp=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " excvaddr=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW "" ANSI_COLOR_RESET,
+                g_crashDump.epc1, g_crashDump.stackBase, g_crashDump.excvaddr);
+                
+        // Emit remaining exception registers on a separate line
+        // (the tool picks these up as generic r00/r01 style or passes them through)
+        debug_w(ANSI_COLOR_YELLOW "epc2=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " epc3=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " exccause=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW " depc=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " reason=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW "" ANSI_COLOR_RESET,
+                g_crashDump.epc2, g_crashDump.epc3,
+                g_crashDump.exccause, g_crashDump.depc, g_crashDump.reason);
+                
+        // Stack dump in the format "xxxxxxxx:  XXXXXXXX XXXXXXXX XXXXXXXX XXXXXXXX"
+        debug_w(ANSI_COLOR_YELLOW "Stack dump:" ANSI_COLOR_RESET);
+        uint32_t addr = g_crashDump.stackBase;
+        for(uint32_t i = 0; i < g_crashDump.stackCount; i += 4, addr += 16) {
+            uint32_t w0 = g_crashDump.stackWords[i];
+            uint32_t w1 = (i + 1 < g_crashDump.stackCount) ? g_crashDump.stackWords[i + 1] : 0;
+            uint32_t w2 = (i + 2 < g_crashDump.stackCount) ? g_crashDump.stackWords[i + 2] : 0;
+            uint32_t w3 = (i + 3 < g_crashDump.stackCount) ? g_crashDump.stackWords[i + 3] : 0;
+            debug_w(ANSI_COLOR_YELLOW "" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW ":  " ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " " ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " " ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " " ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW "" ANSI_COLOR_RESET, addr, w0, w1, w2, w3);
+        }
+    } else {
+        debug_i(ANSI_COLOR_BLUE "Application::reportCrashDump - no crash dump found" ANSI_COLOR_RESET);
+    }
 #endif
-	// Fallback: emit reason/registers if we didn't already emit a full dump above.
-	// On ESP32 this is always the path (no crash callback available).
-	// On ESP8266 this fires only if the RTC magic was invalid (rare: RTC scrambled on hard reset).
-	if(!fullDumpReported && rtc_info != nullptr &&
-	   (rtc_info->reason == REASON_EXCEPTION_RST ||
-	    rtc_info->reason == REASON_SOFT_WDT_RST  ||
-	    rtc_info->reason == REASON_WDT_RST)) {
-		debug_w(ANSI_COLOR_YELLOW "*** CRASH REBOOT: reason=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW " exccause=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW " epc1=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " excvaddr=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW "" ANSI_COLOR_RESET,
-		        rtc_info->reason, rtc_info->exccause, rtc_info->epc1, rtc_info->excvaddr);
-	}else{
-		debug_i(ANSI_COLOR_BLUE "Application::reportCrashDump - no crash detected" ANSI_COLOR_RESET);
-	}
+
+    // Fallback: emit reason/registers if we didn't already emit a full dump above.
+    // On ESP32 this is always the path (no crash callback available).
+    // On ESP8266 this fires if the RTC magic was invalid or if a hardware WDT bypassed the software vectors.
+    if(!fullDumpReported && rtc_info != nullptr &&
+       (rtc_info->reason == REASON_EXCEPTION_RST ||
+        rtc_info->reason == REASON_SOFT_WDT_RST  ||
+        rtc_info->reason == REASON_WDT_RST)) {
+        
+        debug_w(ANSI_COLOR_YELLOW "*** CRASH REBOOT DETECTED ***" ANSI_COLOR_RESET);
+        
+        // Formatted specifically with "pc=" to allow decode-stacktrace.py to extract 
+        // the Instruction Pointer (epc1) during hardware-level lockups.
+        debug_w(ANSI_COLOR_YELLOW "pc=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " excvaddr=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " reason=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW " exccause=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_RESET,
+                rtc_info->epc1, rtc_info->excvaddr, rtc_info->reason, rtc_info->exccause);
+                
+        // Supplementary registers to give extra context if available
+        debug_w(ANSI_COLOR_YELLOW "epc2=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " epc3=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_RESET,
+                rtc_info->epc2, rtc_info->epc3);
+    } else if (!fullDumpReported) {
+        debug_i(ANSI_COLOR_BLUE "Application::reportCrashDump - no crash detected" ANSI_COLOR_RESET);
+    }
 }
 
 void Application::restart()
