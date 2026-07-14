@@ -344,24 +344,15 @@ void ApplicationOTA::afterOTA()
 			app.mountfs(rom_slot);
 
 			// save settings / color into new rom space
-			// app.cfg.save();
 			app.rgbwwctrl.colorSave();
 		}
-		// unmount old Filesystem - mount new filesystem
-		// app.umountfs();
-		// app.mountfs(rom_slot);
 
-		// save settings / color into new rom space
-		// app.cfg.save();
-		// app.rgbwwctrl.colorSave();
 
 		// save success to new rom
 		saveStatus(OTASTATUS::OTA_SUCCESS);
 
-// remount old filesystemv2
-// app.umountfs();
-// app.mountfs(app.getRomSlot());
 #endif
+
 	}
 }
 
