@@ -491,9 +491,6 @@ bool Api::handleInfo(const JsonObject& params, JsonObject& data, uint32_t heapFr
 			debug[F("http_active_connections")] = app.webserver.getHttpActiveConnections();
 			debug[F("websocket_connections")] = app.webserver.getWebsocketConnectionCount();
 			debug[F("eventserver_clients")] = app.eventserver.activeClients;
-	
-			debug[F("tcp_pcb_size")] = 0;
-			debug[F("tcp_active_estimated_bytes")] = 0;
 		}
 			data[F("rgbww")] = serialized(FPSTR(kInfoRgbwwV2));
 			{
