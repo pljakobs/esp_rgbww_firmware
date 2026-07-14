@@ -18,25 +18,6 @@
  * @section DESCRIPTION
  *
  * WebappOta — background webapp file-fetch and LittleFS staging/activation.
- *
- * Flow:
- *   checkForUpdate()
- *     → queryApi()               (HTTP GET /api/webapp/latest?branch=…&firmware_version=…)
- *     → onApiResponse()          (parse JSON; compare versions; populate _files)
- *     → startNextDownload()      (per file: makedirs, HttpClient::downloadFile)
- *     → onFileDownloaded()       (verify MD5; advance index or activate)
- *     → activateStaging()        (move files from staging/ to root, update ConfigDB)
- *
- * File layout on LittleFS:
- *   staging/<path>  — downloaded, verified files awaiting activation
- *   <path>          — active webapp files served by the webserver
- *
- * ConfigDB state (AppConfig::Root::Webapp):
- *   enabled            — master switch; checkForUpdate() is a no-op when false
- *   api_base_url       — e.g. "https://lightinator.de/api"
- *   installed_version  — persisted after successful activation
- *   installed_md5      — persisted after successful activation (last file md5)
- *   last_check_status  — "ok" | "no_update" | "api_error" | "download_error" | "md5_error"
  */
 #pragma once
 
@@ -45,47 +26,17 @@
 #include <ArduinoJson.h>
 #include <vector>
 
-
-#define FS_MIN_FREE_SPACE 358400UL  // informational: a full webapp bundle is ~350KB
-#define FS_EMERGENCY_FREE_SPACE 102400UL  // below this free space, force-clear staging/ to recover from a stuck, full filesystem
-#define FS_DOWNLOAD_MARGIN 32768UL  // extra headroom (bytes) required on top of the reported bundle size to allow for filesystem overhead
+#define FS_MIN_FREE_SPACE 358400UL  
+#define FS_EMERGENCY_FREE_SPACE 102400UL  
+#define FS_DOWNLOAD_MARGIN 32768UL  
 
 class WebappOta
 {
 public:
-    /**
-     * @brief Trigger a check for a newer webapp from the version API.
-     *
-     * Call this once after the WiFi station has obtained an IP address.
-     * Re-entrant: a second call while a check/download is in progress is
-     * silently ignored.
-     *
-     * @param ignoreEnabled  When true, bypasses the enabled flag.
-     *   Use for: bootstrap fetch (no webapp present) or manual UI trigger.
-     *   Default false — respects the auto-update enabled flag.
-     */
     void checkForUpdate(bool ignoreEnabled = false);
-
-    bool isActive() const
-    {
-        return _state != State::IDLE;
-    }
-
-    // Returns true if a previous download was interrupted and not yet completed.
-    // Persisted in ConfigDB; survives reboots. Checked by checkForUpdate() on boot.
+    bool isActive() const { return _state != State::IDLE; }
     bool wasInterrupted() const;
-
-    /**
-     * @brief Fill @p obj with current OTA state for the /webapp_status endpoint.
-     *
-     * Keys: state (string), file (int, 1-based current), total (int),
-     *       file_path (string), version (string), last_status (string from ConfigDB).
-     */
     void fillStatusJson(JsonObject& obj) const;
-
-    // Broadcast current state as a 'webapp_ota_status' WebSocket message.
-    // Called at each state transition so the updating.html page can react
-    // without polling /webapp_status over HTTP.
     void broadcastStatus() const;
 
 private:
@@ -96,17 +47,13 @@ private:
         ACTIVATING,
     };
 
-    // Single choke point for all _state changes. Keeps the inbound HTTP
-    // connection limit in sync with OTA activity (clamped while active,
-    // restored when returning to IDLE) so the download cannot be starved of
-    // heap by concurrent browser polling on ESP8266.
     void setState(State newState);
 
     struct FileEntry {
-        String path;        ///< relative path, e.g. "assets/index.js.gz"
-        String expectedMd5; ///< lowercase hex MD5 from API response
-        String url;         ///< absolute download URL
-        size_t size{0};     ///< file size in bytes from API (0 if not provided)
+        String path;        
+        String expectedMd5; 
+        String url;         
+        size_t size{0};     
     };
 
     // --- API query ---
@@ -146,12 +93,12 @@ private:
     String _pendingVersion;
     std::vector<FileEntry> _files;
     unsigned _fileIndex{0};
-    unsigned _totalFiles{0};  ///< total files in this version (including already-verified ones)
+    unsigned _totalFiles{0};  
     bool _resumingInterrupted{false};
     bool _retryAfterCleanupDone{false};
     String _lastBranch;
     String _lastFirmwareVersion;
     String _lastApiBaseUrl;
     HttpClient _httpClient;
-    Timer _retryTimer; ///< backoff timer for failed checks
+    Timer _retryTimer; 
 };
