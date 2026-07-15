@@ -51,6 +51,7 @@ BssList AppWIFI::getAvailableNetworks()
 	return _networks;
 }
 
+
 /**
  * Scans for available Wi-Fi networks.
  * 
@@ -306,6 +307,7 @@ void AppWIFI::_STAConnected(const String& ssid, MacAddress bssid, uint8_t channe
 	app.startNetworkServices();
 	broadcastWifiStatus(F("Connected to WiFi"));
 	app.telemetryClient.log(F("WiFi connected"));
+	clearNetworks();
 	_con_ctr = 0;
 	// wifi cstation connected
 }
