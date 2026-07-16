@@ -171,6 +171,7 @@ class LEDControllerAPIService : public mDNS::Service {
 public:
     void setInstance(const String& instance) { _instance = instance; }
 
+    void setWebVersion(const String& webVersion) { _webVersion = webVersion; }
     String getInstance() override { return _instance.length() > 0 ? _instance : F("esprgbwwAPI"); }
     String getName() override { return F("lightinator-api"); }
     Protocol getProtocol() override { return Protocol::Tcp; }
@@ -194,10 +195,14 @@ public:
         txt.add(F("host_type=CONTROLLER"));
         txt.add(F("path=/"));
         txt.add(F("v=2"));
+        if (_webVersion.length() > 0) {
+            txt.add(F("webapp=") + _webVersion);
+        }
     }
 
 private:
     String _instance;
+    String _webVersion;
 };
 
 /**
@@ -356,6 +361,15 @@ public:
      * @param enable true to become leader, false to relinquish leadership
      */
     void checkGroupLeadership();
+
+    /**
+     * @brief Set the web version for the API service
+     * @param v The web version string
+     * 
+     * sets the web version for the API service, which is included in the mDNS TXT records.
+     * this is so that other controllers can find compatible sources for the webapp
+     */
+    void setWebVersion(const String& v);
 
 
 private:

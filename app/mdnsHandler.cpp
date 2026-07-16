@@ -317,7 +317,8 @@ bool mdnsHandler::processSwarmServiceResponse(mDNS::Message& message)
 #ifdef DEBUG_MDNS
             debug_i(ANSI_COLOR_BLUE "Hostname " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ", type: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, info.hostName, hostnameType.c_str());
 #endif
-
+            // todo: add webapVersion to controler database
+            String webappVersion = txt[F("webapp")];
             const Controllers::HostType hostType = Controllers::hostTypeFromString(hostnameType);
             app.controllers->addOrUpdate(info.ID, info.hostName, info.ipAddr.toString(), info.ttl, hostType);
         }
@@ -961,4 +962,15 @@ void mdnsHandler::relinquishGroupLeadership(const char* groupId)
 #ifdef DEBUG_MDNS
     debug_i(ANSI_COLOR_BLUE "This controller is no longer leader for group: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, groupName);
 #endif
+}
+
+void mdnsHandler::setWebVersion(const String& v) {
+    ledControllerAPIService.setWebVersion(v);
+    
+    // Trigger an announcement on the primary responder so network peers 
+    // update their cached TXT records immediately without service re-init.
+if (primaryResponder) {
+        primaryResponder->removeService(ledControllerAPIService);
+        primaryResponder->addService(ledControllerAPIService);
+    }
 }
