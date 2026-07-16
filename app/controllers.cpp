@@ -98,9 +98,9 @@ Controllers::~Controllers() {
 }
 
 // Core methods
-void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char* ipAddress, int ttl, HostType hostType) {
+void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char* ipAddress, const char* webAppVersion,  int ttl, HostType hostType) {
     #ifdef DEBUG_MDNS
-        debug_i(ANSI_COLOR_BLUE "Controllers::addOrUpdate id=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE ", hostname=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ", ip=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ", ttl=" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, id, hostname, ipAddress, ttl);
+        debug_i(ANSI_COLOR_BLUE "Controllers::addOrUpdate id=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE ", hostname=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ", ip=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ", webAppVersion=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ", ttl=" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, id, hostname, ipAddress, webAppVersion, ttl);
     #endif
     if(hostname == nullptr || hostname[0] == '\0' || ipAddress == nullptr || ipAddress[0] == '\0') {
         debug_w(ANSI_COLOR_YELLOW "Empty hostname or IP address provided, skipping addOrUpdate" ANSI_COLOR_RESET);
@@ -117,6 +117,14 @@ void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char*
         }
         visibleControllers[index].state = (ttl > 0) ? ONLINE : OFFLINE;
         visibleControllers[index].pingPending = false;
+        {
+            AppConfig::Root::Webapp webapp(*app.cfg);
+            if(webapp.getInstalledVersion() != nullptr && strlen(webAppVersion) > 0 && strcmp(webAppVersion, webapp.getInstalledVersion().c_str()) == 0) {
+                visibleControllers[index].webAppCompatible = true;
+            } else {
+                visibleControllers[index].webAppCompatible = false;
+            }
+        }
     } else {
         // Add new visible controller
         VisibleController newController;
@@ -125,6 +133,14 @@ void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char*
         newController.hostType = hostType;
         newController.state = (ttl > 0) ? ONLINE : OFFLINE;
         newController.pingPending = false;
+        {
+            AppConfig::Root::Webapp webapp(*app.cfg);
+            if(webapp.getInstalledVersion() != nullptr && strlen(webAppVersion) > 0 && strcmp(webAppVersion, webapp.getInstalledVersion().c_str()) == 0) {
+                newController.webAppCompatible = true;
+            } else {
+                newController.webAppCompatible = false;
+            }
+        }
         visibleControllers.push_back(newController);
     }
 
@@ -175,12 +191,12 @@ void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char*
 
 }
 
-void Controllers::addOrUpdate(unsigned int id, const String& hostname, const String& ipAddress, int ttl, HostType hostType) {
-    addOrUpdate(id, hostname.c_str(), ipAddress.c_str(), ttl, hostType);
+void Controllers::addOrUpdate(unsigned int id, const String& hostname, const String& ipAddress, const String& webAppVersion, int ttl, HostType hostType) {
+    addOrUpdate(id, hostname.c_str(), ipAddress.c_str(), webAppVersion.c_str(), ttl, hostType);
 }
 
 void Controllers::updateFromPing(unsigned int id, int ttl) {
-    addOrUpdate(id, "", "", ttl);
+    addOrUpdate(id, "", "", "", ttl);
 }
 
 void Controllers::removeExpired(int elapsedSeconds) {

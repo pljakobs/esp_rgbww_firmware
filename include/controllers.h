@@ -62,6 +62,7 @@ public:
         HostType hostType = HOST_TYPE_UNKNOWN;
         ControllerState state;
         bool pingPending = false;
+        bool webAppCompatible = false;
     };
 
     class Iterator {
@@ -131,10 +132,15 @@ public:
     ~Controllers();
 
     // Core methods
-    void addOrUpdate(unsigned int id, const char* hostname, const char* ipAddress, int ttl, HostType hostType = HOST_TYPE_UNKNOWN);
-    void addOrUpdate(unsigned int id, const String& hostname, const String& ipAddress, int ttl, HostType hostType = HOST_TYPE_UNKNOWN);
+    void addOrUpdate(unsigned int id, const char* hostname, const char* ipAddress, const char* webAppVersion, int ttl, HostType hostType = HOST_TYPE_UNKNOWN);
+    void addOrUpdate(unsigned int id, const String& hostname, const String& ipAddress, const String& webAppVersion, int ttl, HostType hostType = HOST_TYPE_UNKNOWN);
     void updateFromPing(unsigned int id, int ttl);
     void removeExpired(int elapsedSeconds);
+    void clearWebappCompatibility() {
+        for (auto& controller : visibleControllers) {
+            controller.webAppCompatible = false;
+        }
+    }
 
     static HostType hostTypeFromString(const String& type);
     static const char* hostTypeToString(HostType type);

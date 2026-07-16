@@ -26,6 +26,8 @@
 #include <memory>
 #include <controllers.h>
 
+
+
 #pragma once
 
 #define JSON_SIZE 2048
@@ -171,7 +173,6 @@ class LEDControllerAPIService : public mDNS::Service {
 public:
     void setInstance(const String& instance) { _instance = instance; }
 
-    void setWebVersion(const String& webVersion) { _webVersion = webVersion; }
     String getInstance() override { return _instance.length() > 0 ? _instance : F("esprgbwwAPI"); }
     String getName() override { return F("lightinator-api"); }
     Protocol getProtocol() override { return Protocol::Tcp; }
@@ -195,14 +196,11 @@ public:
         txt.add(F("host_type=CONTROLLER"));
         txt.add(F("path=/"));
         txt.add(F("v=2"));
-        if (_webVersion.length() > 0) {
-            txt.add(F("webapp=") + _webVersion);
-        }
+
     }
 
 private:
     String _instance;
-    String _webVersion;
 };
 
 /**
@@ -212,6 +210,8 @@ private:
  */
 class LEDControllerSwarmService : public mDNS::Service {
 public:
+    void setWebVersion(const String& webVersion) { _webVersion = webVersion; }
+    
     void setInstance(const String& instance) { _instance = instance; }
     void setLeader(bool isLeader)             { _isLeader = isLeader; }
     void setGroups(const Vector<String>& g)   { _groups = g; }
@@ -240,13 +240,18 @@ public:
         for (size_t i = 0; i < _leadingGroups.size(); i++) {
             txt.add(F("leads_") + _leadingGroups[i] + "=1");
         }
+        txt.add(F("webapp=") + getWebappVersion());
+        debug_i("[mDNS] API Service TXT records: %s", txt.toString().c_str());
     }
 
 private:
+    String getWebappVersion();
+
     String _instance;
     bool _isLeader = false;
     Vector<String> _groups;
     Vector<String> _leadingGroups;
+    String _webVersion;
 };
 
 
@@ -345,11 +350,6 @@ public:
      * @return true if the message was handled, false otherwise
      */
     bool onMessage(mDNS::Message& message) override;
-
-    /**
-     * @brief Add a discovered host to the list
-     */
-    void addHost(const char* hostname, const char* ip_address, int ttl, unsigned int id);
 
     /**
      * @brief Send WebSocket update about discovered hosts
