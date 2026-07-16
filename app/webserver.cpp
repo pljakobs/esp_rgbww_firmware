@@ -742,7 +742,7 @@ void ApplicationWebserver::onFile(HttpRequest& request, HttpResponse& response)
 				response.sendString(F("No filesystem mounted"));
 				return;
 			}
-			if(!fileExist(fileName) && !fileExist(fileName + ".gz") && WifiAccessPoint.isEnabled()) {
+			if(!fileExist(OTA_ROOT+fileName) && !fileExist(OTA_ROOT+fileName + ".gz") && WifiAccessPoint.isEnabled()) {
 				//if accesspoint is active and we couldn`t find the file - redirect to index
 				debug_d(ANSI_COLOR_GREEN "ApplicationWebserver::onFile redirecting" ANSI_COLOR_RESET);
 				response.headers[HTTP_HEADER_LOCATION] = F("http://") + WifiAccessPoint.getIP().toString() + "/";
@@ -754,7 +754,7 @@ void ApplicationWebserver::onFile(HttpRequest& request, HttpResponse& response)
 				// sendFile with allowGzipFileCheck=true: tries fileName+".gz" first, sets
 				// Content-Encoding:gzip, and infers MIME from fileName (not fileName.gz).
 				debug_i(ANSI_COLOR_GREEN "sending file %s with gzip check" ANSI_COLOR_RESET, fileName.c_str());
-				response.sendFile(fileName, true);
+				response.sendFile(OTA_ROOT+fileName, true);
 			}
 			return;
 		}
@@ -808,8 +808,17 @@ void ApplicationWebserver::onIndex(HttpRequest& request, HttpResponse& response)
 	}
 #endif
 
+    #ifdef ARCH_HOST
+    char cwd[256];
+    if (getcwd(cwd, sizeof(cwd))!=NULL) {
+        debug_i(ANSI_COLOR_BLUE "Webserver::onIndex - current working directory: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, cwd);
+    } else {
+        debug_e(ANSI_COLOR_RED "Webserver::onIndex - failed to get current working directory" ANSI_COLOR_RESET);
+    }
+	#endif
+	debug_i(ANSI_COLOR_BLUE "Webserver::onIndex - checking for IFS %s" ANSI_COLOR_RESET, (String(OTA_ROOT)+F("/index.html")).c_str());
 	bool hasLfsIndex = app.isFilesystemMounted() &&
-	     (fileExist(F("index.html")) || fileExist(F("index.html.gz")));
+	     (fileExist(OTA_ROOT+F("/index.html")) || fileExist(OTA_ROOT+F("/index.html.gz")));
 
 	// Case 1: AP active with no WiFi credentials → serve captive portal
 	if(WifiAccessPoint.isEnabled() && !WifiStation.isConnected() && !hasLfsIndex) {

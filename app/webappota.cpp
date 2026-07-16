@@ -29,13 +29,15 @@ constexpr const char* kStatusMd5Error = "md5_error";
 constexpr const char* kStatusActivationError = "activation_error";
 constexpr const char* kStatusLowHeap = "low_heap";
 constexpr const char* kStatusLowSpace = "low_space";
+
+
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 String WebappOta::stagingPath(const String& relPath)
 {
-    return String(STAGING_ROOT) + "/" + relPath;
+    return String(OTA_ROOT) + "/" + STAGING_ROOT + "/" + relPath;
 }
 
 bool WebappOta::ensureParentDir(const String& path)
@@ -91,18 +93,28 @@ void WebappOta::checkForUpdate(bool ignoreEnabled)
     debug_i(ANSI_COLOR_BLUE "==============================" ANSI_COLOR_RESET);
     printFileSystemUsage();
     
+    debug_i(ANSI_COLOR_BLUE "==============================" ANSI_COLOR_RESET);
+    debug_i(ANSI_COLOR_BLUE "|   current directory layout |" ANSI_COLOR_RESET);
+    debug_i(ANSI_COLOR_BLUE "==============================" ANSI_COLOR_RESET);
+    
+    listDirectory(OTA_ROOT, 0);
+
+    #ifndef ARCH_HOST
+    // file system space check is only meaningful on target device, not in host emulator
     IFS::FileSystem::Info fsInfo;
     int result = fileGetSystemInfo(fsInfo);
     if(result != FS_OK) {
         debug_e(ANSI_COLOR_RED "WebappOta::checkForUpdate - failed to get filesystem info" ANSI_COLOR_RESET);
         return;
     }
-
+    
     if(fsInfo.freeSpace < FS_EMERGENCY_FREE_SPACE) {
         debug_w(ANSI_COLOR_YELLOW "WebappOta::checkForUpdate - emergency low space (" ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW " bytes), clearing staging" ANSI_COLOR_RESET, fsInfo.freeSpace);
         cleanupStaging();
         fileGetSystemInfo(fsInfo);
     }
+
+    #endif 
 
     if(_state != State::IDLE) {
         debug_i(ANSI_COLOR_BLUE "WebappOta::checkForUpdate - already active, skipping" ANSI_COLOR_RESET);
@@ -459,7 +471,7 @@ void WebappOta::purgeOldWebapp()
     }
 
     Directory root;
-    if(root.open("")) {
+    if(root.open(OTA_ROOT)) {
         std::vector<String> toDelete;
         while(root.next()) {
             auto& stat = root.stat();
@@ -483,21 +495,46 @@ void WebappOta::purgeOldWebapp()
  */
 bool WebappOta::moveTree(const String& srcDir, const String& dstDir)
 {
-    // Resolve the default file system reference. 
-    // (Update this reference if your configuration uses a custom partition instance)
-    IFS::FileSystem& fs = IFS::defaultFileSystem();
-
-    // The constructor requires references to both source and destination filesystems
-    IFS::FileCopier copier(fs, fs);
-
-    // Execute the built-in recursive directory copy utility
-    if(!copier.copyDir(srcDir, dstDir)) {
-        debug_e(ANSI_COLOR_RED "WebappOta::moveTree - copyDir from " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED " to " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED " failed" ANSI_COLOR_RESET, srcDir.c_str(), dstDir.c_str());
+    Directory dir;
+    if(!dir.open(srcDir)) {
+        debug_e(ANSI_COLOR_RED "WebappOta::moveTree - cannot open " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED "" ANSI_COLOR_RESET, srcDir.c_str());
         return false;
     }
 
-    debug_d("WebappOta::moveTree - successfully copied %s to %s", srcDir.c_str(), dstDir.c_str());
-    return true;
+    bool ok = true;
+    while(dir.next()) {
+        auto& stat = dir.stat();
+        String name = stat.name.c_str();
+        String src = srcDir + "/" + name;
+        String dst = dstDir + "/" + name;
+
+        if(stat.attr[FileAttribute::Directory]) {
+            if(!ensureParentDir(dst + "/_")) { // ensure dstDir/<subdir> exists
+                createDirectories(dst);
+            }
+            if(!moveTree(src, dst)) {
+                ok = false;
+            }
+        } else {
+            // Delete destination file if it exists (ignore errors)
+            if(fileExist(dst)) {
+                fileDelete(dst);
+            }
+            if(!ensureParentDir(dst)) {
+                debug_e(ANSI_COLOR_RED "WebappOta::moveTree - makedirs failed for " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED "" ANSI_COLOR_RESET, dst.c_str());
+                ok = false;
+                continue;
+            }
+            int res = fileRename(src, dst);
+            if(res < 0) {
+                debug_e(ANSI_COLOR_RED "WebappOta::moveTree - rename " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED " → " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED " failed (" ANSI_COLOR_CYAN "%d" ANSI_COLOR_RED ")" ANSI_COLOR_RESET, src.c_str(), dst.c_str(), res);
+                ok = false;
+            } else {
+                debug_d("WebappOta::moveTree - %s → %s", src.c_str(), dst.c_str());
+            }
+        }
+    }
+    return ok;
 }
 
 void WebappOta::activateStagingDeferred()
@@ -548,7 +585,7 @@ bool WebappOta::activateStaging()
 
     purgeOldWebapp();
 
-    if(!moveTree(STAGING_ROOT, "")) {
+    if(!moveTree(STAGING_ROOT, OTA_ROOT)) {
         debug_e(ANSI_COLOR_RED "WebappOta::activateStaging - moveTree failed" ANSI_COLOR_RESET);
         return false;
     }
@@ -567,7 +604,9 @@ bool WebappOta::activateStaging()
     app.wsBroadcast(F("notification"), F("Webapp updated to ") + _pendingVersion);
 
     debug_i(ANSI_COLOR_BLUE "WebappOta::activateStaging - rebooting to reclaim heap" ANSI_COLOR_RESET);
+    #ifndef ARCH_HOST
     System.restart(2000); 
+    #endif
 
     return true;
 }
