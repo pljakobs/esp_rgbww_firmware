@@ -6,6 +6,7 @@
         "4m"
     ],
     "partitions": {
+	"factory":{},
         "rom0": {
             "device": "spiFlash",
             "address": "0x010000",
