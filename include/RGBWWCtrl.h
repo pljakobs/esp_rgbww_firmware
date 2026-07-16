@@ -132,3 +132,9 @@
 #define dataDB_PATH "app-data"
 
 #define RSYSLOG 1
+
+#ifdef ARCH_HOST
+    static constexpr const char* OTA_ROOT = ".";
+#else
+    static constexpr const char* OTA_ROOT = ""; // Root of partition
+#endif
