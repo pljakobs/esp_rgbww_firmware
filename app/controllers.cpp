@@ -825,3 +825,28 @@ std::unique_ptr<Controllers::JsonStream> Controllers::createJsonStream(JsonFilte
     auto printer = printJson(dummyPrint, filter, pretty);
     return std::make_unique<JsonStream>(std::move(printer));
 }
+
+IpAddress Controllers::getNextCompatibleWebappController() {
+    if (visibleControllers.empty()) {
+        return IpAddress(255, 255, 255, 255);
+    }
+
+    size_t numControllers = visibleControllers.size();
+    
+    // We loop at most 'numControllers' times to check everyone once
+    for (size_t i = 0; i < numControllers; ++i) {
+        // Calculate the next index to inspect, wrapping around to 0 if we hit the end
+        size_t currentIndex = (lastWebappControllerIndex + i) % numControllers;
+        const auto& controller = visibleControllers[currentIndex];
+
+        if (controller.webAppCompatible ) {
+            // Store the next starting position for the subsequent call
+            lastWebappControllerIndex = (currentIndex + 1) % numControllers;
+            debug_i( "Found compatible webapp controller with ID: %u, IP: %s" , controller.id, getIpAddress(controller.id));
+            return IpAddress(getIpAddress(controller.id));
+        }
+    }
+
+    return IpAddress(255, 255, 255, 255); // Return empty if no online, compatible controllers exist
+}
+    

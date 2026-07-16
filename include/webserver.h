@@ -169,7 +169,15 @@ private:
     //void onUpload(HttpRequest &request, HttpResponse &response);
     bool checkHeap(HttpResponse &response);
     bool checkHeap(HttpResponse &response, uint32_t minHeap);
-    bool preflightRequest(HttpRequest& request, HttpResponse& response, std::initializer_list<HttpMethod> allowedMethods, uint32_t minHeap = 0 );
+    bool preflightRequest(HttpRequest& request, HttpResponse& response, std::initializer_list<HttpMethod> allowedMethods, uint32_t minHeap = 0 ){
+        return preflightRequest(request, response, false, allowedMethods,  minHeap);
+    }
+    bool preflightRequest(HttpRequest& request, 
+                      HttpResponse& response, 
+                      bool canRedirect,
+                      std::initializer_list<HttpMethod> allowedMethods, 
+                      uint32_t minHeap = 0);
+
     String makeId();
     
     static bool isPrintable(const String& str);

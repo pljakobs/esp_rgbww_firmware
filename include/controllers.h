@@ -141,6 +141,7 @@ public:
             controller.webAppCompatible = false;
         }
     }
+    IpAddress getNextCompatibleWebappController();
 
     static HostType hostTypeFromString(const String& type);
     static const char* hostTypeToString(HostType type);
@@ -196,6 +197,7 @@ private:
     std::vector<unsigned int> _controllersToPing;
     Timer _pingTimer;
     HttpClient _pingClient;
+    uint8_t lastWebappControllerIndex=0;
     
     // Helper methods
     size_t findVisibleControllerIndex(unsigned int id);
