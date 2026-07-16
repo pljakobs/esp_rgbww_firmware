@@ -50,6 +50,7 @@ public:
 
     void scan(bool connectAfterScan);
     bool isScanning() { return _scanning; };
+    void clearNetworks() { _networks.clear(); };
     BssList getAvailableNetworks();
     
     void forgetWifi();
