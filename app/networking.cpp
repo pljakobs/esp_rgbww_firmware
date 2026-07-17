@@ -377,9 +377,13 @@ void AppWIFI::_STAGotIP(IpAddress ip, IpAddress mask, IpAddress gateway)
 	app.udpSyslogStream.drainPreNetBuffer();
 #endif
 
-	// Kick off background webapp update check now that we have a routable IP.
-	app.webappOta.checkForUpdate();
-}
+	// Kick off background webapp update check with a 10s delay to allow system to stabilize[cite: 18].
+    // Static SimpleTimer avoids dynamic memory allocation during the boot sequence.
+    static Timer otaDelayTimer;
+    otaDelayTimer.initializeMs(10000, TimerDelegate([]() {
+        app.webappOta.checkForUpdate();
+ 	   })).startOnce();
+	}
 
 /**
  * Stops the access point (AP) if it is enabled.

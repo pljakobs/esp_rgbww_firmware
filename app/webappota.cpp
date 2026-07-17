@@ -116,6 +116,19 @@ void WebappOta::checkForUpdate(bool ignoreEnabled)
 {
     debug_i(ANSI_COLOR_BLUE "WebappOta::checkForUpdate - ignoreEnabled=" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, ignoreEnabled);
     
+    static constexpr size_t MIN_UPDATE_HEAP = 17000;
+    if (app.getFreeHeapSize() < MIN_UPDATE_HEAP) {
+        debug_w(ANSI_COLOR_YELLOW "WebappOta::checkForUpdate - low heap (" ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW " bytes), backing off 5s" ANSI_COLOR_RESET, app.getFreeHeapSize());
+        
+        // Statically allocated CallbackTimer avoids heap allocation.
+        static Timer heapRetryTimer;
+        heapRetryTimer.initializeMs(5000, TimerDelegate([this, ignoreEnabled]() {
+            this->checkForUpdate(ignoreEnabled);
+        })).startOnce();
+        
+        return;
+    }
+
     debug_i(ANSI_COLOR_BLUE "==============================" ANSI_COLOR_RESET);
     debug_i(ANSI_COLOR_BLUE "| file system size and usage |" ANSI_COLOR_RESET);
     debug_i(ANSI_COLOR_BLUE "==============================" ANSI_COLOR_RESET);
@@ -417,7 +430,7 @@ void WebappOta::startNextDownload()
         return;
     }
 
-    // Require at least 16 KB free heap before starting a download.
+    // Require at least 12 KB free heap before starting a download.
     // The HttpClient + lwIP TCP buffers + FileStream need headroom.
     // Back off briefly and retry — each retry re-checks heap availability.
     static constexpr size_t MIN_DOWNLOAD_HEAP = 12000;
