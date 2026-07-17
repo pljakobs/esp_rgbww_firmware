@@ -651,8 +651,20 @@ void Application::startServices()
 	app.reportCrashDump(); // report crash dump if available
 
 	rgbwwctrl.start();
-	webserver.start();
+	static Timer webserverStartTimer;
+    webserverStartTimer.initializeMs(4000, TimerDelegate([this]() {
+        debug_i(ANSI_COLOR_BLUE "Application::startServices - starting webserver after delay" ANSI_COLOR_RESET);
+        webserver.start();
 
+        {
+            debug_i(ANSI_COLOR_BLUE "Application::startServices - starting NTP" ANSI_COLOR_RESET);
+            AppConfig::Root appcfg(*cfg);
+            if(appcfg.events.getServerEnabled()) {
+                eventserver.setEnabled(true);
+                eventserver.start(app.webserver);
+            }
+        } // end of ConfigDB root context
+    })).startOnce();
 	{
 		debug_i(ANSI_COLOR_BLUE "Application::startServices - starting NTP" ANSI_COLOR_RESET);
 		AppConfig::Root appcfg(*cfg);
