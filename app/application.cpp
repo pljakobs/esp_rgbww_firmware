@@ -181,6 +181,78 @@ extern "C" void custom_crash_callback(struct rst_info* ri, uint32_t stack, uint3
 
 #endif // ARCH_ESP8266
 
+// ─── Crash-loop rollback guard ───────────────────────────────────────────────
+// If the firmware crash-reboots repeatedly in quick succession we assume the
+// running ROM is broken and boot the other slot instead. The counters live in
+// memory that survives a reset (RTC on ESP8266/ESP32) but is cleared by a real
+// power-cycle, so pulling the plug always yields a clean slate.
+//
+//  - CRASHLOOP_THRESHOLD consecutive crash-reboots     -> switch to the other ROM
+//  - counters are cleared once the firmware has run for CRASHLOOP_HEALTHY_MS
+//    without crashing (Application::markFirmwareHealthy), which is what enforces
+//    the "within x seconds" window.
+//  - at most CRASHLOOP_MAX_SWITCHES automatic switches per episode, so two broken
+//    ROMs don't ping-pong forever (the device then just keeps rebooting in place
+//    until it is power-cycled, re-flashed, or OTA'd to a known-good build).
+//
+// Override any of the numbers from component.mk via -D... if desired.
+#ifndef CRASHLOOP_THRESHOLD
+#define CRASHLOOP_THRESHOLD 5
+#endif
+#ifndef CRASHLOOP_HEALTHY_MS
+#define CRASHLOOP_HEALTHY_MS 60000
+#endif
+#ifndef CRASHLOOP_MAX_SWITCHES
+#define CRASHLOOP_MAX_SWITCHES 2
+#endif
+#define CRASHLOOP_MAGIC 0xC1A5107Du
+
+struct CrashLoopGuard {
+	uint32_t magic;
+	uint16_t crashCount;  // consecutive quick crash-reboots
+	uint16_t switchCount; // automatic ROM switches this episode
+};
+
+#if defined(ARCH_ESP8266)
+// RTC user memory blocks: the crash dump uses 64-127 and rboot uses 64, so the
+// upper half (128-191) of the 512-byte user area is free for the guard.
+#define CRASHLOOP_RTC_SLOT 128
+static CrashLoopGuard loadCrashGuard()
+{
+	CrashLoopGuard g{};
+	system_rtc_mem_read(CRASHLOOP_RTC_SLOT, &g, sizeof(g));
+	return g;
+}
+static void saveCrashGuard(const CrashLoopGuard& g)
+{
+	system_rtc_mem_write(CRASHLOOP_RTC_SLOT, &g, sizeof(g));
+}
+#elif defined(ARCH_ESP32)
+#include <esp_attr.h>
+// RTC slow memory: retained across software/watchdog/panic resets, but holds
+// garbage after a power-on/brown-out (hence the magic check below).
+static RTC_NOINIT_ATTR CrashLoopGuard rtcCrashGuard;
+static CrashLoopGuard loadCrashGuard()
+{
+	return rtcCrashGuard;
+}
+static void saveCrashGuard(const CrashLoopGuard& g)
+{
+	rtcCrashGuard = g;
+}
+#else
+// Host / other: no persistence across resets (fine for emulator testing).
+static CrashLoopGuard hostCrashGuard{};
+static CrashLoopGuard loadCrashGuard()
+{
+	return hostCrashGuard;
+}
+static void saveCrashGuard(const CrashLoopGuard& g)
+{
+	hostCrashGuard = g;
+}
+#endif
+
 Application app;
 
 #if !(defined SMING_RELEASE) && (defined RSYSLOG)
@@ -204,6 +276,9 @@ void onReady()
 	osMessageInterceptor.begin(onOsMessage);
 	debug_i(ANSI_COLOR_BLUE "starting os message interceptor" ANSI_COLOR_RESET);
 #endif
+
+	// Crash-loop rollback: may switch ROM and restart before we bring anything up.
+	app.checkCrashLoop();
 
 #ifdef ARCH_ESP32
 	esp_wifi_set_ps (WIFI_PS_NONE);
@@ -388,6 +463,10 @@ void Application::init()
 	//load settings
 	_uptimetimer.initializeMs(60000, TimerDelegate(&Application::uptimeCounter, this)).start();
 	_checkRamTimer.initializeMs(30000, TimerDelegate(&Application::checkRam, this)).start();
+
+	// Once we've stayed up this long without crashing, declare the running ROM
+	// healthy and clear the crash-loop counters (enforces the "within x seconds" window).
+	_crashHealthyTimer.initializeMs(CRASHLOOP_HEALTHY_MS, TimerDelegate(&Application::markFirmwareHealthy, this)).startOnce();
 
 #ifdef ARCH_ESP8266
 	// load boot information
@@ -746,6 +825,94 @@ void Application::readCrashDump()
 	}
 }
 #endif
+
+void Application::checkCrashLoop()
+{
+	CrashLoopGuard g = loadCrashGuard();
+	if(g.magic != CRASHLOOP_MAGIC) {
+		// Uninitialised RTC (power-on / brown-out / first boot): start clean.
+		g.magic = CRASHLOOP_MAGIC;
+		g.crashCount = 0;
+		g.switchCount = 0;
+	}
+
+	const uint32_t reason = (rtc_info != nullptr) ? rtc_info->reason : uint32_t(REASON_DEFAULT_RST);
+	bool wasCrash = false;
+	switch(reason) {
+		case REASON_EXCEPTION_RST: // exception / panic
+		case REASON_SOFT_WDT_RST:  // software / task watchdog
+		case REASON_WDT_RST:	   // hardware watchdog
+			wasCrash = true;
+			break;
+		default:
+			break;
+	}
+
+	if(!wasCrash) {
+		// Clean boot (power-on, user restart, OTA switch, ...). Leave the episode
+		// counters as they are; markFirmwareHealthy() clears them once we've proven
+		// the firmware can stay up. Just persist in case we freshly seeded the magic.
+		saveCrashGuard(g);
+		return;
+	}
+
+	if(g.crashCount < 0xFFFF) {
+		g.crashCount++;
+	}
+	debug_w(ANSI_COLOR_YELLOW "crash-loop guard: crash boot (reason " ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW ") count=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW "/" ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW " switches=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_RESET,
+			reason, g.crashCount, (unsigned)CRASHLOOP_THRESHOLD, g.switchCount);
+
+	if(g.crashCount < CRASHLOOP_THRESHOLD) {
+		saveCrashGuard(g);
+		return;
+	}
+
+	if(g.switchCount >= CRASHLOOP_MAX_SWITCHES) {
+		// Both ROMs already tried and still crashing — stop flipping to avoid an
+		// endless ping-pong (and needless flash writes). Keep switchCount so we
+		// remember, but clear crashCount so we don't re-evaluate every single boot.
+		debug_e(ANSI_COLOR_RED "crash-loop guard: switch budget (" ANSI_COLOR_CYAN "%u" ANSI_COLOR_RED ") exhausted; both ROMs appear unstable. Staying put until power-cycle / re-flash / OTA." ANSI_COLOR_RESET,
+				(unsigned)CRASHLOOP_MAX_SWITCHES);
+		g.crashCount = 0;
+		saveCrashGuard(g);
+		return;
+	}
+
+#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
+	g.switchCount++;
+	g.crashCount = 0;
+	saveCrashGuard(g); // persist BEFORE restart so the decision survives the reboot
+	auto before = ota.ota.getRunningPartition();
+	auto after = ota.ota.getNextBootPartition();
+	debug_e(ANSI_COLOR_RED "crash-loop guard: " ANSI_COLOR_CYAN "%u" ANSI_COLOR_RED " crashes in a row -> switching ROM from " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED " to " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED " (switch #" ANSI_COLOR_CYAN "%u" ANSI_COLOR_RED ")" ANSI_COLOR_RESET,
+			(unsigned)CRASHLOOP_THRESHOLD, before.name().c_str(), after.name().c_str(), g.switchCount);
+	if(ota.ota.setBootPartition(after)) {
+		System.restart(100);
+		return;
+	}
+	// Switch failed: undo the accounting so we can retry next crash.
+	debug_e(ANSI_COLOR_RED "crash-loop guard: setBootPartition failed, staying on current ROM" ANSI_COLOR_RESET);
+	g.switchCount--;
+	saveCrashGuard(g);
+#else
+	// No OTA/ROM switching on host builds.
+	g.crashCount = 0;
+	saveCrashGuard(g);
+#endif
+}
+
+void Application::markFirmwareHealthy()
+{
+	CrashLoopGuard g = loadCrashGuard();
+	if(g.magic == CRASHLOOP_MAGIC && (g.crashCount != 0 || g.switchCount != 0)) {
+		debug_i(ANSI_COLOR_GREEN "crash-loop guard: firmware stable for " ANSI_COLOR_CYAN "%u" ANSI_COLOR_GREEN " ms, clearing counters (was count=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_GREEN " switches=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_GREEN ")" ANSI_COLOR_RESET,
+				(unsigned)CRASHLOOP_HEALTHY_MS, g.crashCount, g.switchCount);
+	}
+	g.magic = CRASHLOOP_MAGIC;
+	g.crashCount = 0;
+	g.switchCount = 0;
+	saveCrashGuard(g);
+}
 
 void Application::reportCrashDump()
 {
