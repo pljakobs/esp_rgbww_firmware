@@ -379,14 +379,11 @@ private:
 
     // Discovery
     SimpleTimer _mdnsSearchTimer;
-    SimpleTimer _pingTimer;
     String searchName;
     // Swarm gossip service type — controllers browse this exclusively
     const char* service = "_lightinator._tcp.local";
     const char* wallPanelService = "_wall-panel-api._tcp.local";
     int _mdnsTimerInterval = 15000; // Increased from 10000
-    int _mdnsPingInterval = 10000; // Ping every minute
-    int conntrack = 0;
     int _currentMdnsTimerInterval;
     unsigned long _lastMessageTime = 0;
     int _messageCount = 0;
@@ -415,7 +412,6 @@ private:
     // Discovery methods
     static void sendSearchCb(void* pTimerArg);
     void sendSearch();
-    // void queryKnownControllers(uint8_t batchIndex);
 
     // Service instances
     LEDControllerAPIService  ledControllerAPIService;  // _lightinator-api._tcp: external tools
@@ -429,9 +425,6 @@ private:
     bool processSwarmServiceResponse(mDNS::Message& message); // _lightinator._tcp replies
     bool processHostnameARecord(mDNS::Message& message, mDNS::Answer* a_answer);
     bool processHostnameResponse(mDNS::Message& message, const char* hostname);
-
-    void pingController(const char* ipAddress);
-    int pingCallback(HttpConnection& connection, bool successful);
 
 };
 
