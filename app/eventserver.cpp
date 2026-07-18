@@ -128,7 +128,7 @@ void EventServer::publishCurrentState(const ChannelOutput& raw, const HSVCT* pHs
 		return;
 	unsigned long currentTime = millis();
 	if(currentTime - _lastEventTime < _minEventInterval) {
-		debug_i(ANSI_COLOR_BLUE "eventserver, droppinging currentState event" ANSI_COLOR_RESET);
+		debug_d("eventserver, dropping currentState event\n");
 		return; // Silently discard this event
 	}
 	_lastRaw = raw;
@@ -138,12 +138,19 @@ void EventServer::publishCurrentState(const ChannelOutput& raw, const HSVCT* pHs
 	}
 	_lastEventTime = currentTime;
 
-	JsonRpcMessage msg(F("color_event"));
-	JsonObject root = msg.getParams();
+	// Option C: reuse the persistent _colorDoc for this high-frequency event so
+	// no JSON document is heap-allocated per publish (can fire up to 50x/s under
+	// MQTT sync). clear() keeps the static pool; we just repopulate it.
+	_colorDoc.clear();
+	JsonObject root = _colorDoc.to<JsonObject>();
+	root[F("jsonrpc")] = "2.0";
+	root[F("method")] = F("color_event");
+	root[F("id")] = _nextId++;
+	JsonObject params = root.createNestedObject(F("params"));
 
-	root[F("mode")] = pHsv ? "hsv" : "raw";
+	params[F("mode")] = pHsv ? "hsv" : "raw";
 
-	JsonObject rawJson = root.createNestedObject(F("raw"));
+	JsonObject rawJson = params.createNestedObject(F("raw"));
 	rawJson[F("r")] = raw.r;
 	rawJson[F("g")] = raw.g;
 	rawJson[F("b")] = raw.b;
@@ -155,7 +162,7 @@ void EventServer::publishCurrentState(const ChannelOutput& raw, const HSVCT* pHs
 		int ct;
 		pHsv->asRadian(h, s, v, ct);
 
-		JsonObject hsvJson = root.createNestedObject(F("hsv"));
+		JsonObject hsvJson = params.createNestedObject(F("hsv"));
 		hsvJson[F("h")] = h;
 		hsvJson[F("s")] = s;
 		hsvJson[F("v")] = v;
@@ -164,7 +171,12 @@ void EventServer::publishCurrentState(const ChannelOutput& raw, const HSVCT* pHs
 
 	debug_d("EventServer::publishCurrentColor\n");
 
-	sendToClients(msg);
+	if(_colorDoc.overflowed()) {
+		debug_e(ANSI_COLOR_RED "EventServer::publishCurrentState: color_event exceeded _colorDoc capacity (%u), event truncated" ANSI_COLOR_RESET,
+				(unsigned)_colorDoc.capacity());
+	}
+
+	sendRoot(root);
 }
 
 /**
@@ -236,14 +248,22 @@ void EventServer::publishTransitionFinished(const String& name, bool requeued)
 void EventServer::sendToClients(JsonRpcMessage& rpcMsg)
 {
 	rpcMsg.setId(_nextId++);
+	sendRoot(rpcMsg.getRoot());
+}
 
-	String jsonStr = Json::serialize(rpcMsg.getRoot());
-	debug_i(ANSI_COLOR_BLUE "EventServer::sendToClients: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "\n" ANSI_COLOR_RESET, jsonStr.c_str());
+void EventServer::sendRoot(const JsonObject& root)
+{
+	// Serialize into the persistent buffer. setLength(0) keeps the already
+	// allocated capacity, so repeated events reuse the same heap block instead
+	// of allocating and freeing a fresh String every time.
+	_txBuffer.setLength(0);
+	Json::serialize(root, _txBuffer);
+	debug_d("EventServer::sendToClients: %s\n", _txBuffer.c_str());
 
 	for(unsigned i = 0; i < connections.size(); ++i) {
 		auto pClient = reinterpret_cast<TcpClient*>(connections[i]);
-		pClient->sendString(jsonStr);
+		pClient->sendString(_txBuffer);
 	}
 
-	app.wsBroadcast(jsonStr);
-  }
+	app.wsBroadcast(_txBuffer);
+}

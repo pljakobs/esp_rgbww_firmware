@@ -56,7 +56,7 @@ public:
     void forget_wifi_and_restart();
     bool delayedCMD(String cmd, int delay);
 
-    void wsBroadcast(String message);
+    void wsBroadcast(const String& message);
     void wsBroadcast(String cmd, String message);
     void wsBroadcast(const String& cmd, const JsonObject& params);
 

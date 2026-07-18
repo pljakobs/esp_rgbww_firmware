@@ -25,33 +25,27 @@
 
 JsonRpcMessage::JsonRpcMessage(const String& name)
 {
-	JsonObject json = _stream.getRoot();
+	JsonObject json = _doc.to<JsonObject>();
 	json[F("jsonrpc")] = "2.0";
 	json[F("method")] = name;
-}
-
-JsonObjectStream& JsonRpcMessage::getStream()
-{
-	return _stream;
 }
 
 JsonObject JsonRpcMessage::getParams()
 {
 	if(_pParams.isNull()) {
-		_pParams = _stream.getRoot().createNestedObject("params");
+		_pParams = _doc.as<JsonObject>().createNestedObject("params");
 	}
 	return _pParams;
 }
 
 JsonObject JsonRpcMessage::getRoot()
 {
-	return _stream.getRoot();
+	return _doc.as<JsonObject>();
 }
 
 void JsonRpcMessage::setId(int id)
 {
-	JsonObject json = _stream.getRoot();
-	json[F("id")] = id;
+	_doc[F("id")] = id;
 }
 
 
@@ -60,11 +54,13 @@ void JsonRpcMessage::setId(int id)
 
 JsonRpcMessageIn::JsonRpcMessageIn(const String& json)
 {
-	const bool parsed = Json::deserialize(_doc, json);
-	if(!parsed) {
+	DeserializationError err = deserializeJson(_doc, json);
+	if(err) {
 		_valid = false;
-		// Avoid allocating error string for malformed input
-		// getError() will return empty string or default if needed
+		// Distinguish a too-small parse buffer from genuinely malformed input so
+		// callers can report the real cause instead of a generic error.
+		_error = (err == DeserializationError::NoMemory) ? F("message too large for parse buffer")
+														 : F("malformed json");
 		return;
 	}
 

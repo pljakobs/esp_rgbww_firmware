@@ -1025,7 +1025,7 @@ int Application::getRomSlot()
 /*
 *	send a jsonrpc message from a fully constructed JsonRpcMessage object string
 */
-void Application::wsBroadcast(String message)
+void Application::wsBroadcast(const String& message)
 {
     size_t length = message.length();
     if(length > MAX_LOG_LINE_SIZE) length = MAX_LOG_LINE_SIZE;
