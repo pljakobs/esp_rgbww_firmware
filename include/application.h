@@ -70,7 +70,11 @@ public:
 
     void checkRam();
     void reportCrashDump();
-    
+
+    // Crash-loop rollback guard: switch to the other ROM after repeated quick crashes.
+    void checkCrashLoop();
+    void markFirmwareHealthy();
+
 #ifdef ARCH_ESP8266
     void readCrashDump();
     inline bool isTempBoot() { return _bootmode == MODE_TEMP_ROM; };
@@ -162,6 +166,7 @@ private:
     Timer _uptimetimer;
     Timer _checkRamTimer;
     Timer _resetPinTimer;
+    Timer _crashHealthyTimer;
 
     uint32_t _uptimeMinutes   = 0;
     size_t _minimumHeapUptime = 0x80000;
