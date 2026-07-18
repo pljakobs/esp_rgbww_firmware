@@ -18,8 +18,6 @@
 #pragma once
 
 #include <app-data.h>
-#include <Network/HttpClient.h>
-#include <Timer.h>
 #include <Data/Stream/DataSourceStream.h>
 #include <vector>
 #include <algorithm>
@@ -53,7 +51,6 @@ public:
         HostType hostType = HOST_TYPE_UNKNOWN;
         ControllerState state = NOT_FOUND;
         int ttl = 0;
-        bool pingPending = false;
     };
 
     struct VisibleController {
@@ -61,7 +58,6 @@ public:
         int ttl;
         HostType hostType = HOST_TYPE_UNKNOWN;
         ControllerState state;
-        bool pingPending = false;
         bool webAppCompatible = false;
     };
 
@@ -134,7 +130,6 @@ public:
     // Core methods
     void addOrUpdate(unsigned int id, const char* hostname, const char* ipAddress, const char* webAppVersion, int ttl, HostType hostType = HOST_TYPE_UNKNOWN);
     void addOrUpdate(unsigned int id, const String& hostname, const String& ipAddress, const String& webAppVersion, int ttl, HostType hostType = HOST_TYPE_UNKNOWN);
-    void updateFromPing(unsigned int id, int ttl);
     void removeExpired(int elapsedSeconds);
     void clearWebappCompatibility() {
         for (auto& controller : visibleControllers) {
@@ -164,7 +159,6 @@ public:
     bool isVisibleByHostname(const String& hostname);
     bool isVisibleByIpAddress(const char* ipAddress);
     bool isVisibleByIpAddress(const String& ipAddress);
-    bool isPingPending(unsigned int id);
     int getTTL(unsigned int id);
     
     // Counts
@@ -172,7 +166,6 @@ public:
     size_t getTotalCount();
     
     // Utility
-    void init(int pingInterval = 10000);
     void update();
     void forgetControllers();
 
@@ -188,15 +181,6 @@ private:
     static const size_t INVALID_INDEX = SIZE_MAX;
     
     std::vector<VisibleController> visibleControllers;
-    
-    // Ping management
-    bool _pingInProgress;
-    size_t _pingIndex;
-    int _pingInterval;
-    int _pingTimeout;
-    std::vector<unsigned int> _controllersToPing;
-    Timer _pingTimer;
-    HttpClient _pingClient;
     uint8_t lastWebappControllerIndex=0;
     
     // Helper methods
