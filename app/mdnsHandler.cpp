@@ -85,12 +85,9 @@ void mdnsHandler::setHostname(const char* newHostname)
     relinquishLeadership();
 
     // Create a copy of the group IDs to avoid iterator invalidation only if needed
-    Vector<String> groupsToRelinquish;
-    for (size_t i = 0; i < _leadingGroups.size(); ++i) {
-        groupsToRelinquish.add(_leadingGroups[i]);
-    }
-    for (const String& groupId : groupsToRelinquish) {
-        relinquishGroupLeadership(groupId.c_str());
+    std::vector<GroupId> groupsToRelinquish = _leadingGroups;
+    for (const auto& g : groupsToRelinquish) {
+        relinquishGroupLeadership(g.value);
     }
 
     // Sanitize the hostname
@@ -758,7 +755,11 @@ void mdnsHandler::checkGroupLeadership() {
     
     // Get access to all groups and track our memberships
     AppData::Root::Groups groups(*app.data);
-    
+
+    // We can lead at most as many groups as exist; reserve up front so the
+    // push_back()s in becomeGroupLeader() don't trigger reallocations.
+    _leadingGroups.reserve(groups.getItemCount());
+
     // Build map of group ID -> group name for easier reference (avoid redundant String copies)
     std::map<String, String> groupNames;
     
@@ -820,8 +821,8 @@ void mdnsHandler::checkGroupLeadership() {
 
         // Only set up leadership if we're not already leader for this group
         bool alreadyLeader = false;
-        for (int j = 0; j < _leadingGroups.size(); j++) {
-            if (_leadingGroups[j] == groupId) {
+        for (const auto& g : _leadingGroups) {
+            if (groupId == g.value) {
                 alreadyLeader = true;
                 break;
             }
@@ -832,37 +833,35 @@ void mdnsHandler::checkGroupLeadership() {
     }
 
     // Step 4: Relinquish leadership for groups where we no longer should be leader
-    Vector<String> groupsToRelinquish;
+    std::vector<GroupId> groupsToRelinquish;
 
-    for (size_t i = 0; i < _leadingGroups.size(); i++) {
-        const String& groupId = _leadingGroups[i];  // Use const ref instead of copy
+    for (const auto& g : _leadingGroups) {
+        const char* groupId = g.value;
 
         // If we're no longer a member or shouldn't be leader, relinquish
-        bool shouldRelinquish = true;
+        bool stillMember = false;
         for (int j = 0; j < memberGroups.size(); j++) {
             if (memberGroups[j] == groupId) {
-                shouldRelinquish = false;
+                stillMember = true;
                 break;
             }
         }
-        if (shouldRelinquish) {
-            groupsToRelinquish.add(groupId);
-        } else {
-            shouldRelinquish = true;
+        bool stillLeader = false;
+        if (stillMember) {
             for (int j = 0; j < groupsToLead.size(); j++) {
                 if (groupsToLead[j] == groupId) {
-                    shouldRelinquish = false;
+                    stillLeader = true;
                     break;
                 }
             }
-            if (shouldRelinquish) {
-                groupsToRelinquish.add(groupId);
-            }
+        }
+        if (!stillMember || !stillLeader) {
+            groupsToRelinquish.push_back(g);
         }
     }
 
-    for (size_t i = 0; i < groupsToRelinquish.size(); i++) {
-        relinquishGroupLeadership(groupsToRelinquish[i].c_str());
+    for (const auto& g : groupsToRelinquish) {
+        relinquishGroupLeadership(g.value);
     }
     
     // Step 5: Update our service TXT records with current group info
@@ -870,36 +869,12 @@ void mdnsHandler::checkGroupLeadership() {
 }
 
 void mdnsHandler::updateServiceTxtRecords() {
-    // Get our current group memberships
-    Vector<String> memberGroups;
-    uint32_t myId = system_get_chip_id();
-    AppData::Root::Groups groups(*app.data);
-    
-    // Build list of groups we're members of
-    for (auto it = groups.begin(); it != groups.end(); ++it) {
-        auto& currentGroup = *it;
-        
-        // Check if we're a member
-        for (auto controllerIt = currentGroup.controllerIds.begin(); 
-             controllerIt != currentGroup.controllerIds.end(); 
-             ++controllerIt) {
-            
-            // Use const String& to access iterator; toInt() avoids extra String temp
-            if ((*controllerIt).toInt() == (int)myId) {
-                memberGroups.add(currentGroup.getId());
-                break;
-            }
-        }
-    }
-    
-    // Update swarm service with current group and leader state
+    // Group membership is no longer advertised via mDNS. Leadership is computed
+    // locally from the synced config DB, so only the leader flag is published.
     ledControllerSwarmService.setLeader(_isLeader);
-    ledControllerSwarmService.setGroups(memberGroups);
-    ledControllerSwarmService.setLeadingGroups(_leadingGroups);
 
     #ifdef DEBUG_MDNS
-    debug_i(ANSI_COLOR_BLUE "Updated service TXT records with " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " group memberships and " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " leading groups" ANSI_COLOR_RESET, 
-            memberGroups.size(), _leadingGroups.size());
+    debug_i(ANSI_COLOR_BLUE "Updated service TXT records (leader=" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE ")" ANSI_COLOR_RESET, _isLeader);
     #endif
 }
 
@@ -936,7 +911,10 @@ void mdnsHandler::becomeGroupLeader(const char* groupId, const char* groupName)
     _groupWebServices[groupId] = std::move(webService);
 
     // Track that we're now leading this group
-    _leadingGroups.add(groupId);
+    GroupId g;
+    strncpy(g.value, groupId, sizeof(g.value) - 1);
+    g.value[sizeof(g.value) - 1] = '\0';
+    _leadingGroups.push_back(g);
 
 #ifdef DEBUG_MDNS
     debug_i(ANSI_COLOR_BLUE "This controller is now leader for group: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " (" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ".local)" ANSI_COLOR_RESET, groupName, san_buf);
@@ -972,9 +950,9 @@ void mdnsHandler::relinquishGroupLeadership(const char* groupId)
     }
 
     // Remove from our list of led groups
-    for (int i = 0; i < _leadingGroups.size(); i++) {
-        if (_leadingGroups[i] == groupId) {
-            _leadingGroups.remove(i);
+    for (auto it = _leadingGroups.begin(); it != _leadingGroups.end(); ++it) {
+        if (strcmp(it->value, groupId) == 0) {
+            _leadingGroups.erase(it);
             break;
         }
     }
