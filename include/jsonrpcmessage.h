@@ -18,20 +18,19 @@
 #pragma once
 
 #include <RGBWWLed/RGBWWLed.h>
-#include <JsonObjectStream.h>
+#include <ArduinoJson.h>
 
-#define MAX_JSON_MESSAGE_LENGTH 1024
+#define MAX_JSON_MESSAGE_LENGTH 512
 class JsonRpcMessage {
 public:
     JsonRpcMessage(const String& name);
-    JsonObjectStream& getStream();
     void setId(int id);
     JsonObject getParams();
     JsonObject getRoot();
     //void setParams(String params);
 
 private:
-    JsonObjectStream _stream;
+    StaticJsonDocument<MAX_JSON_MESSAGE_LENGTH> _doc;
     JsonObject _pParams;
 };
 

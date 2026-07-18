@@ -267,7 +267,13 @@ bool Api::dispatchCommand(const String& method, const String& params, String& er
 	StaticJsonDocument<512> doc;
 	DeserializationError err = deserializeJson(doc, params);
 	if(err) {
-		errorMsg = F("malformed json");
+		if(err == DeserializationError::NoMemory) {
+			errorMsg = F("params too large for parse buffer");
+			debug_e(ANSI_COLOR_RED "Api::dispatchCommand: params exceeded %u byte buffer" ANSI_COLOR_RESET,
+					(unsigned)doc.capacity());
+		} else {
+			errorMsg = F("malformed json");
+		}
 		return false;
 	}
 
@@ -337,7 +343,7 @@ bool Api::dispatchJsonRpc(const String& json, String& errorMsg, bool relay)
 {
 	JsonRpcMessageIn rpc(json);
 	if(!rpc.isValid()) {
-		errorMsg = F("malformed json");
+		errorMsg = rpc.getError().length() ? rpc.getError() : String(F("malformed json"));
 		return false;
 	}
 
