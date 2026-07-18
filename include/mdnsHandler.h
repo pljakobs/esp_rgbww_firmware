@@ -24,6 +24,7 @@
 #include <Network/Mdns/debug.h>
 #include <map>
 #include <memory>
+#include <vector>
 #include <controllers.h>
 
 
@@ -206,7 +207,8 @@ private:
 /**
  * _lightinator._tcp  —  controller-to-controller swarm gossip
  * Browsed by: other Lightinator controllers only.
- * Carries swarm topology metadata (leader status, group membership).
+ * Carries swarm topology metadata (leader status only). Group membership is
+ * NOT advertised: leadership is computed locally from the synced config DB.
  */
 class LEDControllerSwarmService : public mDNS::Service {
 public:
@@ -214,8 +216,6 @@ public:
     
     void setInstance(const String& instance) { _instance = instance; }
     void setLeader(bool isLeader)             { _isLeader = isLeader; }
-    void setGroups(const Vector<String>& g)   { _groups = g; }
-    void setLeadingGroups(const Vector<String>& g) { _leadingGroups = g; }
 
     String getInstance() override { return _instance; }
     String getName() override { return F("lightinator"); }
@@ -229,17 +229,6 @@ public:
         txt.add(F("type=CONTROLLER"));
         txt.add(F("host_type=CONTROLLER"));
         txt.add(_isLeader ? F("isLeader=1") : F("isLeader=0"));
-        if (_groups.size() > 0) {
-            String groupList;
-            for (size_t i = 0; i < _groups.size(); i++) {
-                if (i > 0) groupList += ",";
-                groupList += _groups[i];
-            }
-            txt.add(F("groups=") + groupList);
-        }
-        for (size_t i = 0; i < _leadingGroups.size(); i++) {
-            txt.add(F("leads_") + _leadingGroups[i] + "=1");
-        }
         txt.add(F("webapp=") + getWebappVersion());
         debug_i("[mDNS] API Service TXT records: %s", txt.toString().c_str());
     }
@@ -249,8 +238,6 @@ private:
 
     String _instance;
     bool _isLeader = false;
-    Vector<String> _groups;
-    Vector<String> _leadingGroups;
     String _webVersion;
 };
 
@@ -383,7 +370,7 @@ private:
     // Swarm gossip service type — controllers browse this exclusively
     const char* service = "_lightinator._tcp.local";
     const char* wallPanelService = "_wall-panel-api._tcp.local";
-    int _mdnsTimerInterval = 15000; // Increased from 10000
+    int _mdnsTimerInterval = 30000; // Increased from 10000
     int _currentMdnsTimerInterval;
     unsigned long _lastMessageTime = 0;
     int _messageCount = 0;
@@ -398,8 +385,16 @@ private:
     void becomeGroupLeader(const char* groupId, const char* groupName);
     void relinquishGroupLeadership(const char* groupId);
 
-    // Track group leadership
-    Vector<String> _leadingGroups;
+    // Track group leadership.
+    // Group IDs have the form "<chipId>-<localId>": chipId is up to 12 decimal
+    // digits, localId is 8 chars, plus '-' and NUL = 22; padded to 32 for
+    // alignment. Stored as fixed buffers (contiguous std::vector) to avoid the
+    // per-element heap churn of a Vector<String>.
+    static constexpr size_t GROUP_ID_BUFLEN = 32;
+    struct GroupId {
+        char value[GROUP_ID_BUFLEN];
+    };
+    std::vector<GroupId> _leadingGroups;
     std::map<String, std::unique_ptr<mDNS::Responder>> _groupResponders;
     std::map<String, std::unique_ptr<LEDControllerWebService>> _groupWebServices;
 
