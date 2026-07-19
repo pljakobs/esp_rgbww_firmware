@@ -435,7 +435,7 @@ jobs:
         with:
           pattern: host-smoke-*
           merge-multiple: true
-          path: .
+          path: out
 
       - name: Restore Host binary permissions
         run: |
