@@ -269,6 +269,31 @@ size_t debugStreamOutputCallback(const char* buffer, unsigned int length)
 
 void onReady()
 {
+	#ifdef ARCH_HOST
+	// Consume all but ~20kB of the (tracked) heap so the emulator runs close to
+	// the low-memory conditions seen on the device.
+	//
+	// Getting the compiler to actually perform (and keep) the allocation needs
+	// two tricks:
+	//   1. A compiler barrier on the returned pointer, so the escaped value is
+	//      considered "used" and the malloc call can't be dead-code eliminated.
+	//   2. memset with a NON-zero value; memset-to-zero right after malloc gets
+	//      folded into calloc and then dropped as a dead store, which is why the
+	//      tracked free heap previously never moved.
+	static uint8_t* heapHog = nullptr;
+	auto free = system_get_free_heap_size();
+	if (free>20000){
+		size_t take = free - 24000;
+		debug_i(ANSI_COLOR_BLUE "onReady: free heap %d, allocating %d bytes to squeeze heap to ~20k" ANSI_COLOR_RESET, free, (int)take);
+		heapHog = static_cast<uint8_t*>(malloc(take));
+		asm volatile("" : : "g"(heapHog) : "memory"); // don't let the allocation be optimised away
+		if (heapHog) {
+			memset(heapHog, 0xA5, take); // non-zero so it isn't turned back into an elidable calloc
+			asm volatile("" : : : "memory");
+		}
+		debug_i(ANSI_COLOR_BLUE "onReady: heapHog allocated %d bytes, free heap now %d" ANSI_COLOR_RESET, (int)take, system_get_free_heap_size());
+	}
+	#endif
 	//System.setCpuFrequencye(CF_160MHz);
 	debug_i(ANSI_COLOR_BLUE "getting reset info from rtc" ANSI_COLOR_RESET);
 	app.rtc_info = system_get_rst_info();
@@ -490,7 +515,11 @@ debug_i(ANSI_COLOR_BLUE "Application::init - check running partition" ANSI_COLOR
 auto part=app.ota.ota.getRunningPartition();
 debug_i(ANSI_COLOR_BLUE "Application::init - running partition " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, part.name());
 
-#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
+#if defined(ARCH_ESP8266) || defined(ARCH_ESP32) || defined(ARCH_HOST)
+	// Mount the data filesystem on every architecture. On Host this drives the
+	// emulated flash backing file + LittleFS (the same code path as the device),
+	// instead of the host-OS passthrough which bypassed LittleFS and the OTA
+	// staging logic entirely.
 	mountfs(getRomSlot());
 	// ToDo - rework mounting filesystem
 	if(_fs_mounted) {
@@ -503,16 +532,12 @@ debug_i(ANSI_COLOR_BLUE "Application::init - running partition " ANSI_COLOR_CYAN
 		}
 		Serial << dir.count() << _F(" files found") << endl << endl;
 	}
+#endif
 
-//#if defined(ARCH_ESP8266) || defined(ESP32)
+#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
 	app.ota.checkAtBoot();
-//#endif
 #endif
 	(void)getFreeHeapSize(); // sample heap after fs mount + OTA check
-#ifdef ARCH_HOST
-	debug_i(ANSI_COLOR_BLUE "mounting host file system" ANSI_COLOR_RESET);
-	fileSetFileSystem(&IFS::Host::getFileSystem());
-#endif
 
 	// initialize config and data
 	cfg =  std::make_unique<AppConfig>(configDB_PATH);
@@ -1077,18 +1102,11 @@ bool Application::mountfs(int slot)
     * system could be spiffs or LitleFS
     *
     */
-#ifdef ARCH_HOST
-	/*
-     * host file system
-     */
-	debug_i(ANSI_COLOR_BLUE "mounting host file system" ANSI_COLOR_RESET);
-	fileSetFileSystem(&IFS::Host::getFileSystem());
-	_fs_mounted = true;
-	return _fs_mounted;
-#endif
 
 	/*
-     * on device file system
+     * data file system (SPIFFS/LittleFS on the flash device). On Host this runs
+     * against the emulated flash backing file, so the same LittleFS code path is
+     * exercised as on the target instead of the host-OS passthrough.
      */
 
 	auto part = Storage::findPartition(F("spiffs") + String(slot));
