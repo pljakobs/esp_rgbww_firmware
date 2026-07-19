@@ -18,10 +18,12 @@
 #     single logical node,
 #   * its own copy of flash.bin (ConfigDB) so writes never collide.
 #
-# Discovery is asserted purely over HTTP: each controller exposes the number of
-# ONLINE peers it has learned as `neighbours` in GET /info (self is state
-# LOCALHOST and is NOT counted), so full convergence for a swarm of N is
-# neighbours == N-1 on every instance.
+# Discovery is asserted purely over HTTP: each controller exposes its learned
+# peers in GET /hosts?all=true as a JSON array of {..,"state":<int>} entries.
+# A peer that is ONLINE has state==3 (ControllerState: NOT_FOUND=0, INCOMPLETE=1,
+# OFFLINE=2, ONLINE=3, LOCALHOST=4); self is LOCALHOST (4) and is NOT counted.
+# The neighbour count is therefore the number of "state":3 entries, so full
+# convergence for a swarm of N is neighbours == N-1 on every instance.
 #
 # The neighbour-count check is SOFT by default: results are reported but the
 # script still exits 0 (set SWARM_STRICT=1 to make non-convergence fail).
@@ -169,11 +171,14 @@ http_ok() {  # http_ok <ip>
   curl -s -o /dev/null --max-time 3 $(curl_bind) "http://$1/info"
 }
 
-neighbours_of() {  # neighbours_of <ip> -> prints integer or "-"
+neighbours_of() {  # neighbours_of <ip> -> prints integer (ONLINE peers) or "-"
   local body
-  body="$(curl -s --max-time 3 $(curl_bind) "http://$1/info" 2>/dev/null)" || { echo "-"; return; }
+  body="$(curl -s --max-time 3 $(curl_bind) "http://$1/hosts?all=true" 2>/dev/null)" || { echo "-"; return; }
+  # /info has no neighbours field; /hosts?all=true returns a "hosts" array whose
+  # ONLINE peers carry "state":3 (self is LOCALHOST "state":4 and is excluded).
+  [[ "$body" == *'"hosts"'* ]] || { echo "-"; return; }
   local n
-  n="$(printf '%s' "$body" | grep -oE '"neighbours"[[:space:]]*:[[:space:]]*[0-9]+' | grep -oE '[0-9]+' | head -n1)"
+  n="$(printf '%s' "$body" | grep -oE '"state"[[:space:]]*:[[:space:]]*3' | wc -l | tr -d '[:space:]')"
   [[ -n "$n" ]] && echo "$n" || echo "-"
 }
 
