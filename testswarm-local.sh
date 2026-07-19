@@ -130,6 +130,27 @@ install_pkg() {  # install_pkg <human-name> <apt/apk-pkg> <dnf/yum-pkg>
   fi
 }
 
+# TAP creation needs the /dev/net/tun character device. A --privileged Docker
+# container does NOT get it automatically, so `ip tuntap add` fails with an
+# invisible error and every swtap ends up missing. Load the module and/or
+# create the node (both permitted under CAP_MKNOD/privileged).
+ensure_tun() {
+  [[ -c /dev/net/tun ]] && return 0
+  local sudo=""
+  [[ "$(id -u)" -ne 0 ]] && command -v sudo >/dev/null 2>&1 && sudo="sudo"
+  log "/dev/net/tun missing; attempting to provision it..."
+  $sudo modprobe tun 2>/dev/null || true
+  if [[ ! -c /dev/net/tun ]]; then
+    $sudo mkdir -p /dev/net 2>/dev/null || true
+    $sudo mknod /dev/net/tun c 10 200 2>/dev/null || true
+    $sudo chmod 0600 /dev/net/tun 2>/dev/null || true
+  fi
+  if [[ ! -c /dev/net/tun ]]; then
+    err "/dev/net/tun is unavailable and could not be created; TAP interfaces cannot be built. Run the container with --device /dev/net/tun (and 'modprobe tun' on the host)."
+    exit 1
+  fi
+}
+
 require_tools() {
   if ! IP_BIN="$(resolve_ip_bin)"; then
     install_pkg "ip" iproute2 iproute || true
@@ -145,6 +166,7 @@ require_tools() {
       exit 1
     fi
   fi
+  ensure_tun
 }
 
 # ---------------------------------------------------------------------------
@@ -213,7 +235,15 @@ setup_bridge() {
 setup_tap() {  # setup_tap <index>
   local i="$1" tap; tap="swtap${i}"
   local mac; mac="$(printf '02:00:00:00:00:%02x' "$((i + 1))")"
-  "$IP_BIN" tuntap add dev "$tap" mode tap 2>/dev/null || true
+  local adderr
+  if ! adderr="$("$IP_BIN" tuntap add dev "$tap" mode tap 2>&1)"; then
+    # An already-existing tap (idempotent re-run) is fine; anything else is fatal
+    # because the enslave/address steps below would fail with "Cannot find device".
+    if ! "$IP_BIN" link show "$tap" >/dev/null 2>&1; then
+      err "failed to create TAP $tap: ${adderr:-unknown error} (is /dev/net/tun available?)"
+      exit 1
+    fi
+  fi
   "$IP_BIN" link set "$tap" address "$mac" 2>/dev/null || true
   "$IP_BIN" link set "$tap" master "$BRIDGE"
   # The emulator needs an IPv4 address on the interface it binds to (see
