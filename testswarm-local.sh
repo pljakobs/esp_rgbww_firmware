@@ -106,14 +106,42 @@ resolve_ip_bin() {
   return 1
 }
 
+# Best-effort install of a missing tool via whatever package manager exists.
+# pkg name may differ from the binary name, so both are passed in.
+install_pkg() {  # install_pkg <human-name> <apt/apk-pkg> <dnf/yum-pkg>
+  local name="$1" deb_pkg="$2" rpm_pkg="$3"
+  local sudo=""
+  [[ "$(id -u)" -ne 0 ]] && command -v sudo >/dev/null 2>&1 && sudo="sudo"
+  log "'$name' not found; attempting to install it..."
+  if command -v apt-get >/dev/null 2>&1; then
+    $sudo apt-get update -y >/dev/null 2>&1
+    $sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y "$deb_pkg" >/dev/null 2>&1
+  elif command -v dnf >/dev/null 2>&1; then
+    $sudo dnf install -y "$rpm_pkg" >/dev/null 2>&1
+  elif command -v yum >/dev/null 2>&1; then
+    $sudo yum install -y "$rpm_pkg" >/dev/null 2>&1
+  elif command -v apk >/dev/null 2>&1; then
+    $sudo apk add --no-cache "$deb_pkg" >/dev/null 2>&1
+  else
+    warn "no supported package manager found to install '$name'."
+    return 1
+  fi
+}
+
 require_tools() {
   if ! IP_BIN="$(resolve_ip_bin)"; then
-    err "'ip' command not found (install iproute2)."
-    exit 1
+    install_pkg "ip" iproute2 iproute || true
+    if ! IP_BIN="$(resolve_ip_bin)"; then
+      err "'ip' command not found and could not be installed (install iproute2)."
+      exit 1
+    fi
   fi
   if ! command -v curl >/dev/null 2>&1; then
-    err "'curl' not found."
-    exit 1
+    install_pkg "curl" curl curl || true
+    if ! command -v curl >/dev/null 2>&1; then
+      err "'curl' not found and could not be installed."
+      exit 1
+    fi
   fi
 }
 
