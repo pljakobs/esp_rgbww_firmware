@@ -475,8 +475,15 @@ void AppMqttClient::publishHomeAssistantConfig() {
         debug_i(ANSI_COLOR_BLUE "Updated HA node_id to clean version: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, _haNodeId.c_str());
     }
     
-    // Create config document
-    StaticJsonDocument<768> doc;
+    // Create config document on the heap (space-guarded). This is a rare,
+    // discovery-time publish, so a transient malloc is far cheaper than keeping
+    // ~768 bytes of JSON pool on the 4 KB CONT stack while this frame also
+    // nests into publishChannelConfig()/publishHAState().
+    DynamicJsonDocument doc(768);
+    if(doc.capacity() == 0) {
+        debug_e(ANSI_COLOR_RED "HA: config doc alloc failed, skipping discovery" ANSI_COLOR_RESET);
+        return;
+    }
     
     // Basic configuration
     doc[F("name")] = deviceName;  // Display name can have spaces
@@ -551,8 +558,14 @@ void AppMqttClient::publishChannelConfig(const String& channelName) {
     // Topic: homeassistant/light/node_id/channel_name/config
     String configTopic = _haDiscoveryPrefix + F("/light/") + _haNodeId + F("/") + channelName + F("/config");
     
-    // Create channel discovery JSON
-    StaticJsonDocument<512> doc;
+    // Create channel discovery JSON on the heap (space-guarded): discovery-time
+    // only, so trade a transient malloc for ~512 bytes of CONT stack, which is
+    // otherwise live simultaneously with the caller's config document.
+    DynamicJsonDocument doc(512);
+    if(doc.capacity() == 0) {
+        debug_e(ANSI_COLOR_RED "HA: channel config doc alloc failed for " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RESET, channelName.c_str());
+        return;
+    }
     
     // Basic configuration
     doc[F("name")] = deviceName + F(" ") + channelName;  // Display name with channel
@@ -778,7 +791,11 @@ void AppMqttClient::handleHomeAssistantCommand(const String& message) {
     
     debug_i(ANSI_COLOR_BLUE "HA: Processing main light command: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, message.c_str());
     
-    StaticJsonDocument<256> doc;
+    DynamicJsonDocument doc(256);
+    if(doc.capacity() == 0) {
+        debug_e(ANSI_COLOR_RED "HA: command doc alloc failed" ANSI_COLOR_RESET);
+        return;
+    }
     DeserializationError parseError = deserializeJson(doc, message);
     if (parseError) {
         debug_e(ANSI_COLOR_RED "HA: Failed to parse command JSON: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED "" ANSI_COLOR_RESET, parseError.c_str());
@@ -789,7 +806,11 @@ void AppMqttClient::handleHomeAssistantCommand(const String& message) {
     debug_i(ANSI_COLOR_BLUE "HA: Command state: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, state.c_str());
     
     // Create a JSON command that works with your existing system
-    StaticJsonDocument<256> cmdDoc;
+    DynamicJsonDocument cmdDoc(256);
+    if(cmdDoc.capacity() == 0) {
+        debug_e(ANSI_COLOR_RED "HA: command build doc alloc failed" ANSI_COLOR_RESET);
+        return;
+    }
     JsonObject root = cmdDoc.to<JsonObject>();
     JsonObject hsv = root.createNestedObject(F("hsv"));
     

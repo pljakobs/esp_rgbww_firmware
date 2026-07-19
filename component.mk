@@ -98,6 +98,12 @@ USER_CFLAGS += -DGDBSTUB_BREAK_ON_INIT=$(GDBSTUB_BREAK_ON_INIT)
 # Keep format-string type checking strict even when global WERROR is disabled in CI.
 USER_CFLAGS += -Wformat -Werror=format
 USER_CXXFLAGS += -Wformat -Werror=format
+# Opt-in per-function stack-frame analysis: `make ... STACK_USAGE=1` emits a .su
+# file next to every object (GCC -fstack-usage). Inert for normal builds.
+ifdef STACK_USAGE
+USER_CFLAGS += -fstack-usage
+USER_CXXFLAGS += -fstack-usage
+endif
 
 # Esp8266 propagates USER_CFLAGS into external lwIP sources, where older GCC
 # toolchains can reject -Werror=format-security even with -Wformat enabled.
@@ -133,6 +139,13 @@ $(info using SMING $(SMING_GITVERSION))
 EXTRA_LDFLAGS := $(call Wrap,user_pre_init)
 USER_CFLAGS += -DPARTITION_TABLE_OFFSET=$(PARTITION_TABLE_OFFSET)
 
+# Host emulator only: allow each running instance to present a distinct chip
+# identity (mDNS hostname/TXT id, MQTT client id, swarm self-dedup, default
+# device name) via the LI_CHIP_ID environment variable. See app/host_identity.cpp.
+ifeq ($(SMING_ARCH), Host)
+    EXTRA_LDFLAGS += $(call Wrap,system_get_chip_id)
+endif
+
 .PHONY: check_versions
 check_versions:
 ifndef GIT_VERSION
@@ -146,3 +159,35 @@ endif
 ifndef WEBAPP_VERSION
 	$(error can not find webapp/VERSION file - please ensure the source code is complete)
 endif
+
+# ---------------------------------------------------------------------------
+# Static stack-risk report
+# ---------------------------------------------------------------------------
+# `make stackreport` (re)builds the app with GCC -fstack-usage (via the
+# STACK_USAGE toggle above) and prints a ranked per-function stack-frame risk
+# report using tools/su_report.py. Because USER_CFLAGS changes when STACK_USAGE
+# flips, the app sources are recompiled so fresh .su files are emitted.
+# Override the number of rows with STACK_REPORT_TOP=<n>.
+#
+# The stack budget used for the risk bands is the per-target user-task stack:
+#   Esp8266 -> 4096 (CONT_STACKSIZE), Esp32 -> 8192, Host -> large.
+STACK_REPORT_TOP ?= 40
+ifeq ($(SMING_ARCH),Esp8266)
+    STACK_REPORT_BYTES ?= 4096
+else ifeq ($(SMING_ARCH),Esp32)
+    STACK_REPORT_BYTES ?= 8192
+else
+    STACK_REPORT_BYTES ?= 8192
+endif
+
+.PHONY: stackreport
+stackreport:
+	@echo "=== building $(SMING_ARCH) with -fstack-usage ==="
+ifeq ($(SMING_ARCH),Esp8266)
+	+$(Q) $(MAKE) --no-print-directory buildmap
+endif
+	+$(Q) $(MAKE) --no-print-directory STACK_USAGE=1
+	@echo
+	$(Q) python3 $(PROJECT_DIR)/tools/su_report.py \
+		$(PROJECT_DIR)/out/$(SMING_ARCH) $(STACK_REPORT_TOP) $(STACK_REPORT_BYTES)
+

@@ -88,6 +88,12 @@ bool WebappOta::ensureParentDir(const String& path)
  */
 String WebappOta::extractBranch(const String& firmwareVersion)
 {
+#ifdef ARCH_HOST
+    // On the Host emulator the git-describe version carries the local working
+    // branch (e.g. "rollback/979"), for which no webapp artifacts are published.
+    // Force the branch that Host testing tracks so OTA queries resolve.
+    return F("experimental");
+#endif
     // Find the third hyphen-separated token
     int firstDash = firmwareVersion.indexOf('-');
     if(firstDash < 0) {
@@ -747,8 +753,14 @@ bool WebappOta::activateStaging()
     // Reboot to reclaim heap used during download before serving the webapp.
     // The updating.html page polls /webapp_status; when it sees last_status=="ok"
     // it reloads — the reload will land on a freshly booted device.
+#ifdef ARCH_HOST
+    // On the Host emulator there is no heap pressure to reclaim and a restart
+    // would tear down the emulator process, so skip the reboot.
+    debug_i(ANSI_COLOR_BLUE "WebappOta::activateStaging - skipping reboot on host" ANSI_COLOR_RESET);
+#else
     debug_i(ANSI_COLOR_BLUE "WebappOta::activateStaging - rebooting to reclaim heap" ANSI_COLOR_RESET);
     System.restart(2000); // 2 s grace period for the status response to reach the browser
+#endif
 
     return true;
 }

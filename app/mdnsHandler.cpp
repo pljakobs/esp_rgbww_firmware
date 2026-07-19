@@ -252,8 +252,16 @@ bool mdnsHandler::onMessage(mDNS::Message& message)
         if (p != nullptr && p[strlen(http_tcp_local)] == '\0') {
             // This is likely a hostname response
             size_t hostname_len = p - answerName;
-            char hostname[hostname_len + 1];
-            strncpy(hostname, answerName, hostname_len);
+            // Bound the copy to a fixed buffer: answerName comes straight off
+            // the network, so a VLA sized from it would let a remote peer decide
+            // how much stack this frame consumes (unbounded alloca, CWE-789) —
+            // dangerous on the shared SYS/network stack this runs on.  A single
+            // mDNS label never exceeds 63 bytes; 64 covers the label + NUL.
+            char hostname[64];
+            if (hostname_len >= sizeof(hostname)) {
+                hostname_len = sizeof(hostname) - 1;
+            }
+            memcpy(hostname, answerName, hostname_len);
             hostname[hostname_len] = '\0';
 
 #ifdef DEBUG_MDNS

@@ -187,9 +187,12 @@ extern "C" void custom_crash_callback(struct rst_info* ri, uint32_t stack, uint3
 // memory that survives a reset (RTC on ESP8266/ESP32) but is cleared by a real
 // power-cycle, so pulling the plug always yields a clean slate.
 //
-//  - CRASHLOOP_THRESHOLD consecutive crash-reboots     -> switch to the other ROM
+//  - CRASHLOOP_THRESHOLD consecutive unexpected reboots -> switch to the other ROM
+//    ("unexpected" = anything that isn't a deliberate software restart or a
+//    deep-sleep wake; reset-reason codes are too unreliable on the ESP8266 to
+//    tell a real crash apart from a hang/brown-out, so we count them all).
 //  - counters are cleared once the firmware has run for CRASHLOOP_HEALTHY_MS
-//    without crashing (Application::markFirmwareHealthy), which is what enforces
+//    without rebooting (Application::markFirmwareHealthy), which is what enforces
 //    the "within x seconds" window.
 //  - at most CRASHLOOP_MAX_SWITCHES automatic switches per episode, so two broken
 //    ROMs don't ping-pong forever (the device then just keeps rebooting in place
@@ -209,7 +212,7 @@ extern "C" void custom_crash_callback(struct rst_info* ri, uint32_t stack, uint3
 
 struct CrashLoopGuard {
 	uint32_t magic;
-	uint16_t crashCount;  // consecutive quick crash-reboots
+	uint16_t bootCount;   // consecutive unexpected reboots (not a deliberate restart)
 	uint16_t switchCount; // automatic ROM switches this episode
 };
 
@@ -266,6 +269,31 @@ size_t debugStreamOutputCallback(const char* buffer, unsigned int length)
 
 void onReady()
 {
+	#ifdef ARCH_HOST
+	// Consume all but ~20kB of the (tracked) heap so the emulator runs close to
+	// the low-memory conditions seen on the device.
+	//
+	// Getting the compiler to actually perform (and keep) the allocation needs
+	// two tricks:
+	//   1. A compiler barrier on the returned pointer, so the escaped value is
+	//      considered "used" and the malloc call can't be dead-code eliminated.
+	//   2. memset with a NON-zero value; memset-to-zero right after malloc gets
+	//      folded into calloc and then dropped as a dead store, which is why the
+	//      tracked free heap previously never moved.
+	static uint8_t* heapHog = nullptr;
+	auto free = system_get_free_heap_size();
+	if (free>20000){
+		size_t take = free - 24000;
+		debug_i(ANSI_COLOR_BLUE "onReady: free heap %d, allocating %d bytes to squeeze heap to ~20k" ANSI_COLOR_RESET, free, (int)take);
+		heapHog = static_cast<uint8_t*>(malloc(take));
+		asm volatile("" : : "g"(heapHog) : "memory"); // don't let the allocation be optimised away
+		if (heapHog) {
+			memset(heapHog, 0xA5, take); // non-zero so it isn't turned back into an elidable calloc
+			asm volatile("" : : : "memory");
+		}
+		debug_i(ANSI_COLOR_BLUE "onReady: heapHog allocated %d bytes, free heap now %d" ANSI_COLOR_RESET, (int)take, system_get_free_heap_size());
+	}
+	#endif
 	//System.setCpuFrequencye(CF_160MHz);
 	debug_i(ANSI_COLOR_BLUE "getting reset info from rtc" ANSI_COLOR_RESET);
 	app.rtc_info = system_get_rst_info();
@@ -354,8 +382,14 @@ void Application::uptimeCounter()
 
 void Application::checkRam()
 {
-	// Create JSON object with uptime and free heap
-	StaticJsonDocument<256> doc;
+	// Build the telemetry payload on the heap (space-guarded): checkRam() runs
+	// on a periodic timer, so a transient malloc is far cheaper than keeping a
+	// 256 B JSON pool on the 4 KB ESP8266 CONT stack.
+	DynamicJsonDocument doc(256);
+	if(doc.capacity() == 0) {
+		debug_e(ANSI_COLOR_RED "checkRam: telemetry doc alloc failed, skipping tick" ANSI_COLOR_RESET);
+		return;
+	}
 	time_t now = time(nullptr); // should be unix time if ntp is running
 	doc[F("id")] = (uint32_t)system_get_chip_id();
 	doc[F("time")] = now;	
@@ -487,7 +521,11 @@ debug_i(ANSI_COLOR_BLUE "Application::init - check running partition" ANSI_COLOR
 auto part=app.ota.ota.getRunningPartition();
 debug_i(ANSI_COLOR_BLUE "Application::init - running partition " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, part.name());
 
-#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
+#if defined(ARCH_ESP8266) || defined(ARCH_ESP32) || defined(ARCH_HOST)
+	// Mount the data filesystem on every architecture. On Host this drives the
+	// emulated flash backing file + LittleFS (the same code path as the device),
+	// instead of the host-OS passthrough which bypassed LittleFS and the OTA
+	// staging logic entirely.
 	mountfs(getRomSlot());
 	// ToDo - rework mounting filesystem
 	if(_fs_mounted) {
@@ -500,16 +538,12 @@ debug_i(ANSI_COLOR_BLUE "Application::init - running partition " ANSI_COLOR_CYAN
 		}
 		Serial << dir.count() << _F(" files found") << endl << endl;
 	}
+#endif
 
-//#if defined(ARCH_ESP8266) || defined(ESP32)
+#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
 	app.ota.checkAtBoot();
-//#endif
 #endif
 	(void)getFreeHeapSize(); // sample heap after fs mount + OTA check
-#ifdef ARCH_HOST
-	debug_i(ANSI_COLOR_BLUE "mounting host file system" ANSI_COLOR_RESET);
-	fileSetFileSystem(&IFS::Host::getFileSystem());
-#endif
 
 	// initialize config and data
 	cfg =  std::make_unique<AppConfig>(configDB_PATH);
@@ -829,40 +863,44 @@ void Application::readCrashDump()
 void Application::checkCrashLoop()
 {
 	CrashLoopGuard g = loadCrashGuard();
+	bool reseeded = false;
 	if(g.magic != CRASHLOOP_MAGIC) {
 		// Uninitialised RTC (power-on / brown-out / first boot): start clean.
 		g.magic = CRASHLOOP_MAGIC;
-		g.crashCount = 0;
+		g.bootCount = 0;
 		g.switchCount = 0;
+		reseeded = true;
 	}
 
 	const uint32_t reason = (rtc_info != nullptr) ? rtc_info->reason : uint32_t(REASON_DEFAULT_RST);
-	bool wasCrash = false;
-	switch(reason) {
-		case REASON_EXCEPTION_RST: // exception / panic
-		case REASON_SOFT_WDT_RST:  // software / task watchdog
-		case REASON_WDT_RST:	   // hardware watchdog
-			wasCrash = true;
-			break;
-		default:
-			break;
-	}
 
-	if(!wasCrash) {
-		// Clean boot (power-on, user restart, OTA switch, ...). Leave the episode
-		// counters as they are; markFirmwareHealthy() clears them once we've proven
-		// the firmware can stay up. Just persist in case we freshly seeded the magic.
+	// Reset-reason codes are unreliable on the ESP8266: many hard faults (heap
+	// corruption, hangs, brown-outs) surface as a bare watchdog/unknown reset that
+	// is NOT reported as an exception. So instead of whitelisting "crash" reasons we
+	// count *every* boot that wasn't a deliberate restart, and clear the counter
+	// once the firmware has proven it can stay up (markFirmwareHealthy). Only an
+	// intentional software restart (config apply, OTA, our own ROM switch) and
+	// wake-from-deep-sleep are treated as healthy reboots.
+	const bool deliberate = (reason == REASON_SOFT_RESTART) || (reason == REASON_DEEP_SLEEP_AWAKE);
+
+	debug_i(ANSI_COLOR_BLUE "crash-loop guard: boot reason=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE " deliberate=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE " loaded count=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE "/" ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE " switches=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE " magic=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_RESET,
+			reason, (unsigned)deliberate, g.bootCount, (unsigned)CRASHLOOP_THRESHOLD, g.switchCount, reseeded ? "reseeded" : "ok");
+
+	if(deliberate) {
+		// Intentional reboot: don't hold it against the firmware. The healthy timer
+		// clears the counter once we've stayed up long enough. Persist in case we
+		// freshly seeded the magic.
 		saveCrashGuard(g);
 		return;
 	}
 
-	if(g.crashCount < 0xFFFF) {
-		g.crashCount++;
+	if(g.bootCount < 0xFFFF) {
+		g.bootCount++;
 	}
-	debug_w(ANSI_COLOR_YELLOW "crash-loop guard: crash boot (reason " ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW ") count=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW "/" ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW " switches=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_RESET,
-			reason, g.crashCount, (unsigned)CRASHLOOP_THRESHOLD, g.switchCount);
+	debug_w(ANSI_COLOR_YELLOW "crash-loop guard: unexpected reboot (reason " ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW ") count=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW "/" ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW " switches=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_RESET,
+			reason, g.bootCount, (unsigned)CRASHLOOP_THRESHOLD, g.switchCount);
 
-	if(g.crashCount < CRASHLOOP_THRESHOLD) {
+	if(g.bootCount < CRASHLOOP_THRESHOLD) {
 		saveCrashGuard(g);
 		return;
 	}
@@ -873,14 +911,14 @@ void Application::checkCrashLoop()
 		// remember, but clear crashCount so we don't re-evaluate every single boot.
 		debug_e(ANSI_COLOR_RED "crash-loop guard: switch budget (" ANSI_COLOR_CYAN "%u" ANSI_COLOR_RED ") exhausted; both ROMs appear unstable. Staying put until power-cycle / re-flash / OTA." ANSI_COLOR_RESET,
 				(unsigned)CRASHLOOP_MAX_SWITCHES);
-		g.crashCount = 0;
+		g.bootCount = 0;
 		saveCrashGuard(g);
 		return;
 	}
 
 #if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
 	g.switchCount++;
-	g.crashCount = 0;
+	g.bootCount = 0;
 	saveCrashGuard(g); // persist BEFORE restart so the decision survives the reboot
 	auto before = ota.ota.getRunningPartition();
 	auto after = ota.ota.getNextBootPartition();
@@ -896,7 +934,7 @@ void Application::checkCrashLoop()
 	saveCrashGuard(g);
 #else
 	// No OTA/ROM switching on host builds.
-	g.crashCount = 0;
+	g.bootCount = 0;
 	saveCrashGuard(g);
 #endif
 }
@@ -904,12 +942,12 @@ void Application::checkCrashLoop()
 void Application::markFirmwareHealthy()
 {
 	CrashLoopGuard g = loadCrashGuard();
-	if(g.magic == CRASHLOOP_MAGIC && (g.crashCount != 0 || g.switchCount != 0)) {
+	if(g.magic == CRASHLOOP_MAGIC && (g.bootCount != 0 || g.switchCount != 0)) {
 		debug_i(ANSI_COLOR_GREEN "crash-loop guard: firmware stable for " ANSI_COLOR_CYAN "%u" ANSI_COLOR_GREEN " ms, clearing counters (was count=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_GREEN " switches=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_GREEN ")" ANSI_COLOR_RESET,
-				(unsigned)CRASHLOOP_HEALTHY_MS, g.crashCount, g.switchCount);
+				(unsigned)CRASHLOOP_HEALTHY_MS, g.bootCount, g.switchCount);
 	}
 	g.magic = CRASHLOOP_MAGIC;
-	g.crashCount = 0;
+	g.bootCount = 0;
 	g.switchCount = 0;
 	saveCrashGuard(g);
 }
@@ -1070,18 +1108,11 @@ bool Application::mountfs(int slot)
     * system could be spiffs or LitleFS
     *
     */
-#ifdef ARCH_HOST
-	/*
-     * host file system
-     */
-	debug_i(ANSI_COLOR_BLUE "mounting host file system" ANSI_COLOR_RESET);
-	fileSetFileSystem(&IFS::Host::getFileSystem());
-	_fs_mounted = true;
-	return _fs_mounted;
-#endif
 
 	/*
-     * on device file system
+     * data file system (SPIFFS/LittleFS on the flash device). On Host this runs
+     * against the emulated flash backing file, so the same LittleFS code path is
+     * exercised as on the target instead of the host-OS passthrough.
      */
 
 	auto part = Storage::findPartition(F("spiffs") + String(slot));
