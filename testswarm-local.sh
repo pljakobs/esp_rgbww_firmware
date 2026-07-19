@@ -151,13 +151,27 @@ require_tools() {
 ip_for()   { echo "${SUBNET_PREFIX}.$((BASE_OCTET + $1))"; }
 info_url() { echo "http://$(ip_for "$1")/info"; }
 
+# Host-side IP assigned to each tap interface. The Sming Host emulator's
+# getifaddr() REQUIRES the named interface to carry an IPv4 address (it derives
+# the emulator's gateway/netmask from it); a bridge-enslaved tap has none by
+# default, which makes network init fail silently. These addresses live in the
+# same /24 but past the controller range so they never collide with a
+# controller IP (${SUBNET_PREFIX}.<BASE_OCTET + i>) or the bridge gateway.
+tap_host_ip_for() { echo "${SUBNET_PREFIX}.$((BASE_OCTET + SWARM_SIZE + $1))"; }
+
+# Bind host probes to the bridge so route selection is deterministic. Without
+# this, an unrelated interface sharing the swarm /24 (e.g. a stray debug tap0)
+# can steal the route and every probe silently fails even though the
+# controllers are up. The bridge always exists before any probe runs.
+curl_bind() { [[ -n "$BRIDGE" ]] && printf -- '--interface\n%s\n' "$BRIDGE"; }
+
 http_ok() {  # http_ok <ip>
-  curl -s -o /dev/null --max-time 3 "http://$1/info"
+  curl -s -o /dev/null --max-time 3 $(curl_bind) "http://$1/info"
 }
 
 neighbours_of() {  # neighbours_of <ip> -> prints integer or "-"
   local body
-  body="$(curl -s --max-time 3 "http://$1/info" 2>/dev/null)" || { echo "-"; return; }
+  body="$(curl -s --max-time 3 $(curl_bind) "http://$1/info" 2>/dev/null)" || { echo "-"; return; }
   local n
   n="$(printf '%s' "$body" | grep -oE '"neighbours"[[:space:]]*:[[:space:]]*[0-9]+' | grep -oE '[0-9]+' | head -n1)"
   [[ -n "$n" ]] && echo "$n" || echo "-"
@@ -197,6 +211,10 @@ setup_tap() {  # setup_tap <index>
   "$IP_BIN" tuntap add dev "$tap" mode tap 2>/dev/null || true
   "$IP_BIN" link set "$tap" address "$mac" 2>/dev/null || true
   "$IP_BIN" link set "$tap" master "$BRIDGE"
+  # The emulator needs an IPv4 address on the interface it binds to (see
+  # tap_host_ip_for); without it getifaddr() reports "Interface not found" and
+  # LWIP never comes up, so the controller is never HTTP-reachable.
+  "$IP_BIN" addr add "$(tap_host_ip_for "$i")/24" dev "$tap" 2>/dev/null || true
   "$IP_BIN" link set "$tap" up
   TAPS+=("$tap")
   echo "$tap"
@@ -231,7 +249,7 @@ launch_instance() {  # launch_instance <index> <tap>
       --ipaddr="$ip" \
       --gateway="$GATEWAY_IP" \
       --netmask="$NETMASK"
-  ) >"$app_log" 2>&1 &
+  ) >"$app_log" 2>&1 </dev/null &
   APP_PIDS+=("$!")
 }
 
