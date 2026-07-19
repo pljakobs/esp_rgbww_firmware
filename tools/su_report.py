@@ -11,34 +11,59 @@ The stack budget defaults to 4096 (ESP8266) but can be overridden with the
 third argument or the STACK_BYTES environment variable for other targets.
 """
 import os
+import re
 import sys
 
 CONT_STACK = int(os.environ.get('STACK_BYTES', '4096'))
 
+def _dedup_su_files(paths):
+    """Collapse duplicate build trees into one .su per object.
+
+    The ESP8266 build emits a separate object tree per config hash / rBoot ROM
+    slot (e.g. .../build/App/App-<hash>/app/mqtt.su). Orphaned trees from an
+    earlier config linger and would leak stale frame sizes into the report as
+    duplicate rows. Key each file by its path with the volatile 'App-<hash>'
+    build dir masked, then keep only the copy from the most recently modified
+    tree.
+    """
+    best = {}
+    for p in paths:
+        key = re.sub(r'App-[0-9a-fA-F]+', 'App-#', p)
+        try:
+            mt = os.path.getmtime(p)
+        except OSError:
+            mt = 0
+        cur = best.get(key)
+        if cur is None or mt > cur[0]:
+            best[key] = (mt, p)
+    return [v[1] for v in best.values()]
+
 def parse(root):
     rows = []
+    su_paths = []
     for dirpath, _dirs, files in os.walk(root):
         for fn in files:
-            if not fn.endswith('.su'):
-                continue
-            path = os.path.join(dirpath, fn)
-            with open(path, 'r', errors='replace') as fh:
-                for raw in fh:
-                    line = raw.rstrip('\n')
-                    if not line.strip():
-                        continue
-                    parts = line.split('\t')
-                    if len(parts) < 3:
-                        continue
-                    loc, size_s, qual = parts[0], parts[1], parts[2]
-                    try:
-                        size = int(size_s)
-                    except ValueError:
-                        continue
-                    # loc = path:line:col:function  (C++ function contains '::')
-                    seg = loc.split(':')
-                    func = ':'.join(seg[3:]) if len(seg) >= 4 else loc
-                    rows.append((size, qual.strip(), func.strip(), fn[:-3]))
+            if fn.endswith('.su'):
+                su_paths.append(os.path.join(dirpath, fn))
+    for path in _dedup_su_files(su_paths):
+        fn = os.path.basename(path)
+        with open(path, 'r', errors='replace') as fh:
+            for raw in fh:
+                line = raw.rstrip('\n')
+                if not line.strip():
+                    continue
+                parts = line.split('\t')
+                if len(parts) < 3:
+                    continue
+                loc, size_s, qual = parts[0], parts[1], parts[2]
+                try:
+                    size = int(size_s)
+                except ValueError:
+                    continue
+                # loc = path:line:col:function  (C++ function contains '::')
+                seg = loc.split(':')
+                func = ':'.join(seg[3:]) if len(seg) >= 4 else loc
+                rows.append((size, qual.strip(), func.strip(), fn[:-3]))
     return rows
 
 # Risk bands as a fraction of the CONT stack. A single frame this large is a

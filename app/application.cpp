@@ -382,8 +382,14 @@ void Application::uptimeCounter()
 
 void Application::checkRam()
 {
-	// Create JSON object with uptime and free heap
-	StaticJsonDocument<256> doc;
+	// Build the telemetry payload on the heap (space-guarded): checkRam() runs
+	// on a periodic timer, so a transient malloc is far cheaper than keeping a
+	// 256 B JSON pool on the 4 KB ESP8266 CONT stack.
+	DynamicJsonDocument doc(256);
+	if(doc.capacity() == 0) {
+		debug_e(ANSI_COLOR_RED "checkRam: telemetry doc alloc failed, skipping tick" ANSI_COLOR_RESET);
+		return;
+	}
 	time_t now = time(nullptr); // should be unix time if ntp is running
 	doc[F("id")] = (uint32_t)system_get_chip_id();
 	doc[F("time")] = now;	
