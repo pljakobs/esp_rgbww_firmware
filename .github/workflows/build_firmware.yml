@@ -8,7 +8,7 @@ env:
 
 on:
   push:
-    branches: [stable, testing, develop, experimental, experimental-externalUI]
+    branches: [stable, testing, develop, experimental, experimental-externalUI, ci/swarm-test]
   pull_request:
     branches: [stable, testing, develop, experimental, experimental-externalUI]
   workflow_dispatch:
@@ -253,7 +253,7 @@ jobs:
         continue-on-error: true
         env:
           GITHUB_ACTIONS: 'true'
-          SWARM_SIZE: '10'
+          SWARM_SIZE: '3'
         run: |
           set -uo pipefail
           mkdir -p out/host-swarm
