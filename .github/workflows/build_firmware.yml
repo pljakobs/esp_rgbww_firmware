@@ -471,12 +471,16 @@ jobs:
 
           # Build the Host binary fresh on this runner and launch the swarm.
           # Building here (instead of reusing the smoke artifact) decouples this
-          # job from host-smoke so both run in parallel.
+          # job from host-smoke so both run in parallel. We reuse the smoke
+          # script's build-only mode (HOST_CI_BUILD_ONLY=1) so the binary is
+          # produced with the exact same flags host-smoke uses, then run the
+          # swarm against that prebuilt binary (SWARM_SKIP_BUILD=1).
           docker run --rm --privileged --device /dev/net/tun -v ${{ github.workspace }}:/workspace -w /workspace \
             -e GITHUB_ACTIONS=${{ env.GITHUB_ACTIONS }} \
             -e SWARM_SIZE=${{ env.SWARM_SIZE }} \
+            -e SWARM_SKIP_BUILD=1 \
             docker.io/pjakobs/sming:latest \
-            bash -lc "git config --global --add safe.directory /workspace && bash ./testswarm-local.sh none" \
+            bash -lc "git config --global --add safe.directory /workspace && HOST_CI_BUILD_ONLY=1 bash ./.github/scripts/host_ci_smoke_test.sh && bash ./testswarm-local.sh none" \
             2>&1 | tee out/host-swarm/swarm-discovery.log || true
 
           echo "mDNS discovery swarm step completed (soft; non-blocking)."
