@@ -415,6 +415,97 @@ jobs:
           echo "- Valgrind runtime log (RGBWW): valgrind-runtime-rgbww.log" >> "$GITHUB_STEP_SUMMARY"
           echo "- Valgrind runtime startup log (RGBWW): valgrind-runtime-rgbww-startup.log" >> "$GITHUB_STEP_SUMMARY"
 
+  # Multi-controller mDNS discovery swarm on the self-hosted runner.
+  # SECURITY: never runs on pull_request events — a self-hosted runner must not
+  # execute untrusted code submitted via a PR. Only push / workflow_dispatch.
+  swarm-mdns:
+    needs: host-smoke
+    if: github.event_name != 'pull_request'
+    runs-on: [self-hosted, Linux, X64]
+    continue-on-error: true
+    timeout-minutes: 45
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Download Host binary from smoke job
+        uses: actions/download-artifact@v8
+        with:
+          pattern: host-smoke-*
+          merge-multiple: true
+          path: .
+
+      - name: Restore Host binary permissions
+        run: |
+          if [ -f out/Host/debug/firmware/app ]; then
+            chmod +x out/Host/debug/firmware/app
+            echo "Host binary restored: $(ls -l out/Host/debug/firmware/app)"
+          else
+            echo "::warning::Host binary not found under out/Host/debug/firmware/ — swarm will be skipped by the script."
+          fi
+
+      - name: Pull Docker Image
+        run: docker pull docker.io/pjakobs/sming:latest
+
+      - name: Run multi-controller mDNS discovery swarm
+        if: always()
+        continue-on-error: true
+        env:
+          GITHUB_ACTIONS: 'true'
+          SWARM_SIZE: '50'
+        run: |
+          set -uo pipefail
+          mkdir -p out/host-swarm
+          echo "Starting mDNS discovery swarm at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          # Heartbeat so the job never looks stalled during convergence polling.
+          (
+            while true; do
+              sleep 20
+              echo "[swarm][heartbeat] $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            done
+          ) &
+          HEARTBEAT_PID=$!
+          trap 'kill "$HEARTBEAT_PID" >/dev/null 2>&1 || true' EXIT
+
+          # Reuse the Host binary the smoke job already built (downloaded above).
+          docker run --rm --privileged -v ${{ github.workspace }}:/workspace -w /workspace \
+            -e GITHUB_ACTIONS=${{ env.GITHUB_ACTIONS }} \
+            -e SWARM_SIZE=${{ env.SWARM_SIZE }} \
+            -e SWARM_SKIP_BUILD=1 \
+            docker.io/pjakobs/sming:latest \
+            bash -lc "git config --global --add safe.directory /workspace && bash ./testswarm-local.sh none" \
+            2>&1 | tee out/host-swarm/swarm-discovery.log || true
+
+          echo "mDNS discovery swarm step completed (soft; non-blocking)."
+
+      - name: Upload swarm logs and results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: swarm-mdns-${{ github.run_number }}
+          path: |
+            out/host-swarm/**
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Create swarm job summary
+        if: always()
+        run: |
+          echo "## 🛰️ Multi-controller mDNS Discovery Swarm (soft)" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Nodes: ${SWARM_SIZE:-50}" >> "$GITHUB_STEP_SUMMARY"
+          SWARM_SUMMARY="out/host-swarm/summary.txt"
+          if [[ -f "$SWARM_SUMMARY" ]]; then
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            cat "$SWARM_SUMMARY" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- ⚠️ Swarm summary not found ($SWARM_SUMMARY) — see swarm-discovery.log" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
   build:
     needs: [generate-matrix, host-smoke]
     runs-on: ubuntu-latest
