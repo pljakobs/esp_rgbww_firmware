@@ -518,6 +518,8 @@ void Application::init()
 #endif
 
 debug_i(ANSI_COLOR_BLUE "Application::init - check running partition" ANSI_COLOR_RESET);
+// TODO(ota-integration): avoid reaching into ota internals (app.ota.ota).
+// Use only ApplicationOTA wrapper methods to keep module boundaries stable.
 auto part=app.ota.ota.getRunningPartition();
 debug_i(ANSI_COLOR_BLUE "Application::init - running partition " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, part.name());
 
@@ -540,6 +542,8 @@ debug_i(ANSI_COLOR_BLUE "Application::init - running partition " ANSI_COLOR_CYAN
 	}
 #endif
 
+	// TODO(ota-integration): checkAtBoot() is also called later in init().
+	// Consolidate to a single invocation point and document ordering constraints.
 #if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
 	app.ota.checkAtBoot();
 #endif
@@ -624,6 +628,9 @@ debug_i(ANSI_COLOR_BLUE "Application::init - running partition " ANSI_COLOR_CYAN
 
 	// check ota
 #ifdef ARCH_ESP8266
+	// TODO(ota-integration): duplicate boot-state check; review with the earlier
+	// checkAtBoot() call and keep exactly one call site unless two-phase behavior
+	// is explicitly required and documented.
 	ota.checkAtBoot();
 #endif
 	
@@ -674,13 +681,6 @@ debug_i(ANSI_COLOR_BLUE "Application::init - running partition " ANSI_COLOR_CYAN
 		app.controllers->addOrUpdate( myId,myName,"self", WifiStation.getIP().toString(), 1200); // add myself to the list
 	}
 
-	/*
-	Serial << endl << _F("** Stream **") << endl;
-	Serial << "#########################################################################################"<<endl;
-	cfg->exportToStream(ConfigDB::Json::format, Serial);
-	Serial <<endl;
-	Serial << "#########################################################################################"<<endl;
-	*/
 
 	
 	/// initialize led ctrl
