@@ -133,6 +133,13 @@ $(info using SMING $(SMING_GITVERSION))
 EXTRA_LDFLAGS := $(call Wrap,user_pre_init)
 USER_CFLAGS += -DPARTITION_TABLE_OFFSET=$(PARTITION_TABLE_OFFSET)
 
+# Host emulator only: allow each running instance to present a distinct chip
+# identity (mDNS hostname/TXT id, MQTT client id, swarm self-dedup, default
+# device name) via the LI_CHIP_ID environment variable. See app/host_identity.cpp.
+ifeq ($(SMING_ARCH), Host)
+    EXTRA_LDFLAGS += $(call Wrap,system_get_chip_id)
+endif
+
 .PHONY: check_versions
 check_versions:
 ifndef GIT_VERSION
