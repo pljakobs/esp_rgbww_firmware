@@ -360,8 +360,8 @@ void AppWIFI::_STAGotIP(IpAddress ip, IpAddress mask, IpAddress gateway)
 		id = (uint32_t)system_get_chip_id();	
 
 		debug_i(ANSI_COLOR_BLUE "adding mdns host " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " with ip " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " and id " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, network.mdns.getName().c_str(), ipAddress.c_str(), String(id).c_str());
-		app.controllers->addOrUpdate(id, network.mdns.getName(),"self", ipAddress, -1);
-
+		app.controllers->addOrUpdate(id, network.mdns.getName(), ipAddress,"",-1,  Controllers::HostType::HOST_TYPE_CONTROLLER);
+		
 		broadcastWifiStatus();
 
 		if(network.mqtt.getEnabled()) {
