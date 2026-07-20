@@ -45,9 +45,9 @@
 // heap, so inbound browser connections are clamped hard for the duration of the
 // download to leave headroom and avoid OOM crashes. Restored when OTA finishes.
 #ifdef ARCH_ESP8266
-    #define WEBSERVER_MAX_CONN_OTA 3
-    #define WEBSERVER_MAX_CONN_DEFAULT 4
-    #define WEBAPP_OTA_MAX_CONN 3
+    #define WEBSERVER_MAX_CONN_OTA 4
+    #define WEBSERVER_MAX_CONN_DEFAULT 5
+    #define WEBAPP_OTA_MAX_CONN 4
 #else
     #define WEBSERVER_MAX_CONN_OTA 5
     #define WEBSERVER_MAX_CONN_DEFAULT 10
