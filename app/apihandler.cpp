@@ -562,7 +562,46 @@ bool Api::handleInfo(const JsonObject& params, JsonObject& data, uint32_t heapFr
         }
 
         return true;
-    }
+    }else{
+		// legacy payload shape
+	#if defined(ARCH_ESP8266)
+		data[F("deviceid")] = system_get_chip_id();
+	#else
+		data[F("deviceid")] = 0;
+	#endif
+		data[F("soc")] = SOC;
+	#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
+		data[F("current_rom")] = String(app.ota.getRomPartition().name());
+	#endif
+		data[F("git_version")] = fw_git_version;
+		data[F("build_type")] = BUILD_TYPE;
+		data[F("git_date")] = fw_git_date;
+		{
+			AppConfig::Root::Webapp webappCfg(*app.cfg);
+			String installedVer = webappCfg.getInstalledVersion();
+			data[F("webapp_version")] = installedVer.length() > 0 ? installedVer : String(WEBAPP_VERSION);
+		}
+		data[F("sming")] = SMING_VERSION;
+		data[F("event_num_clients")] = app.eventserver.activeClients;
+		data[F("uptime")] = app.getUptime();
+		data[F("heap_free")] = heapFreeReported;
+
+		JsonObject rgbww = data.createNestedObject(F("rgbww"));
+		rgbww[F("version")] = RGBWW_VERSION;
+		rgbww[F("queuesize")] = RGBWW_ANIMATIONQSIZE;
+
+		JsonObject con = data.createNestedObject(F("connection"));
+		con[F("connected")] = WifiStation.isConnected();
+		con[F("ssid")] = WifiStation.getSSID();
+		con[F("dhcp")] = WifiStation.isEnabledDHCP();
+		con[F("ip")] = WifiStation.getIP().toString();
+		con[F("netmask")] = WifiStation.getNetworkMask().toString();
+		con[F("gateway")] = WifiStation.getNetworkGateway().toString();
+		con[F("mac")] = WifiStation.getMAC();
+
+		return true;
+	}
+
     return false;
 }
 
