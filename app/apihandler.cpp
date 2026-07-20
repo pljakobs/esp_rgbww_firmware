@@ -549,8 +549,10 @@ bool Api::handleInfo(const JsonObject& params, JsonObject& data, uint32_t heapFr
             debug[F("tcp_active_estimated_bytes")] = 0;
         }
 
+		#ifdef RGBWW_ANIMATIONQSIZE
         data[F("rgbww")] = serialized(FPSTR(kInfoRgbwwV2));
-        
+        #endif 
+		
         buildNetworkInfo(data);
         buildMqttInfo(data);
 
