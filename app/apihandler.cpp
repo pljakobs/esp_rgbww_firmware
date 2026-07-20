@@ -15,6 +15,8 @@ extern "C" {
 }
 #endif
 
+#define NO_INLINE __attribute__((noinline))
+
 namespace {
 enum class CommandMethodId : uint8_t {
 	Unknown,
@@ -401,195 +403,165 @@ bool Api::dispatchDataRequest(const char* method, const JsonObject& params, Json
 	return false;
 }
 
+NO_INLINE void buildAppInfo(JsonObject& data) {
+    JsonObject application = data.createNestedObject(F("app"));
+    AppConfig::Root::Webapp webappCfg(*app.cfg);
+    String installedVer = webappCfg.getInstalledVersion();
+    application[F("webapp_version")] = installedVer.length() > 0 ? installedVer : String(WEBAPP_VERSION);
+    application[F("git_version")] = fw_git_version;
+    application[F("build_type")] = BUILD_TYPE;
+    application[F("git_date")] = fw_git_date;
+}
+
+NO_INLINE void buildFsInfo(JsonObject& data) {
+    JsonObject fs = data.createNestedObject(F("filesystem"));
+    IFS::FileSystem::Info fsInfo;
+    if (fileGetSystemInfo(fsInfo) != FS_OK) {
+        fs[F("error")] = F("failed to get filesystem info");
+    } else {
+        fs[F("total_bytes")] = fsInfo.volumeSize;
+        fs[F("free_bytes")] = fsInfo.freeSpace;
+        fs[F("used_bytes")] = fsInfo.volumeSize - fsInfo.freeSpace;
+    }
+}
+
+NO_INLINE void buildNetworkInfo(JsonObject& data) {
+    JsonObject con = data.createNestedObject(F("connection"));
+    con[F("connected")] = WifiStation.isConnected();
+    if(WifiStation.isConnected()) {
+        con[F("ssid")] = WifiStation.getSSID();
+        con[F("dhcp")] = WifiStation.isEnabledDHCP();
+        // The temporary String objects generated here are isolated to this stack frame
+        con[F("ip")] = WifiStation.getIP().toString();
+        con[F("netmask")] = WifiStation.getNetworkMask().toString();
+        con[F("gateway")] = WifiStation.getNetworkGateway().toString();
+        con[F("mac")] = WifiStation.getMAC();
+        con[F("rssi")] = WifiStation.getRssi();
+    }
+}
+
+NO_INLINE void buildMqttInfo(JsonObject& data) {
+    JsonObject mqtt = data.createNestedObject(F("mqtt"));
+    JsonObject ha = data.createNestedObject(F("homeassistant"));
+    
+    if(!app.ota.isProccessing()) {
+        AppConfig::Network network(*app.cfg);
+        bool enabled = network.mqtt.getEnabled();
+        
+        if(enabled && !app.mqttclient.isRunning()) {
+            mqtt[F("status")] = F("configured but not running");
+        } else if(enabled && app.mqttclient.isRunning()) {
+            mqtt[F("status")] = F("running");
+        } else {
+            mqtt[F("status")] = F("disabled");
+        }
+        mqtt[F("enabled")] = enabled;
+        mqtt[F("broker")] = network.mqtt.getServer();
+        mqtt[F("topic")] = network.mqtt.getTopicBase();
+
+        ha[F("enabled")] = network.mqtt.homeassistant.getEnable();
+        ha[F("discovery_prefix")] = network.mqtt.homeassistant.getDiscoveryPrefix();
+        ha[F("Node ID")] = network.mqtt.homeassistant.getNodeId();
+    } else {
+        mqtt[F("status")] = F("ota in progress");
+        mqtt[F("enabled")] = false;
+        mqtt[F("broker")] = String::nullstr;
+        mqtt[F("topic")] = String::nullstr;
+
+        ha[F("enabled")] = false;
+        ha[F("discovery_prefix")] = String::nullstr;
+        ha[F("Node ID")] = String::nullstr;
+    }
+}
+
+// Cleaned up main handler
 bool Api::handleInfo(const JsonObject& params, JsonObject& data, uint32_t heapFreeSnapshot)
 {
-	debug_i(ANSI_COLOR_BLUE "Api::handleInfo called" ANSI_COLOR_RESET);
-	const uint32_t heapFreeReported = (heapFreeSnapshot != 0) ? heapFreeSnapshot : app.getFreeHeapSize();
+    debug_i(ANSI_COLOR_BLUE "Api::handleInfo called" ANSI_COLOR_RESET);
+    const uint32_t heapFreeReported = (heapFreeSnapshot != 0) ? heapFreeSnapshot : app.getFreeHeapSize();
 
-	JsonVariantConst version = params[F("V")];
-	if(version.isNull()) {
-		version = params[F("v")];
-	}
+    JsonVariantConst version = params[F("V")];
+    if(version.isNull()) {
+        version = params[F("v")];
+    }
 
-	bool isV2 = false;
-	if(!version.isNull()) {
-		if(version.is<long>() || version.is<int>() || version.is<unsigned long>() || version.is<unsigned int>()) {
-			isV2 = (version.as<long>() == 2);
-		} else {
-			const char* v = version.as<const char*>();
-			if(v != nullptr) {
-				isV2 = (v[0] == '2' && v[1] == '\0');
-			}
-		}
-	}
+    bool isV2 = false;
+    if(!version.isNull()) {
+        if(version.is<long>() || version.is<int>() || version.is<unsigned long>() || version.is<unsigned int>()) {
+            isV2 = (version.as<long>() == 2);
+        } else {
+            const char* v = version.as<const char*>();
+            if(v != nullptr) {
+                isV2 = (v[0] == '2' && v[1] == '\0');
+            }
+        }
+    }
 
-	if(isV2) {
-		debug_i(ANSI_COLOR_BLUE "Api::handleInfo: version 2 detected" ANSI_COLOR_RESET);
+    if(isV2) {
+        debug_i(ANSI_COLOR_BLUE "Api::handleInfo: version 2 detected" ANSI_COLOR_RESET);
 
-		// device is a runtime-but-per-boot-constant fragment (chip id + running ROM).
-		// It is formatted once into a static buffer (BSS, no heap) and linked in via
-		// serialized(). sming/rgbww are pure build-time constants and live in flash.
-		static char s_infoDeviceV2[80];
-		if(s_infoDeviceV2[0] == '\0') {
-	#if defined(ARCH_ESP8266)
-			m_snprintf(s_infoDeviceV2, sizeof(s_infoDeviceV2),
-				"{\"deviceid\":%u,\"soc\":\"" SOC "\",\"current_rom\":\"%s\"}",
-				(unsigned)system_get_chip_id(), app.ota.getRomPartition().name().c_str());
-	#elif defined(ARCH_ESP32)
-			m_snprintf(s_infoDeviceV2, sizeof(s_infoDeviceV2),
-				"{\"deviceid\":0,\"soc\":\"" SOC "\",\"current_rom\":\"%s\"}",
-				app.ota.getRomPartition().name().c_str());
-	#else
-			m_snprintf(s_infoDeviceV2, sizeof(s_infoDeviceV2),
-				"{\"deviceid\":0,\"soc\":\"" SOC "\"}");
-	#endif
-		}
+        static char s_infoDeviceV2[80];
+        if(s_infoDeviceV2[0] == '\0') {
+    #if defined(ARCH_ESP8266)
+            m_snprintf(s_infoDeviceV2, sizeof(s_infoDeviceV2),
+                "{\"deviceid\":%u,\"soc\":\"" SOC "\",\"current_rom\":\"%s\"}",
+                (unsigned)system_get_chip_id(), app.ota.getRomPartition().name().c_str());
+    #elif defined(ARCH_ESP32)
+            m_snprintf(s_infoDeviceV2, sizeof(s_infoDeviceV2),
+                "{\"deviceid\":0,\"soc\":\"" SOC "\",\"current_rom\":\"%s\"}",
+                app.ota.getRomPartition().name().c_str());
+    #else
+            m_snprintf(s_infoDeviceV2, sizeof(s_infoDeviceV2),
+                "{\"deviceid\":0,\"soc\":\"" SOC "\"}");
+    #endif
+        }
 
-		// sming/rgbww are pure build-time constants: keep the JSON fragments in flash
-		// (PROGMEM) and let ArduinoJson copy them straight from flash into the pool.
-		static const char kInfoSmingV2[] PROGMEM = "{\"version\":\"" SMING_VERSION "\"}";
-		static const char kInfoRgbwwV2[] PROGMEM =
-			"{\"version\":\"" RGBWW_VERSION "\",\"queuesize\":" RGBWW_STRINGIFY(RGBWW_ANIMATIONQSIZE) "}";
+        static const char kInfoSmingV2[] PROGMEM = "{\"version\":\"" SMING_VERSION "\"}";
+        static const char kInfoRgbwwV2[] PROGMEM =
+            "{\"version\":\"" RGBWW_VERSION "\",\"queuesize\":" RGBWW_STRINGIFY(RGBWW_ANIMATIONQSIZE) "}";
 
-		data[F("version")] = 2;
-		data[F("device")] = serialized((const char*)s_infoDeviceV2);
+        data[F("version")] = 2;
+        data[F("device")] = serialized((const char*)s_infoDeviceV2);
 
-		{
-			JsonObject application = data.createNestedObject(F("app"));
-			{
-				AppConfig::Root::Webapp webappCfg(*app.cfg);
-				String installedVer = webappCfg.getInstalledVersion();
-				application[F("webapp_version")] = installedVer.length() > 0 ? installedVer : String(WEBAPP_VERSION);
-			}
-			application[F("git_version")] = fw_git_version;
-			application[F("build_type")] = BUILD_TYPE;
-			application[F("git_date")] = fw_git_date;
-		}
+        // Isolated sub-function calls execute sequentially, drastically flattening peak stack usage
+        buildAppInfo(data);
 
-		data[F("sming")] = serialized(FPSTR(kInfoSmingV2));
+        data[F("sming")] = serialized(FPSTR(kInfoSmingV2));
 
-		{
-			JsonObject fs=data.createNestedObject(F("filesystem"));
-			IFS::FileSystem::Info fsInfo;
-			int result=fileGetSystemInfo(fsInfo);
-			if (result != FS_OK) {
-				fs[F("error")] = F("failed to get filesystem info");
-			} else {
-				fs[F("total_bytes")] = fsInfo.volumeSize;
-				fs[F("free_bytes")] = fsInfo.freeSpace;
-				fs[F("used_bytes")] = fsInfo.volumeSize - fsInfo.freeSpace;
-			}
-		}
+        buildFsInfo(data);
 
-		{
-			JsonObject run = data.createNestedObject(F("runtime"));
-			run[F("uptime")] = app.getUptime();
-			run[F("heap_free")] = heapFreeReported;
-			run[F("minfreeHeapRuntime")] = app.getMinimumHeapUptime();
-			run[F("minfreeHeap10min")] = app.getMinimumHeap10min();
-			run[F("heapLowErrUptime")] = app.getHeapLowErrUptime();
-			run[F("heapLowErr10min")] = app.getHeapLowErr10min();
-		}	
+        {
+            JsonObject run = data.createNestedObject(F("runtime"));
+            run[F("uptime")] = app.getUptime();
+            run[F("heap_free")] = heapFreeReported;
+            run[F("minfreeHeapRuntime")] = app.getMinimumHeapUptime();
+            run[F("minfreeHeap10min")] = app.getMinimumHeap10min();
+            run[F("heapLowErrUptime")] = app.getHeapLowErrUptime();
+            run[F("heapLowErr10min")] = app.getHeapLowErr10min();
+        }   
 
-		{
-			JsonObject debug = data.createNestedObject(F("debug"));
+        {
+            JsonObject debug = data.createNestedObject(F("debug"));
+            debug[F("http_active_connections")] = app.webserver.getHttpActiveConnections();
+            debug[F("websocket_connections")] = app.webserver.getWebsocketConnectionCount();
+            debug[F("eventserver_clients")] = app.eventserver.activeClients;
+            debug[F("tcp_pcb_size")] = 0;
+            debug[F("tcp_active_estimated_bytes")] = 0;
+        }
 
-			debug[F("http_active_connections")] = app.webserver.getHttpActiveConnections();
-			debug[F("websocket_connections")] = app.webserver.getWebsocketConnectionCount();
-			debug[F("eventserver_clients")] = app.eventserver.activeClients;
-	
-			debug[F("tcp_pcb_size")] = 0;
-			debug[F("tcp_active_estimated_bytes")] = 0;
-		}
-			data[F("rgbww")] = serialized(FPSTR(kInfoRgbwwV2));
-			{
-			JsonObject con = data.createNestedObject(F("connection"));
-			con[F("connected")] = WifiStation.isConnected();
-			if(WifiStation.isConnected()) {
-				con[F("ssid")] = WifiStation.getSSID();
-				con[F("dhcp")] = WifiStation.isEnabledDHCP();
-				con[F("ip")] = WifiStation.getIP().toString();
-				con[F("netmask")] = WifiStation.getNetworkMask().toString();
-				con[F("gateway")] = WifiStation.getNetworkGateway().toString();
-				con[F("mac")] = WifiStation.getMAC();
-				con[F("rssi")] = WifiStation.getRssi();
-			}
-		}
+        data[F("rgbww")] = serialized(FPSTR(kInfoRgbwwV2));
+        
+        buildNetworkInfo(data);
+        buildMqttInfo(data);
 
-		JsonObject mqtt = data.createNestedObject(F("mqtt"));
-		JsonObject ha = data.createNestedObject(F("homeassistant"));
-		if(!app.ota.isProccessing()) {
-			AppConfig::Network network(*app.cfg);
-			if(network.mqtt.getEnabled() && !app.mqttclient.isRunning()) {
-				mqtt[F("status")] = F("configured but not running");
-			} else if(network.mqtt.getEnabled() && app.mqttclient.isRunning()) {
-				mqtt[F("status")] = F("running");
-			} else {
-				mqtt[F("status")] = F("disabled");
-			}
-			mqtt[F("enabled")] = network.mqtt.getEnabled();
-			mqtt[F("broker")] = network.mqtt.getServer();
-			mqtt[F("topic")] = network.mqtt.getTopicBase();
+        if(app.ota.isProccessing()) {
+            JsonObject ota = data.createNestedObject(F("ota"));
+            ota[F("status")] = F("in progress");
+        }
 
-			ha[F("enabled")] = network.mqtt.homeassistant.getEnable();
-			ha[F("discovery_prefix")] = network.mqtt.homeassistant.getDiscoveryPrefix();
-			ha[F("Node ID")] = network.mqtt.homeassistant.getNodeId();
-		} else {
-			mqtt[F("status")] = F("ota in progress");
-			mqtt[F("enabled")] = false;
-			mqtt[F("broker")] = String::nullstr;
-			mqtt[F("topic")] = String::nullstr;
-
-			ha[F("enabled")] = false;
-			ha[F("discovery_prefix")] = String::nullstr;
-			ha[F("Node ID")] = String::nullstr;
-		}
-
-		if(app.ota.isProccessing()) {
-			JsonObject ota = data.createNestedObject(F("ota"));
-			ota[F("status")] = F("in progress");
-		}
-
-		return true;
-	}
-
-// legacy payload shape
-#if defined(ARCH_ESP8266)
-	data[F("deviceid")] = system_get_chip_id();
-#else
-	data[F("deviceid")] = 0;
-#endif
- 	data[F("soc")] = SOC;
-#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
-	data[F("current_rom")] = String(app.ota.getRomPartition().name());
-#endif
-	data[F("git_version")] = fw_git_version;
-	data[F("build_type")] = BUILD_TYPE;
-	data[F("git_date")] = fw_git_date;
-	{
-		AppConfig::Root::Webapp webappCfg(*app.cfg);
-		String installedVer = webappCfg.getInstalledVersion();
-		data[F("webapp_version")] = installedVer.length() > 0 ? installedVer : String(WEBAPP_VERSION);
-	}
-	data[F("sming")] = SMING_VERSION;
-	data[F("event_num_clients")] = app.eventserver.activeClients;
-	data[F("uptime")] = app.getUptime();
-	data[F("heap_free")] = heapFreeReported;
-
-	JsonObject rgbww = data.createNestedObject(F("rgbww"));
-	rgbww[F("version")] = RGBWW_VERSION;
-	rgbww[F("queuesize")] = RGBWW_ANIMATIONQSIZE;
-
-	JsonObject con = data.createNestedObject(F("connection"));
-	con[F("connected")] = WifiStation.isConnected();
-	con[F("ssid")] = WifiStation.getSSID();
-	con[F("dhcp")] = WifiStation.isEnabledDHCP();
-	con[F("ip")] = WifiStation.getIP().toString();
-	con[F("netmask")] = WifiStation.getNetworkMask().toString();
-	con[F("gateway")] = WifiStation.getNetworkGateway().toString();
-	con[F("mac")] = WifiStation.getMAC();
-
-	return true;
+        return true;
+    }
+    return false;
 }
 
 bool Api::handleHosts(const JsonObject& params, std::unique_ptr<IDataSourceStream>& out, String& errorMsg)
