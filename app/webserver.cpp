@@ -46,7 +46,7 @@ extern "C" {
 
 namespace {
 constexpr size_t INFO_DOC_CAPACITY_V1 = 512;
-constexpr size_t INFO_DOC_CAPACITY_V2 = 1024;
+constexpr size_t INFO_DOC_CAPACITY_V2 = 1224;
 constexpr size_t WS_INFO_RESPONSE_OVERHEAD = 300;
 constexpr size_t WS_INFO_RESPONSE_CAPACITY = INFO_DOC_CAPACITY_V1 + WS_INFO_RESPONSE_OVERHEAD;
 
