@@ -401,7 +401,7 @@ EOF
     echo "WARNING: lwipopts.h not found at $LWIPOPTS" >&2
   fi
 
-  make SMING_ARCH=Host configdb-rebuild 2>&1 | tee -a "$BUILD_LOG"
+  make SMING_ARCH=Host 2>&1 | tee -a "$BUILD_LOG"
   make SMING_ARCH=Host flash DISABLE_WERROR=1 COM_SPEED=115200 2>&1 | tee -a "$BUILD_LOG"
 
   # Collect non-fatal compiler warnings from the Host build output for CI visibility.
