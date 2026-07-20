@@ -678,7 +678,7 @@ debug_i(ANSI_COLOR_BLUE "Application::init - running partition " ANSI_COLOR_CYAN
 			snprintf(myName_buf, sizeof(myName_buf), "rgbww-%x", myId);
 			myName = myName_buf;
 		}
-		app.controllers->addOrUpdate( myId,myName,"self", WifiStation.getIP().toString(), 1200); // add myself to the list
+		app.controllers->addOrUpdate( myId,myName, WifiStation.getIP().toString(), "", Controllers::HostType::HOST_TYPE_CONTROLLER); // add myself to the list
 	}
 
 
