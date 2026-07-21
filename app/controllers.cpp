@@ -184,7 +184,6 @@ void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char*
             debug_e(ANSI_COLOR_RED "error: failed to add host" ANSI_COLOR_RESET);
         }
     }
-
 }
 
 void Controllers::addOrUpdate(unsigned int id, const String& hostname, const String& ipAddress, const String& webAppVersion, int ttl, HostType hostType) {
