@@ -942,6 +942,7 @@ bool ApplicationWebserver::preflightRequest(HttpRequest& request, HttpResponse& 
     // 1. Heap Check
 	if (!checkHeap(response, minHeap)) {
     	setCorsHeaders(response);
+		/*
 		if (canRedirect) {
 			auto filename = request.uri.Path;
 			
@@ -974,7 +975,8 @@ bool ApplicationWebserver::preflightRequest(HttpRequest& request, HttpResponse& 
 				return false;
 			} 
 		} else {
-			response.code = HTTP_STATUS_TOO_MANY_REQUESTS;
+		*/
+		response.code = HTTP_STATUS_TOO_MANY_REQUESTS;
 			
 			// Smart backoff: scale based on how far we are below threshold
 			// If OTA is active, wait longer to avoid hammering during download
@@ -997,7 +999,7 @@ bool ApplicationWebserver::preflightRequest(HttpRequest& request, HttpResponse& 
 			response.setHeader(F("Retry-After"), retryAfterHeader);
 			debug_e(ANSI_COLOR_RED "Not enough heap free, rejecting request. Free heap: " ANSI_COLOR_CYAN "%u" ANSI_COLOR_RED " bytes" ANSI_COLOR_RESET, app.getFreeHeapSize());
 			return false;
-		}
+		//}
 	}
 
 	debug_i(ANSI_COLOR_BLUE "heap check passed, checking OPTIONS..." ANSI_COLOR_RESET);
