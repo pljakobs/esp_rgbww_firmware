@@ -24,6 +24,7 @@
 #include "jsonrpcmessage.h"
 
 JsonRpcMessage::JsonRpcMessage(const String& name)
+	: _doc(MAX_JSON_MESSAGE_LENGTH)
 {
 	JsonObject json = _doc.to<JsonObject>();
 	json[F("jsonrpc")] = "2.0";
@@ -53,6 +54,7 @@ void JsonRpcMessage::setId(int id)
 ////////////////////////////////////////
 
 JsonRpcMessageIn::JsonRpcMessageIn(const String& json)
+	:_doc(MAX_JSON_MESSAGE_LENGTH)
 {
 	DeserializationError err = deserializeJson(_doc, json);
 	if(err) {

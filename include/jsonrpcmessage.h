@@ -30,7 +30,7 @@ public:
     //void setParams(String params);
 
 private:
-    StaticJsonDocument<MAX_JSON_MESSAGE_LENGTH> _doc;
+    DynamicJsonDocument _doc;
     JsonObject _pParams;
 };
 
@@ -45,7 +45,7 @@ public:
     const String& getError() const { return _error; }
 
 private:
-    StaticJsonDocument<MAX_JSON_MESSAGE_LENGTH> _doc;
+    DynamicJsonDocument _doc;
     bool _valid{false};
     String _error;
 };
