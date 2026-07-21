@@ -735,6 +735,7 @@ void ApplicationWebserver::onFile(HttpRequest& request, HttpResponse& response)
 		debug_i(ANSI_COLOR_GREEN "searching file name %s" ANSI_COLOR_RESET, fileName.c_str());
 		v = fileMap[fileName];
 		if(!v) {
+			// file not found in fileMap, check if it exists in filesystem
 			debug_i(ANSI_COLOR_YELLOW "file %s not found in filemap" ANSI_COLOR_RESET, fileName.c_str());
 			if(!app.isFilesystemMounted()) {
 				response.setContentType(MIME_TEXT);
@@ -749,8 +750,12 @@ void ApplicationWebserver::onFile(HttpRequest& request, HttpResponse& response)
 			} else {
 #ifndef NOCACHE
 				//response.setCache(604800, true); // It's important to use cache for better performance.
-				response.setHeader(F("Cache-Control"),F("public, max-age=604800, immutable"));
+				if(fileName != F("index.html")) {
+					// never cache the index.html page. it's small and does not have a cache busting hash.
+					response.setHeader(F("Cache-Control"),F("public, max-age=604800, immutable"));
+				}
 #endif
+				
 				// sendFile with allowGzipFileCheck=true: tries fileName+".gz" first, sets
 				// Content-Encoding:gzip, and infers MIME from fileName (not fileName.gz).
 				debug_i(ANSI_COLOR_GREEN "sending file %s with gzip check" ANSI_COLOR_RESET, fileName.c_str());
