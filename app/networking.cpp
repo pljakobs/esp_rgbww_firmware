@@ -498,9 +498,15 @@ void AppWIFI::broadcastWifiStatus(String message)
 
 		debug_i(ANSI_COLOR_BLUE "rpc: root =" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, Json::serialize(root).c_str());
 
-		String jsonStr = Json::serialize(msg.getRoot());
+		String jsonStr;
+		jsonStr.reserve(384); // Pre-allocate buffer space to avoid repeated heap reallocations
+		Json::serialize(msg.getRoot(), jsonStr);
 
-		app.wsBroadcast(jsonStr);
+		// Single debug logging statement using the already serialized string
+		debug_i(ANSI_COLOR_BLUE "rpc: root =" ANSI_COLOR_CYAN "%s" ANSI_COLOR_RESET, jsonStr.c_str());
+
+		// Broadcast
+    	app.wsBroadcast(jsonStr);
 	}
 }
 
