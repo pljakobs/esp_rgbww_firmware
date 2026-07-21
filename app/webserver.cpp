@@ -749,11 +749,14 @@ void ApplicationWebserver::onFile(HttpRequest& request, HttpResponse& response)
 				response.headers[HTTP_HEADER_LOCATION] = F("http://") + WifiAccessPoint.getIP().toString() + "/";
 			} else {
 #ifndef NOCACHE
-				//response.setCache(604800, true); // It's important to use cache for better performance.
-				if(fileName != F("index.html")) {
-					// never cache the index.html page. it's small and does not have a cache busting hash.
-					response.setHeader(F("Cache-Control"),F("public, max-age=604800, immutable"));
-				}
+			if (fileName == F("index.html") || fileName == F("/")) {
+                // Explicitly disable caching for index.html
+                response.setHeader(F("Cache-Control"), F("no-store, no-cache, must-revalidate, max-age=0"));
+                response.setHeader(F("Pragma"), F("no-cache")); // Legacy HTTP/1.0 fallback
+            } else {
+                // Static assets (JS/CSS/images with build hashes) can be aggressively cached
+                response.setHeader(F("Cache-Control"), F("public, max-age=604800, immutable"));
+            }
 #endif
 				
 				// sendFile with allowGzipFileCheck=true: tries fileName+".gz" first, sets
