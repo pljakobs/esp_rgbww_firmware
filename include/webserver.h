@@ -24,6 +24,7 @@
 #define APP_WEBSERVER_H_
 
 #include <ArduinoJson.h>
+#include <JsonWriter.h>
 #include <RGBWWLed/RGBWWLedColor.h>
 #include <Network/Http/Websocket/WebsocketResource.h>
 
@@ -49,9 +50,9 @@
     #define WEBSERVER_MAX_CONN_DEFAULT 5
     #define WEBAPP_OTA_MAX_CONN 4
 #else
-    #define WEBSERVER_MAX_CONN_OTA 5
+    #define WEBSERVER_MAX_CONN_OTA 6
     #define WEBSERVER_MAX_CONN_DEFAULT 10
-    #define WEBAPP_OTA_MAX_CONN 5
+    #define WEBAPP_OTA_MAX_CONN 6
 #endif
 
 
@@ -159,7 +160,7 @@ private:
     void onColorPost(HttpRequest &request, HttpResponse &response);
     bool onColorPostCmd(JsonObject& root, String& errorMsg);
 
-    void addInfoFields(JsonObject& obj);
+    void addInfoFields(JsonWriter::ObjectScope& obj);
     void sendApiResponse(HttpResponse &response, JsonObjectStream* stream, HttpStatus code = HTTP_STATUS_OK);
     void sendApiCode(HttpResponse &response, API_CODES code, const char* msg = nullptr);
     void sendApiCode(HttpResponse &response, API_CODES code, const String& msg);

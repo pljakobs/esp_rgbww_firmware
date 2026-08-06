@@ -134,12 +134,12 @@ bool isPrintableSsid(const String& str)
 
 } // namespace
 
-bool Api::dispatch(const String& method, const JsonObject& params, JsonObject& out)
+bool Api::dispatch(const String& method, const JsonObject& params, JsonWriter::ObjectScope& out)
 {
 	return dispatch(method.c_str(), params, out);
 }
 
-bool Api::dispatch(const char* method, const JsonObject& params, JsonObject& out)
+bool Api::dispatch(const char* method, const JsonObject& params, JsonWriter::ObjectScope& out)
 {
 	const char* methodName = (method != nullptr) ? method : "";
 	debug_i(ANSI_COLOR_BLUE "Api::dispatch: method=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET,
@@ -282,32 +282,36 @@ bool Api::dispatchCommand(const String& method, const String& params, String& er
 	return dispatchCommand(method.c_str(), doc.as<JsonObject>(), errorMsg, relay);
 }
 
-bool Api::handleColor(const JsonObject& params, JsonObject& out)
+bool Api::handleColor(const JsonObject& params, JsonWriter::ObjectScope& out)
 {
 	(void)params;
 
-	JsonObject raw = out.createNestedObject(F("raw"));
 	ChannelOutput output = app.rgbwwctrl.getCurrentOutput();
-	raw[F("r")] = output.r;
-	raw[F("g")] = output.g;
-	raw[F("b")] = output.b;
-	raw[F("ww")] = output.ww;
-	raw[F("cw")] = output.cw;
+	{
+		auto raw = out.beginObject(F("raw"));
+		raw[F("r")] = output.r;
+		raw[F("g")] = output.g;
+		raw[F("b")] = output.b;
+		raw[F("ww")] = output.ww;
+		raw[F("cw")] = output.cw;
+	}
 
-	JsonObject hsv = out.createNestedObject(F("hsv"));
 	float h, s, v;
 	int ct;
 	HSVCT c = app.rgbwwctrl.getCurrentColor();
 	c.asRadian(h, s, v, ct);
-	hsv[F("h")] = h;
-	hsv[F("s")] = s;
-	hsv[F("v")] = v;
-	hsv[F("ct")] = ct;
+	{
+		auto hsv = out.beginObject(F("hsv"));
+		hsv[F("h")] = h;
+		hsv[F("s")] = s;
+		hsv[F("v")] = v;
+		hsv[F("ct")] = ct;
+	}
 
 	return true;
 }
 
-bool Api::handleNetworks(const JsonObject& params, JsonObject& out)
+bool Api::handleNetworks(const JsonObject& params, JsonWriter::ObjectScope& out)
 {
 	(void)params;
 
@@ -317,7 +321,7 @@ bool Api::handleNetworks(const JsonObject& params, JsonObject& out)
 	}
 
 	out[F("scanning")] = false;
-	JsonArray netlist = out.createNestedArray(F("available"));
+	auto netlist = out.beginArray(F("available"));
 	BssList networks = app.network.getAvailableNetworks();
 	for(unsigned int i = 0; i < networks.count(); i++) {
 		if(networks[i].hidden) {
@@ -327,11 +331,13 @@ bool Api::handleNetworks(const JsonObject& params, JsonObject& out)
 			continue;
 		}
 
-		JsonObject item = netlist.createNestedObject();
-		item[F("id")] = (int)networks[i].getHashId();
-		item[F("ssid")] = networks[i].ssid;
-		item[F("signal")] = networks[i].rssi;
-		item[F("encryption")] = networks[i].getAuthorizationMethodName();
+		{
+			auto item = netlist.beginObject();
+			item[F("id")] = (int)networks[i].getHashId();
+			item[F("ssid")] = networks[i].ssid;
+			item[F("signal")] = networks[i].rssi;
+			item[F("encryption")] = networks[i].getAuthorizationMethodName();
+		}
 
 		if(i >= 25) {
 			break;
@@ -365,13 +371,13 @@ bool Api::dispatchStream(const String& method, const JsonObject& params, std::un
 	return dispatchDataRequest(method, params, nullptr, &out, errorMsg);
 }
 
-bool Api::dispatchDataRequest(const String& method, const JsonObject& params, JsonObject* outObject,
+bool Api::dispatchDataRequest(const String& method, const JsonObject& params, JsonWriter::ObjectScope* outObject,
 						 std::unique_ptr<IDataSourceStream>* outStream, String& errorMsg)
 {
 	return dispatchDataRequest(method.c_str(), params, outObject, outStream, errorMsg);
 }
 
-bool Api::dispatchDataRequest(const char* method, const JsonObject& params, JsonObject* outObject,
+bool Api::dispatchDataRequest(const char* method, const JsonObject& params, JsonWriter::ObjectScope* outObject,
 						 std::unique_ptr<IDataSourceStream>* outStream, String& errorMsg)
 {
 	const char* methodName = (method != nullptr) ? method : "";
@@ -403,8 +409,8 @@ bool Api::dispatchDataRequest(const char* method, const JsonObject& params, Json
 	return false;
 }
 
-NO_INLINE void buildAppInfo(JsonObject& data) {
-    JsonObject application = data.createNestedObject(F("app"));
+NO_INLINE void buildAppInfo(JsonWriter::ObjectScope& data) {
+    auto application = data.beginObject(F("app"));
     AppConfig::Root::Webapp webappCfg(*app.cfg);
     String installedVer = webappCfg.getInstalledVersion();
     application[F("webapp_version")] = installedVer.length() > 0 ? installedVer : String(WEBAPP_VERSION);
@@ -413,8 +419,8 @@ NO_INLINE void buildAppInfo(JsonObject& data) {
     application[F("git_date")] = fw_git_date;
 }
 
-NO_INLINE void buildFsInfo(JsonObject& data) {
-    JsonObject fs = data.createNestedObject(F("filesystem"));
+NO_INLINE void buildFsInfo(JsonWriter::ObjectScope& data) {
+    auto fs = data.beginObject(F("filesystem"));
     IFS::FileSystem::Info fsInfo;
     if (fileGetSystemInfo(fsInfo) != FS_OK) {
         fs[F("error")] = F("failed to get filesystem info");
@@ -425,8 +431,8 @@ NO_INLINE void buildFsInfo(JsonObject& data) {
     }
 }
 
-NO_INLINE void buildNetworkInfo(JsonObject& data) {
-    JsonObject con = data.createNestedObject(F("connection"));
+NO_INLINE void buildNetworkInfo(JsonWriter::ObjectScope& data) {
+    auto con = data.beginObject(F("connection"));
     con[F("connected")] = WifiStation.isConnected();
     if(WifiStation.isConnected()) {
         con[F("ssid")] = WifiStation.getSSID();
@@ -440,42 +446,49 @@ NO_INLINE void buildNetworkInfo(JsonObject& data) {
     }
 }
 
-NO_INLINE void buildMqttInfo(JsonObject& data) {
-    JsonObject mqtt = data.createNestedObject(F("mqtt"));
-    JsonObject ha = data.createNestedObject(F("homeassistant"));
-    
+NO_INLINE void buildMqttInfo(JsonWriter::ObjectScope& data) {
     if(!app.ota.isProccessing()) {
         AppConfig::Network network(*app.cfg);
         bool enabled = network.mqtt.getEnabled();
-        
-        if(enabled && !app.mqttclient.isRunning()) {
-            mqtt[F("status")] = F("configured but not running");
-        } else if(enabled && app.mqttclient.isRunning()) {
-            mqtt[F("status")] = F("running");
-        } else {
-            mqtt[F("status")] = F("disabled");
+
+        {
+            auto mqtt = data.beginObject(F("mqtt"));
+            if(enabled && !app.mqttclient.isRunning()) {
+                mqtt[F("status")] = F("configured but not running");
+            } else if(enabled && app.mqttclient.isRunning()) {
+                mqtt[F("status")] = F("running");
+            } else {
+                mqtt[F("status")] = F("disabled");
+            }
+            mqtt[F("enabled")] = enabled;
+            mqtt[F("broker")] = network.mqtt.getServer();
+            mqtt[F("topic")] = network.mqtt.getTopicBase();
         }
-        mqtt[F("enabled")] = enabled;
-        mqtt[F("broker")] = network.mqtt.getServer();
-        mqtt[F("topic")] = network.mqtt.getTopicBase();
-
-        ha[F("enabled")] = network.mqtt.homeassistant.getEnable();
-        ha[F("discovery_prefix")] = network.mqtt.homeassistant.getDiscoveryPrefix();
-        ha[F("Node ID")] = network.mqtt.homeassistant.getNodeId();
+        {
+            auto ha = data.beginObject(F("homeassistant"));
+            ha[F("enabled")] = network.mqtt.homeassistant.getEnable();
+            ha[F("discovery_prefix")] = network.mqtt.homeassistant.getDiscoveryPrefix();
+            ha[F("Node ID")] = network.mqtt.homeassistant.getNodeId();
+        }
     } else {
-        mqtt[F("status")] = F("ota in progress");
-        mqtt[F("enabled")] = false;
-        mqtt[F("broker")] = String::nullstr;
-        mqtt[F("topic")] = String::nullstr;
-
-        ha[F("enabled")] = false;
-        ha[F("discovery_prefix")] = String::nullstr;
-        ha[F("Node ID")] = String::nullstr;
+        {
+            auto mqtt = data.beginObject(F("mqtt"));
+            mqtt[F("status")] = F("ota in progress");
+            mqtt[F("enabled")] = false;
+            mqtt[F("broker")] = String::nullstr;
+            mqtt[F("topic")] = String::nullstr;
+        }
+        {
+            auto ha = data.beginObject(F("homeassistant"));
+            ha[F("enabled")] = false;
+            ha[F("discovery_prefix")] = String::nullstr;
+            ha[F("Node ID")] = String::nullstr;
+        }
     }
 }
 
 // Cleaned up main handler
-bool Api::handleInfo(const JsonObject& params, JsonObject& data, uint32_t heapFreeSnapshot, bool sparse)
+bool Api::handleInfo(const JsonObject& params, JsonWriter::ObjectScope& data, uint32_t heapFreeSnapshot, bool sparse)
 {
     debug_i(ANSI_COLOR_BLUE "Api::handleInfo called" ANSI_COLOR_RESET);
     const uint32_t heapFreeReported = (heapFreeSnapshot != 0) ? heapFreeSnapshot : app.getFreeHeapSize();
@@ -539,41 +552,44 @@ bool Api::handleInfo(const JsonObject& params, JsonObject& data, uint32_t heapFr
             "{\"version\":\"" RGBWW_VERSION "\",\"queuesize\":" RGBWW_STRINGIFY(RGBWW_ANIMATIONQSIZE) "}";
 
         data[F("version")] = 2;
-        data[F("device")] = serialized((const char*)s_infoDeviceV2);
+        data.writeRawField(F("device"), (const char*)s_infoDeviceV2);
 
         // Isolated sub-function calls execute sequentially, drastically flattening peak stack usage
         buildAppInfo(data);
 
-        data[F("sming")] = serialized(FPSTR(kInfoSmingV2));
+        data.writeRawField(F("sming"), FPSTR(kInfoSmingV2));
 
         buildFsInfo(data);
 
 		if(!sparse) {
-			JsonObject run = data.createNestedObject(F("runtime"));
-			run[F("uptime")] = app.getUptime();
-			run[F("heap_free")] = heapFreeReported;
-			run[F("minfreeHeapRuntime")] = app.getMinimumHeapUptime();
-			run[F("minfreeHeap10min")] = app.getMinimumHeap10min();
-			run[F("heapLowErrUptime")] = app.getHeapLowErrUptime();
-			run[F("heapLowErr10min")] = app.getHeapLowErr10min();
-
-			JsonObject debug = data.createNestedObject(F("debug"));
-			debug[F("http_active_connections")] = app.webserver.getHttpActiveConnections();
-			debug[F("websocket_connections")] = app.webserver.getWebsocketConnectionCount();
-			debug[F("eventserver_clients")] = app.eventserver.activeClients;
-			debug[F("tcp_pcb_size")] = 0;
-			debug[F("tcp_active_estimated_bytes")] = 0;
+			{
+				auto run = data.beginObject(F("runtime"));
+				run[F("uptime")] = app.getUptime();
+				run[F("heap_free")] = heapFreeReported;
+				run[F("minfreeHeapRuntime")] = app.getMinimumHeapUptime();
+				run[F("minfreeHeap10min")] = app.getMinimumHeap10min();
+				run[F("heapLowErrUptime")] = app.getHeapLowErrUptime();
+				run[F("heapLowErr10min")] = app.getHeapLowErr10min();
+			}
+			{
+				auto debug = data.beginObject(F("debug"));
+				debug[F("http_active_connections")] = app.webserver.getHttpActiveConnections();
+				debug[F("websocket_connections")] = app.webserver.getWebsocketConnectionCount();
+				debug[F("eventserver_clients")] = app.eventserver.activeClients;
+				debug[F("tcp_pcb_size")] = 0;
+				debug[F("tcp_active_estimated_bytes")] = 0;
+			}
 		}
 
 		#ifdef RGBWW_ANIMATIONQSIZE
-        data[F("rgbww")] = serialized(FPSTR(kInfoRgbwwV2));
+        data.writeRawField(F("rgbww"), FPSTR(kInfoRgbwwV2));
         #endif 
 		
         buildNetworkInfo(data);
         buildMqttInfo(data);
 
         if(app.ota.isProccessing()) {
-            JsonObject ota = data.createNestedObject(F("ota"));
+            auto ota = data.beginObject(F("ota"));
             ota[F("status")] = F("in progress");
         }
 
@@ -602,18 +618,22 @@ bool Api::handleInfo(const JsonObject& params, JsonObject& data, uint32_t heapFr
 		data[F("uptime")] = app.getUptime();
 		data[F("heap_free")] = heapFreeReported;
 
-		JsonObject rgbww = data.createNestedObject(F("rgbww"));
-		rgbww[F("version")] = RGBWW_VERSION;
-		rgbww[F("queuesize")] = RGBWW_ANIMATIONQSIZE;
+		{
+			auto rgbww = data.beginObject(F("rgbww"));
+			rgbww[F("version")] = RGBWW_VERSION;
+			rgbww[F("queuesize")] = RGBWW_ANIMATIONQSIZE;
+		}
 
-		JsonObject con = data.createNestedObject(F("connection"));
-		con[F("connected")] = WifiStation.isConnected();
-		con[F("ssid")] = WifiStation.getSSID();
-		con[F("dhcp")] = WifiStation.isEnabledDHCP();
-		con[F("ip")] = WifiStation.getIP().toString();
-		con[F("netmask")] = WifiStation.getNetworkMask().toString();
-		con[F("gateway")] = WifiStation.getNetworkGateway().toString();
-		con[F("mac")] = WifiStation.getMAC();
+		{
+			auto con = data.beginObject(F("connection"));
+			con[F("connected")] = WifiStation.isConnected();
+			con[F("ssid")] = WifiStation.getSSID();
+			con[F("dhcp")] = WifiStation.isEnabledDHCP();
+			con[F("ip")] = WifiStation.getIP().toString();
+			con[F("netmask")] = WifiStation.getNetworkMask().toString();
+			con[F("gateway")] = WifiStation.getNetworkGateway().toString();
+			con[F("mac")] = WifiStation.getMAC();
+		}
 
 		return true;
 	}

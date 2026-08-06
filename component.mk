@@ -1,5 +1,5 @@
 COMPONENT_SEARCH_DIRS := $(PROJECT_DIR)/Components
-COMPONENT_DEPENDS += MDNS RGBWWLed LittleFS ConfigDB ArduinoJson6 OtaNetwork
+COMPONENT_DEPENDS += MDNS RGBWWLed LittleFS ConfigDB ArduinoJson6 OtaNetwork JsonWriter
 ifndef SMING_RELEASE
 COMPONENT_DEPENDS += HuffmanCodec
 endif
@@ -8,8 +8,7 @@ ifeq ($(SMING_ARCH), Esp32)
     COMPONENT_DEPENDS += Esp32HardwarePwm
 endif
 
-# Set default number of jobs to twice the number of available processors
-#NUM_JOBS := $(shell echo $(($(nproc) * 2)))
+# Set default number of jobs to number of available processors +2
 NUM_JOBS := $(shell echo $(($(nproc) + 2)))
 MAKEFLAGS += -j$(NUM_JOBS)
 

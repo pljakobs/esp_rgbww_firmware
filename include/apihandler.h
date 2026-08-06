@@ -18,6 +18,7 @@
 #pragma once
 
 #include <ArduinoJson.h>
+#include <JsonWriter.h>
 #include <Data/Stream/DataSourceStream.h>
 #include <memory>
 
@@ -26,23 +27,23 @@ public:
 	Api() = default;
 	~Api() = default;
 
-	bool dispatch(const String& method, const JsonObject& params, JsonObject& out);
-	bool dispatch(const char* method, const JsonObject& params, JsonObject& out);
+	bool dispatch(const String& method, const JsonObject& params, JsonWriter::ObjectScope& out);
+	bool dispatch(const char* method, const JsonObject& params, JsonWriter::ObjectScope& out);
 	bool dispatchCommand(const String& method, const JsonObject& params, String& errorMsg, bool relay = true);
 	bool dispatchCommand(const char* method, const JsonObject& params, String& errorMsg, bool relay = true);
 	bool dispatchCommand(const String& method, const String& params, String& errorMsg, bool relay = true);
 	bool dispatchJsonRpc(const String& json, String& errorMsg, bool relay = false);
 	bool dispatchStream(const String& method, const JsonObject& params, std::unique_ptr<IDataSourceStream>& out,
 					 String& errorMsg);
-	bool handleInfo(const JsonObject& params, JsonObject& out, uint32_t heapFreeSnapshot = 0, bool sparse = true);
+	bool handleInfo(const JsonObject& params, JsonWriter::ObjectScope& out, uint32_t heapFreeSnapshot = 0, bool sparse = true);
 
 private:
-	bool dispatchDataRequest(const String& method, const JsonObject& params, JsonObject* outObject,
+	bool dispatchDataRequest(const String& method, const JsonObject& params, JsonWriter::ObjectScope* outObject,
 						 std::unique_ptr<IDataSourceStream>* outStream, String& errorMsg);
-	bool dispatchDataRequest(const char* method, const JsonObject& params, JsonObject* outObject,
+	bool dispatchDataRequest(const char* method, const JsonObject& params, JsonWriter::ObjectScope* outObject,
 						 std::unique_ptr<IDataSourceStream>* outStream, String& errorMsg);
-	bool handleColor(const JsonObject& params, JsonObject& out);
-	bool handleNetworks(const JsonObject& params, JsonObject& out);
+	bool handleColor(const JsonObject& params, JsonWriter::ObjectScope& out);
+	bool handleNetworks(const JsonObject& params, JsonWriter::ObjectScope& out);
 	bool handleHosts(const JsonObject& params, std::unique_ptr<IDataSourceStream>& out, String& errorMsg);
 	bool handleConfig(const JsonObject& params, std::unique_ptr<IDataSourceStream>& out, String& errorMsg);
 };

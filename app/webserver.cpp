@@ -1,4 +1,5 @@
 #include <ArduinoJson.h>
+#include <JsonWriter.h>
 #include <IFS/FileSystem.h>
 
 /**
@@ -270,7 +271,7 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 
 	debug_i(ANSI_COLOR_BLUE "Websocket message: method= " ANSI_COLOR_GREEN "%s" ANSI_COLOR_RESET, method);
 
-	// Determine target stream capacity based on the specific method requested
+	// Determine target buffer capacity based on the specific method requested
 	size_t responseCapacity = 512; // Default for simple getters/commands
 	const bool isInfoMethod = (strcmp_P(method, PSTR("info")) == 0) || (strcmp_P(method, PSTR("getInfo")) == 0);
 	if(isInfoMethod) {
@@ -278,17 +279,13 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 	}
 	const uint32_t infoHeapSnapshot = app.getFreeHeapSize();
 
-	auto responseStream = std::make_unique<JsonObjectStream>(responseCapacity);
-	if(!responseStream) {
-		socket.sendString(F("{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32603,\"message\":\"internal error: low memory\"},\"id\":null}"));
-		return;
-	}
-	JsonObject responseRoot = responseStream->getRoot();
-	responseRoot[F("jsonrpc")] = F("2.0");
-
-	if(!requestId.isNull()) {
-		responseRoot[F("id")] = requestId;
-	}
+	// ---- Phase 1: decide the outcome without emitting any JSON ----------
+	// Streamed bytes can't be un-written, so all auth/method decisions (and any
+	// command side effects) happen here; phase 2 then streams the envelope once.
+	enum ResultKind { RK_None, RK_Authenticated, RK_SubTrue, RK_SubFalse, RK_CommandSuccess, RK_Data };
+	ResultKind resultKind = RK_None;
+	bool dataIsInfo = false;
+	String challenge; // non-empty => include a top-level "challenge"
 
 	// ---- WebSocket authentication gate ----------------------------------
 	// When the API is secured, a connection must complete the challenge-
@@ -301,15 +298,13 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 	const bool isKeepAlive = strcmp_P(method, PSTR("keep_alive")) == 0;
 
 	if(isAuthMethod) {
-		JsonObject params = requestRoot[F("params")];
 		const String clientHash = params[F("hash")] | "";
 		if(!wsSecured) {
 			// Nothing to prove when security is disabled.
 			if(wsAuth) {
 				wsAuth->authenticated = true;
 			}
-			JsonObject result = responseRoot.createNestedObject(F("result"));
-			result[F("authenticated")] = true;
+			resultKind = RK_Authenticated;
 		} else if(wsAuth == nullptr) {
 			errorCode = -32603;
 			errorMsg = F("internal error: no auth state");
@@ -318,31 +313,29 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 			wsAuth->challenge = wsMakeChallenge();
 			errorCode = -32001;
 			errorMsg = F("authentication required");
-			responseRoot[F("challenge")] = wsAuth->challenge;
+			challenge = wsAuth->challenge;
 		} else {
 			const String expected = wsComputeAuthHash(wsAuth->challenge, _apiPasswordCache);
 			if(expected.length() && clientHash.equalsIgnoreCase(expected)) {
 				wsAuth->authenticated = true;
 				wsAuth->challenge = ""; // consume the nonce
-				JsonObject result = responseRoot.createNestedObject(F("result"));
-				result[F("authenticated")] = true;
+				resultKind = RK_Authenticated;
 			} else {
 				// Wrong hash — hand out a fresh challenge for the next attempt.
 				wsAuth->challenge = wsMakeChallenge();
 				errorCode = -32001;
 				errorMsg = F("authentication failed");
-				responseRoot[F("challenge")] = wsAuth->challenge;
+				challenge = wsAuth->challenge;
 			}
 		}
 	} else if(wsSecured && !isKeepAlive && (wsAuth == nullptr || !wsAuth->authenticated)) {
 		// Unauthenticated request on a secured API: refuse and issue a challenge.
-		const String challenge = wsMakeChallenge();
+		challenge = wsMakeChallenge();
 		if(wsAuth) {
 			wsAuth->challenge = challenge;
 		}
 		errorCode = -32001;
 		errorMsg = F("authentication required");
-		responseRoot[F("challenge")] = challenge;
 	} else if(method[0] == '\0') {
 		errorCode = -32600;
 		errorMsg = F("missing method");
@@ -350,16 +343,12 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 		if(wsAuth) {
 			wsAuth->runtimeInfoSubscribed = true;
 		}
-		JsonObject result = responseRoot.createNestedObject(F("result"));
-		result[F("subscribed")] = true;
-		result[F("channel")] = F("runtime_info");
+		resultKind = RK_SubTrue;
 	} else if(std::strcmp(method, "runtime_info_unsubscribe") == 0 || std::strcmp(method, "unsubscribe_runtime_info") == 0) {
 		if(wsAuth) {
 			wsAuth->runtimeInfoSubscribed = false;
 		}
-		JsonObject result = responseRoot.createNestedObject(F("result"));
-		result[F("subscribed")] = false;
-		result[F("channel")] = F("runtime_info");
+		resultKind = RK_SubFalse;
 	} else if(!app.api) {
 		errorCode = -32603;
 		errorMsg = F("api not initialized");
@@ -369,27 +358,13 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 						(strcmp_P(method, PSTR("networks")) == 0) || (strcmp_P(method, PSTR("getNetworks")) == 0);
 
 		if(isDataMethod) {
-			JsonObject result = responseRoot.createNestedObject(F("result"));
-			if(isInfoMethod) {
-				const bool sparse = parseTruthy(params[F("sparse")], true);
-				if(!app.api->handleInfo(params, result, infoHeapSnapshot, sparse)) {
-					errorCode = -32601;
-					const char* resultError = result[F("error")] | nullptr;
-					errorMsg = resultError ? String(resultError) : String(F("method not implemented"));
-					responseRoot.remove(F("result"));
-				}
-			} else {
-				if(!app.api->dispatch(method, params, result)) {
-					errorCode = -32601;
-					const char* resultError = result[F("error")] | nullptr;
-					errorMsg = resultError ? String(resultError) : String(F("method not implemented"));
-					responseRoot.remove(F("result"));
-				}
-			}
+			// Data handlers always succeed for a known method; result is streamed in phase 2.
+			resultKind = RK_Data;
+			dataIsInfo = isInfoMethod;
 		} else {
+			// Command: execute now (side effects + success/error), stream the envelope after.
 			if(app.api->dispatchCommand(method, params, errorMsg, false)) {
-				JsonObject result = responseRoot.createNestedObject(F("result"));
-				result[F("success")] = true;
+				resultKind = RK_CommandSuccess;
 			} else {
 				const bool methodMissing = errorMsg.length() == 0 || errorMsg.indexOf(F("method not implemented")) >= 0;
 				if(methodMissing) {
@@ -404,14 +379,69 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 		}
     }
 
-	if(errorMsg.length()) {
-		JsonObject errorObj = responseRoot.createNestedObject(F("error"));
-		errorObj[F("code")] = errorCode;
-		errorObj[F("message")] = errorMsg;
+	// ---- Phase 2: stream the JSON-RPC envelope --------------------------
+	String payload;
+	payload.reserve(responseCapacity);
+	{
+		JsonWriter writer(payload);
+		auto root = writer.beginObject();
+		root[F("jsonrpc")] = F("2.0");
+		if(!requestId.isNull()) {
+			// Preserve the exact id type (number/string) by inserting it raw.
+			String idStr;
+			serializeJson(requestId, idStr);
+			root.writeRawField(F("id"), idStr.c_str());
+		}
+		if(challenge.length()) {
+			root[F("challenge")] = challenge;
+		}
+		if(errorMsg.length()) {
+			auto err = root.beginObject(F("error"));
+			err[F("code")] = errorCode;
+			err[F("message")] = errorMsg;
+		} else {
+			switch(resultKind) {
+			case RK_Authenticated: {
+				auto result = root.beginObject(F("result"));
+				result[F("authenticated")] = true;
+				break;
+			}
+			case RK_SubTrue: {
+				auto result = root.beginObject(F("result"));
+				result[F("subscribed")] = true;
+				result[F("channel")] = F("runtime_info");
+				break;
+			}
+			case RK_SubFalse: {
+				auto result = root.beginObject(F("result"));
+				result[F("subscribed")] = false;
+				result[F("channel")] = F("runtime_info");
+				break;
+			}
+			case RK_CommandSuccess: {
+				auto result = root.beginObject(F("result"));
+				result[F("success")] = true;
+				break;
+			}
+			case RK_Data: {
+				auto result = root.beginObject(F("result"));
+				if(dataIsInfo) {
+					const bool sparse = parseTruthy(params[F("sparse")], true);
+					app.api->handleInfo(params, result, infoHeapSnapshot, sparse);
+				} else {
+					app.api->dispatch(method, params, result);
+				}
+				break;
+			}
+			case RK_None:
+			default:
+				break;
+			}
+		}
 	}
 
 	debug_i(ANSI_COLOR_BLUE "Websocket response prepared" ANSI_COLOR_RESET);
-	socket.send(responseStream.release(), WS_FRAME_TEXT);
+	socket.sendString(payload);
 }
 
 /*
@@ -574,78 +604,78 @@ void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, c
 
 void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, const __FlashStringHelper* msg)
 {
-	auto stream = std::make_unique<JsonObjectStream>();
-	if(!stream) {
-		setCorsHeaders(response);
-		response.setHeader(F("accept"), F("GET, POST, OPTIONS"));
-		response.setHeader(F("Connection"), F("close"));
-		response.code = (code == API_CODES::API_SUCCESS) ? HTTP_STATUS_OK : HTTP_STATUS_BAD_REQUEST;
-		response.setContentType(MIME_TEXT);
-		if(!response.sendString(String(F("Invalid JSON")))) {
-			response.headers[HTTP_HEADER_CONTENT_LENGTH] = "0";
+	String payload;
+	payload.reserve(code == API_CODES::API_UPDATE_IN_PROGRESS ? 512 : 64);
+	{
+		JsonWriter writer(payload);
+		auto json = writer.beginObject();
+		if(code == API_CODES::API_SUCCESS) {
+			json[F("success")] = true;
+		} else {
+			if(code == API_CODES::API_UPDATE_IN_PROGRESS) {
+				debug_i(ANSI_COLOR_BLUE "API update in progress, adding info to response" ANSI_COLOR_RESET);
+				auto data = json.beginObject(F("info"));
+				addInfoFields(data);
+			}
+			if(msg == nullptr) {
+				json[F("error")] = getApiCodeMsg(code);
+			} else {
+				json[F("error")] = msg;
+			}
 		}
+	}
+
+	if(!checkHeap(response)) {
 		return;
 	}
-	JsonObject json = stream->getRoot();
-
 	setCorsHeaders(response);
 	response.setHeader(F("accept"), F("GET, POST, OPTIONS"));
-
-	if(code == API_CODES::API_SUCCESS) {
-		json[F("success")] = true;
-		sendApiResponse(response, stream.release(), HTTP_STATUS_OK);
-		return;
-	}
-
-	if(code == API_CODES::API_UPDATE_IN_PROGRESS) {
-		debug_i(ANSI_COLOR_BLUE "API update in progress, adding info to response" ANSI_COLOR_RESET);
-		JsonObject data = json.createNestedObject(F("info"));
-		addInfoFields(data);
-	}
-
-	if(msg == nullptr) {
-		json[F("error")] = getApiCodeMsg(code);
-	} else {
-		json[F("error")] = msg;
-	}
-	sendApiResponse(response, stream.release(), HTTP_STATUS_BAD_REQUEST);
+	response.code = (code == API_CODES::API_SUCCESS) ? HTTP_STATUS_OK : HTTP_STATUS_BAD_REQUEST;
+	response.setContentType(MIME_JSON);
+	response.sendString(payload);
 }
 
-void ApplicationWebserver::addInfoFields(JsonObject& obj)
+void ApplicationWebserver::addInfoFields(JsonWriter::ObjectScope& obj)
 {
-	JsonObject dev = obj.createNestedObject(F("device"));
-
-	dev[F("deviceid")] = system_get_chip_id();
-	dev[F("soc")] = SOC;
-#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
-	dev[F("current_rom")] = String(app.ota.getRomPartition().name());
-#endif
-	JsonObject application = obj.createNestedObject(F("app"));
 	{
-		AppConfig::Root::Webapp webappCfg(*app.cfg);
-		String installedVer = webappCfg.getInstalledVersion();
-		application[F("webapp_version")] = installedVer.length() > 0 ? installedVer : String(WEBAPP_VERSION);
+		auto dev = obj.beginObject(F("device"));
+		dev[F("deviceid")] = system_get_chip_id();
+		dev[F("soc")] = SOC;
+#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
+		dev[F("current_rom")] = String(app.ota.getRomPartition().name());
+#endif
 	}
-	application[F("git_version")] = fw_git_version;
-	application[F("build_type")] = BUILD_TYPE;
-	application[F("git_date")] = fw_git_date;
-
-	JsonObject sming = obj.createNestedObject(F("sming"));
-	sming[F("version")] = SMING_VERSION;
-	JsonObject run = obj.createNestedObject(F("runtime"));
-	run[F("uptime")] = app.getUptime();
-	run[F("heap_free")] = app.getFreeHeapSize();
-	run[F("minimumfreeHeapRuntime")]=app.getMinimumHeapUptime();
-	run[F("minimumfreeHeap10min")]=app.getMinimumHeap10min();
-	run[F("heapLowErrUptime")]=app.getHeapLowErrUptime();
-	run[F("heapLowErr10min")]=app.getHeapLowErr10min();
+	{
+		auto application = obj.beginObject(F("app"));
+		{
+			AppConfig::Root::Webapp webappCfg(*app.cfg);
+			String installedVer = webappCfg.getInstalledVersion();
+			application[F("webapp_version")] = installedVer.length() > 0 ? installedVer : String(WEBAPP_VERSION);
+		}
+		application[F("git_version")] = fw_git_version;
+		application[F("build_type")] = BUILD_TYPE;
+		application[F("git_date")] = fw_git_date;
+	}
+	{
+		auto sming = obj.beginObject(F("sming"));
+		sming[F("version")] = SMING_VERSION;
+	}
+	{
+		auto run = obj.beginObject(F("runtime"));
+		run[F("uptime")] = app.getUptime();
+		run[F("heap_free")] = app.getFreeHeapSize();
+		run[F("minimumfreeHeapRuntime")]=app.getMinimumHeapUptime();
+		run[F("minimumfreeHeap10min")]=app.getMinimumHeap10min();
+		run[F("heapLowErrUptime")]=app.getHeapLowErrUptime();
+		run[F("heapLowErr10min")]=app.getHeapLowErr10min();
+	}
 
 	if(app.isFilesystemMounted()) {
 		auto* fs = IFS::getDefaultFileSystem();
 		if(fs != nullptr) {
 			IFS::FileSystem::Info fsInfo{};
 			if(fs->getinfo(fsInfo) == IFS::Error::Success) {
-				JsonObject lfs = obj.createNestedObject(F("lfs"));
+				auto lfs = obj.beginObject(F("lfs"));
 				lfs[F("total")] = (uint32_t)fsInfo.volumeSize;
 				lfs[F("used")]  = (uint32_t)fsInfo.used();
 				lfs[F("free")]  = (uint32_t)fsInfo.freeSpace;
@@ -661,40 +691,33 @@ void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, c
 		return;
 	}
 
-	auto stream = std::make_unique<JsonObjectStream>();
-	if(!stream) {
-		setCorsHeaders(response);
-		response.setHeader(F("accept"), F("GET, POST, OPTIONS"));
-		response.setHeader(F("Connection"), F("close"));
-		response.code = (code == API_CODES::API_SUCCESS) ? HTTP_STATUS_OK : HTTP_STATUS_BAD_REQUEST;
-		response.setContentType(MIME_TEXT);
-		if(!response.sendString(String(F("Invalid JSON")))) {
-			response.headers[HTTP_HEADER_CONTENT_LENGTH] = "0";
+	String payload;
+	payload.reserve(code == API_CODES::API_UPDATE_IN_PROGRESS ? 512 : 64);
+	{
+		JsonWriter writer(payload);
+		auto json = writer.beginObject();
+		if(code == API_CODES::API_SUCCESS) {
+			json[F("success")] = true;
+		} else {
+			if(code == API_CODES::API_UPDATE_IN_PROGRESS) {
+				debug_i(ANSI_COLOR_BLUE "API update in progress, adding info to response" ANSI_COLOR_RESET);
+				auto data = json.beginObject(F("info"));
+				addInfoFields(data);
+			}
+			// JsonWriter copies the bytes into `payload` synchronously, so passing msg
+			// (which may point at a caller's stack buffer) directly is safe here.
+			json[F("error")] = msg;
 		}
+	}
+
+	if(!checkHeap(response)) {
 		return;
 	}
-	JsonObject json = stream->getRoot();
-
 	setCorsHeaders(response);
 	response.setHeader(F("accept"), F("GET, POST, OPTIONS"));
-
-	if(code == API_CODES::API_SUCCESS) {
-		json[F("success")] = true;
-		sendApiResponse(response, stream.release(), HTTP_STATUS_OK);
-	} else {
-		if(code == API_CODES::API_UPDATE_IN_PROGRESS) {
-			debug_i(ANSI_COLOR_BLUE "API update in progress, adding info to response" ANSI_COLOR_RESET);
-			JsonObject data = json.createNestedObject(F("info"));
-			addInfoFields(data);
-		}
-
-		// ArduinoJson stores a const char* by reference (no copy). Callers may pass a
-		// pointer to a stack buffer (e.g. parseJsonBody's parseError[]) that is gone by
-		// the time JsonObjectStream is serialized asynchronously, yielding a dangling
-		// read and a truncated response. Wrap in String to force a copy into the pool.
-		json[F("error")] = String(msg);
-		sendApiResponse(response, stream.release(), HTTP_STATUS_BAD_REQUEST);
-	}
+	response.code = (code == API_CODES::API_SUCCESS) ? HTTP_STATUS_OK : HTTP_STATUS_BAD_REQUEST;
+	response.setContentType(MIME_JSON);
+	response.sendString(payload);
 }
 
 bool ApplicationWebserver::parseJsonBody(HttpRequest& request, HttpResponse& response, JsonDocument& doc,
@@ -1440,20 +1463,12 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response){
 		return;
 	}
 
-	auto stream = std::make_unique<JsonObjectStream>(isV2 ? INFO_DOC_CAPACITY_V2 : INFO_DOC_CAPACITY_V1);
-	if(!stream) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("low memory"));
-		return;
-	}
-	JsonObject data = stream->getRoot();
-	
-	// Call the shared handler
-	app.api->handleInfo(params, data, infoHeapSnapshot, sparse);
-
 	String payload;
-	if(!serializeJson(data, payload)) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("serialize failed"));
-		return;
+	payload.reserve(isV2 ? INFO_DOC_CAPACITY_V2 : INFO_DOC_CAPACITY_V1);
+	{
+		JsonWriter writer(payload);
+		auto root = writer.beginObject();
+		app.api->handleInfo(params, root, infoHeapSnapshot, sparse);
 	}
 
 	if(useSparseCache && !app.ota.isProccessing()) {
@@ -1476,30 +1491,34 @@ void ApplicationWebserver::onColorGet(HttpRequest& request, HttpResponse& respon
 {
 	debug_i(ANSI_COLOR_BLUE "onColorGet" ANSI_COLOR_RESET);
 
-	StaticJsonDocument<256> doc;
-	JsonObject json = doc.to<JsonObject>();
-
-	JsonObject raw = json.createNestedObject("raw");
-	ChannelOutput output = app.rgbwwctrl.getCurrentOutput();
-	raw[F("r")] = output.r;
-	raw[F("g")] = output.g;
-	raw[F("b")] = output.b;
-	raw[F("ww")] = output.ww;
-	raw[F("cw")] = output.cw;
-
-	JsonObject hsv = json.createNestedObject("hsv");
-	float h, s, v;
-	int ct;
-	HSVCT c = app.rgbwwctrl.getCurrentColor();
-	c.asRadian(h, s, v, ct);
-	hsv[F("h")] = h;
-	hsv[F("s")] = s;
-	hsv[F("v")] = v;
-	hsv[F("ct")] = ct;
-
 	String payload;
-	payload.reserve(128);
-	serializeJson(doc, payload);
+	payload.reserve(256);
+	{
+		JsonWriter writer(payload);
+		auto json = writer.beginObject();
+
+		ChannelOutput output = app.rgbwwctrl.getCurrentOutput();
+		{
+			auto raw = json.beginObject(F("raw"));
+			raw[F("r")] = output.r;
+			raw[F("g")] = output.g;
+			raw[F("b")] = output.b;
+			raw[F("ww")] = output.ww;
+			raw[F("cw")] = output.cw;
+		}
+
+		float h, s, v;
+		int ct;
+		HSVCT c = app.rgbwwctrl.getCurrentColor();
+		c.asRadian(h, s, v, ct);
+		{
+			auto hsv = json.beginObject(F("hsv"));
+			hsv[F("h")] = h;
+			hsv[F("s")] = s;
+			hsv[F("v")] = v;
+			hsv[F("ct")] = ct;
+		}
+	}
 
 	response.code = HTTP_STATUS_OK;
 	response.setContentType(MIME_JSON);
@@ -1612,43 +1631,51 @@ void ApplicationWebserver::onNetworks(HttpRequest& request, HttpResponse& respon
 	}
 #endif
 
-	auto stream = std::make_unique<JsonObjectStream>();
-	if(!stream) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("low memory"));
-		return;
-	}
-	JsonObject json = stream->getRoot();
+	String payload;
+	payload.reserve(512);
+	{
+		JsonWriter writer(payload);
+		auto json = writer.beginObject();
 
-	bool error = false;
+		if(app.network.isScanning()) {
+			json[F("scanning")] = true;
+		} else {
+			json[F("scanning")] = false;
+			auto netlist = json.beginArray(F("available"));
+			BssList networks = app.network.getAvailableNetworks();
+			for(unsigned int i = 0; i < networks.count(); i++) {
+				if(networks[i].hidden)
+					continue;
 
-	if(app.network.isScanning()) {
-		json[F("scanning")] = true;
-	} else {
-		json[F("scanning")] = false;
-		JsonArray netlist = json.createNestedArray(F("available"));
-		BssList networks = app.network.getAvailableNetworks();
-		for(unsigned int i = 0; i < networks.count(); i++) {
-			if(networks[i].hidden)
-				continue;
+				// SSIDs may contain any byte values. Some are not printable and will cause the javascript client to fail
+				// on parsing the message. Try to filter those here
+				if(!ApplicationWebserver::isPrintable(networks[i].ssid)) {
+					debug_w(ANSI_COLOR_YELLOW "Filtered SSID due to unprintable characters: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_YELLOW "" ANSI_COLOR_RESET, networks[i].ssid.c_str());
+					continue;
+				}
 
-			// SSIDs may contain any byte values. Some are not printable and will cause the javascript client to fail
-			// on parsing the message. Try to filter those here
-			if(!ApplicationWebserver::isPrintable(networks[i].ssid)) {
-				debug_w(ANSI_COLOR_YELLOW "Filtered SSID due to unprintable characters: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_YELLOW "" ANSI_COLOR_RESET, networks[i].ssid.c_str());
-				continue;
+				{
+					auto item = netlist.beginObject();
+					item[F("id")] = (int)networks[i].getHashId();
+					item[F("ssid")] = networks[i].ssid;
+					item[F("signal")] = networks[i].rssi;
+					item[F("encryption")] = networks[i].getAuthorizationMethodName();
+				}
+				//limit to max 25 networks
+				if(i >= 25)
+					break;
 			}
-
-			JsonObject item = netlist.createNestedObject();
-			item[F("id")] = (int)networks[i].getHashId();
-			item[F("ssid")] = networks[i].ssid;
-			item[F("signal")] = networks[i].rssi;
-			item[F("encryption")] = networks[i].getAuthorizationMethodName();
-			//limit to max 25 networks
-			if(i >= 25)
-				break;
 		}
 	}
-	sendApiResponse(response, stream.release());
+
+	if(!checkHeap(response)) {
+		return;
+	}
+	setCorsHeaders(response);
+	response.setHeader(F("accept"), F("GET, POST, OPTIONS"));
+	response.code = HTTP_STATUS_OK;
+	response.setContentType(MIME_JSON);
+	response.sendString(payload);
 
 }
 
