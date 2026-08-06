@@ -557,10 +557,10 @@ void JsonProcessor::parseRequestParams(JsonObject root, RequestParameters& param
 		JsonObject from = hsv[F("from")];
 		if(!from.isNull()) {
 			params.hasHsvFrom = true;
-			parseAbsOrRelValue(from[F("h")], params.hsv.h, AbsOrRelValue::Type::Hue);
-			parseAbsOrRelValue(from[F("s")], params.hsv.s);
-			parseAbsOrRelValue(from[F("v")], params.hsv.v);
-			parseAbsOrRelValue(from[F("ct")], params.hsv.ct, AbsOrRelValue::Type::Ct);
+			parseAbsOrRelValue(from[F("h")], params.hsvFrom.h, AbsOrRelValue::Type::Hue);
+			parseAbsOrRelValue(from[F("s")], params.hsvFrom.s);
+			parseAbsOrRelValue(from[F("v")], params.hsvFrom.v);
+			parseAbsOrRelValue(from[F("ct")], params.hsvFrom.ct, AbsOrRelValue::Type::Ct);
 		}
 	} else if(!root[F("raw")].isNull()) {
 		JsonObject raw = root[F("raw")];
