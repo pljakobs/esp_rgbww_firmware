@@ -34,7 +34,7 @@ public:
 	bool dispatchJsonRpc(const String& json, String& errorMsg, bool relay = false);
 	bool dispatchStream(const String& method, const JsonObject& params, std::unique_ptr<IDataSourceStream>& out,
 					 String& errorMsg);
-	bool handleInfo(const JsonObject& params, JsonObject& out, uint32_t heapFreeSnapshot = 0);
+	bool handleInfo(const JsonObject& params, JsonObject& out, uint32_t heapFreeSnapshot = 0, bool sparse = true);
 
 private:
 	bool dispatchDataRequest(const String& method, const JsonObject& params, JsonObject* outObject,

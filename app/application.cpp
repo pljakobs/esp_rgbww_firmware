@@ -421,6 +421,19 @@ void Application::checkRam()
 		doc[F("mDNS")][F("replies")] = _mDNS_replies;
 
 	debug_i(ANSI_COLOR_BLUE "Free heap: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE ", uptime: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, getFreeHeapSize(), millis() / 1000);
+	{
+		// Push fast-changing runtime telemetry without ArduinoJson allocations.
+		static char runtimeFrame[320];
+		const uint32_t uptimeSeconds = _uptimeMinutes * 60;
+		const int frameLen = m_snprintf(runtimeFrame, sizeof(runtimeFrame),
+				"{\"jsonrpc\":\"2.0\",\"method\":\"runtime_info\",\"params\":{\"uptime\":%lu,\"heap_free\":%u,\"minfreeHeapRuntime\":%u,\"minfreeHeap10min\":%u,\"heapLowErrUptime\":%u,\"heapLowErr10min\":%u}}",
+				(unsigned long)uptimeSeconds, (unsigned)doc[F("freeHeap")].as<uint32_t>(),
+				(unsigned)_minimumHeapUptime, (unsigned)_minimumHeap10min, (unsigned)_HeapLowErrUptime,
+				(unsigned)_HeapLowErr10min);
+		if(frameLen > 0 && static_cast<size_t>(frameLen) < sizeof(runtimeFrame)) {
+			webserver.wsSendRuntimeInfo(runtimeFrame, static_cast<size_t>(frameLen));
+		}
+	}
 	if (!telemetryClient.stat(doc))
 	{
 		debug_i(ANSI_COLOR_BLUE "Failed to publish monitor data to telemetry MQTT" ANSI_COLOR_RESET);

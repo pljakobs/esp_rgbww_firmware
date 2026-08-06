@@ -380,7 +380,7 @@ bool Api::dispatchDataRequest(const char* method, const JsonObject& params, Json
 	if(outObject != nullptr) {
 		debug_i(ANSI_COLOR_BLUE "Api::dispatchDataRequest: method=" ANSI_COLOR_RED "%s" ANSI_COLOR_RESET, methodName);
 		if(dataMethodId == DataMethodId::Info) {
-			return handleInfo(params, *outObject);
+			return handleInfo(params, *outObject, 0, false);
 		}
 		if(dataMethodId == DataMethodId::Color) {
 			return handleColor(params, *outObject);
@@ -475,7 +475,7 @@ NO_INLINE void buildMqttInfo(JsonObject& data) {
 }
 
 // Cleaned up main handler
-bool Api::handleInfo(const JsonObject& params, JsonObject& data, uint32_t heapFreeSnapshot)
+bool Api::handleInfo(const JsonObject& params, JsonObject& data, uint32_t heapFreeSnapshot, bool sparse)
 {
     debug_i(ANSI_COLOR_BLUE "Api::handleInfo called" ANSI_COLOR_RESET);
     const uint32_t heapFreeReported = (heapFreeSnapshot != 0) ? heapFreeSnapshot : app.getFreeHeapSize();
@@ -496,6 +496,24 @@ bool Api::handleInfo(const JsonObject& params, JsonObject& data, uint32_t heapFr
             }
         }
     }
+
+	JsonVariantConst sparseParam = params[F("sparse")];
+	if(sparseParam.isNull()) {
+		sparseParam = params[F("S")];
+	}
+	if(!sparseParam.isNull()) {
+		if(sparseParam.is<bool>()) {
+			sparse = sparseParam.as<bool>();
+		} else {
+			const char* sparseText = sparseParam.as<const char*>();
+			if(sparseText != nullptr) {
+				sparse = !(std::strcmp(sparseText, "0") == 0 || std::strcmp(sparseText, "false") == 0 ||
+						std::strcmp(sparseText, "FALSE") == 0 || std::strcmp(sparseText, "off") == 0 ||
+						std::strcmp(sparseText, "OFF") == 0 || std::strcmp(sparseText, "no") == 0 ||
+						std::strcmp(sparseText, "NO") == 0);
+			}
+		}
+	}
 
     if(isV2) {
         debug_i(ANSI_COLOR_BLUE "Api::handleInfo: version 2 detected" ANSI_COLOR_RESET);
@@ -530,24 +548,22 @@ bool Api::handleInfo(const JsonObject& params, JsonObject& data, uint32_t heapFr
 
         buildFsInfo(data);
 
-        {
-            JsonObject run = data.createNestedObject(F("runtime"));
-            run[F("uptime")] = app.getUptime();
-            run[F("heap_free")] = heapFreeReported;
-            run[F("minfreeHeapRuntime")] = app.getMinimumHeapUptime();
-            run[F("minfreeHeap10min")] = app.getMinimumHeap10min();
-            run[F("heapLowErrUptime")] = app.getHeapLowErrUptime();
-            run[F("heapLowErr10min")] = app.getHeapLowErr10min();
-        }   
+		if(!sparse) {
+			JsonObject run = data.createNestedObject(F("runtime"));
+			run[F("uptime")] = app.getUptime();
+			run[F("heap_free")] = heapFreeReported;
+			run[F("minfreeHeapRuntime")] = app.getMinimumHeapUptime();
+			run[F("minfreeHeap10min")] = app.getMinimumHeap10min();
+			run[F("heapLowErrUptime")] = app.getHeapLowErrUptime();
+			run[F("heapLowErr10min")] = app.getHeapLowErr10min();
 
-        {
-            JsonObject debug = data.createNestedObject(F("debug"));
-            debug[F("http_active_connections")] = app.webserver.getHttpActiveConnections();
-            debug[F("websocket_connections")] = app.webserver.getWebsocketConnectionCount();
-            debug[F("eventserver_clients")] = app.eventserver.activeClients;
-            debug[F("tcp_pcb_size")] = 0;
-            debug[F("tcp_active_estimated_bytes")] = 0;
-        }
+			JsonObject debug = data.createNestedObject(F("debug"));
+			debug[F("http_active_connections")] = app.webserver.getHttpActiveConnections();
+			debug[F("websocket_connections")] = app.webserver.getWebsocketConnectionCount();
+			debug[F("eventserver_clients")] = app.eventserver.activeClients;
+			debug[F("tcp_pcb_size")] = 0;
+			debug[F("tcp_active_estimated_bytes")] = 0;
+		}
 
 		#ifdef RGBWW_ANIMATIONQSIZE
         data[F("rgbww")] = serialized(FPSTR(kInfoRgbwwV2));

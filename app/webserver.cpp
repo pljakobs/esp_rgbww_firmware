@@ -56,6 +56,7 @@ constexpr size_t WS_INFO_RESPONSE_CAPACITY = INFO_DOC_CAPACITY_V1 + WS_INFO_RESP
 // consumed by the next "authenticate" message.
 struct WsAuthState {
 	bool authenticated = false;
+	bool runtimeInfoSubscribed = false;
 	String challenge;
 };
 
@@ -249,6 +250,23 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
     JsonObject requestRoot = requestDoc.as<JsonObject>();
 	const char* method = requestRoot[F("method")] | "";
     JsonVariant requestId = requestRoot[F("id")];
+	JsonObject params = requestRoot[F("params")];
+
+	auto parseTruthy = [](JsonVariantConst v, bool defaultValue) -> bool {
+		if(v.isNull()) {
+			return defaultValue;
+		}
+		if(v.is<bool>()) {
+			return v.as<bool>();
+		}
+		const char* txt = v.as<const char*>();
+		if(txt == nullptr || txt[0] == '\0') {
+			return defaultValue;
+		}
+		return !(std::strcmp(txt, "0") == 0 || std::strcmp(txt, "false") == 0 || std::strcmp(txt, "FALSE") == 0 ||
+				 std::strcmp(txt, "off") == 0 || std::strcmp(txt, "OFF") == 0 || std::strcmp(txt, "no") == 0 ||
+				 std::strcmp(txt, "NO") == 0);
+	};
 
 	debug_i(ANSI_COLOR_BLUE "Websocket message: method= " ANSI_COLOR_GREEN "%s" ANSI_COLOR_RESET, method);
 
@@ -328,11 +346,24 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 	} else if(method[0] == '\0') {
 		errorCode = -32600;
 		errorMsg = F("missing method");
+	} else if(std::strcmp(method, "runtime_info_subscribe") == 0 || std::strcmp(method, "subscribe_runtime_info") == 0) {
+		if(wsAuth) {
+			wsAuth->runtimeInfoSubscribed = true;
+		}
+		JsonObject result = responseRoot.createNestedObject(F("result"));
+		result[F("subscribed")] = true;
+		result[F("channel")] = F("runtime_info");
+	} else if(std::strcmp(method, "runtime_info_unsubscribe") == 0 || std::strcmp(method, "unsubscribe_runtime_info") == 0) {
+		if(wsAuth) {
+			wsAuth->runtimeInfoSubscribed = false;
+		}
+		JsonObject result = responseRoot.createNestedObject(F("result"));
+		result[F("subscribed")] = false;
+		result[F("channel")] = F("runtime_info");
 	} else if(!app.api) {
 		errorCode = -32603;
 		errorMsg = F("api not initialized");
     } else {
-        JsonObject params = requestRoot[F("params")];
 		const bool isColorGetter = (strcmp_P(method, PSTR("color")) == 0) && (params.isNull() || params.size() == 0);
 		const bool isDataMethod = isColorGetter || (strcmp_P(method, PSTR("getColor")) == 0) || isInfoMethod ||
 						(strcmp_P(method, PSTR("networks")) == 0) || (strcmp_P(method, PSTR("getNetworks")) == 0);
@@ -340,7 +371,8 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 		if(isDataMethod) {
 			JsonObject result = responseRoot.createNestedObject(F("result"));
 			if(isInfoMethod) {
-				if(!app.api->handleInfo(params, result, infoHeapSnapshot)) {
+				const bool sparse = parseTruthy(params[F("sparse")], true);
+				if(!app.api->handleInfo(params, result, infoHeapSnapshot, sparse)) {
 					errorCode = -32601;
 					const char* resultError = result[F("error")] | nullptr;
 					errorMsg = resultError ? String(resultError) : String(F("method not implemented"));
@@ -392,6 +424,24 @@ void ICACHE_FLASH_ATTR ApplicationWebserver::wsSendBroadcast(const char* buffer,
         // Use firstSocket as needed
         socket->broadcast(buffer, length, WS_FRAME_TEXT);
     }
+}
+
+void ICACHE_FLASH_ATTR ApplicationWebserver::wsSendRuntimeInfo(const char* buffer, size_t length)
+{
+	if(webSockets.isEmpty() || buffer == nullptr || length == 0) {
+		return;
+	}
+
+	for(unsigned i = 0; i < webSockets.size(); i++) {
+		WebsocketConnection* socket = webSockets[i];
+		if(socket == nullptr) {
+			continue;
+		}
+		WsAuthState* wsAuth = static_cast<WsAuthState*>(socket->getUserData());
+		if(wsAuth != nullptr && wsAuth->runtimeInfoSubscribed) {
+			socket->sendString(String(buffer, length));
+		}
+	}
 }
 
 unsigned ApplicationWebserver::getHttpActiveConnections() const
@@ -1362,15 +1412,26 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response){
 	if(versionParam.length()) {
 		params[F("V")] = versionParam;
 	}
+	String sparseParam = request.getQueryParameter(F("sparse"));
+	if(!sparseParam.length()) {
+		sparseParam = request.getQueryParameter(F("S"));
+	}
+	if(!sparseParam.length()) {
+		sparseParam = F("1");
+	}
+	params[F("sparse")] = sparseParam;
+	const bool sparse = !(sparseParam == "0" || sparseParam == "false" || sparseParam == "FALSE" || sparseParam == "off" ||
+				sparseParam == "OFF" || sparseParam == "no" || sparseParam == "NO");
 	const uint32_t infoHeapSnapshot = app.getFreeHeapSize();
 	const bool isV2 = versionParam == "2";
+	const bool useSparseCache = sparse;
 	String* cachePayload = isV2 ? &_infoV2Cache : &_infoV1Cache;
 	unsigned long* cacheTime = isV2 ? &_infoV2CacheTime : &_infoV1CacheTime;
 	const unsigned long nowMs = millis();
 
 	// Frequent UI polling can trigger repeated ConfigDB store opens;
 	// use a short cache window to lower pressure on FS/event queue.
-	if(!app.ota.isProccessing() && cachePayload->length() > 0 && (nowMs - *cacheTime) < INFO_CACHE_MS) {
+	if(useSparseCache && !app.ota.isProccessing() && cachePayload->length() > 0 && (nowMs - *cacheTime) < INFO_CACHE_MS) {
 		setCorsHeaders(response);
 		response.setHeader(F("accept"), F("GET, POST, OPTIONS"));
 		response.code = HTTP_STATUS_OK;
@@ -1387,7 +1448,7 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response){
 	JsonObject data = stream->getRoot();
 	
 	// Call the shared handler
-	app.api->handleInfo(params, data, infoHeapSnapshot);
+	app.api->handleInfo(params, data, infoHeapSnapshot, sparse);
 
 	String payload;
 	if(!serializeJson(data, payload)) {
@@ -1395,7 +1456,7 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response){
 		return;
 	}
 
-	if(!app.ota.isProccessing()) {
+	if(useSparseCache && !app.ota.isProccessing()) {
 		*cachePayload = payload;
 		*cacheTime = nowMs;
 	}
