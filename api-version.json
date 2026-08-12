@@ -1,0 +1,40 @@
+{
+  "apiVersion": "1.0.0-inferred.1",
+  "status": "inferred",
+  "schemaHashAlgorithm": "sha256",
+  "schemaHash": "93a80a2c609091b393d2445d6537538f2a6c498d40f23068700e4ae6fa16d358",
+  "sourceSchemas": [
+    {
+      "database": "Definitions",
+      "source": "defs.cfgdb",
+      "persistent": false,
+      "sourceHash": "5b149ae213514b5527126bac397f4f9e5478c0a778a208848c3958fae89090f9"
+    },
+    {
+      "database": "AppConfig",
+      "source": "app-config.cfgdb",
+      "projection": "schema/app-config.schema.json",
+      "persistent": true,
+      "sourceHash": "4ef0cb89aa67994fa76f5811bc0b27509ac8e25bfcb8814042748a3b4948c2fc",
+      "projectionHash": "19b6b3599bd9d35b8bca6ea4c5aa5928f36a4a86dedec360ffed9294ec8f5900"
+    },
+    {
+      "database": "AppData",
+      "source": "app-data.cfgdb",
+      "projection": "schema/app-data.schema.json",
+      "persistent": true,
+      "sourceHash": "d7f6dbb03ad17e4fe58a608b5febc86640fb0a9fd78a6cacf729c81d1d9aa049",
+      "projectionHash": "ab2d82536f161e72de28047f77ab507a934ab558c83071d0e7323d3bd23eabe0"
+    }
+  ],
+  "artifacts": [
+    "api.json",
+    "json-rpc-api.schema.json",
+    "defs.cfgdb",
+    "app-config.cfgdb",
+    "app-data.cfgdb",
+    "schema/app-config.schema.json",
+    "schema/app-data.schema.json",
+    "openapi.json"
+  ]
+}
