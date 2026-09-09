@@ -473,40 +473,30 @@ void AppWIFI::startAp()
 void AppWIFI::broadcastWifiStatus(String message)
 {
 	if(WifiStation.isConnected() || WifiAccessPoint.isEnabled()) {
-		JsonRpcMessage msg(F("wifi_status"));
-		JsonObject root = msg.getParams();
+		auto& codec = rpcCodec();
+		Jsonrpc::Root root(codec.db());
+		if(auto update = root.update()) {
+			auto status = update.toWifiStatus();
+			status.setMessage(message);
 
-		if(message != "") {
-			root[F("message")] = message;
+			status.station.setConnected(WifiStation.isConnected());
+			status.station.setSsid(WifiStation.getSSID());
+			status.station.setDhcp(WifiStation.isEnabledDHCP());
+			status.station.setIp(WifiStation.getIP().toString());
+			status.station.setNetmask(WifiStation.getNetworkMask().toString());
+			status.station.setGateway(WifiStation.getNetworkGateway().toString());
+			status.station.setMac(WifiStation.getMAC());
+
+			status.ap.setEnabled(WifiAccessPoint.isEnabled());
+			status.ap.setSsid(WifiAccessPoint.getSSID());
+			status.ap.setIp(WifiAccessPoint.getIP().toString());
 		}
 
-		JsonObject station = root.createNestedObject(F("station"));
-
-		station[F("connected")] = WifiStation.isConnected();
-		station[F("ssid")] = WifiStation.getSSID();
-		station[F("dhcp")] = WifiStation.isEnabledDHCP();
-		station[F("ip")] = WifiStation.getIP().toString();
-		station[F("netmask")] = WifiStation.getNetworkMask().toString();
-		station[F("gateway")] = WifiStation.getNetworkGateway().toString();
-		station[F("mac")] = WifiStation.getMAC();
-
-		JsonObject ap = root.createNestedObject("ap");
-
-		ap[F("enabled")] = WifiAccessPoint.isEnabled();
-		ap[F("ssid")] = WifiAccessPoint.getSSID();
-		ap[F("ip")] = WifiAccessPoint.getIP().toString();
-
-		debug_i(ANSI_COLOR_BLUE "rpc: root =" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, Json::serialize(root).c_str());
-
 		String jsonStr;
-		jsonStr.reserve(384); // Pre-allocate buffer space to avoid repeated heap reallocations
-		Json::serialize(msg.getRoot(), jsonStr);
-
-		// Single debug logging statement using the already serialized string
-		debug_i(ANSI_COLOR_BLUE "rpc: root =" ANSI_COLOR_CYAN "%s" ANSI_COLOR_RESET, jsonStr.c_str());
-
-		// Broadcast
-    	app.wsBroadcast(jsonStr);
+		if(codec.render({0, JsonRPC::Message::Kind::notification, F("wifi_status")}, root.asWifiStatus(), jsonStr)) {
+			debug_i(ANSI_COLOR_BLUE "rpc: root =" ANSI_COLOR_CYAN "%s" ANSI_COLOR_RESET, jsonStr.c_str());
+			app.wsBroadcast(jsonStr);
+		}
 	}
 }
 

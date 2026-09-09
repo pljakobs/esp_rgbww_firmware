@@ -7,11 +7,11 @@ This bundle is inferred from the current firmware and `esp_rgb_webapp2` implemen
 - `app-config.cfgdb` defines the persistent `/config` object.
 - `app-data.cfgdb` defines the persistent `/data` object.
 - `defs.cfgdb` defines reusable ConfigDB values.
-- `json-rpc-api.schema.json` defines transient HTTP payloads, JSON-RPC envelopes, results, and server events.
+- `json-rpc-api.cfgdb` defines the transient HTTP payload, JSON-RPC envelope, result, and server-event ConfigDB classes.
 - `api.json` maps HTTP operations and JSON-RPC methods/events to payload definitions.
 - `openapi.json` defines HTTP paths, methods, query parameters, authentication, statuses, and payload references.
 
-`AppConfig`, `AppData`, and the transient API workspace are separate ConfigDB databases. The API schema references the two persistent cfgdb roots; it does not copy their properties into `json-rpc-api.schema.json` and does not generate one combined database.
+`AppConfig`, `AppData`, and the transient `Api` workspace are separate ConfigDB databases. The API schema references the two persistent cfgdb roots; it does not copy their properties into `json-rpc-api.cfgdb` and does not generate one combined database.
 
 Do not add HTTP retry, controller selection, authentication prompting, or WebSocket lifecycle policy to generated clients. Those remain responsibilities of the frontend transport services.
 
@@ -25,11 +25,14 @@ node tools/generate-api-schemas.mjs
 
 This writes:
 
+- `json-rpc-api.schema.json`
 - `schema/app-config.schema.json`
 - `schema/app-data.schema.json`
 - `api-version.json`
 
-These files are read-only projections of the cfgdb sources for tools which cannot load the `.cfgdb` extension or ConfigDB-specific keywords. They are never firmware database inputs. The normalizer converts ConfigDB `$defs` and cross-file references into Draft-07 `definitions`, removes ConfigDB-only generator keywords, and embeds shared definitions. `api-version.json` hashes both authoritative cfgdb sources and their projections so source/projection drift is detectable.
+These files are read-only projections of the cfgdb sources for tools which cannot load the `.cfgdb` extension or ConfigDB-specific keywords. They are never firmware database inputs. The normalizer converts ConfigDB `$defs` and cross-file references into Draft-07 `definitions`, removes ConfigDB-only generator keywords, and embeds shared definitions where required. `api-version.json` hashes both authoritative cfgdb sources and their projections so source/projection drift is detectable.
+
+`make configdb-rebuild` runs `api-schema-rebuild` first, then generates C++ from the checked-in `.cfgdb` sources. The generated transient API class comes from `json-rpc-api.cfgdb`; the `.schema.json` file is not used for firmware code generation.
 
 Generation is deterministic. Frontend CI should regenerate these files and fail when the working tree changes.
 
@@ -37,7 +40,7 @@ Generation is deterministic. Frontend CI should regenerate these files and fail 
 
 ```bash
 node tools/generate-api-schemas.mjs
-python -c 'import json; from jsonschema import Draft7Validator; files=["api-manifest.schema.json","json-rpc-api.schema.json","schema/app-config.schema.json","schema/app-data.schema.json"]; schemas=[json.load(open(path)) for path in files]; [Draft7Validator.check_schema(schema) for schema in schemas]; Draft7Validator(schemas[0]).validate(json.load(open("api.json")))'
+python -c 'import json; from jsonschema import Draft7Validator; files=["api-manifest.schema.json","json-rpc-api.cfgdb","json-rpc-api.schema.json","schema/app-config.schema.json","schema/app-data.schema.json"]; schemas=[json.load(open(path)) for path in files]; [Draft7Validator.check_schema(schema) for schema in schemas]; Draft7Validator(schemas[0]).validate(json.load(open("api.json")))'
 npx --yes @redocly/cli lint openapi.json
 ```
 
@@ -49,7 +52,8 @@ The frontend generator consumes:
 
 - `api.json` for JSON-RPC method/result/event associations.
 - `openapi.json` for HTTP operations.
-- `json-rpc-api.schema.json` for transient payload validators.
+- `json-rpc-api.cfgdb` as the authoritative transient API schema.
+- `json-rpc-api.schema.json` only as its generated browser-compatible projection for transient payload validators.
 - `app-config.cfgdb` and `app-data.cfgdb` as the authoritative persistent database schemas.
 - `schema/app-config.schema.json` and `schema/app-data.schema.json` only as generated browser-compatible projections of those cfgdb schemas.
 - `api-version.json` for compatibility and cache checks.

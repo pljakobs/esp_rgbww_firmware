@@ -44,13 +44,6 @@ JsonObject JsonRpcMessage::getRoot()
 	return _doc.as<JsonObject>();
 }
 
-void JsonRpcMessage::setId(int id)
-{
-	_doc[F("id")] = id;
-}
-
-
-
 ////////////////////////////////////////
 
 JsonRpcMessageIn::JsonRpcMessageIn(const String& json)

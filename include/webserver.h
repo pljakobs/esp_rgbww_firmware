@@ -24,7 +24,6 @@
 #define APP_WEBSERVER_H_
 
 #include <ArduinoJson.h>
-#include <JsonWriter.h>
 #include <RGBWWLed/RGBWWLedColor.h>
 #include <Network/Http/Websocket/WebsocketResource.h>
 
@@ -122,6 +121,12 @@ private:
     WebsocketResource* wsResource = nullptr;
     WebsocketList webSockets;
 
+    // WebSocket liveness. Browsers cannot originate PING frames from script, so
+    // the server pings and relies on the automatic PONG reply.
+    Timer _wsPingTimer;
+    static constexpr unsigned WS_PING_INTERVAL_MS = 30000;
+    void wsPingAll();
+
     bool authenticated(HttpRequest &request, HttpResponse &response);
     bool authenticateExec(HttpRequest &request, HttpResponse &response);
     // Lazily load _apiSecuredCache / _apiPasswordCache from ConfigDB. Cache is
@@ -160,7 +165,6 @@ private:
     void onColorPost(HttpRequest &request, HttpResponse &response);
     bool onColorPostCmd(JsonObject& root, String& errorMsg);
 
-    void addInfoFields(JsonWriter::ObjectScope& obj);
     void sendApiResponse(HttpResponse &response, JsonObjectStream* stream, HttpStatus code = HTTP_STATUS_OK);
     void sendApiCode(HttpResponse &response, API_CODES code, const char* msg = nullptr);
     void sendApiCode(HttpResponse &response, API_CODES code, const String& msg);

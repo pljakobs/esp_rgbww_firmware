@@ -1254,26 +1254,158 @@ void Application::wsBroadcast(const String& message)
 */
 void Application::wsBroadcast(String cmd, String message)
 {
-	JsonRpcMessage msg(cmd);
-	msg.setId(jsonrpc_id++);
-	JsonObject root = msg.getParams();
-	root[F("message")] = message;
-
-	String jsonStr = Json::serialize(msg.getRoot());
-	wsBroadcast(jsonStr);
+	auto& codec = rpcCodec();
+	Jsonrpc::Root root(codec.db());
+	if(auto update = root.update()) {
+		auto event = update.toMessageEvent();
+		event.setMessage(message);
+	}
+	String jsonStr;
+	if(codec.render({0, JsonRPC::Message::Kind::notification, cmd}, root.asMessageEvent(), jsonStr)) {
+		wsBroadcast(jsonStr);
+	}
 }
 
 void Application::wsBroadcast(const String& cmd, const JsonObject& params)
 {
-	JsonRpcMessage msg(cmd);
-	msg.setId(jsonrpc_id++);
-	JsonObject root = msg.getParams();
-    for (JsonPair kv : params) {
-        root[kv.key()] = kv.value();
-    }
-	String jsonStr = Json::serialize(msg.getRoot());
-	//debug_i(ANSI_COLOR_BLUE "Application::wsBroadcast: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, jsonStr.c_str());
-	wsBroadcast(jsonStr);
+	if(cmd == F("wifi_status")) {
+		auto& codec = rpcCodec();
+		Jsonrpc::Root root(codec.db());
+		if(auto update = root.update()) {
+			auto wifi = update.toWifiStatus();
+			if(params.containsKey(F("message"))) {
+				wifi.setMessage(params[F("message")] | "");
+			}
+			if(params.containsKey(F("station"))) {
+				JsonObject station = params[F("station")].as<JsonObject>();
+				auto s = wifi.station;
+				s.setConnected(station[F("connected")] | false);
+				s.setSsid(station[F("ssid")] | "");
+				s.setDhcp(station[F("dhcp")] | false);
+				s.setIp(station[F("ip")] | "");
+				s.setNetmask(station[F("netmask")] | "");
+				s.setGateway(station[F("gateway")] | "");
+				s.setMac(station[F("mac")] | "");
+			}
+			if(params.containsKey(F("ap"))) {
+				JsonObject ap = params[F("ap")].as<JsonObject>();
+				auto a = wifi.ap;
+				a.setEnabled(ap[F("enabled")] | false);
+				a.setSsid(ap[F("ssid")] | "");
+				a.setIp(ap[F("ip")] | "");
+			}
+		}
+		String jsonStr;
+		if(codec.render({0, JsonRPC::Message::Kind::notification, cmd}, root.asWifiStatus(), jsonStr)) {
+			wsBroadcast(jsonStr);
+			return;
+		}
+	} else if(cmd == F("transition_finished")) {
+		auto& codec = rpcCodec();
+		Jsonrpc::Root root(codec.db());
+		if(auto update = root.update()) {
+			auto finished = update.toTransitionFinished();
+			finished.setName(params[F("name")] | "");
+			finished.setRequeued(params[F("requeued")] | false);
+		}
+		String jsonStr;
+		if(codec.render({0, JsonRPC::Message::Kind::notification, cmd}, root.asTransitionFinished(), jsonStr)) {
+			wsBroadcast(jsonStr);
+			return;
+		}
+	} else if(cmd == F("clock_slave_status")) {
+		auto& codec = rpcCodec();
+		Jsonrpc::Root root(codec.db());
+		if(auto update = root.update()) {
+			auto status = update.toClockSlaveStatus();
+			status.setOffset(params[F("offset")] | 0);
+			status.setCurrentInterval(params[F("current_interval")] | 0);
+		}
+		String jsonStr;
+		if(codec.render({0, JsonRPC::Message::Kind::notification, cmd}, root.asClockSlaveStatus(), jsonStr)) {
+			wsBroadcast(jsonStr);
+			return;
+		}
+	} else if(cmd == F("keep_alive")) {
+		auto& codec = rpcCodec();
+		Jsonrpc::Root root(codec.db());
+		if(auto update = root.update()) {
+			update.toKeepAlive();
+		}
+		String jsonStr;
+		if(codec.render({0, JsonRPC::Message::Kind::notification, cmd}, root.asKeepAlive(), jsonStr)) {
+			wsBroadcast(jsonStr);
+			return;
+		}
+	} else if(cmd == F("color_event")) {
+		auto& codec = rpcCodec();
+		Jsonrpc::Root root(codec.db());
+		if(auto update = root.update()) {
+			auto color = update.toColor();
+			if(params.containsKey(F("raw"))) {
+				auto raw = color.toRaw();
+				auto p = params[F("raw")].as<JsonObject>();
+				raw.setR(p[F("r")] | 0);
+				raw.setG(p[F("g")] | 0);
+				raw.setB(p[F("b")] | 0);
+				raw.setWw(p[F("ww")] | 0);
+				raw.setCw(p[F("cw")] | 0);
+			} else if(params.containsKey(F("hsv"))) {
+				auto hsv = color.toHsv();
+				auto p = params[F("hsv")].as<JsonObject>();
+				hsv.setH(p[F("h")] | 0.0f);
+				hsv.setS(p[F("s")] | 0.0f);
+				hsv.setV(p[F("v")] | 0.0f);
+				hsv.setCt(p[F("ct")] | 0);
+			}
+		}
+		String jsonStr;
+		if(codec.render({0, JsonRPC::Message::Kind::notification, cmd}, root.asColor(), jsonStr)) {
+			wsBroadcast(jsonStr);
+			return;
+		}
+	}
+
+	auto& codec = rpcCodec();
+	Jsonrpc::Root root(codec.db());
+	String jsonStr;
+	if(cmd == F("notification") || cmd == F("webapp_cmd")) {
+		if(auto update = root.update()) {
+			update.toMessageEvent().setMessage(params[F("message")] | "");
+		}
+		if(codec.render({0, JsonRPC::Message::Kind::notification, cmd}, root.asMessageEvent(), jsonStr)) {
+			wsBroadcast(jsonStr);
+		}
+		return;
+	}
+	if(cmd == F("ota_status")) {
+		if(auto update = root.update()) {
+			auto status = update.toOtaStatus();
+			status.setStatus(params[F("status")] | 0);
+			status.setMessage(params[F("message")] | "");
+		}
+		if(codec.render({0, JsonRPC::Message::Kind::notification, cmd}, root.asOtaStatus(), jsonStr)) {
+			wsBroadcast(jsonStr);
+		}
+		return;
+	}
+	if(cmd == F("webapp_ota_status")) {
+		if(auto update = root.update()) {
+			auto status = update.toWebappOtaStatus();
+			status.setState(params[F("state")] | "");
+			status.setFile(params[F("file")] | 0);
+			status.setTotal(params[F("total")] | 0);
+			status.setFilePath(params[F("file_path")] | "");
+			status.setVersion(params[F("version")] | "");
+			status.setLastStatus(params[F("last_status")] | "");
+			status.setInProgress(params[F("in_progress")] | false);
+		}
+		if(codec.render({0, JsonRPC::Message::Kind::notification, cmd}, root.asWebappOtaStatus(), jsonStr)) {
+			wsBroadcast(jsonStr);
+		}
+		return;
+	}
+	debug_w(ANSI_COLOR_YELLOW "Unsupported schema-driven websocket event: %s" ANSI_COLOR_RESET, cmd.c_str());
 }
 
 void Application::onCommandRelay(const String& method, const JsonObject& params)

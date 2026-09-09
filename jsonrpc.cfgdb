@@ -1,0 +1,154 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$comment": "JSON-RPC framing. Each root member is a message BODY: the library emits the envelope, picks the params/result/error key from Message::kind, and Message::method is free-form. Members are therefore named after the body shape, not the wire method.",
+    "oneOf": [
+        {
+            "type": "object",
+            "title": "color",
+            "$comment": "body for the color request/response and the color_event notification; a colour is always raw XOR hsv",
+            "oneOf": [
+                { "$ref": "params/$defs/raw" },
+                { "$ref": "params/$defs/hsv" }
+            ]
+        },
+        {
+            "$ref": "params/$defs/command-fields",
+            "title": "command"
+        },
+        {
+            "type": "object",
+            "title": "info",
+            "oneOf": [
+                { "$ref": "params/$defs/info-static-params" },
+                { "$ref": "params/$defs/info-full-params" }
+            ]
+        },
+        {
+            "type": "object",
+            "title": "runtime_info",
+            "properties": {
+                "uptime": { "$ref": "value-types/$defs/non-negative-integer" },
+                "heap_free": { "$ref": "value-types/$defs/non-negative-integer" },
+                "minfreeHeapRuntime": { "$ref": "value-types/$defs/non-negative-integer" },
+                "minfreeHeap10min": { "$ref": "value-types/$defs/non-negative-integer" },
+                "heapLowErrUptime": { "$ref": "value-types/$defs/non-negative-integer" },
+                "heapLowErr10min": { "$ref": "value-types/$defs/non-negative-integer" }
+            }
+        },
+        {
+            "type": "object",
+            "title": "networks",
+            "properties": {
+                "scanning": { "$ref": "value-types/$defs/boolean-value" },
+                "available": {
+                    "type": "array",
+                    "items": { "$ref": "params/$defs/netlist-item" }
+                }
+            }
+        },
+        {
+            "type": "object",
+            "title": "wifi_status",
+            "properties": {
+                "message": { "$ref": "value-types/$defs/string-value" },
+                "station": { "$ref": "params/$defs/wifi-station-info" },
+                "ap": { "$ref": "params/$defs/wifi-ap-info" }
+            }
+        },
+        {
+            "type": "object",
+            "title": "transition_finished",
+            "properties": {
+                "name": { "$ref": "value-types/$defs/string-value" },
+                "requeued": { "$ref": "value-types/$defs/boolean-value" }
+            }
+        },
+        {
+            "type": "object",
+            "title": "clock_slave_status",
+            "properties": {
+                "offset": { "$ref": "value-types/$defs/integer-value" },
+                "current_interval": { "$ref": "value-types/$defs/non-negative-integer" }
+            }
+        },
+        {
+            "type": "object",
+            "title": "keep_alive",
+            "properties": {}
+        },
+        {
+            "type": "object",
+            "title": "message_event",
+            "properties": {
+                "message": { "$ref": "value-types/$defs/string-value" }
+            }
+        },
+        {
+            "type": "object",
+            "title": "ota_status",
+            "properties": {
+                "status": { "$ref": "value-types/$defs/integer-value" },
+                "message": { "$ref": "value-types/$defs/string-value" }
+            }
+        },
+        {
+            "type": "object",
+            "title": "webapp_ota_status",
+            "properties": {
+                "state": { "$ref": "value-types/$defs/string-value" },
+                "file": { "$ref": "value-types/$defs/non-negative-integer" },
+                "total": { "$ref": "value-types/$defs/non-negative-integer" },
+                "file_path": { "$ref": "value-types/$defs/string-value" },
+                "version": { "$ref": "value-types/$defs/string-value" },
+                "last_status": { "$ref": "value-types/$defs/string-value" },
+                "in_progress": { "$ref": "value-types/$defs/boolean-value" }
+            }
+        },
+        {
+            "type": "object",
+            "title": "api_success",
+            "properties": {
+                "success": { "$ref": "value-types/$defs/boolean-value" }
+            }
+        },
+        {
+            "type": "object",
+            "title": "api_error",
+            "properties": {
+                "error": { "$ref": "value-types/$defs/string-value" }
+            }
+        },
+        {
+            "type": "object",
+            "title": "authenticate_result",
+            "properties": {
+                "authenticated": { "$ref": "value-types/$defs/boolean-value" }
+            }
+        },
+        {
+            "type": "object",
+            "title": "subscription_result",
+            "properties": {
+                "subscribed": { "$ref": "value-types/$defs/boolean-value" },
+                "channel": { "$ref": "value-types/$defs/string-value" }
+            }
+        },
+        {
+            "type": "object",
+            "title": "rpc_error",
+            "properties": {
+                "code": { "$ref": "value-types/$defs/integer-value" },
+                "message": { "$ref": "value-types/$defs/string-value" },
+                "data": { "$ref": "value-types/$defs/string-value" }
+            }
+        },
+        {
+            "type": "object",
+            "title": "error",
+            "$comment": "ReadStream resolves an error body via findObject(\"error\")",
+            "properties": {
+                "error": { "$ref": "value-types/$defs/error-msg" }
+            }
+        }
+    ]
+}

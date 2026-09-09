@@ -45,7 +45,14 @@ function stableJson(value) {
 const definitionsSource = await readJson("defs.cfgdb");
 const sharedDefinitions = normalize(definitionsSource.$defs ?? {});
 
-async function generatePersistedSchema(sourceName, outputName, title, database) {
+async function generateSchemaProjection(
+  sourceName,
+  outputName,
+  title,
+  database,
+  definitions = {},
+  destination = outputDirectory,
+) {
   const source = normalize(await readJson(sourceName));
   const schema = {
     ...source,
@@ -55,33 +62,43 @@ async function generatePersistedSchema(sourceName, outputName, title, database) 
     "x-configdb-source": sourceName,
     "x-configdb-database": database,
     definitions: {
-      ...sharedDefinitions,
+      ...definitions,
       ...(source.definitions ?? {}),
     },
   };
-  await writeFile(join(outputDirectory, outputName), stableJson(schema));
+  await writeFile(join(destination, outputName), stableJson(schema));
   return schema;
 }
 
 await mkdir(outputDirectory, { recursive: true });
-const config = await generatePersistedSchema(
+const config = await generateSchemaProjection(
   "app-config.cfgdb",
   "app-config.schema.json",
   "Lightinator persistent configuration",
   "AppConfig",
+  sharedDefinitions,
 );
-const data = await generatePersistedSchema(
+const data = await generateSchemaProjection(
   "app-data.cfgdb",
   "app-data.schema.json",
   "Lightinator persistent application data",
   "AppData",
+  sharedDefinitions,
 );
-const wire = await readJson("json-rpc-api.schema.json");
+const wire = await generateSchemaProjection(
+  "schema/json-rpc-api.cfgdb",
+  "json-rpc-api.schema.json",
+  "Lightinator transient wire API",
+  "Api",
+  {},
+  root,
+);
 const manifest = await readJson("api.json");
 const openapi = await readJson("openapi.json");
 
 const sourceSchemas = [
   { database: "Definitions", source: "defs.cfgdb", persistent: false },
+  { database: "Api", source: "schema/json-rpc-api.cfgdb", projection: "json-rpc-api.schema.json", persistent: false },
   { database: "AppConfig", source: "app-config.cfgdb", projection: "schema/app-config.schema.json", persistent: true },
   { database: "AppData", source: "app-data.cfgdb", projection: "schema/app-data.schema.json", persistent: true },
 ];
@@ -93,7 +110,7 @@ for (const schema of sourceSchemas) {
 }
 
 const digest = createHash("sha256");
-for (const source of ["defs.cfgdb", "app-config.cfgdb", "app-data.cfgdb"]) {
+for (const source of ["defs.cfgdb", "schema/json-rpc-api.cfgdb", "app-config.cfgdb", "app-data.cfgdb"]) {
   digest.update(await readText(source));
 }
 for (const artifact of [manifest, wire, openapi]) {
@@ -108,6 +125,7 @@ const version = {
   sourceSchemas,
   artifacts: [
     "api.json",
+    "schema/json-rpc-api.cfgdb",
     "json-rpc-api.schema.json",
     "defs.cfgdb",
     "app-config.cfgdb",

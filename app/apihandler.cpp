@@ -30,7 +30,6 @@ enum class CommandMethodId : uint8_t {
 	Direct,
 	SetOn,
 	SetOff,
-	KeepAlive,
 	ScanNetworks,
 	System,
 	WebappCheck,
@@ -80,9 +79,6 @@ CommandMethodId getCommandMethodId(const char* method)
 	}
 	if(std::strcmp(method, "setOff") == 0 || std::strcmp(method, "off") == 0) {
 		return CommandMethodId::SetOff;
-	}
-	if(std::strcmp(method, "keep_alive") == 0) {
-		return CommandMethodId::KeepAlive;
 	}
 	if(std::strcmp(method, "scan_networks") == 0) {
 		return CommandMethodId::ScanNetworks;
@@ -134,28 +130,6 @@ bool isPrintableSsid(const String& str)
 
 } // namespace
 
-bool Api::dispatch(const String& method, const JsonObject& params, JsonWriter::ObjectScope& out)
-{
-	return dispatch(method.c_str(), params, out);
-}
-
-bool Api::dispatch(const char* method, const JsonObject& params, JsonWriter::ObjectScope& out)
-{
-	const char* methodName = (method != nullptr) ? method : "";
-	debug_i(ANSI_COLOR_BLUE "Api::dispatch: method=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET,
-			methodName);
-	String errorMsg;
-	if(dispatchDataRequest(methodName, params, &out, nullptr, errorMsg)) {
-		return true;
-	}
-
-	out[F("error")] = errorMsg;
-	out[F("method")] = methodName;
-	debug_i(ANSI_COLOR_BLUE "Api::dispatch failed: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET,
-			errorMsg.c_str());
-	return false;
-}
-
 bool Api::dispatchCommand(const String& method, const JsonObject& params, String& errorMsg, bool relay)
 {
 	return dispatchCommand(method.c_str(), params, errorMsg, relay);
@@ -187,9 +161,6 @@ bool Api::dispatchCommand(const char* method, const JsonObject& params, String& 
 		return app.jsonproc.onSetOn(params, errorMsg, relay);
 	case CommandMethodId::SetOff:
 		return app.jsonproc.onSetOff(params, errorMsg, relay);
-	case CommandMethodId::KeepAlive:
-		// No-op ping from webapp to keep the WebSocket connection alive.
-		return true;
 	case CommandMethodId::ScanNetworks:
 		if(!app.network.isScanning()) {
 			app.network.scan(false);
@@ -256,10 +227,6 @@ bool Api::dispatchCommand(const String& method, const String& params, String& er
 {
 	debug_i(ANSI_COLOR_BLUE "Api::dispatchCommand(str): method=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ", params=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, method.c_str(), params.c_str());
 	const auto methodId = getCommandMethodId(method.c_str());
-	if(methodId == CommandMethodId::KeepAlive) {
-		return true;
-	}
-
 	if(methodId == CommandMethodId::Unknown) {
 		errorMsg = F("method not implemented: ");
 		errorMsg.concat(method.c_str());
@@ -282,6 +249,7 @@ bool Api::dispatchCommand(const String& method, const String& params, String& er
 	return dispatchCommand(method.c_str(), doc.as<JsonObject>(), errorMsg, relay);
 }
 
+#if 0
 bool Api::handleColor(const JsonObject& params, JsonWriter::ObjectScope& out)
 {
 	(void)params;
@@ -346,6 +314,7 @@ bool Api::handleNetworks(const JsonObject& params, JsonWriter::ObjectScope& out)
 
 	return true;
 }
+#endif
 
 bool Api::dispatchJsonRpc(const String& json, String& errorMsg, bool relay)
 {
@@ -364,6 +333,165 @@ bool Api::dispatchJsonRpc(const String& json, String& errorMsg, bool relay)
 	return dispatchCommand(method, rpc.getParams(), errorMsg, relay);
 }
 
+bool Api::renderData(const String& method, const JsonObject& params, String& out)
+{
+	return renderData(method, params, out, -1);
+}
+
+bool Api::renderData(const String& method, const JsonObject& params, String& out, int requestId)
+{
+	auto& codec = rpcCodec();
+	Jsonrpc::Root root(codec.db());
+	const auto dataMethodId = getDataMethodId(method.c_str());
+	auto render = [&]() {
+		if(requestId >= 0) {
+			return codec.render({requestId, JsonRPC::Message::Kind::result, method}, root, out);
+		}
+		return codec.renderPayload(root, out);
+	};
+
+	if(dataMethodId == DataMethodId::Info) {
+		JsonVariantConst sparseParam = params[F("sparse")];
+		if(sparseParam.isNull()) {
+			sparseParam = params[F("S")];
+		}
+		const bool sparse = sparseParam.isNull() ? true :
+			(sparseParam.is<bool>() ? sparseParam.as<bool>() :
+			 !(sparseParam.as<String>() == F("0") || sparseParam.as<String>() == F("false") || sparseParam.as<String>() == F("off")));
+
+		if(auto update = root.update()) {
+			auto info = update.toInfo();
+		auto fillCommon = [&](auto& value) {
+			#if defined(ARCH_ESP8266)
+			value.device.setDeviceid(system_get_chip_id());
+			#else
+			value.device.setDeviceid(0);
+			#endif
+			value.device.setSoc(SOC);
+			#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
+			value.device.setCurrentRom(String(app.ota.getRomPartition().name()));
+			#endif
+			value.app.setGitVersion(fw_git_version);
+			value.app.setBuildType(BUILD_TYPE);
+			value.app.setGitDate(fw_git_date);
+			AppConfig::Root::Webapp webappCfg(*app.cfg);
+			String installedVer = webappCfg.getInstalledVersion();
+			value.app.setWebappVersion(installedVer.length() > 0 ? installedVer : String(WEBAPP_VERSION));
+			value.sming.setVersion(SMING_VERSION);
+			IFS::FileSystem::Info fsInfo;
+			if(fileGetSystemInfo(fsInfo) == FS_OK) {
+				value.filesystem.setTotalBytes(fsInfo.volumeSize);
+				value.filesystem.setFreeBytes(fsInfo.freeSpace);
+				value.filesystem.setUsedBytes(fsInfo.volumeSize - fsInfo.freeSpace);
+			}
+			value.rgbww.setVersion(RGBWW_VERSION);
+			value.rgbww.setQueuesize(RGBWW_ANIMATIONQSIZE);
+			value.connection.setConnected(WifiStation.isConnected());
+			if(WifiStation.isConnected()) {
+				value.connection.setSsid(WifiStation.getSSID());
+				value.connection.setDhcp(WifiStation.isEnabledDHCP());
+				value.connection.setIp(WifiStation.getIP().toString());
+				value.connection.setNetmask(WifiStation.getNetworkMask().toString());
+				value.connection.setGateway(WifiStation.getNetworkGateway().toString());
+				value.connection.setMac(WifiStation.getMAC());
+				value.connection.setRssi(WifiStation.getRssi());
+			}
+			AppConfig::Network network(*app.cfg);
+			const bool mqttEnabled = !app.ota.isProccessing() && network.mqtt.getEnabled();
+			value.mqtt.setEnabled(mqttEnabled);
+			value.mqtt.setBroker(mqttEnabled ? network.mqtt.getServer() : String::nullstr);
+			value.mqtt.setTopic(mqttEnabled ? network.mqtt.getTopicBase() : String::nullstr);
+			value.mqtt.setStatus(app.ota.isProccessing() ? F("ota in progress") :
+				(mqttEnabled ? (app.mqttclient.isRunning() ? F("running") : F("configured but not running")) : F("disabled")));
+			value.homeassistant.setEnabled(mqttEnabled && network.mqtt.homeassistant.getEnable());
+			value.homeassistant.setDiscoveryPrefix(mqttEnabled ? network.mqtt.homeassistant.getDiscoveryPrefix() : String::nullstr);
+			value.homeassistant.setNodeID(mqttEnabled ? network.mqtt.homeassistant.getNodeId() : String::nullstr);
+			if(app.ota.isProccessing()) {
+				value.ota.setStatus(F("in progress"));
+			}
+		};
+			if(!sparse) {
+				auto full = info.toInfoFullParams();
+				full.setVersion(2);
+				fillCommon(full);
+				auto& runtime = full.runtime;
+				runtime.setUptime(app.getUptime());
+				runtime.setHeapFree(app.getFreeHeapSize());
+				runtime.setMinfreeHeapRuntime(app.getMinimumHeapUptime());
+				runtime.setMinfreeHeap10min(app.getMinimumHeap10min());
+				runtime.setHeapLowErrUptime(app.getHeapLowErrUptime());
+				runtime.setHeapLowErr10min(app.getHeapLowErr10min());
+				auto& debug = full.debug;
+				debug.setHttpActiveConnections(app.webserver.getHttpActiveConnections());
+				debug.setWebsocketConnections(app.webserver.getWebsocketConnectionCount());
+				debug.setEventserverClients(app.eventserver.activeClients);
+			}
+			else {
+				auto stat = info.toInfoStaticParams();
+				stat.setVersion(2);
+				fillCommon(stat);
+			}
+		}
+		return render();
+	}
+
+	if(dataMethodId == DataMethodId::Color) {
+		if(auto update = root.update()) {
+			auto color = update.toColor();
+			ChannelOutput output = app.rgbwwctrl.getCurrentOutput();
+			{
+				auto raw = color.toRaw();
+				raw.setR(output.r);
+				raw.setG(output.g);
+				raw.setB(output.b);
+				raw.setWw(output.ww);
+				raw.setCw(output.cw);
+			}
+
+			float h, s, v;
+			int ct;
+			HSVCT current = app.rgbwwctrl.getCurrentColor();
+			current.asRadian(h, s, v, ct);
+			{
+				auto hsv = color.toHsv();
+				hsv.setH(h);
+				hsv.setS(s);
+				hsv.setV(v);
+				hsv.setCt(ct);
+			}
+		}
+		return render();
+	}
+
+	if(dataMethodId == DataMethodId::Networks) {
+		if(auto update = root.update()) {
+			auto networks = update.toNetworks();
+			const bool scanning = app.network.isScanning();
+			networks.setScanning(scanning);
+			if(!scanning) {
+				BssList available = app.network.getAvailableNetworks();
+				for(unsigned int i = 0; i < available.count(); ++i) {
+					if(available[i].hidden || !isPrintableSsid(available[i].ssid)) {
+						continue;
+					}
+					auto item = networks.available.addItem();
+					item.setId(String(available[i].getHashId()));
+					item.setSsid(available[i].ssid);
+					item.setSignal(available[i].rssi);
+					item.setEncryption(available[i].getAuthorizationMethodName());
+					if(i >= 25) {
+						break;
+					}
+				}
+			}
+		}
+		return render();
+	}
+
+	return false;
+}
+
+#if 0
 bool Api::dispatchStream(const String& method, const JsonObject& params, std::unique_ptr<IDataSourceStream>& out,
 					 String& errorMsg)
 {
@@ -498,17 +626,7 @@ bool Api::handleInfo(const JsonObject& params, JsonWriter::ObjectScope& data, ui
         version = params[F("v")];
     }
 
-    bool isV2 = false;
-    if(!version.isNull()) {
-        if(version.is<long>() || version.is<int>() || version.is<unsigned long>() || version.is<unsigned int>()) {
-            isV2 = (version.as<long>() == 2);
-        } else {
-            const char* v = version.as<const char*>();
-            if(v != nullptr) {
-                isV2 = (v[0] == '2' && v[1] == '\0');
-            }
-        }
-    }
+	const bool isV2 = true;
 
 	JsonVariantConst sparseParam = params[F("sparse")];
 	if(sparseParam.isNull()) {
@@ -640,6 +758,8 @@ bool Api::handleInfo(const JsonObject& params, JsonWriter::ObjectScope& data, ui
 
     return false;
 }
+
+#endif
 
 bool Api::handleHosts(const JsonObject& params, std::unique_ptr<IDataSourceStream>& out, String& errorMsg)
 {

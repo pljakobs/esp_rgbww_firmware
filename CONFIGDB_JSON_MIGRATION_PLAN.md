@@ -25,6 +25,15 @@ Typed result --> generated response/payload updater --> ConfigDB ExportStream --
 
 Transport code owns framing, authentication, CORS, HTTP status codes, MQTT topics, and WebSocket connection state. ConfigDB owns JSON parsing, schema validation, typed storage, and serialization. `Api` owns command/query semantics and controller side effects.
 
+**Sequencing.** The migration runs *outbound first*: Phase 1 replaces JSON-RPC
+and JSON payload **generation** with ConfigDB across **all** transports (HTTP,
+WebSocket, TCP event server, MQTT) before any inbound parsing is touched.
+Generation is the half where ConfigDB export is already truly streaming, the wire
+format is fully under firmware control, and there are no borrowed-buffer lifetime
+constraints — so it validates the schema on the wire at low risk. Inbound
+migration follows in Phases 3–5. Phase 0 first corrects three JSON-RPC
+conformance defects that ConfigDB's generated envelope will not reproduce.
+
 ## Streaming Model and Transport Limits
 
 The term "streaming" must distinguish JSON processing from network ingress. Sming's current APIs are asymmetric:
@@ -57,6 +66,17 @@ This still provides meaningful memory improvements:
 - Outgoing responses are serialized directly to the network.
 
 It does not make incoming message size unlimited. Input remains bounded by Sming's WebSocket or MQTT message assembly, available heap, configured protocol limits, and ConfigDB storage required by variable-length strings and arrays.
+
+**Decision (from review):** reassembled TCP fragments may exceed the MTU-limited
+payload, but that reassembly is owned by the WebSocket/MQTT layer and is not a
+ConfigDB concern. True ingress streaming would require a framing protocol layered
+*on top of* WebSocket/MQTT; that is explicitly a later option, not a prerequisite.
+The buffered compatibility mode described above is the target for this migration.
+
+Note also that outbound generation has none of these constraints: ConfigDB export
+streams are genuinely incremental on every transport that accepts an
+`IDataSourceStream`. This asymmetry is the reason outbound work is sequenced
+first — see [Phase 1](#phase-1-outbound-generation-all-transports).
 
 ### One Import, Two Logical Layers
 
@@ -172,6 +192,24 @@ Provide one of these ConfigDB facilities before production migration:
 - Preferred: a RAM-only database/store backend whose commit does not call filesystem save.
 - Acceptable interim option: a dedicated transient database subclass with an explicit no-save policy.
 
+Until ConfigDB provides that generalized transient backend, every API workspace
+must clear its dirty state from the generated root `onCommit` callback before
+the final updater leaves scope. This prevents protocol parsing and response
+construction from committing transient JSON data to the underlying persistent
+store:
+
+```cpp
+JsonRpcApi::Root::onCommit(database, [](auto root) {
+  root.clearDirty();
+});
+```
+
+The callback must be installed when the workspace database is created and must
+remain active for its complete lifetime. Do not rely on `store: false` alone as
+a no-persistence guarantee during this transition. Any path which opens an
+updater without this safeguard is incomplete, including failed imports and
+error-response construction.
+
 Use a bounded workspace pool sized from measured concurrency and memory usage. Each workspace contains one generated API store and has states such as `free`, `importing`, `handling`, and `exporting`. If no workspace is available, HTTP returns `409` or `503`, and MQTT/WebSocket reports a busy error or defers processing.
 
 Incremental import must be transactional. A malformed message, disconnect, timeout, or size violation can occur after valid fields have already been written. Import into transient copy-on-write state and expose no side effects until message finalization and schema validation succeed. On failure, discard the complete workspace; never commit partially imported protocol data to live controller or persistent configuration state.
@@ -180,35 +218,31 @@ Do not release a workspace immediately after calling `sendDataStream`, `Websocke
 
 ## Schema Work
 
-Make `json-rpc-api.cfgdb` the authoritative generated API schema.
+**Authoritative source (decision from review):** the definitive message schema is
+the triplet [jsonrpc.cfgdb](jsonrpc.cfgdb) + [params.cfgdb](params.cfgdb) +
+[value-types.cfgdb](value-types.cfgdb). Its layering is the point:
 
-Required schema structure:
+| File | Layer | Role |
+|---|---|---|
+| [value-types.cfgdb](value-types.cfgdb) | scalars | reusable constrained primitives |
+| [params.cfgdb](params.cfgdb) | **payload** | transport-independent objects; this is what the HTTP interface sends and receives |
+| [jsonrpc.cfgdb](jsonrpc.cfgdb) | **framing** | JSON-RPC 2.0 envelope around a payload; each root member's title is the wire method name |
 
-```json
-{
-  "definitions": {
-    "colorParams": {},
-    "animationParams": {},
-    "infoParams": {},
-    "colorCommandRequest": {
-      "properties": {
-        "params": { "$ref": "#/definitions/colorParams" }
-      }
-    },
-    "requestEnvelope": {
-      "oneOf": [
-        { "$ref": "#/definitions/colorCommandRequest" }
-      ]
-    }
-  },
-  "properties": {
-    "request": { "$ref": "#/definitions/requestEnvelope" },
-    "color": { "$ref": "#/definitions/colorParams" }
-  }
-}
-```
+`json-rpc-api.cfgdb` and the other legacy `.cfgdb` files may define more protocol
+messages, but they do not separate framing from payload. Treat them as a
+**reference for missing definitions only**, and port those definitions into the
+triplet. Do not extend them. Delete them once the triplet is complete.
 
-Keep reusable payloads under `definitions`; do not define envelope variants only as root properties. This avoids generated nested-type ambiguity and permits HTTP and RPC to share types.
+The triplet is currently incomplete; completing it is part of Phase 1.
+
+Because payload and framing are separate schemas, HTTP renders a
+[params.cfgdb](params.cfgdb) object directly and the framed transports wrap the
+same object — one producer, two renderings. A payload sent only over HTTP needs
+no [jsonrpc.cfgdb](jsonrpc.cfgdb) root member at all.
+
+Keep reusable payloads in [params.cfgdb](params.cfgdb) `$defs`; do not define
+envelope variants only as root properties. This avoids generated nested-type
+ambiguity and permits HTTP and RPC to share types.
 
 Complete and verify definitions for:
 
@@ -224,6 +258,19 @@ Complete and verify definitions for:
 Add schema fixtures for accepted legacy payloads and rejected values. Run dbgen plus JSON schema validation in CI.
 
 ## Frontend Contract Generation and Validation
+
+> **Deferred (decision from review).** Everything in this section is a later
+> programme phase. For the firmware migration the frontend keeps using the
+> protocol exactly as it does today; no frontend change is required by Phases
+> 1–7 below, because those phases preserve the wire format. The one exception is
+> Phase 0, which fixes three genuine JSON-RPC conformance defects and therefore
+> needs a coordinated webapp change.
+>
+> A second complication to resolve before starting it: the Pinia stores mirror
+> [app-data.cfgdb](app-data.cfgdb) and [app-config.cfgdb](app-config.cfgdb), yet
+> not every JSON-RPC message is a store update — many are notifications or
+> actions. A generated store-facing facade therefore cannot be derived from the
+> message schema alone.
 
 The Quasar/Vite frontend in `../esp_rgb_webapp2` should consume generated protocol artifacts rather than reimplement firmware constraints by hand. The existing integration points are:
 
@@ -264,7 +311,8 @@ Use the preprocessed schemas from `out/ConfigDB/schema` because they contain res
 
 Package the following artifacts for each firmware API version:
 
-- `json-rpc-api.schema.json`: complete request union and response/error envelopes.
+- `json-rpc-api.cfgdb`: authoritative complete request union and response/error envelopes.
+- `json-rpc-api.schema.json`: generated browser/OpenAPI projection of the transient cfgdb schema.
 - Reusable standalone payload schemas such as color, info, config, and app data.
 - `openapi.json`: HTTP paths, verbs, status codes, authentication, and component references.
 - `api-version.json`: semantic API version, schema hash, firmware compatibility range, and generator version.
@@ -313,7 +361,7 @@ Keep generated files isolated and never edit them manually:
 ```text
 src/generated/api/
   schema/
-    json-rpc-api.schema.json
+    json-rpc-api.cfgdb
     openapi.json
     api-version.json
   types.d.ts
@@ -487,7 +535,142 @@ Add transport-level Vitest coverage:
 
 The generated-client migration is complete when `api.js` and `websocket.js` contain transport policy only, stores call named generated operations, `schemaValidator.js` contains only intentional UI normalization/legacy conversion, and no firmware range or required-field rule is duplicated manually in frontend source.
 
-## Phase 1: Typed Color Core
+## Phase 0: Protocol Conformance Fixes
+
+Three defects in the current JSON-RPC implementation must be fixed **before**
+Phase 1, because ConfigDB's generated envelope is spec-conformant and will not
+reproduce them. They are corrected here as bugs in their own right, not worked
+around; each requires a coordinated firmware + webapp change and is therefore
+the one point in the migration where the wire format deliberately changes.
+
+### 0a. Notifications must not carry an `id`
+
+`EventServer::sendToClients()` ([app/eventserver.cpp](app/eventserver.cpp))
+stamps `_nextId++` onto every outbound event. A JSON-RPC notification is defined
+by the *absence* of `id`; a message with an `id` is a request and obliges the
+peer to respond. Clients that follow the spec must either answer or treat these
+as protocol errors.
+
+Fix: emit events with no `id`. `JsonRPC::ReadStream` does this automatically for
+`Message::Kind::notification`. Retire `_nextId` for the event path. The webapp
+must stop keying anything off the event `id`.
+
+### 0b. Request `id` must be integer or string, and echoed unchanged
+
+[app/webserver.cpp](app/webserver.cpp) round-trips the client's `id` verbatim
+via `writeRawField` — which will faithfully echo `true`, an object, or an array,
+none of which are legal `id` values. ConfigDB emits an integer.
+
+Fix: validate the inbound `id` at the transport boundary. Accept integer, string
+and `null`; reject anything else with `-32600`. Standardise the webapp on
+integers so the generated integer-only envelope is sufficient; if string ids must
+survive, that is a schema change to make deliberately, not an accident of
+`writeRawField`.
+
+### 0c. Replace the WebSocket `keep_alive` kludge
+
+The current arrangement is a kludge in three ways:
+
+- `keep_alive` exists as an application-level JSON-RPC method
+  ([app/apihandler.cpp](app/apihandler.cpp)) on a transport that already has
+  native PING/PONG control frames. Sming supports both
+  (`WS_FRAME_PING`/`WS_FRAME_PONG`, `WebsocketConnection::setPongHandler()`).
+- It is simultaneously an *outbound* notification from the TCP event server
+  (`publishKeepAlive()`, [app/eventserver.cpp](app/eventserver.cpp)) and an
+  *inbound* method from WebSocket clients — one method name, two unrelated
+  meanings.
+- It is explicitly exempted from WebSocket authentication
+  ([app/webserver.cpp](app/webserver.cpp), `isKeepAlive`), which is an
+  unauthenticated pre-auth code path.
+
+Fix:
+
+- **WebSocket:** delete the `keep_alive` method and its auth exemption. Use
+  PING/PONG control frames, driven by the existing `settings.keepAliveSeconds`
+  and a `setPongHandler()` liveness timer. Control frames are handled below the
+  RPC layer, so no auth bypass is needed.
+- **TCP event server:** keep an application-level heartbeat — a raw TCP stream
+  has no control frames — but emit it as a proper notification (no `id`, per
+  0a) and give it a distinct method name so it is not confused with the removed
+  WebSocket method.
+
+This removes one `CommandMethodId`, one auth special case, and one schema entry
+before they are ported into [jsonrpc.cfgdb](jsonrpc.cfgdb).
+
+## Phase 1: Outbound Generation (all transports)
+
+**Do outbound first, and do it everywhere at once.** Message *generation* is
+where ConfigDB is unambiguously ready today: export is genuinely streaming on
+every transport, the wire format is fully under our control, there is no
+borrowed-buffer lifetime problem, and no inbound parsing question has to be
+answered first. Inbound migration (Phases 3–5) then lands against a schema that
+has already been proven on the wire.
+
+Detailed findings, blockers, per-call-site mapping and ordering for this phase
+are in
+[CONFIGDB_JSONRPC_MESSAGES_PLAN.md](CONFIGDB_JSONRPC_MESSAGES_PLAN.md).
+Summary:
+
+### 1a. Complete the schema triplet
+
+Port every message still defined only in the legacy `.cfgdb` files into
+[params.cfgdb](params.cfgdb) (payload) and, where the message is framed, into
+[jsonrpc.cfgdb](jsonrpc.cfgdb). Fix the two known modelling defects: the `error`
+root member must expose an `error` property (not `params`/`result`), and the
+member titled `result` must be titled `networks` with a `result` property.
+Reconcile `transition_finished` and `clock_slave_status` field sets against what
+the firmware actually sends.
+
+### 1b. Add the transient message workspace
+
+One owner (`Components/RpcCodec` or `app/rpccodec.cpp`) holding the generated
+message database, never committed, with three primitives:
+
+- `framed(const Message&)` → `JsonRPC::ReadStream` — full envelope, for unicast
+  WebSocket and any stream-capable framed transport.
+- `payload(ConfigDB::Object&)` → `Json::ReadStream` — bare payload, for HTTP.
+- `render(const Message&, String&)` — for the buffer-only sinks:
+  `MqttClient::publish(topic, String)` and `WebsocketConnection::broadcast()`.
+
+See the Prerequisite section above for the no-persistence requirement, and
+Design Rule 7 for export-stream lifetime.
+
+### 1c. Convert every outbound site, transport by transport
+
+Using the inventory in [JSON_OUTBOUND_USAGE.md](JSON_OUTBOUND_USAGE.md) — note
+that document is stale where it describes `JsonObjectStream`; those sites have
+since moved to `JsonWriter`:
+
+| Transport | Sites |
+|---|---|
+| TCP event server | `publishCurrentState`, `publishTransitionFinished`, `publishClockSlaveStatus`, `publishKeepAlive` [app/eventserver.cpp](app/eventserver.cpp) |
+| WebSocket broadcast | `broadcastWifiStatus` [app/networking.cpp](app/networking.cpp), notification/config events [app/webserver.cpp](app/webserver.cpp) |
+| WebSocket RPC reply | `wsMessage()` result/error envelope [app/webserver.cpp](app/webserver.cpp) |
+| MQTT | `publishCurrentRaw`, `publishCurrentHsv`, `publishTransitionFinished`, `publishCommand` [app/mqtt.cpp](app/mqtt.cpp) |
+| HTTP | `onColor`, `onInfo`, `onNetworks`, `onHosts`, … — rendered as **bare payload**, no envelope [app/webserver.cpp](app/webserver.cpp) |
+
+The result producers `handleColor()`, `handleNetworks()` and `handleInfo()`
+([app/apihandler.cpp](app/apihandler.cpp)) change signature once, from
+`JsonWriter::ObjectScope&` to the generated params updater, and then serve both
+the HTTP and the framed renderings.
+
+**Exit criteria for Phase 1:**
+
+- `JsonRpcMessage` and its `DynamicJsonDocument(512)`
+  ([app/jsonrpcmessage.cpp](app/jsonrpcmessage.cpp)) are deleted.
+- `_colorDoc` and the per-publish `Static`/`DynamicJsonDocument` instances in
+  [app/mqtt.cpp](app/mqtt.cpp) and [app/eventserver.cpp](app/eventserver.cpp)
+  are gone.
+- Every migrated payload is byte-for-byte identical to the pre-migration output,
+  verified against captured fixtures — with the Phase 0 conformance fixes
+  already applied to the reference fixtures, so no unexplained delta remains.
+- No inbound path has changed.
+
+Explicitly **not** in Phase 1: Home Assistant discovery/state/config payloads
+and `sendApiCode()`. These are not JSON-RPC and gain little over the
+`JsonWriter(String&)` they already use; leave them.
+
+## Phase 2: Typed Color Core
 
 Introduce a typed color entry point in `Api` or the controller-facing command layer:
 
@@ -509,9 +692,9 @@ into this typed handler. It must support:
 - Existing defaults and validation behavior
 - Relay enabled/disabled behavior
 
-Keep the ArduinoJson overload temporarily as an adapter for unmigrated callers. The adapter is removed at the end of Phase 4.
+Keep the ArduinoJson overload temporarily as an adapter for unmigrated callers. The adapter is removed at the end of Phase 5.
 
-## Phase 2: HTTP `/color`
+## Phase 3: HTTP `/color`
 
 Retain `bodyToStringParser` initially so Sming owns request buffering and moves the completed `MemoryDataStream` to `request.bodyStream`.
 
@@ -533,9 +716,11 @@ Retain `bodyToStringParser` initially so Sming owns request buffering and moves 
 3. Create a ConfigDB JSON export stream.
 4. Pass ownership to `response.sendDataStream()`.
 
+The `GET` half is already done by Phase 1; only the `POST` import path is new here.
+
 After behavior is stable, evaluate direct chunk import through an `HttpResource`. Do not combine `bodyToStringParser` and a direct ConfigDB `ImportStream` on one request because both use `request.args` during body processing.
 
-## Phase 3: WebSocket JSON-RPC
+## Phase 4: WebSocket JSON-RPC
 
 Replace `DynamicJsonDocument` and `JsonRpcMessageIn` for migrated methods.
 
@@ -556,13 +741,16 @@ Output flow:
 3. Create a ConfigDB export stream.
 4. Call `socket.send(stream.release(), WS_FRAME_TEXT)`.
 
+The output flow is already delivered by Phase 1; this phase only replaces the
+input side.
+
 Preserve authentication as a WebSocket transport concern. Authentication must complete before acquiring a command workspace or applying side effects.
 
 Notifications with no `id` execute without sending a response. Parse errors use `-32700`; invalid request, method, params, and internal errors retain the agreed JSON-RPC codes.
 
 After compatibility mode is stable, prototype lower-level WebSocket message begin/data/end callbacks. Feed continuation-frame payload chunks into one ConfigDB import stream held in per-connection state. Preserve ping, pong, and close handling independently of fragmented JSON messages.
 
-## Phase 4: MQTT
+## Phase 5: MQTT
 
 Migrate the two MQTT input shapes separately.
 
@@ -582,13 +770,15 @@ For outgoing state and command publications:
 2. Create a ConfigDB export stream.
 3. Use `MqttClient::publish(topic, stream.release(), flags)`.
 
+Delivered by Phase 1; retained here for completeness.
+
 Preserve retain and QoS flags. The publishing workspace must live until the MQTT client releases the stream.
 
 After compatibility mode is stable, evaluate lower-level MQTT publish begin/data/end hooks. A chunked adapter must retain topic, QoS, retain flag, expected payload length, bytes received, workspace, and importer status for each in-flight publish. Abort and discard the workspace on disconnect, timeout, length mismatch, parser rejection, or configured-size overflow.
 
 Home Assistant discovery documents are a separate schema surface. Migrate them after command/state paths because they are large, infrequent, and have different compatibility risk.
 
-## Phase 5: Queries and Configuration
+## Phase 6: Queries and Configuration
 
 Migrate in increasing order of complexity:
 
@@ -603,11 +793,13 @@ For dynamic data such as network arrays and runtime info, populate generated res
 
 Persistent configuration import is distinct from transient API message import. Validate a typed API request first, then deliberately update `AppConfig` in a separate transaction.
 
-## Phase 6: Remove ArduinoJson Protocol Paths
+## Phase 7: Remove ArduinoJson Protocol Paths
 
 After all transports use generated objects:
 
 - Remove `JsonRpcMessageIn` and its fixed-capacity document.
+  (The outbound `JsonRpcMessage` and the per-publish documents were already
+  removed by Phase 1.)
 - Remove `dispatchCommand(..., JsonObject, ...)` and string-parsing overloads.
 - Replace `getCommandMethodId()` and `getDataMethodId()` with generated union dispatch.
 - Remove `_colorPostDoc` and endpoint-specific `JsonDocument` buffers.

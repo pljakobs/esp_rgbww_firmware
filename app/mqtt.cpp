@@ -391,26 +391,120 @@ void AppMqttClient::publishCommand(const String& method, const JsonObject& param
 {
 	debug_d("ApplicationMQTTClient::publishCommand: %s\n", method.c_str());
 
-	JsonRpcMessage msg(method);
+	String msgStr;
+	if(method == F("wifi_status") || method == F("transition_finished") || method == F("clock_slave_status") ||
+	   method == F("keep_alive") || method == F("color_event")) {
+		auto& codec = rpcCodec();
+		Jsonrpc::Root root(codec.db());
+		if(auto update = root.update()) {
+			if(method == F("transition_finished")) {
+				auto finished = update.toTransitionFinished();
+				finished.setName(params[F("name")] | "");
+				finished.setRequeued(params[F("requeued")] | false);
+			} else if(method == F("clock_slave_status")) {
+				auto status = update.toClockSlaveStatus();
+				status.setOffset(params[F("offset")] | 0);
+				status.setCurrentInterval(params[F("current_interval")] | 0);
+			} else if(method == F("keep_alive")) {
+				update.toKeepAlive();
+			} else if(method == F("color_event")) {
+				auto color = update.toColor();
+				if(params.containsKey(F("raw"))) {
+					auto raw = color.toRaw();
+					auto p = params[F("raw")].as<JsonObject>();
+					raw.setR(p[F("r")] | 0);
+					raw.setG(p[F("g")] | 0);
+					raw.setB(p[F("b")] | 0);
+					raw.setWw(p[F("ww")] | 0);
+					raw.setCw(p[F("cw")] | 0);
+				} else if(params.containsKey(F("hsv"))) {
+					auto hsv = color.toHsv();
+					auto p = params[F("hsv")].as<JsonObject>();
+					hsv.setH(p[F("h")] | 0.0f);
+					hsv.setS(p[F("s")] | 0.0f);
+					hsv.setV(p[F("v")] | 0.0f);
+					hsv.setCt(p[F("ct")] | 0);
+				}
+			}
+		}
+		if(method == F("wifi_status")) {
+			if(codec.render({0, JsonRPC::Message::Kind::notification, method}, root.asWifiStatus(), msgStr)) {
+				publish(buildTopic(F("command")), msgStr, false);
+				return;
+			}
+		} else if(method == F("transition_finished")) {
+			if(codec.render({0, JsonRPC::Message::Kind::notification, method}, root.asTransitionFinished(), msgStr)) {
+				publish(buildTopic(F("command")), msgStr, false);
+				return;
+			}
+		} else if(method == F("clock_slave_status")) {
+			if(codec.render({0, JsonRPC::Message::Kind::notification, method}, root.asClockSlaveStatus(), msgStr)) {
+				publish(buildTopic(F("command")), msgStr, false);
+				return;
+			}
+		} else if(method == F("keep_alive")) {
+			if(codec.render({0, JsonRPC::Message::Kind::notification, method}, root.asKeepAlive(), msgStr)) {
+				publish(buildTopic(F("command")), msgStr, false);
+				return;
+			}
+		} else if(method == F("color_event")) {
+			if(codec.render({0, JsonRPC::Message::Kind::notification, method}, root.asColor(), msgStr)) {
+				publish(buildTopic(F("command")), msgStr, false);
+				return;
+			}
+		}
+	}
 
-	if(params.size() > 0)
-		msg.getRoot()[F("params")] = params;
-
-	String msgStr = Json::serialize(msg.getRoot());
-	publish(buildTopic(F("command")), msgStr, false);
+    auto& codec = rpcCodec();
+    Jsonrpc::Root root(codec.db());
+    if(auto update = root.update()) {
+        auto command = update.toCommandFields();
+        command.setCmd(method);
+        command.setT(params[F("t")] | 0);
+        command.setS(params[F("s")] | 0);
+        command.setR(params[F("r")] | false);
+        command.setD(params[F("d")] | 0);
+        command.setName(params[F("name")] | "");
+        command.setQ(params[F("q")] | "");
+        if(params.containsKey(F("raw"))) {
+            auto raw = command.raw;
+            auto value = params[F("raw")].as<JsonObject>();
+            raw.setR(value[F("r")] | 0);
+            raw.setG(value[F("g")] | 0);
+            raw.setB(value[F("b")] | 0);
+            raw.setWw(value[F("ww")] | 0);
+            raw.setCw(value[F("cw")] | 0);
+        }
+        if(params.containsKey(F("hsv"))) {
+            auto hsv = command.hsv;
+            auto value = params[F("hsv")].as<JsonObject>();
+            hsv.setH(value[F("h")] | 0.0f);
+            hsv.setS(value[F("s")] | 0.0f);
+            hsv.setV(value[F("v")] | 0.0f);
+            hsv.setCt(value[F("ct")] | 0);
+        }
+    }
+    if(codec.render({0, JsonRPC::Message::Kind::notification, method}, root.asCommandFields(), msgStr)) {
+        publish(buildTopic(F("command")), msgStr, false);
+    }
 }
 
 void AppMqttClient::publishTransitionFinished(const String& name, bool requeued)
 {
 	debug_d("ApplicationMQTTClient::publishTransitionFinished: %s\n", name.c_str());
 
-	StaticJsonDocument<200> doc;
-	JsonObject root = doc.to<JsonObject>();
-	root[F("name")] = name;
-	root[F("requequed")] = requeued;
+	auto& codec = rpcCodec();
+	Jsonrpc::Root root(codec.db());
+	if(auto update = root.update()) {
+		auto finished = update.toTransitionFinished();
+		finished.setName(name);
+		finished.setRequeued(requeued);
+	}
 
-	String jsonMsg = Json::serialize(root);
-	publish(buildTopic(F("transition_finished")), jsonMsg, true);
+	String jsonMsg;
+	if(codec.renderPayload(root.asTransitionFinished(), jsonMsg)) {
+		publish(buildTopic(F("transition_finished")), jsonMsg, true);
+	}
 }
 
 void AppMqttClient::initHomeAssistant() {

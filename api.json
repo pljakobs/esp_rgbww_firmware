@@ -9,7 +9,8 @@
   },
   "schemas": {
     "wire": {
-      "source": "json-rpc-api.schema.json",
+      "source": "schema/json-rpc-api.cfgdb",
+      "projection": "json-rpc-api.schema.json",
       "database": "Api",
       "persistent": false
     },
