@@ -432,7 +432,19 @@ bool Api::renderData(const String& method, const JsonObject& params, String& out
 				fillCommon(stat);
 			}
 		}
-		return render();
+		const auto infoBody = root.asInfo();
+		if(!sparse) {
+			if(requestId >= 0) {
+				return codec.render({requestId, JsonRPC::Message::Kind::result, method},
+					infoBody.asInfoFullParams(), out);
+			}
+			return codec.renderPayload(infoBody.asInfoFullParams(), out);
+		}
+		if(requestId >= 0) {
+			return codec.render({requestId, JsonRPC::Message::Kind::result, method},
+				infoBody.asInfoStaticParams(), out);
+		}
+		return codec.renderPayload(infoBody.asInfoStaticParams(), out);
 	}
 
 	if(dataMethodId == DataMethodId::Color) {
