@@ -38,6 +38,7 @@ public:
     void start();
     void stop();
     bool stat(const JsonDocument& doc);
+    bool stat(const String& payload);
     bool log(const char* message);
     bool log(const String& message);
     void connect(const char* debugServer, const char* debugUser, const char* debugPass);

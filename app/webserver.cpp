@@ -246,7 +246,17 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 	int errorCode = 0;
 
     if(!Json::deserialize(requestDoc, message)) {
-		socket.sendString(F("{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32700,\"message\":\"Parse error\"},\"id\":null}"));
+		String parseErrorPayload;
+		auto& codec = rpcCodec();
+		Jsonrpc::Root root(codec.db());
+		if(auto update = root.update()) {
+			auto error = update.toRpcError();
+			error.setCode(-32700);
+			error.setMessage(F("Parse error"));
+		}
+		if(codec.render({0, JsonRPC::Message::Kind::error, ""}, root.asRpcError(), parseErrorPayload)) {
+			socket.sendString(parseErrorPayload);
+		}
         return;
     }
 
@@ -258,8 +268,17 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 	// JSON-RPC 2.0 permits only a number, a string or null as the id. Reject
 	// anything else rather than echoing an illegal value back to the client.
 	if(!requestId.isNull() && !requestId.is<double>() && !requestId.is<const char*>()) {
-		socket.sendString(F("{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32600,\"message\":\"Invalid Request: id must be "
-						   "a string, a number or null\"},\"id\":null}"));
+		String invalidIdPayload;
+		auto& codec = rpcCodec();
+		Jsonrpc::Root root(codec.db());
+		if(auto update = root.update()) {
+			auto error = update.toRpcError();
+			error.setCode(-32600);
+			error.setMessage(F("Invalid Request: id must be a string, a number or null"));
+		}
+		if(codec.render({0, JsonRPC::Message::Kind::error, method}, root.asRpcError(), invalidIdPayload)) {
+			socket.sendString(invalidIdPayload);
+		}
 		return;
 	}
 
@@ -295,7 +314,7 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 	enum ResultKind { RK_None, RK_Authenticated, RK_SubTrue, RK_SubFalse, RK_CommandSuccess, RK_Data };
 	ResultKind resultKind = RK_None;
 	bool dataIsInfo = false;
-	String challenge; // non-empty => include a top-level "challenge"
+	String challenge; // non-empty => included in the JSON-RPC error object's "challenge" field
 
 	// ---- WebSocket authentication gate ----------------------------------
 	// When the API is secured, a connection must complete the challenge-
@@ -398,7 +417,7 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 			return;
 		}
 	}
-	if(challenge.length() == 0) {
+	{
 		auto& codec = rpcCodec();
 		Jsonrpc::Root root(codec.db());
 		String rpcPayload;
@@ -408,6 +427,9 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 				auto error = update.toRpcError();
 				error.setCode(errorCode);
 				error.setMessage(errorMsg);
+				if(challenge.length()) {
+					error.setChallenge(challenge);
+				}
 			}
 			rendered = codec.render({requestId.is<int>() ? requestId.as<int>() : 0,
 				JsonRPC::Message::Kind::error, method}, root.asRpcError(), rpcPayload);
@@ -437,32 +459,6 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 			return;
 		}
 	}
-
-	String payload;
-	payload.reserve(responseCapacity);
-	StaticJsonDocument<768> responseDoc;
-	responseDoc[F("jsonrpc")] = F("2.0");
-	if(!requestId.isNull()) {
-		responseDoc[F("id")].set(requestId);
-	}
-	if(challenge.length()) {
-		responseDoc[F("challenge")] = challenge;
-	}
-	if(errorMsg.length()) {
-		responseDoc[F("error")][F("code")] = errorCode;
-		responseDoc[F("error")][F("message")] = errorMsg;
-	} else if(resultKind == RK_Authenticated) {
-		responseDoc[F("result")][F("authenticated")] = true;
-	} else if(resultKind == RK_SubTrue || resultKind == RK_SubFalse) {
-		responseDoc[F("result")][F("subscribed")] = resultKind == RK_SubTrue;
-		responseDoc[F("result")][F("channel")] = F("runtime_info");
-	} else if(resultKind == RK_CommandSuccess) {
-		responseDoc[F("result")][F("success")] = true;
-	}
-	serializeJson(responseDoc, payload);
-
-	debug_i(ANSI_COLOR_BLUE "Websocket response prepared" ANSI_COLOR_RESET);
-	socket.sendString(payload);
 }
 
 /*

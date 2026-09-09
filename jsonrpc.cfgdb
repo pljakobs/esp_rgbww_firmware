@@ -47,6 +47,30 @@
             }
         },
         {
+            "$ref": "params/$defs/ha-state-color-temp",
+            "title": "ha_state_color_temp"
+        },
+        {
+            "$ref": "params/$defs/ha-state-hs",
+            "title": "ha_state_hs"
+        },
+        {
+            "$ref": "params/$defs/ha-channel-state",
+            "title": "ha_channel_state"
+        },
+        {
+            "$ref": "params/$defs/telemetry-params",
+            "title": "telemetry"
+        },
+        {
+            "$ref": "params/$defs/ha-discovery-main",
+            "title": "ha_discovery_main"
+        },
+        {
+            "$ref": "params/$defs/ha-discovery-channel",
+            "title": "ha_discovery_channel"
+        },
+        {
             "type": "object",
             "title": "wifi_status",
             "properties": {
@@ -139,7 +163,8 @@
             "properties": {
                 "code": { "$ref": "value-types/$defs/integer-value" },
                 "message": { "$ref": "value-types/$defs/string-value" },
-                "data": { "$ref": "value-types/$defs/string-value" }
+                "data": { "$ref": "value-types/$defs/string-value" },
+                "challenge": { "$ref": "value-types/$defs/string-value" }
             }
         },
         {

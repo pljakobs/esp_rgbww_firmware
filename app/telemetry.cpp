@@ -156,6 +156,10 @@ bool TelemetryClient::publish(const char* topic, const JsonDocument& doc) {
 	debug_i(ANSI_COLOR_BLUE "Telemetry MQTT publishing " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " to topic: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, payload.c_str(), fullTopic);
 	return mqtt->publish(fullTopic, payload);
 }
+
+bool TelemetryClient::stat(const String& payload) {
+	return publish("monitor", payload);
+}
 // Add to TelemetryClient class definition in telemetry.h:
 // Timer _reconnectGateTimer;
 // static void reconnectGateTimeoutCb(void* arg);

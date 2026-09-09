@@ -382,59 +382,60 @@ void Application::uptimeCounter()
 
 void Application::checkRam()
 {
-	// Build the telemetry payload on the heap (space-guarded): checkRam() runs
-	// on a periodic timer, so a transient malloc is far cheaper than keeping a
-	// 256 B JSON pool on the 4 KB ESP8266 CONT stack.
-	DynamicJsonDocument doc(256);
-	if(doc.capacity() == 0) {
-		debug_e(ANSI_COLOR_RED "checkRam: telemetry doc alloc failed, skipping tick" ANSI_COLOR_RESET);
+	time_t now = time(nullptr); // should be unix time if ntp is running
+	const uint32_t freeHeap = getFreeHeapSize();
+	const uint32_t uptimeSeconds = _uptimeMinutes * 60;
+	const uint32_t rebootReason = app.rtc_info->reason;
+	AppConfig::Network::Telemetry telemetryCfg(*cfg);
+
+	auto& codec = rpcCodec();
+	Jsonrpc::Root root(codec.db());
+	if(auto update = root.update()) {
+		auto telemetry = update.toTelemetryParams();
+		telemetry.setId(system_get_chip_id());
+		telemetry.setTime(now);
+		telemetry.setUptime(uptimeSeconds);
+		telemetry.setIp(WifiStation.getIP().toString());
+		telemetry.setFreeHeap(freeHeap);
+		telemetry.setMinHeapRuntime(_minimumHeapUptime);
+		telemetry.setMinHeap10min(_minimumHeap10min);
+		telemetry.setHeapLowErrUptime(_HeapLowErrUptime);
+		telemetry.setHeapLowErr10min(_HeapLowErr10min);
+		telemetry.setFirmware(fw_git_version);
+		telemetry.setBuild(BUILD_TYPE);
+		telemetry.setSoc(SOC);
+		telemetry.setNeighbours(app.controllers->getVisibleCount());
+		telemetry.reboot.setNumber(telemetryCfg.getNumReboots());
+		telemetry.reboot.setReason(rebootReason);
+		telemetry.reboot.setExccause(app.rtc_info->exccause);
+		telemetry.reboot.setEpc1(app.rtc_info->epc1);
+		telemetry.reboot.setEpc2(app.rtc_info->epc2);
+		telemetry.reboot.setEpc3(app.rtc_info->epc3);
+		telemetry.reboot.setExcvaddr(app.rtc_info->excvaddr);
+		telemetry.reboot.setDepc(app.rtc_info->depc);
+		telemetry.mDNS.setReceived(_mDNS_received);
+		telemetry.mDNS.setReplies(_mDNS_replies);
+	}
+	String telemetryPayload;
+	if(!codec.renderPayload(root.asTelemetryParams(), telemetryPayload)) {
+		debug_e(ANSI_COLOR_RED "checkRam: telemetry render failed, skipping tick" ANSI_COLOR_RESET);
 		return;
 	}
-	time_t now = time(nullptr); // should be unix time if ntp is running
-	doc[F("id")] = (uint32_t)system_get_chip_id();
-	doc[F("time")] = now;	
-	doc[F("uptime")] = _uptimeMinutes*60;
-	doc[F("ip")] = WifiStation.getIP().toString();
-	doc[F("freeHeap")] = getFreeHeapSize();
-	doc[F("minHeapRuntime")]=_minimumHeapUptime;
-	doc[F("minHeap10min")]=_minimumHeap10min;
-	doc[F("heapLowErrUptime")]=_HeapLowErrUptime;
-	doc[F("heapLowErr10min")]=_HeapLowErr10min;
-	doc[F("firmware")] = fw_git_version;
-	doc[F("build")] = BUILD_TYPE;
-	doc[F("soc")] = SOC;
-	doc[F("neighbours")]=app.controllers->getVisibleCount();
-	if (app.rtc_info->reason!= 0 && !_reboot_reported)
-	{
-		AppConfig::Network::Telemetry telemetryCfg(*cfg);
-
-		doc[F("reboot")][F("number")] = telemetryCfg.getNumReboots();
-		doc[F("reboot")][F("reason")] = app.rtc_info->reason;
-		doc[F("reboot")][F("exccause")] = app.rtc_info->exccause;
-		doc[F("reboot")][F("epc1")] = app.rtc_info->epc1;
-		doc[F("reboot")][F("epc2")] = app.rtc_info->epc2;
-		doc[F("reboot")][F("epc3")] = app.rtc_info->epc3;
-		doc[F("reboot")][F("excvaddr")] = app.rtc_info->excvaddr;
-		doc[F("reboot")][F("depc")] = app.rtc_info->depc;
-	}
-		doc[F("mDNS")][F("received")] = _mDNS_received;
-		doc[F("mDNS")][F("replies")] = _mDNS_replies;
 
 	debug_i(ANSI_COLOR_BLUE "Free heap: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE ", uptime: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, getFreeHeapSize(), millis() / 1000);
 	{
 		// Push fast-changing runtime telemetry without ArduinoJson allocations.
 		static char runtimeFrame[320];
-		const uint32_t uptimeSeconds = _uptimeMinutes * 60;
 		const int frameLen = m_snprintf(runtimeFrame, sizeof(runtimeFrame),
 				"{\"jsonrpc\":\"2.0\",\"method\":\"runtime_info\",\"params\":{\"uptime\":%lu,\"heap_free\":%u,\"minfreeHeapRuntime\":%u,\"minfreeHeap10min\":%u,\"heapLowErrUptime\":%u,\"heapLowErr10min\":%u}}",
-				(unsigned long)uptimeSeconds, (unsigned)doc[F("freeHeap")].as<uint32_t>(),
+				(unsigned long)uptimeSeconds, (unsigned)freeHeap,
 				(unsigned)_minimumHeapUptime, (unsigned)_minimumHeap10min, (unsigned)_HeapLowErrUptime,
 				(unsigned)_HeapLowErr10min);
 		if(frameLen > 0 && static_cast<size_t>(frameLen) < sizeof(runtimeFrame)) {
 			webserver.wsSendRuntimeInfo(runtimeFrame, static_cast<size_t>(frameLen));
 		}
 	}
-	if (!telemetryClient.stat(doc))
+	if (!telemetryClient.stat(telemetryPayload))
 	{
 		debug_i(ANSI_COLOR_BLUE "Failed to publish monitor data to telemetry MQTT" ANSI_COLOR_RESET);
 		/* 
