@@ -293,14 +293,15 @@
       },
       "additionalProperties": false
     },
+    "networks-list": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/netlist-item" }
+    },
     "networks-params": {
       "type": "object",
       "properties": {
         "scanning": { "$ref": "value-types/$defs/boolean-value" },
-        "available": {
-          "type": "array",
-          "items": { "$ref": "#/$defs/netlist-item" }
-        }
+        "available": { "$ref": "#/$defs/networks-list" }
       },
       "additionalProperties": false
     },

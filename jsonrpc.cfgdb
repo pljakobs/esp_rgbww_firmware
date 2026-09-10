@@ -38,13 +38,9 @@
         {
             "type": "object",
             "title": "networks",
-            "properties": {
-                "scanning": { "$ref": "value-types/$defs/boolean-value" },
-                "available": {
-                    "type": "array",
-                    "items": { "$ref": "params/$defs/netlist-item" }
-                }
-            }
+            "oneOf": [
+                { "$ref": "params/$defs/networks-params" }
+            ]
         },
         {
             "$ref": "params/$defs/ha-state-color-temp",

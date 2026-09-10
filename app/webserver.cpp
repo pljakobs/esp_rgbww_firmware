@@ -644,7 +644,11 @@ void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, c
 				update.toApiError().setError(msg == nullptr ? getApiCodeMsg(code) : String(msg));
 			}
 		}
-		codec.renderPayload(root, payload);
+		if(code == API_CODES::API_SUCCESS) {
+			codec.renderPayload(root.asApiSuccess(), payload);
+		} else {
+			codec.renderPayload(root.asApiError(), payload);
+		}
 	}
 
 	if(!checkHeap(response)) {
@@ -676,7 +680,11 @@ void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, c
 				update.toApiError().setError(msg == nullptr ? getApiCodeMsg(code) : String(msg));
 			}
 		}
-		codec.renderPayload(root, payload);
+		if(code == API_CODES::API_SUCCESS) {
+			codec.renderPayload(root.asApiSuccess(), payload);
+		} else {
+			codec.renderPayload(root.asApiError(), payload);
+		}
 	}
 
 	if(!checkHeap(response)) {

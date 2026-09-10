@@ -43,7 +43,10 @@ bool RpcCodec::renderPayload(const ConfigDB::Object& body, String& out)
 
 	MemoryDataStream mem;
 	ConfigDB::ExportOptions options;
-	options.asObject = true;
+	// A bare payload must contain only the object's properties. ConfigDB's
+	// asObject style also emits the root object's schema name, which would turn
+	// e.g. {"scanning":...} into {"networks-params":{...}}.
+	options.asObject = false;
 	if(ConfigDB::Json::format.exportToStream(body, mem, options) == 0) {
 		return false;
 	}

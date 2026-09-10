@@ -249,72 +249,7 @@ bool Api::dispatchCommand(const String& method, const String& params, String& er
 	return dispatchCommand(method.c_str(), doc.as<JsonObject>(), errorMsg, relay);
 }
 
-#if 0
-bool Api::handleColor(const JsonObject& params, JsonWriter::ObjectScope& out)
-{
-	(void)params;
 
-	ChannelOutput output = app.rgbwwctrl.getCurrentOutput();
-	{
-		auto raw = out.beginObject(F("raw"));
-		raw[F("r")] = output.r;
-		raw[F("g")] = output.g;
-		raw[F("b")] = output.b;
-		raw[F("ww")] = output.ww;
-		raw[F("cw")] = output.cw;
-	}
-
-	float h, s, v;
-	int ct;
-	HSVCT c = app.rgbwwctrl.getCurrentColor();
-	c.asRadian(h, s, v, ct);
-	{
-		auto hsv = out.beginObject(F("hsv"));
-		hsv[F("h")] = h;
-		hsv[F("s")] = s;
-		hsv[F("v")] = v;
-		hsv[F("ct")] = ct;
-	}
-
-	return true;
-}
-
-bool Api::handleNetworks(const JsonObject& params, JsonWriter::ObjectScope& out)
-{
-	(void)params;
-
-	if(app.network.isScanning()) {
-		out[F("scanning")] = true;
-		return true;
-	}
-
-	out[F("scanning")] = false;
-	auto netlist = out.beginArray(F("available"));
-	BssList networks = app.network.getAvailableNetworks();
-	for(unsigned int i = 0; i < networks.count(); i++) {
-		if(networks[i].hidden) {
-			continue;
-		}
-		if(!isPrintableSsid(networks[i].ssid)) {
-			continue;
-		}
-
-		{
-			auto item = netlist.beginObject();
-			item[F("id")] = (int)networks[i].getHashId();
-			item[F("ssid")] = networks[i].ssid;
-			item[F("signal")] = networks[i].rssi;
-			item[F("encryption")] = networks[i].getAuthorizationMethodName();
-		}
-
-		if(i >= 25) {
-			break;
-		}
-	}
-
-	return true;
-}
-#endif
 
 bool Api::dispatchJsonRpc(const String& json, String& errorMsg, bool relay)
 {
@@ -343,12 +278,6 @@ bool Api::renderData(const String& method, const JsonObject& params, String& out
 	auto& codec = rpcCodec();
 	Jsonrpc::Root root(codec.db());
 	const auto dataMethodId = getDataMethodId(method.c_str());
-	auto render = [&]() {
-		if(requestId >= 0) {
-			return codec.render({requestId, JsonRPC::Message::Kind::result, method}, root, out);
-		}
-		return codec.renderPayload(root, out);
-	};
 
 	if(dataMethodId == DataMethodId::Info) {
 		JsonVariantConst sparseParam = params[F("sparse")];
@@ -472,12 +401,15 @@ bool Api::renderData(const String& method, const JsonObject& params, String& out
 				hsv.setCt(ct);
 			}
 		}
-		return render();
+		if(requestId >= 0) {
+			return codec.render({requestId, JsonRPC::Message::Kind::result, method}, root.asColor(), out);
+		}
+		return codec.renderPayload(root.asColor(), out);
 	}
 
 	if(dataMethodId == DataMethodId::Networks) {
 		if(auto update = root.update()) {
-			auto networks = update.toNetworks();
+			auto networks = update.toNetworks().toNetworksParams();
 			const bool scanning = app.network.isScanning();
 			networks.setScanning(scanning);
 			if(!scanning) {
@@ -497,281 +429,17 @@ bool Api::renderData(const String& method, const JsonObject& params, String& out
 				}
 			}
 		}
-		return render();
+		if(requestId >= 0) {
+			return codec.render({requestId, JsonRPC::Message::Kind::result, method},
+				root.asNetworks().asNetworksParams(), out);
+		}
+		return codec.renderPayload(root.asNetworks().asNetworksParams(), out);
 	}
 
 	return false;
 }
 
-#if 0
-bool Api::dispatchStream(const String& method, const JsonObject& params, std::unique_ptr<IDataSourceStream>& out,
-					 String& errorMsg)
-{
-	debug_i(ANSI_COLOR_BLUE "Api::dispatchStream: method=" ANSI_COLOR_RED "%s" ANSI_COLOR_RESET, method.c_str());
-	return dispatchDataRequest(method, params, nullptr, &out, errorMsg);
-}
 
-bool Api::dispatchDataRequest(const String& method, const JsonObject& params, JsonWriter::ObjectScope* outObject,
-						 std::unique_ptr<IDataSourceStream>* outStream, String& errorMsg)
-{
-	return dispatchDataRequest(method.c_str(), params, outObject, outStream, errorMsg);
-}
-
-bool Api::dispatchDataRequest(const char* method, const JsonObject& params, JsonWriter::ObjectScope* outObject,
-						 std::unique_ptr<IDataSourceStream>* outStream, String& errorMsg)
-{
-	const char* methodName = (method != nullptr) ? method : "";
-	const auto dataMethodId = getDataMethodId(methodName);
-
-	if(outObject != nullptr) {
-		debug_i(ANSI_COLOR_BLUE "Api::dispatchDataRequest: method=" ANSI_COLOR_RED "%s" ANSI_COLOR_RESET, methodName);
-		if(dataMethodId == DataMethodId::Info) {
-			return handleInfo(params, *outObject, 0, false);
-		}
-		if(dataMethodId == DataMethodId::Color) {
-			return handleColor(params, *outObject);
-		}
-		if(dataMethodId == DataMethodId::Networks) {
-			return handleNetworks(params, *outObject);
-		}
-	}
-
-	if(outStream != nullptr) {
-		if(dataMethodId == DataMethodId::Hosts) {
-			return handleHosts(params, *outStream, errorMsg);
-		}
-		if(dataMethodId == DataMethodId::Config) {
-			return handleConfig(params, *outStream, errorMsg);
-		}
-	}
-
-	errorMsg = F("method not implemented");
-	return false;
-}
-
-NO_INLINE void buildAppInfo(JsonWriter::ObjectScope& data) {
-    auto application = data.beginObject(F("app"));
-    AppConfig::Root::Webapp webappCfg(*app.cfg);
-    String installedVer = webappCfg.getInstalledVersion();
-    application[F("webapp_version")] = installedVer.length() > 0 ? installedVer : String(WEBAPP_VERSION);
-    application[F("git_version")] = fw_git_version;
-    application[F("build_type")] = BUILD_TYPE;
-    application[F("git_date")] = fw_git_date;
-}
-
-NO_INLINE void buildFsInfo(JsonWriter::ObjectScope& data) {
-    auto fs = data.beginObject(F("filesystem"));
-    IFS::FileSystem::Info fsInfo;
-    if (fileGetSystemInfo(fsInfo) != FS_OK) {
-        fs[F("error")] = F("failed to get filesystem info");
-    } else {
-        fs[F("total_bytes")] = fsInfo.volumeSize;
-        fs[F("free_bytes")] = fsInfo.freeSpace;
-        fs[F("used_bytes")] = fsInfo.volumeSize - fsInfo.freeSpace;
-    }
-}
-
-NO_INLINE void buildNetworkInfo(JsonWriter::ObjectScope& data) {
-    auto con = data.beginObject(F("connection"));
-    con[F("connected")] = WifiStation.isConnected();
-    if(WifiStation.isConnected()) {
-        con[F("ssid")] = WifiStation.getSSID();
-        con[F("dhcp")] = WifiStation.isEnabledDHCP();
-        // The temporary String objects generated here are isolated to this stack frame
-        con[F("ip")] = WifiStation.getIP().toString();
-        con[F("netmask")] = WifiStation.getNetworkMask().toString();
-        con[F("gateway")] = WifiStation.getNetworkGateway().toString();
-        con[F("mac")] = WifiStation.getMAC();
-        con[F("rssi")] = WifiStation.getRssi();
-    }
-}
-
-NO_INLINE void buildMqttInfo(JsonWriter::ObjectScope& data) {
-    if(!app.ota.isProccessing()) {
-        AppConfig::Network network(*app.cfg);
-        bool enabled = network.mqtt.getEnabled();
-
-        {
-            auto mqtt = data.beginObject(F("mqtt"));
-            if(enabled && !app.mqttclient.isRunning()) {
-                mqtt[F("status")] = F("configured but not running");
-            } else if(enabled && app.mqttclient.isRunning()) {
-                mqtt[F("status")] = F("running");
-            } else {
-                mqtt[F("status")] = F("disabled");
-            }
-            mqtt[F("enabled")] = enabled;
-            mqtt[F("broker")] = network.mqtt.getServer();
-            mqtt[F("topic")] = network.mqtt.getTopicBase();
-        }
-        {
-            auto ha = data.beginObject(F("homeassistant"));
-            ha[F("enabled")] = network.mqtt.homeassistant.getEnable();
-            ha[F("discovery_prefix")] = network.mqtt.homeassistant.getDiscoveryPrefix();
-            ha[F("Node ID")] = network.mqtt.homeassistant.getNodeId();
-        }
-    } else {
-        {
-            auto mqtt = data.beginObject(F("mqtt"));
-            mqtt[F("status")] = F("ota in progress");
-            mqtt[F("enabled")] = false;
-            mqtt[F("broker")] = String::nullstr;
-            mqtt[F("topic")] = String::nullstr;
-        }
-        {
-            auto ha = data.beginObject(F("homeassistant"));
-            ha[F("enabled")] = false;
-            ha[F("discovery_prefix")] = String::nullstr;
-            ha[F("Node ID")] = String::nullstr;
-        }
-    }
-}
-
-// Cleaned up main handler
-bool Api::handleInfo(const JsonObject& params, JsonWriter::ObjectScope& data, uint32_t heapFreeSnapshot, bool sparse)
-{
-    debug_i(ANSI_COLOR_BLUE "Api::handleInfo called" ANSI_COLOR_RESET);
-    const uint32_t heapFreeReported = (heapFreeSnapshot != 0) ? heapFreeSnapshot : app.getFreeHeapSize();
-
-    JsonVariantConst version = params[F("V")];
-    if(version.isNull()) {
-        version = params[F("v")];
-    }
-
-	const bool isV2 = true;
-
-	JsonVariantConst sparseParam = params[F("sparse")];
-	if(sparseParam.isNull()) {
-		sparseParam = params[F("S")];
-	}
-	if(!sparseParam.isNull()) {
-		if(sparseParam.is<bool>()) {
-			sparse = sparseParam.as<bool>();
-		} else {
-			const char* sparseText = sparseParam.as<const char*>();
-			if(sparseText != nullptr) {
-				sparse = !(std::strcmp(sparseText, "0") == 0 || std::strcmp(sparseText, "false") == 0 ||
-						std::strcmp(sparseText, "FALSE") == 0 || std::strcmp(sparseText, "off") == 0 ||
-						std::strcmp(sparseText, "OFF") == 0 || std::strcmp(sparseText, "no") == 0 ||
-						std::strcmp(sparseText, "NO") == 0);
-			}
-		}
-	}
-
-    if(isV2) {
-        debug_i(ANSI_COLOR_BLUE "Api::handleInfo: version 2 detected" ANSI_COLOR_RESET);
-
-        static char s_infoDeviceV2[80];
-        if(s_infoDeviceV2[0] == '\0') {
-    #if defined(ARCH_ESP8266)
-            m_snprintf(s_infoDeviceV2, sizeof(s_infoDeviceV2),
-                "{\"deviceid\":%u,\"soc\":\"" SOC "\",\"current_rom\":\"%s\"}",
-                (unsigned)system_get_chip_id(), app.ota.getRomPartition().name().c_str());
-    #elif defined(ARCH_ESP32)
-            m_snprintf(s_infoDeviceV2, sizeof(s_infoDeviceV2),
-                "{\"deviceid\":0,\"soc\":\"" SOC "\",\"current_rom\":\"%s\"}",
-                app.ota.getRomPartition().name().c_str());
-    #else
-            m_snprintf(s_infoDeviceV2, sizeof(s_infoDeviceV2),
-                "{\"deviceid\":0,\"soc\":\"" SOC "\"}");
-    #endif
-        }
-
-        static const char kInfoSmingV2[] PROGMEM = "{\"version\":\"" SMING_VERSION "\"}";
-        static const char kInfoRgbwwV2[] PROGMEM =
-            "{\"version\":\"" RGBWW_VERSION "\",\"queuesize\":" RGBWW_STRINGIFY(RGBWW_ANIMATIONQSIZE) "}";
-
-        data[F("version")] = 2;
-        data.writeRawField(F("device"), (const char*)s_infoDeviceV2);
-
-        // Isolated sub-function calls execute sequentially, drastically flattening peak stack usage
-        buildAppInfo(data);
-
-        data.writeRawField(F("sming"), FPSTR(kInfoSmingV2));
-
-        buildFsInfo(data);
-
-		if(!sparse) {
-			{
-				auto run = data.beginObject(F("runtime"));
-				run[F("uptime")] = app.getUptime();
-				run[F("heap_free")] = heapFreeReported;
-				run[F("minfreeHeapRuntime")] = app.getMinimumHeapUptime();
-				run[F("minfreeHeap10min")] = app.getMinimumHeap10min();
-				run[F("heapLowErrUptime")] = app.getHeapLowErrUptime();
-				run[F("heapLowErr10min")] = app.getHeapLowErr10min();
-			}
-			{
-				auto debug = data.beginObject(F("debug"));
-				debug[F("http_active_connections")] = app.webserver.getHttpActiveConnections();
-				debug[F("websocket_connections")] = app.webserver.getWebsocketConnectionCount();
-				debug[F("eventserver_clients")] = app.eventserver.activeClients;
-				debug[F("tcp_pcb_size")] = 0;
-				debug[F("tcp_active_estimated_bytes")] = 0;
-			}
-		}
-
-		#ifdef RGBWW_ANIMATIONQSIZE
-        data.writeRawField(F("rgbww"), FPSTR(kInfoRgbwwV2));
-        #endif 
-		
-        buildNetworkInfo(data);
-        buildMqttInfo(data);
-
-        if(app.ota.isProccessing()) {
-            auto ota = data.beginObject(F("ota"));
-            ota[F("status")] = F("in progress");
-        }
-
-        return true;
-    }else{
-		// legacy payload shape
-	#if defined(ARCH_ESP8266)
-		data[F("deviceid")] = system_get_chip_id();
-	#else
-		data[F("deviceid")] = 0;
-	#endif
-		data[F("soc")] = SOC;
-	#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
-		data[F("current_rom")] = String(app.ota.getRomPartition().name());
-	#endif
-		data[F("git_version")] = fw_git_version;
-		data[F("build_type")] = BUILD_TYPE;
-		data[F("git_date")] = fw_git_date;
-		{
-			AppConfig::Root::Webapp webappCfg(*app.cfg);
-			String installedVer = webappCfg.getInstalledVersion();
-			data[F("webapp_version")] = installedVer.length() > 0 ? installedVer : String(WEBAPP_VERSION);
-		}
-		data[F("sming")] = SMING_VERSION;
-		data[F("event_num_clients")] = app.eventserver.activeClients;
-		data[F("uptime")] = app.getUptime();
-		data[F("heap_free")] = heapFreeReported;
-
-		{
-			auto rgbww = data.beginObject(F("rgbww"));
-			rgbww[F("version")] = RGBWW_VERSION;
-			rgbww[F("queuesize")] = RGBWW_ANIMATIONQSIZE;
-		}
-
-		{
-			auto con = data.beginObject(F("connection"));
-			con[F("connected")] = WifiStation.isConnected();
-			con[F("ssid")] = WifiStation.getSSID();
-			con[F("dhcp")] = WifiStation.isEnabledDHCP();
-			con[F("ip")] = WifiStation.getIP().toString();
-			con[F("netmask")] = WifiStation.getNetworkMask().toString();
-			con[F("gateway")] = WifiStation.getNetworkGateway().toString();
-			con[F("mac")] = WifiStation.getMAC();
-		}
-
-		return true;
-	}
-
-    return false;
-}
-
-#endif
 
 bool Api::handleHosts(const JsonObject& params, std::unique_ptr<IDataSourceStream>& out, String& errorMsg)
 {

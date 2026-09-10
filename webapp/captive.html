@@ -120,11 +120,14 @@ function hideMsg(){document.getElementById('msg').style.display='none';}
 
 function fetchNets(){
   fetch('/networks').then(function(r){return r.json();}).then(function(d){
-    if(d.scanning){scanning=true;setTimeout(fetchNets,1500);return;}
+    // Accept both the current flat response and the legacy ConfigDB-union
+    // wrapper while devices are being upgraded.
+    var networks=d.networks||d;
+    if(networks.scanning){scanning=true;setTimeout(fetchNets,1500);return;}
     scanning=false;
     document.getElementById('scanBtn').disabled=false;
-    if(d.available&&d.available.length){
-      nets=d.available.sort(function(a,b){return b.signal-a.signal;});
+    if(networks.available&&networks.available.length){
+      nets=networks.available.sort(function(a,b){return b.signal-a.signal;});
     }
     renderNets();
   }).catch(function(){setTimeout(fetchNets,2000);});
