@@ -372,78 +372,91 @@ Application::~Application()
 
 void Application::uptimeCounter()
 {
-	++_uptimeMinutes;
-	if (_uptimeMinutes % 10 ==0){
-		_minimumHeap10min=system_get_free_heap_size();
-		_HeapLowErr10min=0;
+	++_uptimeSeconds;
+	if (+_uptimeSeconds % 600 == 0) { // every 10 minutes
+		_minimumHeap10min = system_get_free_heap_size();
+		_HeapLowErr10min = 0;
 	}
 	
 }
 
 void Application::checkRam()
 {
-	time_t now = time(nullptr); // should be unix time if ntp is running
-	const uint32_t freeHeap = getFreeHeapSize();
-	const uint32_t uptimeSeconds = _uptimeMinutes * 60;
-	const uint32_t rebootReason = app.rtc_info->reason;
-	AppConfig::Network::Telemetry telemetryCfg(*cfg);
-
-	auto& codec = rpcCodec();
-	Jsonrpc::Root root(codec.db());
-	if(auto update = root.update()) {
-		auto telemetry = update.toTelemetryParams();
-		telemetry.setId(system_get_chip_id());
-		telemetry.setTime(now);
-		telemetry.setUptime(uptimeSeconds);
-		telemetry.setIp(WifiStation.getIP().toString());
-		telemetry.setFreeHeap(freeHeap);
-		telemetry.setMinHeapRuntime(_minimumHeapUptime);
-		telemetry.setMinHeap10min(_minimumHeap10min);
-		telemetry.setHeapLowErrUptime(_HeapLowErrUptime);
-		telemetry.setHeapLowErr10min(_HeapLowErr10min);
-		telemetry.setFirmware(fw_git_version);
-		telemetry.setBuild(BUILD_TYPE);
-		telemetry.setSoc(SOC);
-		telemetry.setNeighbours(app.controllers->getVisibleCount());
-		telemetry.reboot.setNumber(telemetryCfg.getNumReboots());
-		telemetry.reboot.setReason(rebootReason);
-		telemetry.reboot.setExccause(app.rtc_info->exccause);
-		telemetry.reboot.setEpc1(app.rtc_info->epc1);
-		telemetry.reboot.setEpc2(app.rtc_info->epc2);
-		telemetry.reboot.setEpc3(app.rtc_info->epc3);
-		telemetry.reboot.setExcvaddr(app.rtc_info->excvaddr);
-		telemetry.reboot.setDepc(app.rtc_info->depc);
-		telemetry.mDNS.setReceived(_mDNS_received);
-		telemetry.mDNS.setReplies(_mDNS_replies);
-	}
-	String telemetryPayload;
-	if(!codec.renderPayload(root.asTelemetryParams(), telemetryPayload)) {
-		debug_e(ANSI_COLOR_RED "checkRam: telemetry render failed, skipping tick" ANSI_COLOR_RESET);
-		return;
-	}
-
-	debug_i(ANSI_COLOR_BLUE "Free heap: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE ", uptime: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, getFreeHeapSize(), millis() / 1000);
+	// generate and send memory update to fronend
 	{
-		// Push fast-changing runtime telemetry without ArduinoJson allocations.
-		static char runtimeFrame[320];
-		const int frameLen = m_snprintf(runtimeFrame, sizeof(runtimeFrame),
-				"{\"jsonrpc\":\"2.0\",\"method\":\"runtime_info\",\"params\":{\"uptime\":%lu,\"heap_free\":%u,\"minfreeHeapRuntime\":%u,\"minfreeHeap10min\":%u,\"heapLowErrUptime\":%u,\"heapLowErr10min\":%u}}",
-				(unsigned long)uptimeSeconds, (unsigned)freeHeap,
-				(unsigned)_minimumHeapUptime, (unsigned)_minimumHeap10min, (unsigned)_HeapLowErrUptime,
-				(unsigned)_HeapLowErr10min);
-		if(frameLen > 0 && static_cast<size_t>(frameLen) < sizeof(runtimeFrame)) {
-			webserver.wsSendRuntimeInfo(runtimeFrame, static_cast<size_t>(frameLen));
+		debug_i(ANSI_COLOR_BLUE "Free heap: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE ", uptime: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, getFreeHeapSize(), millis() / 1000);
+		auto& codec = rpcCodec();
+		Jsonrpc::Root root(codec.db());
+		if(auto update = root.update()){
+			auto runtimeInfo = update.toRuntimeInfo();
+			runtimeInfo.setUptime(_uptimeSeconds );
+			runtimeInfo.setHeapFree(getFreeHeapSize());
+			runtimeInfo.setMinfreeHeapRuntime(_minimumHeapUptime);
+			runtimeInfo.setMinfreeHeap10min(_minimumHeap10min);
+			runtimeInfo.setHeapLowErrUptime(_HeapLowErrUptime);
+			runtimeInfo.setHeapLowErr10min(_HeapLowErr10min);	
+		}
+		String runtimeNotification;
+		if(codec.render({0, JsonRPC::Message::Kind::notification, F("runtime_info")}, root.asRuntimeInfo(), runtimeNotification)) {
+			debug_i(ANSI_COLOR_GREEN "checkRam: runtime info rendered successfully" ANSI_COLOR_RESET);
+			webserver.wsSendRuntimeInfo(runtimeNotification.c_str(), runtimeNotification.length());
+		} else {
+			debug_e(ANSI_COLOR_RED "checkRam: runtime info render failed, skipping tick" ANSI_COLOR_RESET);
 		}
 	}
-	if (!telemetryClient.stat(telemetryPayload))
+}
+	
+void Application::sendTelemetry()
+{
+	// generate and send telemetry 
 	{
-		debug_i(ANSI_COLOR_BLUE "Failed to publish monitor data to telemetry MQTT" ANSI_COLOR_RESET);
-		/* 
-		if (!telemetryClient.isRunning()){
-			debug_i(ANSI_COLOR_BLUE "restarting telemetry MQTT client" ANSI_COLOR_RESET);
-			telemetryClient.reconnect();
+		const uint32_t freeHeap = getFreeHeapSize();
+		const uint32_t rebootReason = app.rtc_info->reason;
+		AppConfig::Network::Telemetry telemetryCfg(*cfg);
+		auto& codec = rpcCodec();
+		Jsonrpc::Root root(codec.db());
+		if(auto update = root.update()) {
+			auto telemetry = update.toTelemetryParams();
+			telemetry.setId(system_get_chip_id());
+			telemetry.setTime(time(nullptr));
+			telemetry.setUptime(+_uptimeSeconds * 60);
+			telemetry.setIp(WifiStation.getIP().toString());
+			telemetry.setFreeHeap(freeHeap);
+			telemetry.setMinHeapRuntime(_minimumHeapUptime);
+			telemetry.setMinHeap10min(_minimumHeap10min);
+			telemetry.setHeapLowErrUptime(_HeapLowErrUptime);
+			telemetry.setHeapLowErr10min(_HeapLowErr10min);
+			telemetry.setFirmware(fw_git_version);
+			telemetry.setBuild(BUILD_TYPE);
+			telemetry.setSoc(SOC);
+			telemetry.setNeighbours(app.controllers->getVisibleCount());
+			telemetry.reboot.setNumber(telemetryCfg.getNumReboots());
+			telemetry.reboot.setReason(rebootReason);
+			telemetry.reboot.setExccause(app.rtc_info->exccause);
+			telemetry.reboot.setEpc1(app.rtc_info->epc1);
+			telemetry.reboot.setEpc2(app.rtc_info->epc2);
+			telemetry.reboot.setEpc3(app.rtc_info->epc3);
+			telemetry.reboot.setExcvaddr(app.rtc_info->excvaddr);
+			telemetry.reboot.setDepc(app.rtc_info->depc);
+			telemetry.mDNS.setReceived(_mDNS_received);
+			telemetry.mDNS.setReplies(_mDNS_replies);
 		}
-		*/
+		String telemetryPayload;
+		if(!codec.renderPayload(root.asTelemetryParams(), telemetryPayload)) {
+			debug_e(ANSI_COLOR_RED "checkRam: telemetry render failed, skipping tick" ANSI_COLOR_RESET);
+			return;
+		}
+		
+		if (!telemetryClient.stat(telemetryPayload))
+		{
+			debug_i(ANSI_COLOR_BLUE "Failed to publish monitor data to telemetry MQTT" ANSI_COLOR_RESET);
+			/* 
+			if (!telemetryClient.isRunning()){
+				debug_i(ANSI_COLOR_BLUE "restarting telemetry MQTT client" ANSI_COLOR_RESET);
+				telemetryClient.reconnect();
+			}
+			*/
+		}
 	}
 	
 	if (app.rtc_info->reason!= 0 && !_reboot_reported){
@@ -508,9 +521,10 @@ void Application::init()
 
 #endif
 
-	//load settings
-	_uptimetimer.initializeMs(60000, TimerDelegate(&Application::uptimeCounter, this)).start();
-	_checkRamTimer.initializeMs(30000, TimerDelegate(&Application::checkRam, this)).start();
+	//initialize timers
+	_uptimetimer.initializeMs(1000, TimerDelegate(&Application::uptimeCounter, this)).start();
+	_checkRamTimer.initializeMs(5000, TimerDelegate(&Application::checkRam, this)).start();
+	_sendTelemetryTimer.initializeMs(60000, TimerDelegate(&Application::sendTelemetry, this)).start();
 
 	// Once we've stayed up this long without crashing, declare the running ROM
 	// healthy and clear the crash-loop counters (enforces the "within x seconds" window).
@@ -1469,5 +1483,5 @@ void Application::pollResetButton()
 
 uint32_t Application::getUptime()
 {
-	return _uptimeMinutes * 60u;
+	return+_uptimeSeconds;
 }
