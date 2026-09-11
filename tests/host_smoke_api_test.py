@@ -376,12 +376,16 @@ def test_info_endpoint(smoke_config: SmokeConfig) -> None:
     except json.JSONDecodeError:
         fail_with_trace("/info returned invalid JSON", trace)
 
-    required_keys = ["git_version", "build_type", "sming", "connection"]
-    missing_keys = [key for key in required_keys if key not in payload]
+    info_body = payload.get("info-static-params") or payload.get("info-full-params")
+    if not isinstance(info_body, dict):
+        fail_with_trace("/info returned no ConfigDB info variant", trace)
+
+    required_keys = ["app", "sming", "connection"]
+    missing_keys = [key for key in required_keys if key not in info_body]
     if missing_keys:
         fail_with_trace(f"Missing keys in /info response: {', '.join(missing_keys)}", trace)
 
-    actual_ip = payload.get("connection", {}).get("ip")
+    actual_ip = info_body.get("connection", {}).get("ip")
     if actual_ip != smoke_config.app_ip:
         fail_with_trace(f"Unexpected Host IP in /info: {actual_ip!r} != {smoke_config.app_ip!r}", trace)
 

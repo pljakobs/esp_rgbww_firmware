@@ -1,0 +1,441 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "raw": {
+      "type": "object",
+      "properties": {
+        "r": { "$ref": "value-types/$defs/raw-value" },
+        "g": { "$ref": "value-types/$defs/raw-value" },
+        "b": { "$ref": "value-types/$defs/raw-value" },
+        "ww": { "$ref": "value-types/$defs/raw-value" },
+        "cw": { "$ref": "value-types/$defs/raw-value" }
+      }
+    },
+    "hsv": {
+      "type": "object",
+      "properties": {
+        "h": { "$ref": "value-types/$defs/hue-value" },
+        "s": { "$ref": "value-types/$defs/percentage-value" },
+        "v": { "$ref": "value-types/$defs/percentage-value" },
+        "ct": { "$ref": "value-types/$defs/color-temperature" }
+      }
+    },
+    "color-params": {
+      "oneOf": [
+        { "$ref": "#/$defs/raw" },
+        { "$ref": "#/$defs/hsv" }
+      ]
+    },
+    "command-fields": {
+      "type": "object",
+      "properties": {
+        "cmd": { "$ref": "value-types/$defs/string-value" },
+        "raw": { "$ref": "#/$defs/raw" },
+        "hsv": { "$ref": "#/$defs/hsv" },
+        "t": { "$ref": "value-types/$defs/non-negative-integer" },
+        "s": { "$ref": "value-types/$defs/non-negative-integer" },
+        "r": { "$ref": "value-types/$defs/boolean-value" },
+        "d": { "$ref": "value-types/$defs/non-negative-integer" },
+        "name": { "$ref": "value-types/$defs/string-value" },
+        "q": { "$ref": "value-types/$defs/string-value" }
+      },
+      "additionalProperties": false
+    },
+    "connection-info": {
+      "type": "object",
+      "properties": {
+        "connected": { "$ref": "value-types/$defs/boolean-value" },
+        "ssid": { "$ref": "value-types/$defs/string-value" },
+        "dhcp": { "$ref": "value-types/$defs/boolean-value" },
+        "ip": { "$ref": "value-types/$defs/string-value" },
+        "netmask": { "$ref": "value-types/$defs/string-value" },
+        "gateway": { "$ref": "value-types/$defs/string-value" },
+        "mac": { "$ref": "value-types/$defs/string-value" },
+        "rssi": { "$ref": "value-types/$defs/integer-value" }
+      },
+      "additionalProperties": false
+    },
+    "component-error": {
+      "type": "object",
+      "properties": {
+        "component": { "$ref": "value-types/$defs/string-value" },
+        "message": { "$ref": "value-types/$defs/string-value" }
+      },
+      "additionalProperties": false
+    },
+    "component-errors": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/component-error" }
+    },
+    "rgbww-info": {
+      "type": "object",
+      "properties": {
+        "version": { "$ref": "value-types/$defs/string-value" },
+        "queuesize": { "$ref": "value-types/$defs/non-negative-integer" }
+      },
+      "required": ["version", "queuesize"],
+      "additionalProperties": false
+    },
+    "device-info": {
+      "type": "object",
+      "properties": {
+        "deviceid": { "$ref": "value-types/$defs/non-negative-integer" },
+        "soc": { "$ref": "value-types/$defs/string-value" },
+        "current_rom": { "$ref": "value-types/$defs/string-value" }
+      },
+      "required": ["deviceid", "soc", "current_rom"],
+      "additionalProperties": false
+    },
+    "app-info": {
+      "type": "object",
+      "properties": {
+        "webapp_version": { "$ref": "value-types/$defs/string-value" },
+        "git_version": { "$ref": "value-types/$defs/string-value" },
+        "build_type": { "$ref": "value-types/$defs/string-value" },
+        "git_date": { "$ref": "value-types/$defs/string-value" }
+      },
+      "required": ["webapp_version", "git_version", "build_type", "git_date"],
+      "additionalProperties": false
+    },
+    "sming-info": {
+      "type": "object",
+      "properties": {
+        "version": { "$ref": "value-types/$defs/string-value" }
+      },
+      "required": ["version"],
+      "additionalProperties": false
+    },
+    "filesystem-info": {
+      "type": "object",
+      "properties": {
+        "total_bytes": { "$ref": "value-types/$defs/non-negative-integer" },
+        "free_bytes": { "$ref": "value-types/$defs/non-negative-integer" },
+        "used_bytes": { "$ref": "value-types/$defs/non-negative-integer" }
+      },
+      "required": ["total_bytes", "free_bytes", "used_bytes"],
+      "additionalProperties": false
+    },
+    "runtime-info":{
+        "type": "object",
+        "properties": {
+            "uptime": { "$ref": "value-types/$defs/non-negative-integer" },
+            "heap_free": { "$ref": "value-types/$defs/non-negative-integer" },
+            "minfreeHeapRuntime": { "$ref": "value-types/$defs/non-negative-integer" },
+            "minfreeHeap10min": { "$ref": "value-types/$defs/non-negative-integer" },
+            "heapLowErrUptime": { "$ref": "value-types/$defs/non-negative-integer" },
+            "heapLowErr10min": { "$ref": "value-types/$defs/non-negative-integer" }
+        }
+    },
+    "debug-info": {
+      "type": "object",
+      "properties": {
+        "http_active_connections": { "$ref": "value-types/$defs/non-negative-integer" },
+        "websocket_connections": { "$ref": "value-types/$defs/non-negative-integer" },
+        "eventserver_clients": { "$ref": "value-types/$defs/non-negative-integer" },
+        "tcp_pcb_size": { "$ref": "value-types/$defs/non-negative-integer" },
+        "tcp_active_estimated_bytes": { "$ref": "value-types/$defs/non-negative-integer" }
+      },
+      "additionalProperties": false
+    },
+    "ota-info": {
+      "type": "object",
+      "properties": {
+        "status": { "$ref": "value-types/$defs/string-value" }
+      },
+      "additionalProperties": false
+    },
+    "mqtt-info": {
+      "type": "object",
+      "properties": {
+        "status": { "$ref": "value-types/$defs/string-value" },
+        "enabled": { "$ref": "value-types/$defs/boolean-value" },
+        "broker": { "$ref": "value-types/$defs/string-value" },
+        "topic": { "$ref": "value-types/$defs/string-value" }
+      },
+      "required": ["status", "enabled", "broker", "topic"],
+      "additionalProperties": false
+    },
+    "homeassistant-info": {
+      "type": "object",
+      "properties": {
+        "enabled": { "$ref": "value-types/$defs/boolean-value" },
+        "discovery_prefix": { "$ref": "value-types/$defs/string-value" },
+        "Node ID": { "$ref": "value-types/$defs/string-value" }
+      },
+      "required": ["enabled", "discovery_prefix", "Node ID"],
+      "additionalProperties": false
+    },
+    "info-static-params": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "integer",
+          "const": 2,
+          "default": 2
+        },
+        "device": { "$ref": "#/$defs/device-info" },
+        "app": { "$ref": "#/$defs/app-info" },
+        "sming": { "$ref": "#/$defs/sming-info" },
+        "filesystem": { "$ref": "#/$defs/filesystem-info" },
+        "rgbww": { "$ref": "#/$defs/rgbww-info" },
+        "connection": { "$ref": "#/$defs/connection-info" },
+        "mqtt": { "$ref": "#/$defs/mqtt-info" },
+        "homeassistant": { "$ref": "#/$defs/homeassistant-info" },
+        "ota": { "$ref": "#/$defs/ota-info" },
+        "errors": { "$ref": "#/$defs/component-errors" }
+      },
+      "additionalProperties": false
+    },
+    "info-full-params": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "integer",
+          "const": 2,
+          "default": 2
+        },
+        "device": { "$ref": "#/$defs/device-info" },
+        "app": { "$ref": "#/$defs/app-info" },
+        "sming": { "$ref": "#/$defs/sming-info" },
+        "filesystem": { "$ref": "#/$defs/filesystem-info" },
+        "runtime": { "$ref": "#/$defs/runtime-info" },
+        "debug": { "$ref": "#/$defs/debug-info" },
+        "rgbww": { "$ref": "#/$defs/rgbww-info" },
+        "connection": { "$ref": "#/$defs/connection-info" },
+        "mqtt": { "$ref": "#/$defs/mqtt-info" },
+        "homeassistant": { "$ref": "#/$defs/homeassistant-info" },
+        "ota": { "$ref": "#/$defs/ota-info" },
+        "errors": { "$ref": "#/$defs/component-errors" }
+      },
+      "additionalProperties": false
+    },
+    "netlist-item": {
+      "type": "object",
+      "properties": {
+        "id": { "$ref": "value-types/$defs/string-value" },
+        "ssid": { "$ref": "value-types/$defs/string-value" },
+        "signal": { "$ref": "value-types/$defs/integer-value" },
+        "encryption": { "$ref": "value-types/$defs/string-value" }
+      },
+      "required": ["ssid", "signal", "encryption"],
+      "additionalProperties": false
+    },
+    "error":{
+        "type": "object",
+        "properties": {
+            "code": { "$ref": "value-types/$defs/error-code" },
+            "message": { "$ref": "value-types/$defs/string-value" },
+	    "data": { "$ref": "value-types/$defs/string-value" }
+        },
+        "required": ["code", "message"],
+        "additionalProperties": false
+    },
+    "transition-finished-params": {
+      "type": "object",
+      "properties": {
+        "name": { "$ref": "value-types/$defs/string-value" },
+        "requeued": { "$ref": "value-types/$defs/boolean-value" }
+      },
+      "required": ["name"]
+    },
+    "ha-discovery-params": {
+      "type": "object",
+      "properties": {
+        "name": { "$ref": "value-types/$defs/string-value" },
+        "unique_id": { "$ref": "value-types/$defs/string-value" },
+        "cmd_t": { "$ref": "value-types/$defs/string-value" },
+        "stat_t": { "$ref": "value-types/$defs/string-value" },
+        "schema": { "type": "string", "const": "json" }
+      },
+      "required": ["name", "unique_id", "cmd_t", "stat_t"]
+    },
+    "clock-slave-status-params": {
+      "type": "object",
+      "properties": {
+        "offset": { "$ref": "value-types/$defs/integer-value" },
+        "current_interval": { "$ref": "value-types/$defs/non-negative-integer" }
+      },
+      "additionalProperties": false
+    },
+    "keep-alive-params": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "wifi-station-info": {
+      "type": "object",
+      "properties": {
+        "connected": { "$ref": "value-types/$defs/boolean-value" },
+        "ssid": { "$ref": "value-types/$defs/string-value" },
+        "dhcp": { "$ref": "value-types/$defs/boolean-value" },
+        "ip": { "$ref": "value-types/$defs/string-value" },
+        "netmask": { "$ref": "value-types/$defs/string-value" },
+        "gateway": { "$ref": "value-types/$defs/string-value" },
+        "mac": { "$ref": "value-types/$defs/string-value" }
+      },
+      "additionalProperties": false
+    },
+    "wifi-ap-info": {
+      "type": "object",
+      "properties": {
+        "enabled": { "$ref": "value-types/$defs/boolean-value" },
+        "ssid": { "$ref": "value-types/$defs/string-value" },
+        "ip": { "$ref": "value-types/$defs/string-value" }
+      },
+      "additionalProperties": false
+    },
+    "wifi-status-params": {
+      "type": "object",
+      "properties": {
+        "message": { "$ref": "value-types/$defs/string-value" },
+        "station": { "$ref": "#/$defs/wifi-station-info" },
+        "ap": { "$ref": "#/$defs/wifi-ap-info" }
+      },
+      "additionalProperties": false
+    },
+    "networks-list": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/netlist-item" }
+    },
+    "networks-params": {
+      "type": "object",
+      "properties": {
+        "scanning": { "$ref": "value-types/$defs/boolean-value" },
+        "available": { "$ref": "#/$defs/networks-list" }
+      },
+      "additionalProperties": false
+    },
+    "ha-state-color-temp": {
+      "type": "object",
+      "properties": {
+        "state": { "$ref": "value-types/$defs/string-value" },
+        "brightness": { "$ref": "value-types/$defs/non-negative-integer" },
+        "color_mode": { "$ref": "value-types/$defs/string-value" },
+        "color_temp": { "$ref": "value-types/$defs/non-negative-integer" }
+      },
+      "additionalProperties": false
+    },
+    "ha-hs-color": {
+      "type": "object",
+      "properties": {
+        "h": { "$ref": "value-types/$defs/hue-value" },
+        "s": { "$ref": "value-types/$defs/percentage-value" }
+      },
+      "additionalProperties": false
+    },
+    "ha-state-hs": {
+      "type": "object",
+      "properties": {
+        "state": { "$ref": "value-types/$defs/string-value" },
+        "brightness": { "$ref": "value-types/$defs/non-negative-integer" },
+        "color_mode": { "$ref": "value-types/$defs/string-value" },
+        "color": { "$ref": "#/$defs/ha-hs-color" }
+      },
+      "additionalProperties": false
+    },
+    "ha-channel-state": {
+      "type": "object",
+      "properties": {
+        "state": { "$ref": "value-types/$defs/string-value" },
+        "brightness": { "$ref": "value-types/$defs/raw-value" }
+      },
+      "additionalProperties": false
+    },
+    "telemetry-reboot": {
+      "type": "object",
+      "properties": {
+        "number": { "$ref": "value-types/$defs/non-negative-integer" },
+        "reason": { "$ref": "value-types/$defs/non-negative-integer" },
+        "exccause": { "$ref": "value-types/$defs/non-negative-integer" },
+        "epc1": { "$ref": "value-types/$defs/non-negative-integer" },
+        "epc2": { "$ref": "value-types/$defs/non-negative-integer" },
+        "epc3": { "$ref": "value-types/$defs/non-negative-integer" },
+        "excvaddr": { "$ref": "value-types/$defs/non-negative-integer" },
+        "depc": { "$ref": "value-types/$defs/non-negative-integer" }
+      },
+      "additionalProperties": false
+    },
+    "telemetry-mdns": {
+      "type": "object",
+      "properties": {
+        "received": { "$ref": "value-types/$defs/non-negative-integer" },
+        "replies": { "$ref": "value-types/$defs/non-negative-integer" }
+      },
+      "additionalProperties": false
+    },
+    "telemetry-params": {
+      "type": "object",
+      "properties": {
+        "id": { "$ref": "value-types/$defs/non-negative-integer" },
+        "time": { "$ref": "value-types/$defs/integer-value" },
+        "uptime": { "$ref": "value-types/$defs/non-negative-integer" },
+        "ip": { "$ref": "value-types/$defs/string-value" },
+        "freeHeap": { "$ref": "value-types/$defs/non-negative-integer" },
+        "minHeapRuntime": { "$ref": "value-types/$defs/non-negative-integer" },
+        "minHeap10min": { "$ref": "value-types/$defs/non-negative-integer" },
+        "heapLowErrUptime": { "$ref": "value-types/$defs/non-negative-integer" },
+        "heapLowErr10min": { "$ref": "value-types/$defs/non-negative-integer" },
+        "firmware": { "$ref": "value-types/$defs/string-value" },
+        "build": { "$ref": "value-types/$defs/string-value" },
+        "soc": { "$ref": "value-types/$defs/string-value" },
+        "neighbours": { "$ref": "value-types/$defs/non-negative-integer" },
+        "reboot": { "$ref": "#/$defs/telemetry-reboot" },
+        "mDNS": { "$ref": "#/$defs/telemetry-mdns" }
+      },
+      "additionalProperties": false
+    },
+    "ha-string-array": {
+      "type": "array",
+      "items": { "$ref": "value-types/$defs/string-value" }
+    },
+    "ha-discovery-device": {
+      "type": "object",
+      "properties": {
+        "identifiers": { "$ref": "#/$defs/ha-string-array" },
+        "name": { "$ref": "value-types/$defs/string-value" },
+        "model": { "$ref": "value-types/$defs/string-value" },
+        "manufacturer": { "$ref": "value-types/$defs/string-value" },
+        "sw_version": { "$ref": "value-types/$defs/string-value" }
+      },
+      "additionalProperties": false
+    },
+    "ha-discovery-main": {
+      "type": "object",
+      "properties": {
+        "name": { "$ref": "value-types/$defs/string-value" },
+        "unique_id": { "$ref": "value-types/$defs/string-value" },
+        "availability_topic": { "$ref": "value-types/$defs/string-value" },
+        "payload_available": { "$ref": "value-types/$defs/string-value" },
+        "payload_not_available": { "$ref": "value-types/$defs/string-value" },
+        "state_topic": { "$ref": "value-types/$defs/string-value" },
+        "command_topic": { "$ref": "value-types/$defs/string-value" },
+        "schema": { "$ref": "value-types/$defs/string-value" },
+        "brightness": { "$ref": "value-types/$defs/boolean-value" },
+        "brightness_scale": { "$ref": "value-types/$defs/non-negative-integer" },
+        "color_mode": { "$ref": "value-types/$defs/boolean-value" },
+        "supported_color_modes": { "$ref": "#/$defs/ha-string-array" },
+        "min_mireds": { "$ref": "value-types/$defs/non-negative-integer" },
+        "max_mireds": { "$ref": "value-types/$defs/non-negative-integer" },
+        "optimistic": { "$ref": "value-types/$defs/boolean-value" },
+        "retain": { "$ref": "value-types/$defs/boolean-value" },
+        "device": { "$ref": "#/$defs/ha-discovery-device" }
+      },
+      "additionalProperties": false
+    },
+    "ha-discovery-channel": {
+      "type": "object",
+      "properties": {
+        "name": { "$ref": "value-types/$defs/string-value" },
+        "unique_id": { "$ref": "value-types/$defs/string-value" },
+        "state_topic": { "$ref": "value-types/$defs/string-value" },
+        "command_topic": { "$ref": "value-types/$defs/string-value" },
+        "schema": { "$ref": "value-types/$defs/string-value" },
+        "brightness": { "$ref": "value-types/$defs/boolean-value" },
+        "brightness_scale": { "$ref": "value-types/$defs/non-negative-integer" },
+        "color_mode": { "$ref": "value-types/$defs/boolean-value" },
+        "device": { "$ref": "#/$defs/ha-discovery-device" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

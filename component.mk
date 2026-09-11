@@ -1,5 +1,5 @@
 COMPONENT_SEARCH_DIRS := $(PROJECT_DIR)/Components
-COMPONENT_DEPENDS += MDNS RGBWWLed LittleFS ConfigDB ArduinoJson6 OtaNetwork JsonWriter
+COMPONENT_DEPENDS += MDNS RGBWWLed LittleFS ConfigDB ArduinoJson6 OtaNetwork
 ifndef SMING_RELEASE
 COMPONENT_DEPENDS += HuffmanCodec
 endif
@@ -64,7 +64,7 @@ else ifeq ($(SMING_ARCH), Esp32)
     $(info COM_PORT is $(COM_PORT)@$(COM_SPEED) for $(SMING_ARCH))
 endif
 
-CUSTOM_TARGETS += check_versions
+CUSTOM_TARGETS += check_versions api-schema-rebuild
 
 #### GIT VERSION Information #####
 ifdef GITHUB_RUN_NUMBER
@@ -158,6 +158,13 @@ endif
 ifndef WEBAPP_VERSION
 	$(error can not find webapp/VERSION file - please ensure the source code is complete)
 endif
+
+.PHONY: api-schema-rebuild
+api-schema-rebuild:
+	$(Q) node $(PROJECT_DIR)/tools/generate-api-schemas.mjs
+
+# Keep browser/OpenAPI projections synchronized whenever ConfigDB C++ is rebuilt.
+configdb-rebuild: api-schema-rebuild
 
 # ---------------------------------------------------------------------------
 # Static stack-risk report

@@ -1,5 +1,4 @@
 #include <ArduinoJson.h>
-#include <JsonWriter.h>
 #include <IFS/FileSystem.h>
 
 /**
@@ -214,11 +213,14 @@ void ApplicationWebserver::wsConnected(WebsocketConnection& socket)
 		DynamicJsonDocument doc(256);
 		JsonObject params = doc.to<JsonObject>();
 		app.webappOta.fillStatusJson(params);
-		JsonRpcMessage msg(F("webapp_ota_status"));
-		msg.setId(0);
-		JsonObject root = msg.getParams();
-		for(JsonPair kv : params) root[kv.key()] = kv.value();
-		socket.sendString(Json::serialize(msg.getRoot()));
+		DynamicJsonDocument rpcDoc(512);
+		JsonObject rpcRoot = rpcDoc.to<JsonObject>();
+		JsonObject rpcParams = rpcRoot.createNestedObject(F("params"));
+		for(JsonPair kv : params) rpcParams[kv.key()] = kv.value();
+		rpcRoot[F("jsonrpc")] = F("2.0");
+		rpcRoot[F("method")] = F("webapp_ota_status");
+		rpcRoot[F("params")] = rpcParams;
+		socket.sendString(Json::serialize(rpcRoot));
 	}
 }
 
@@ -244,7 +246,17 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 	int errorCode = 0;
 
     if(!Json::deserialize(requestDoc, message)) {
-		socket.sendString(F("{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32700,\"message\":\"Parse error\"},\"id\":null}"));
+		String parseErrorPayload;
+		auto& codec = rpcCodec();
+		Jsonrpc::Root root(codec.db());
+		if(auto update = root.update()) {
+			auto error = update.toRpcError();
+			error.setCode(-32700);
+			error.setMessage(F("Parse error"));
+		}
+		if(codec.render({0, JsonRPC::Message::Kind::error, ""}, root.asRpcError(), parseErrorPayload)) {
+			socket.sendString(parseErrorPayload);
+		}
         return;
     }
 
@@ -252,6 +264,23 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 	const char* method = requestRoot[F("method")] | "";
     JsonVariant requestId = requestRoot[F("id")];
 	JsonObject params = requestRoot[F("params")];
+
+	// JSON-RPC 2.0 permits only a number, a string or null as the id. Reject
+	// anything else rather than echoing an illegal value back to the client.
+	if(!requestId.isNull() && !requestId.is<double>() && !requestId.is<const char*>()) {
+		String invalidIdPayload;
+		auto& codec = rpcCodec();
+		Jsonrpc::Root root(codec.db());
+		if(auto update = root.update()) {
+			auto error = update.toRpcError();
+			error.setCode(-32600);
+			error.setMessage(F("Invalid Request: id must be a string, a number or null"));
+		}
+		if(codec.render({0, JsonRPC::Message::Kind::error, method}, root.asRpcError(), invalidIdPayload)) {
+			socket.sendString(invalidIdPayload);
+		}
+		return;
+	}
 
 	auto parseTruthy = [](JsonVariantConst v, bool defaultValue) -> bool {
 		if(v.isNull()) {
@@ -285,17 +314,17 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 	enum ResultKind { RK_None, RK_Authenticated, RK_SubTrue, RK_SubFalse, RK_CommandSuccess, RK_Data };
 	ResultKind resultKind = RK_None;
 	bool dataIsInfo = false;
-	String challenge; // non-empty => include a top-level "challenge"
+	String challenge; // non-empty => included in the JSON-RPC error object's "challenge" field
 
 	// ---- WebSocket authentication gate ----------------------------------
 	// When the API is secured, a connection must complete the challenge-
-	// response handshake before any state-changing method is accepted. The
-	// "authenticate" method and "keep_alive" pings are always allowed through.
+	// response handshake before any state-changing method is accepted. Only the
+	// "authenticate" method is allowed through; connection liveness is handled
+	// below the RPC layer by PING/PONG control frames.
 	ensureSecurityCache();
 	const bool wsSecured = (_apiSecuredCache == 1);
 	WsAuthState* wsAuth = static_cast<WsAuthState*>(socket.getUserData());
 	const bool isAuthMethod = strcmp_P(method, PSTR("authenticate")) == 0;
-	const bool isKeepAlive = strcmp_P(method, PSTR("keep_alive")) == 0;
 
 	if(isAuthMethod) {
 		const String clientHash = params[F("hash")] | "";
@@ -328,7 +357,7 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 				challenge = wsAuth->challenge;
 			}
 		}
-	} else if(wsSecured && !isKeepAlive && (wsAuth == nullptr || !wsAuth->authenticated)) {
+	} else if(wsSecured && (wsAuth == nullptr || !wsAuth->authenticated)) {
 		// Unauthenticated request on a secured API: refuse and issue a challenge.
 		challenge = wsMakeChallenge();
 		if(wsAuth) {
@@ -380,68 +409,56 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
     }
 
 	// ---- Phase 2: stream the JSON-RPC envelope --------------------------
-	String payload;
-	payload.reserve(responseCapacity);
-	{
-		JsonWriter writer(payload);
-		auto root = writer.beginObject();
-		root[F("jsonrpc")] = F("2.0");
-		if(!requestId.isNull()) {
-			// Preserve the exact id type (number/string) by inserting it raw.
-			String idStr;
-			serializeJson(requestId, idStr);
-			root.writeRawField(F("id"), idStr.c_str());
-		}
-		if(challenge.length()) {
-			root[F("challenge")] = challenge;
-		}
-		if(errorMsg.length()) {
-			auto err = root.beginObject(F("error"));
-			err[F("code")] = errorCode;
-			err[F("message")] = errorMsg;
-		} else {
-			switch(resultKind) {
-			case RK_Authenticated: {
-				auto result = root.beginObject(F("result"));
-				result[F("authenticated")] = true;
-				break;
-			}
-			case RK_SubTrue: {
-				auto result = root.beginObject(F("result"));
-				result[F("subscribed")] = true;
-				result[F("channel")] = F("runtime_info");
-				break;
-			}
-			case RK_SubFalse: {
-				auto result = root.beginObject(F("result"));
-				result[F("subscribed")] = false;
-				result[F("channel")] = F("runtime_info");
-				break;
-			}
-			case RK_CommandSuccess: {
-				auto result = root.beginObject(F("result"));
-				result[F("success")] = true;
-				break;
-			}
-			case RK_Data: {
-				auto result = root.beginObject(F("result"));
-				if(dataIsInfo) {
-					const bool sparse = parseTruthy(params[F("sparse")], true);
-					app.api->handleInfo(params, result, infoHeapSnapshot, sparse);
-				} else {
-					app.api->dispatch(method, params, result);
-				}
-				break;
-			}
-			case RK_None:
-			default:
-				break;
-			}
+	if(resultKind == RK_Data && errorMsg.length() == 0 && app.api != nullptr) {
+		const int requestIdValue = requestId.is<int>() ? requestId.as<int>() : 0;
+		String dataPayload;
+		if(app.api->renderData(method, params, dataPayload, requestIdValue)) {
+			socket.sendString(dataPayload);
+			return;
 		}
 	}
-
-	debug_i(ANSI_COLOR_BLUE "Websocket response prepared" ANSI_COLOR_RESET);
-	socket.sendString(payload);
+	{
+		auto& codec = rpcCodec();
+		Jsonrpc::Root root(codec.db());
+		String rpcPayload;
+		bool rendered = false;
+		if(errorMsg.length()) {
+			if(auto update = root.update()) {
+				auto error = update.toRpcError();
+				error.setCode(errorCode);
+				error.setMessage(errorMsg);
+				if(challenge.length()) {
+					error.setChallenge(challenge);
+				}
+			}
+			rendered = codec.render({requestId.is<int>() ? requestId.as<int>() : 0,
+				JsonRPC::Message::Kind::error, method}, root.asRpcError(), rpcPayload);
+		} else if(resultKind == RK_Authenticated) {
+			if(auto update = root.update()) {
+				update.toAuthenticateResult().setAuthenticated(true);
+			}
+			rendered = codec.render({requestId.is<int>() ? requestId.as<int>() : 0,
+				JsonRPC::Message::Kind::result, method}, root.asAuthenticateResult(), rpcPayload);
+		} else if(resultKind == RK_SubTrue || resultKind == RK_SubFalse) {
+			if(auto update = root.update()) {
+				auto subscription = update.toSubscriptionResult();
+				subscription.setSubscribed(resultKind == RK_SubTrue);
+				subscription.setChannel(F("runtime_info"));
+			}
+			rendered = codec.render({requestId.is<int>() ? requestId.as<int>() : 0,
+				JsonRPC::Message::Kind::result, method}, root.asSubscriptionResult(), rpcPayload);
+		} else if(resultKind == RK_CommandSuccess) {
+			if(auto update = root.update()) {
+				update.toApiSuccess().setSuccess(true);
+			}
+			rendered = codec.render({requestId.is<int>() ? requestId.as<int>() : 0,
+				JsonRPC::Message::Kind::result, method}, root.asApiSuccess(), rpcPayload);
+		}
+		if(rendered) {
+			socket.sendString(rpcPayload);
+			return;
+		}
+	}
 }
 
 /*
@@ -495,13 +512,24 @@ void ApplicationWebserver::start()
 		init();
 	}
 	listen(80);
+	_wsPingTimer.initializeMs(WS_PING_INTERVAL_MS, TimerDelegate(&ApplicationWebserver::wsPingAll, this)).start();
 	_running = true;
 }
 
 void ApplicationWebserver::stop()
 {
+	_wsPingTimer.stop();
 	close();
 	_running = false;
+}
+
+void ApplicationWebserver::wsPingAll()
+{
+	for(unsigned i = 0; i < webSockets.size(); i++) {
+		if(auto socket = webSockets[i]) {
+			socket->send("", 0, WS_FRAME_PING);
+		}
+	}
 }
 
 void ApplicationWebserver::ensureSecurityCache()
@@ -607,21 +635,19 @@ void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, c
 	String payload;
 	payload.reserve(code == API_CODES::API_UPDATE_IN_PROGRESS ? 512 : 64);
 	{
-		JsonWriter writer(payload);
-		auto json = writer.beginObject();
-		if(code == API_CODES::API_SUCCESS) {
-			json[F("success")] = true;
-		} else {
-			if(code == API_CODES::API_UPDATE_IN_PROGRESS) {
-				debug_i(ANSI_COLOR_BLUE "API update in progress, adding info to response" ANSI_COLOR_RESET);
-				auto data = json.beginObject(F("info"));
-				addInfoFields(data);
-			}
-			if(msg == nullptr) {
-				json[F("error")] = getApiCodeMsg(code);
+		auto& codec = rpcCodec();
+		Jsonrpc::Root root(codec.db());
+		if(auto update = root.update()) {
+			if(code == API_CODES::API_SUCCESS) {
+				update.toApiSuccess().setSuccess(true);
 			} else {
-				json[F("error")] = msg;
+				update.toApiError().setError(msg == nullptr ? getApiCodeMsg(code) : String(msg));
 			}
+		}
+		if(code == API_CODES::API_SUCCESS) {
+			codec.renderPayload(root.asApiSuccess(), payload);
+		} else {
+			codec.renderPayload(root.asApiError(), payload);
 		}
 	}
 
@@ -635,55 +661,6 @@ void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, c
 	response.sendString(payload);
 }
 
-void ApplicationWebserver::addInfoFields(JsonWriter::ObjectScope& obj)
-{
-	{
-		auto dev = obj.beginObject(F("device"));
-		dev[F("deviceid")] = system_get_chip_id();
-		dev[F("soc")] = SOC;
-#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
-		dev[F("current_rom")] = String(app.ota.getRomPartition().name());
-#endif
-	}
-	{
-		auto application = obj.beginObject(F("app"));
-		{
-			AppConfig::Root::Webapp webappCfg(*app.cfg);
-			String installedVer = webappCfg.getInstalledVersion();
-			application[F("webapp_version")] = installedVer.length() > 0 ? installedVer : String(WEBAPP_VERSION);
-		}
-		application[F("git_version")] = fw_git_version;
-		application[F("build_type")] = BUILD_TYPE;
-		application[F("git_date")] = fw_git_date;
-	}
-	{
-		auto sming = obj.beginObject(F("sming"));
-		sming[F("version")] = SMING_VERSION;
-	}
-	{
-		auto run = obj.beginObject(F("runtime"));
-		run[F("uptime")] = app.getUptime();
-		run[F("heap_free")] = app.getFreeHeapSize();
-		run[F("minimumfreeHeapRuntime")]=app.getMinimumHeapUptime();
-		run[F("minimumfreeHeap10min")]=app.getMinimumHeap10min();
-		run[F("heapLowErrUptime")]=app.getHeapLowErrUptime();
-		run[F("heapLowErr10min")]=app.getHeapLowErr10min();
-	}
-
-	if(app.isFilesystemMounted()) {
-		auto* fs = IFS::getDefaultFileSystem();
-		if(fs != nullptr) {
-			IFS::FileSystem::Info fsInfo{};
-			if(fs->getinfo(fsInfo) == IFS::Error::Success) {
-				auto lfs = obj.beginObject(F("lfs"));
-				lfs[F("total")] = (uint32_t)fsInfo.volumeSize;
-				lfs[F("used")]  = (uint32_t)fsInfo.used();
-				lfs[F("free")]  = (uint32_t)fsInfo.freeSpace;
-			}
-		}
-	}
-}
-
 void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, const char* msg)
 {
 	if(msg == nullptr) {
@@ -694,19 +671,19 @@ void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, c
 	String payload;
 	payload.reserve(code == API_CODES::API_UPDATE_IN_PROGRESS ? 512 : 64);
 	{
-		JsonWriter writer(payload);
-		auto json = writer.beginObject();
-		if(code == API_CODES::API_SUCCESS) {
-			json[F("success")] = true;
-		} else {
-			if(code == API_CODES::API_UPDATE_IN_PROGRESS) {
-				debug_i(ANSI_COLOR_BLUE "API update in progress, adding info to response" ANSI_COLOR_RESET);
-				auto data = json.beginObject(F("info"));
-				addInfoFields(data);
+		auto& codec = rpcCodec();
+		Jsonrpc::Root root(codec.db());
+		if(auto update = root.update()) {
+			if(code == API_CODES::API_SUCCESS) {
+				update.toApiSuccess().setSuccess(true);
+			} else {
+				update.toApiError().setError(msg == nullptr ? getApiCodeMsg(code) : String(msg));
 			}
-			// JsonWriter copies the bytes into `payload` synchronously, so passing msg
-			// (which may point at a caller's stack buffer) directly is safe here.
-			json[F("error")] = msg;
+		}
+		if(code == API_CODES::API_SUCCESS) {
+			codec.renderPayload(root.asApiSuccess(), payload);
+		} else {
+			codec.renderPayload(root.asApiError(), payload);
 		}
 	}
 
@@ -1465,11 +1442,7 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response){
 
 	String payload;
 	payload.reserve(isV2 ? INFO_DOC_CAPACITY_V2 : INFO_DOC_CAPACITY_V1);
-	{
-		JsonWriter writer(payload);
-		auto root = writer.beginObject();
-		app.api->handleInfo(params, root, infoHeapSnapshot, sparse);
-	}
+	app.api->renderData(F("info"), params, payload);
 
 	if(useSparseCache && !app.ota.isProccessing()) {
 		*cachePayload = payload;
@@ -1493,32 +1466,7 @@ void ApplicationWebserver::onColorGet(HttpRequest& request, HttpResponse& respon
 
 	String payload;
 	payload.reserve(256);
-	{
-		JsonWriter writer(payload);
-		auto json = writer.beginObject();
-
-		ChannelOutput output = app.rgbwwctrl.getCurrentOutput();
-		{
-			auto raw = json.beginObject(F("raw"));
-			raw[F("r")] = output.r;
-			raw[F("g")] = output.g;
-			raw[F("b")] = output.b;
-			raw[F("ww")] = output.ww;
-			raw[F("cw")] = output.cw;
-		}
-
-		float h, s, v;
-		int ct;
-		HSVCT c = app.rgbwwctrl.getCurrentColor();
-		c.asRadian(h, s, v, ct);
-		{
-			auto hsv = json.beginObject(F("hsv"));
-			hsv[F("h")] = h;
-			hsv[F("s")] = s;
-			hsv[F("v")] = v;
-			hsv[F("ct")] = ct;
-		}
-	}
+	app.api->renderData(F("color"), JsonObject(), payload);
 
 	response.code = HTTP_STATUS_OK;
 	response.setContentType(MIME_JSON);
@@ -1633,40 +1581,7 @@ void ApplicationWebserver::onNetworks(HttpRequest& request, HttpResponse& respon
 
 	String payload;
 	payload.reserve(512);
-	{
-		JsonWriter writer(payload);
-		auto json = writer.beginObject();
-
-		if(app.network.isScanning()) {
-			json[F("scanning")] = true;
-		} else {
-			json[F("scanning")] = false;
-			auto netlist = json.beginArray(F("available"));
-			BssList networks = app.network.getAvailableNetworks();
-			for(unsigned int i = 0; i < networks.count(); i++) {
-				if(networks[i].hidden)
-					continue;
-
-				// SSIDs may contain any byte values. Some are not printable and will cause the javascript client to fail
-				// on parsing the message. Try to filter those here
-				if(!ApplicationWebserver::isPrintable(networks[i].ssid)) {
-					debug_w(ANSI_COLOR_YELLOW "Filtered SSID due to unprintable characters: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_YELLOW "" ANSI_COLOR_RESET, networks[i].ssid.c_str());
-					continue;
-				}
-
-				{
-					auto item = netlist.beginObject();
-					item[F("id")] = (int)networks[i].getHashId();
-					item[F("ssid")] = networks[i].ssid;
-					item[F("signal")] = networks[i].rssi;
-					item[F("encryption")] = networks[i].getAuthorizationMethodName();
-				}
-				//limit to max 25 networks
-				if(i >= 25)
-					break;
-			}
-		}
-	}
+	app.api->renderData(F("networks"), JsonObject(), payload);
 
 	if(!checkHeap(response)) {
 		return;

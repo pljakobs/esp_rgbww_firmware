@@ -138,45 +138,36 @@ void EventServer::publishCurrentState(const ChannelOutput& raw, const HSVCT* pHs
 	}
 	_lastEventTime = currentTime;
 
-	// Option C: reuse the persistent _colorDoc for this high-frequency event so
-	// no JSON document is heap-allocated per publish (can fire up to 50x/s under
-	// MQTT sync). clear() keeps the static pool; we just repopulate it.
-	_colorDoc.clear();
-	JsonObject root = _colorDoc.to<JsonObject>();
-	root[F("jsonrpc")] = "2.0";
-	root[F("method")] = F("color_event");
-	root[F("id")] = _nextId++;
-	JsonObject params = root.createNestedObject(F("params"));
+	auto& codec = rpcCodec();
+	Jsonrpc::Root root(codec.db());
+	if(auto update = root.update()) {
+		auto color = update.toColor();
+		if(pHsv) {
+			float h, s, v;
+			int ct;
+			pHsv->asRadian(h, s, v, ct);
 
-	params[F("mode")] = pHsv ? "hsv" : "raw";
-
-	JsonObject rawJson = params.createNestedObject(F("raw"));
-	rawJson[F("r")] = raw.r;
-	rawJson[F("g")] = raw.g;
-	rawJson[F("b")] = raw.b;
-	rawJson[F("ww")] = raw.ww;
-	rawJson[F("cw")] = raw.cw;
-
-	if(pHsv) {
-		float h, s, v;
-		int ct;
-		pHsv->asRadian(h, s, v, ct);
-
-		JsonObject hsvJson = params.createNestedObject(F("hsv"));
-		hsvJson[F("h")] = h;
-		hsvJson[F("s")] = s;
-		hsvJson[F("v")] = v;
-		hsvJson[F("ct")] = ct;
+			auto hsv = color.toHsv();
+			hsv.setH(h);
+			hsv.setS(s);
+			hsv.setV(v);
+			hsv.setCt(ct);
+		} else {
+			auto rawColor = color.toRaw();
+			rawColor.setR(raw.r);
+			rawColor.setG(raw.g);
+			rawColor.setB(raw.b);
+			rawColor.setWw(raw.ww);
+			rawColor.setCw(raw.cw);
+		}
 	}
 
 	debug_d("EventServer::publishCurrentColor\n");
 
-	if(_colorDoc.overflowed()) {
-		debug_e(ANSI_COLOR_RED "EventServer::publishCurrentState: color_event exceeded _colorDoc capacity (%u), event truncated" ANSI_COLOR_RESET,
-				(unsigned)_colorDoc.capacity());
+	String payload;
+	if(codec.render({0, JsonRPC::Message::Kind::notification, F("color_event")}, root.asColor(), payload)) {
+		sendPayload(payload);
 	}
-
-	sendRoot(root);
 }
 
 /**
@@ -191,24 +182,41 @@ void EventServer::publishClockSlaveStatus(int offset, uint32_t interval)
 {
 	debug_d("EventServer::publishClockSlaveStatus: offset: %d | interval :%d\n", offset, interval);
 
-	JsonRpcMessage msg(F("clock_slave_status"));
-	JsonObject root = msg.getParams();
-	root[F("offset")] = offset;
-	root[F("current_interval")] = interval;
-	sendToClients(msg);
+	auto& codec = rpcCodec();
+	Jsonrpc::Root root(codec.db());
+	if(auto update = root.update()) {
+		auto status = update.toClockSlaveStatus();
+		status.setOffset(offset);
+		status.setCurrentInterval(interval);
+	}
+
+	String payload;
+	if(codec.render({0, JsonRPC::Message::Kind::notification, F("clock_slave_status")}, root.asClockSlaveStatus(),
+					payload)) {
+		sendPayload(payload);
+	}
 }
 
 /**
- * @brief Publishes a keep-alive message to the clients.
- * 
- * This function creates a JSON-RPC message with the method "keep_alive" and sends it to all connected clients.
+ * @brief Publishes a keep-alive message to the raw TCP clients.
+ *
+ * WebSocket liveness is handled by PING/PONG control frames in the webserver,
+ * so this heartbeat is not broadcast there.
  */
 void EventServer::publishKeepAlive()
 {
 	debug_d("EventServer::publishKeepAlive\n");
 
-	JsonRpcMessage msg(F("keep_alive"));
-	sendToClients(msg);
+	auto& codec = rpcCodec();
+	Jsonrpc::Root root(codec.db());
+	if(auto update = root.update()) {
+		update.toKeepAlive();
+	}
+
+	String payload;
+	if(codec.render({0, JsonRPC::Message::Kind::notification, F("keep_alive")}, root.asKeepAlive(), payload)) {
+		sendPayload(payload, false);
+	}
 }
 
 /**
@@ -223,12 +231,19 @@ void EventServer::publishTransitionFinished(const String& name, bool requeued)
 {
 	debug_d("EventServer::publishTransitionComplete: %s\n", name.c_str());
 
-	JsonRpcMessage msg(F("transition_finished"));
-	JsonObject root = msg.getParams();
-	root[F("name")] = name;
-	root[F("requeued")] = requeued;
+	auto& codec = rpcCodec();
+	Jsonrpc::Root root(codec.db());
+	if(auto update = root.update()) {
+		auto finished = update.toTransitionFinished();
+		finished.setName(name);
+		finished.setRequeued(requeued);
+	}
 
-	sendToClients(msg);
+	String payload;
+	if(codec.render({0, JsonRPC::Message::Kind::notification, F("transition_finished")}, root.asTransitionFinished(),
+					payload)) {
+		sendPayload(payload);
+	}
 }
 
 /**
@@ -245,25 +260,23 @@ void EventServer::publishTransitionFinished(const String& name, bool requeued)
  *
  * @param rpcMsg The JSON-RPC message to be sent to the clients.
  */
-void EventServer::sendToClients(JsonRpcMessage& rpcMsg)
+/**
+ * @brief Sends an already serialized JSON-RPC frame to all connected clients.
+ *
+ * @note this is a bit of a cludge right now. I assume that mid term, I will deprecate the pure tcp
+ *      connection and only use the websocket connection. I'm keeping it for now to maintain compatibility
+ *      with the fhem module
+ */
+void EventServer::sendPayload(const String& payload, bool broadcastWs)
 {
-	rpcMsg.setId(_nextId++);
-	sendRoot(rpcMsg.getRoot());
-}
-
-void EventServer::sendRoot(const JsonObject& root)
-{
-	// Serialize into the persistent buffer. setLength(0) keeps the already
-	// allocated capacity, so repeated events reuse the same heap block instead
-	// of allocating and freeing a fresh String every time.
-	_txBuffer.setLength(0);
-	Json::serialize(root, _txBuffer);
-	debug_d("EventServer::sendToClients: %s\n", _txBuffer.c_str());
+	debug_d("EventServer::sendPayload: %s\n", payload.c_str());
 
 	for(unsigned i = 0; i < connections.size(); ++i) {
 		auto pClient = reinterpret_cast<TcpClient*>(connections[i]);
-		pClient->sendString(_txBuffer);
+		pClient->sendString(payload);
 	}
 
-	app.wsBroadcast(_txBuffer);
+	if(broadcastWs) {
+		app.wsBroadcast(payload);
+	}
 }

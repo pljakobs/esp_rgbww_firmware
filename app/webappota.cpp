@@ -94,7 +94,9 @@ String WebappOta::extractBranch(const String& firmwareVersion)
     // Force the branch that Host testing tracks so OTA queries resolve.
     return F("experimental");
 #endif
-    // Find the third hyphen-separated token
+    // Find the branch after the numeric build number. Local git-describe
+    // versions can contain a tag such as "ci/feature/name/..."; those do not
+    // identify a published webapp branch and must use the experimental feed.
     int firstDash = firmwareVersion.indexOf('-');
     if(firstDash < 0) {
         return F("experimental");
@@ -103,6 +105,16 @@ String WebappOta::extractBranch(const String& firmwareVersion)
     if(secondDash < 0) {
         return F("experimental");
     }
+    String buildNumber = firmwareVersion.substring(firstDash + 1, secondDash);
+    if(buildNumber.length() == 0) {
+        return F("experimental");
+    }
+    for(unsigned i = 0; i < buildNumber.length(); ++i) {
+        if(buildNumber[i] < '0' || buildNumber[i] > '9') {
+            return F("experimental");
+        }
+    }
+
     int thirdDash = firmwareVersion.indexOf('-', secondDash + 1);
     String branch = (thirdDash > 0)
         ? firmwareVersion.substring(secondDash + 1, thirdDash)
@@ -122,7 +134,7 @@ void WebappOta::checkForUpdate(bool ignoreEnabled)
 {
     debug_i(ANSI_COLOR_BLUE "WebappOta::checkForUpdate - ignoreEnabled=" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, ignoreEnabled);
     
-    static constexpr size_t MIN_UPDATE_HEAP = 17000;
+    static constexpr size_t MIN_UPDATE_HEAP = 15000;
     if (app.getFreeHeapSize() < MIN_UPDATE_HEAP) {
         debug_w(ANSI_COLOR_YELLOW "WebappOta::checkForUpdate - low heap (" ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW " bytes), backing off 5s" ANSI_COLOR_RESET, app.getFreeHeapSize());
         
@@ -758,8 +770,8 @@ bool WebappOta::activateStaging()
     // would tear down the emulator process, so skip the reboot.
     debug_i(ANSI_COLOR_BLUE "WebappOta::activateStaging - skipping reboot on host" ANSI_COLOR_RESET);
 #else
-    debug_i(ANSI_COLOR_BLUE "WebappOta::activateStaging - rebooting to reclaim heap" ANSI_COLOR_RESET);
-    System.restart(2000); // 2 s grace period for the status response to reach the browser
+    debug_i(ANSI_COLOR_BLUE "WebappOta::activateStaging - webapp update complete; rebooting in 5 seconds to activate version " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RESET, _pendingVersion.c_str());
+    System.restart(5000); // Allow the terminal status to reach the frontend before reboot
 #endif
 
     return true;

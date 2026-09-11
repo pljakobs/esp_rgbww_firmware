@@ -24,7 +24,6 @@
 class JsonRpcMessage {
 public:
     JsonRpcMessage(const String& name);
-    void setId(int id);
     JsonObject getParams();
     JsonObject getRoot();
     //void setParams(String params);

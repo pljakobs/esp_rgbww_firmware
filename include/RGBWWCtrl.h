@@ -121,6 +121,8 @@
 #include <mdnsHandler.h>
 #include <telemetry.h>
 #include <mqtt.h>
+#include "jsonrpcmessage.h"
+#include <rpccodec.h>
 #include <eventserver.h>
 #include <jsonprocessor.h>
 #include <application.h>

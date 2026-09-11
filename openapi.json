@@ -1,0 +1,264 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Lightinator HTTP API",
+    "version": "1.0.0-inferred.1",
+    "description": "HTTP API inferred from app/webserver.cpp and esp_rgb_webapp2/src/services/api.js. app-config.cfgdb and app-data.cfgdb remain the authoritative schemas for separate persistent ConfigDB databases; OpenAPI references generated JSON Schema projections because general OpenAPI tooling does not recognize the .cfgdb media type.",
+    "license": { "name": "GPL-3.0-or-later", "identifier": "GPL-3.0-or-later" }
+  },
+  "servers": [{ "url": "http://{controller}", "variables": { "controller": { "default": "lightinator.local" } } }],
+  "security": [{ "basicAuth": [] }],
+  "paths": {
+    "/config": {
+      "get": {
+        "operationId": "getConfig",
+        "summary": "Get persistent controller configuration",
+        "responses": {
+          "200": { "description": "Current configuration", "content": { "application/json": { "schema": { "$ref": "schema/app-config.schema.json#" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/Busy" }
+        }
+      },
+      "post": {
+        "operationId": "updateConfig",
+        "summary": "Import persistent controller configuration",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "schema/app-config.schema.json#" } } } },
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/Busy" }
+        }
+      }
+    },
+    "/data": {
+      "get": {
+        "operationId": "getData",
+        "summary": "Get persistent application data",
+        "responses": {
+          "200": { "description": "Current application data", "content": { "application/json": { "schema": { "$ref": "schema/app-data.schema.json#" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/Busy" }
+        }
+      },
+      "post": {
+        "operationId": "updateData",
+        "summary": "Import persistent application data",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "schema/app-data.schema.json#" } } } },
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/Busy" }
+        }
+      }
+    },
+    "/info": {
+      "get": {
+        "operationId": "getInfo",
+        "summary": "Get legacy or version 2 controller information",
+        "parameters": [
+          { "name": "v", "in": "query", "schema": { "type": "integer", "enum": [1, 2] }, "description": "Response version; version 2 is preferred." },
+          { "name": "sparse", "in": "query", "schema": { "type": "boolean", "default": true }, "description": "Omit volatile runtime and debug sections when true." }
+        ],
+        "responses": {
+          "200": { "description": "Controller information", "content": { "application/json": { "schema": { "$ref": "json-rpc-api.schema.json#/definitions/infoResult" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/Busy" }
+        }
+      }
+    },
+    "/color": {
+      "get": {
+        "operationId": "getColor",
+        "summary": "Get current raw and HSV color",
+        "responses": {
+          "200": { "description": "Current color", "content": { "application/json": { "schema": { "$ref": "json-rpc-api.schema.json#/definitions/colorState" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/Busy" }
+        }
+      },
+      "post": {
+        "operationId": "setColor",
+        "summary": "Execute one or more color commands",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "json-rpc-api.schema.json#/definitions/colorParams" } } } },
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/Busy" }
+        }
+      }
+    },
+    "/networks": {
+      "get": {
+        "operationId": "getNetworks",
+        "summary": "Get Wi-Fi scan state and visible networks",
+        "responses": {
+          "200": { "description": "Scan state and networks", "content": { "application/json": { "schema": { "$ref": "json-rpc-api.schema.json#/definitions/networksResult" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/Busy" }
+        }
+      }
+    },
+    "/scan_networks": {
+      "post": {
+        "operationId": "scanNetworks",
+        "summary": "Start a Wi-Fi scan",
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/Busy" }
+        }
+      }
+    },
+    "/connect": {
+      "get": {
+        "operationId": "getConnection",
+        "summary": "Get Wi-Fi connection state",
+        "responses": {
+          "200": { "description": "Connection state", "content": { "application/json": { "schema": { "$ref": "json-rpc-api.schema.json#/definitions/connectionResult" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/Busy" }
+        }
+      },
+      "post": {
+        "operationId": "connect",
+        "summary": "Connect to a Wi-Fi network",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "json-rpc-api.schema.json#/definitions/connectParams" } } } },
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/Busy" }
+        }
+      }
+    },
+    "/system": {
+      "post": {
+        "operationId": "system",
+        "summary": "Execute a system command",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "json-rpc-api.schema.json#/definitions/systemParams" } } } },
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/Busy" }
+        }
+      }
+    },
+    "/update": {
+      "get": {
+        "operationId": "getUpdate",
+        "summary": "Get firmware OTA status",
+        "description": "Not supported by the Host build.",
+        "responses": {
+          "200": { "description": "OTA status", "content": { "application/json": { "schema": { "$ref": "json-rpc-api.schema.json#/definitions/updateStatus" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/Busy" }
+        }
+      },
+      "post": {
+        "operationId": "startUpdate",
+        "summary": "Start firmware OTA",
+        "description": "Not supported by the Host build.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "json-rpc-api.schema.json#/definitions/updateParams" } } } },
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/Busy" }
+        }
+      }
+    },
+    "/ping": {
+      "get": {
+        "operationId": "ping",
+        "summary": "Check controller reachability",
+        "responses": {
+          "200": { "description": "Pong", "content": { "application/json": { "schema": { "$ref": "json-rpc-api.schema.json#/definitions/pingResult" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/Busy" }
+        }
+      }
+    },
+    "/hosts": {
+      "get": {
+        "operationId": "getHosts",
+        "summary": "Get discovered controllers",
+        "parameters": [
+          { "name": "all", "in": "query", "schema": { "type": "boolean" } },
+          { "name": "debug", "in": "query", "schema": { "type": "boolean" } }
+        ],
+        "responses": {
+          "200": { "description": "Discovered hosts", "content": { "application/json": { "schema": { "$ref": "json-rpc-api.schema.json#/definitions/hostsResult" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/Busy" }
+        }
+      }
+    },
+    "/stop": { "post": { "operationId": "stop", "summary": "Stop animation", "requestBody": { "$ref": "#/components/requestBodies/AnimationParams" }, "responses": { "200": { "$ref": "#/components/responses/Success" }, "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "429": { "$ref": "#/components/responses/Busy" } } } },
+    "/skip": { "post": { "operationId": "skip", "summary": "Skip animation", "requestBody": { "$ref": "#/components/requestBodies/AnimationParams" }, "responses": { "200": { "$ref": "#/components/responses/Success" }, "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "429": { "$ref": "#/components/responses/Busy" } } } },
+    "/pause": { "post": { "operationId": "pause", "summary": "Pause animation", "requestBody": { "$ref": "#/components/requestBodies/AnimationParams" }, "responses": { "200": { "$ref": "#/components/responses/Success" }, "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "429": { "$ref": "#/components/responses/Busy" } } } },
+    "/continue": { "post": { "operationId": "continue", "summary": "Continue animation", "requestBody": { "$ref": "#/components/requestBodies/AnimationParams" }, "responses": { "200": { "$ref": "#/components/responses/Success" }, "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "429": { "$ref": "#/components/responses/Busy" } } } },
+    "/toggle": { "post": { "operationId": "toggle", "summary": "Toggle output", "requestBody": { "$ref": "#/components/requestBodies/AnimationParams" }, "responses": { "200": { "$ref": "#/components/responses/Success" }, "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "429": { "$ref": "#/components/responses/Busy" } } } },
+    "/on": { "post": { "operationId": "setOn", "summary": "Turn output on", "requestBody": { "$ref": "#/components/requestBodies/AnimationParams" }, "responses": { "200": { "$ref": "#/components/responses/Success" }, "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "429": { "$ref": "#/components/responses/Busy" } } } },
+    "/off": { "post": { "operationId": "setOff", "summary": "Turn output off", "requestBody": { "$ref": "#/components/requestBodies/AnimationParams" }, "responses": { "200": { "$ref": "#/components/responses/Success" }, "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "429": { "$ref": "#/components/responses/Busy" } } } },
+    "/blink": {
+      "post": {
+        "operationId": "blink",
+        "summary": "Execute blink command",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "json-rpc-api.schema.json#/definitions/blinkParams" } } } },
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/Busy" }
+        }
+      }
+    },
+    "/webapp_status": {
+      "get": {
+        "operationId": "getWebappStatus",
+        "summary": "Get web application OTA status",
+        "responses": {
+          "200": { "description": "Webapp OTA status", "content": { "application/json": { "schema": { "$ref": "json-rpc-api.schema.json#/definitions/webappOtaStatusParams" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/Busy" }
+        }
+      }
+    },
+    "/webapp_check": {
+      "get": {
+        "operationId": "getWebappCheck",
+        "summary": "Get web application OTA status and trigger a check when idle",
+        "responses": { "200": { "description": "Webapp OTA status", "content": { "application/json": { "schema": { "$ref": "json-rpc-api.schema.json#/definitions/webappOtaStatusParams" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" }, "429": { "$ref": "#/components/responses/Busy" } }
+      },
+      "post": {
+        "operationId": "checkWebapp",
+        "summary": "Force a web application update check",
+        "responses": { "200": { "description": "Webapp OTA status", "content": { "application/json": { "schema": { "$ref": "json-rpc-api.schema.json#/definitions/webappOtaStatusParams" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" }, "429": { "$ref": "#/components/responses/Busy" } }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "basicAuth": { "type": "http", "scheme": "basic", "description": "Enabled only when security.api_secured is true." }
+    },
+    "responses": {
+      "Success": { "description": "Command accepted", "content": { "application/json": { "schema": { "$ref": "json-rpc-api.schema.json#/definitions/apiSuccess" } } } },
+      "BadRequest": { "description": "Malformed input, invalid command, unsupported method, OTA conflict, or unsupported platform", "content": { "application/json": { "schema": { "$ref": "json-rpc-api.schema.json#/definitions/apiError" } } } },
+      "Unauthorized": { "description": "Basic authentication required", "headers": { "WWW-Authenticate": { "schema": { "type": "string" } } } },
+      "Busy": { "description": "Insufficient free heap or OTA load shedding", "headers": { "Retry-After": { "schema": { "type": "integer" } } } }
+    },
+    "requestBodies": {
+      "AnimationParams": {
+        "required": true,
+        "content": { "application/json": { "schema": { "$ref": "json-rpc-api.schema.json#/definitions/animationParams" } } }
+      }
+    }
+  }
+}

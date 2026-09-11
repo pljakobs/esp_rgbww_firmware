@@ -19,8 +19,6 @@
 
 #include <Wiring/WVector.h>
 
-#include "jsonrpcmessage.h"
-
 class EventServer : public TcpServer{
 public:
     EventServer() : webServer(nullptr), enabled(false) {} // Empty constructor
@@ -41,24 +39,14 @@ private:
 	virtual void onClient(TcpClient *client) override;
 	virtual void onClientComplete(TcpClient& client, bool succesfull) override;
 
-	void sendToClients(JsonRpcMessage& rpcMsg);
-	// Serializes a JSON root into _txBuffer and dispatches it to all clients.
-	void sendRoot(const JsonObject& root);
+	// Dispatches an already serialized JSON-RPC frame.
+	void sendPayload(const String& payload, bool broadcastWs = true);
 
 	static const int _tcpPort = 9090;
 	static const int _connectionTimeout = 120;
 	static const int _keepAliveInterval = 60;
 	
     Timer _keepAliveTimer;
-	int _nextId = 1;
-
-	// Reusable serialization buffer: keeps its heap capacity between events so
-	// the outbound payload isn't re-allocated and freed on every publish.
-	String _txBuffer;
-
-	// Persistent document for the high-frequency color_event (up to 50/s with
-	// MQTT sync). Reused via clear() so no per-event heap allocation occurs.
-	StaticJsonDocument<512> _colorDoc;
 
 	bool enabled;
 
