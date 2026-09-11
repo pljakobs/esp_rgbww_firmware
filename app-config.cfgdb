@@ -87,6 +87,29 @@
         "in_progress":{
           "type":"boolean",
           "default":false
+        },
+        "current": {
+          "type":"object",
+          "properties": {
+            "version": { "type":"string", "default":"" },
+            "branch": { "type":"string", "default":"" },
+            "type": { "type":"string", "default":"" },
+            "basepath": { "type":"string", "default":"" },
+            "min_firmware": { "type":"string", "default":"" },
+            "total_size": { "type":"integer", "minimum":0, "default":0 },
+            "files": {
+              "type":"array",
+              "items": {
+                "type":"object",
+                "properties": {
+                  "filename": { "type":"string", "default":"" },
+                  "md5": { "type":"string", "default":"" },
+                  "size": { "type":"integer", "minimum":0, "default":0 }
+                }
+              }
+            },
+            "comment": { "type":"string", "default":"" }
+          }
         }
       }
     },
