@@ -750,7 +750,7 @@ void ApplicationWebserver::onFile(HttpRequest& request, HttpResponse& response)
 {
 	debug_i(ANSI_COLOR_BLUE "http onFile" ANSI_COLOR_RESET);
 	// LittleFS file serving buffers through lwIP — require more free heap than API calls.
-	if(!preflightRequest(request, response,true, {HttpMethod::GET, HttpMethod::HEAD}, 12000)) return;
+	if(!preflightRequest(request, response,true, {HttpMethod::GET, HttpMethod::HEAD}, 8000)) return;
 
 #ifdef ARCH_ESP8266
 	if(app.ota.isProccessing()) {
