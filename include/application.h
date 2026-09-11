@@ -153,6 +153,7 @@ private:
     void listFiles();
     void logRestart();
     void pollResetButton();
+    void sendTelemetry();
 
     Timer _systimer;
     int _bootmode = 0;
@@ -165,10 +166,11 @@ private:
 
     Timer _uptimetimer;
     Timer _checkRamTimer;
+    Timer _sendTelemetryTimer;
     Timer _resetPinTimer;
     Timer _crashHealthyTimer;
 
-    uint32_t _uptimeMinutes   = 0;
+    uint32_t _uptimeSeconds   = 0;
     size_t _minimumHeapUptime = 0x80000;
     size_t _minimumHeap10min  = 0x80000;
     size_t _HeapLowErrUptime  = 0;
