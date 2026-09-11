@@ -11,6 +11,7 @@ on:
 jobs:
   check-updates:
     runs-on: ubuntu-latest
+    #runs-on: self-hosted
     outputs:
       updated: ${{ steps.check.outputs.updated }}
     steps:
@@ -27,8 +28,8 @@ jobs:
             echo "updated=false" >> $GITHUB_OUTPUT
           fi
   build:
-    #runs-on: ubuntu-latest
     runs-on: ubuntu-latest
+    #runs-on: self-hosted
     needs: check-updates
     if: needs.check-updates.outputs.updated == 'true' || github.event_name == 'workflow_dispatch'
     steps:
