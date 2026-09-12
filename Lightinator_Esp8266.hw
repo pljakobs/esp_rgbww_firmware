@@ -9,7 +9,7 @@
     },
     "partitions": {
         "rom0": {
-			"subtype": "ota_0",
+            "subtype": "ota_0",
             "size": "1016K"
         },
         "lfs0": {
