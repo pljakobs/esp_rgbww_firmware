@@ -14,6 +14,7 @@
 #include <FileSystem.h>
 #include <Crypto/Md5.h>
 #include <Data/HexString.h>
+#include <Data/Stream/MemoryDataStream.h>
 #include <Data/Stream/FileStream.h>
 #include <cstring>
 #include <vector>
@@ -272,31 +273,33 @@ int WebappOta::onApiResponse(HttpConnection& client, bool successful)
     debug_d("WebappOta::onApiResponse - body: %s", body.c_str());
 
     /*
-    | Parse JSON — the /webapp/latest endpoint with a fixed branch returns a
-    | single version object (not an array).
+    | Import the typed response — the /webapp/latest endpoint with a fixed
+    | branch returns a single version object (not an array).
     | Expected shape:
     |   { "version": "5.2.0", "branch": "testing", "files": [
     |       { "path": "index.html.gz", "md5": "abc123" },
     |       ...
     |   ] }
-    | Response is ~1 KB raw JSON; ArduinoJson needs ~2-3x that internally.
-    | Use DynamicJsonDocument on the heap to avoid stack overflow on ESP8266.
+    | The response is imported into the persistent webapp.current ConfigDB
+    | object, then read through generated accessors.
     */
-    DynamicJsonDocument doc(3072);
-    DeserializationError err = deserializeJson(doc, body);
-    if(err) {
-        debug_e(ANSI_COLOR_RED "WebappOta::onApiResponse - JSON parse error: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED "" ANSI_COLOR_RESET, err.c_str());
+    MemoryDataStream input(std::move(body));
+    AppConfig::Root config(*app.cfg);
+    auto update = config.update();
+    auto current = update.webapp.current;
+    ConfigDB::Status importStatus = current.importFromStream(ConfigDB::Json::format, input);
+    if(!importStatus) {
+        debug_e(ANSI_COLOR_RED "WebappOta::onApiResponse - ConfigDB import error: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED "" ANSI_COLOR_RESET, importStatus.toString().c_str());
         failAttempt(kStatusApiError);
         return 0;
     }
 
-    const char* version = doc["version"];
-    if(version == nullptr) {
+    _pendingVersion = current.getVersion();
+    if(_pendingVersion.length() == 0) {
         debug_e(ANSI_COLOR_RED "WebappOta::onApiResponse - missing 'version' field" ANSI_COLOR_RESET);
         failAttempt(kStatusApiError);
         return 0;
     }
-    _pendingVersion = version;
 
     // Compare against installed version
     {
@@ -310,25 +313,24 @@ int WebappOta::onApiResponse(HttpConnection& client, bool successful)
     }
 
     // Populate file list
-    JsonArray files = doc["files"];
-    if(files.isNull() || files.size() == 0) {
+    if(current.files.getItemCount() == 0) {
         debug_e(ANSI_COLOR_RED "WebappOta::onApiResponse - no files in response" ANSI_COLOR_RESET);
         failAttempt(kStatusApiError);
         return 0;
     }
 
-    const char* basepath = doc["basepath"];
-    if(basepath == nullptr) {
+    String base = current.getBasepath();
+    if(base.length() == 0) {
         debug_e(ANSI_COLOR_RED "WebappOta::onApiResponse - missing basepath in response" ANSI_COLOR_RESET);
         failAttempt(kStatusApiError);
         return 0;
     }
-    String base(basepath);
 
-    for(JsonObject f : files) {
-        const char* filename = f["filename"];
-        const char* md5      = f["md5"];
-        if(filename == nullptr || md5 == nullptr) {
+    for(unsigned i = 0; i < current.files.getItemCount(); ++i) {
+        auto file = current.files[i];
+        String filename = file.getFilename();
+        String md5 = file.getMd5();
+        if(filename.length() == 0 || md5.length() == 0) {
             debug_e(ANSI_COLOR_RED "WebappOta::onApiResponse - file entry missing filename/md5, skipping version" ANSI_COLOR_RESET);
             failAttempt(kStatusApiError);
             return 0;
@@ -337,7 +339,7 @@ int WebappOta::onApiResponse(HttpConnection& client, bool successful)
         entry.path        = filename;
         entry.expectedMd5 = md5;
         entry.url         = base + filename;
-        entry.size        = f["size"].as<size_t>();
+        entry.size        = file.getSize();
         _files.push_back(entry);
     }
 
@@ -345,7 +347,7 @@ int WebappOta::onApiResponse(HttpConnection& client, bool successful)
     // "size".  Used below to verify the bundle can fit before we touch the active
     // webapp.  Older servers omit these → bundleTotalSize stays 0 and the space
     // check is skipped (backward compatible).
-    size_t bundleTotalSize = doc["total_size"].as<size_t>();
+    size_t bundleTotalSize = current.getTotalSize();
     if(bundleTotalSize == 0) {
         for(const auto& f : _files) {
             bundleTotalSize += f.size;
@@ -920,7 +922,7 @@ void WebappOta::broadcastStatus() const
     // Don't broadcast if heap is too tight — wsBroadcast allocates a JsonRpcMessage,
     // a serialised String, and a char[] frame buffer.  Attempting this in a low-heap
     // situation (the very condition we're trying to report) can itself crash the device.
-    static constexpr size_t MIN_BROADCAST_HEAP = 10240;
+    static constexpr size_t MIN_BROADCAST_HEAP = 8192;
     if(app.getFreeHeapSize() < MIN_BROADCAST_HEAP) {
         debug_w(ANSI_COLOR_YELLOW "WebappOta::broadcastStatus - skipping, low heap (" ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW ")" ANSI_COLOR_RESET, app.getFreeHeapSize());
         return;

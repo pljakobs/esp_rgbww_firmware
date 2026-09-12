@@ -26,7 +26,7 @@
 #include <RGBWWCtrl.h>
 #include <apihandler.h>
 
-#define MIN_HEAP_FREE 8192
+#define MIN_HEAP_FREE 4096
 
 namespace {
 bool parseAbsOrRelValue(const JsonVariantConst& source, Optional<AbsOrRelValue>& target,
