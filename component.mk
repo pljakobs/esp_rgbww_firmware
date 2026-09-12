@@ -64,7 +64,8 @@ else ifeq ($(SMING_ARCH), Esp32)
     $(info COM_PORT is $(COM_PORT)@$(COM_SPEED) for $(SMING_ARCH))
 endif
 
-CUSTOM_TARGETS += check_versions api-schema-rebuild
+#CUSTOM_TARGETS += check_versions api-schema-rebuild
+CUSTOM_TARGETS += check_versions 
 
 #### GIT VERSION Information #####
 ifdef GITHUB_RUN_NUMBER
