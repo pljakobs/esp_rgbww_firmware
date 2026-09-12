@@ -164,7 +164,7 @@ api-schema-rebuild:
 	$(Q) node $(PROJECT_DIR)/tools/generate-api-schemas.mjs
 
 # Keep browser/OpenAPI projections synchronized whenever ConfigDB C++ is rebuilt.
-configdb-rebuild: api-schema-rebuild
+# configdb-rebuild: api-schema-rebuild
 
 # ---------------------------------------------------------------------------
 # Static stack-risk report
