@@ -381,7 +381,7 @@ def test_info_endpoint(smoke_config: SmokeConfig) -> None:
     if not required_keys.issubset(payload.keys()):
         fail_with_trace("/info response missing expected top-level fields", trace)
 
-    actual_ip = info_body.get("connection", {}).get("ip")
+    actual_ip = payload.get("connection", {}).get("ip")
     if actual_ip != smoke_config.app_ip:
         fail_with_trace(f"Unexpected Host IP in /info: {actual_ip!r} != {smoke_config.app_ip!r}", trace)
 
