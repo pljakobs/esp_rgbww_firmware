@@ -373,7 +373,7 @@ Application::~Application()
 void Application::uptimeCounter()
 {
 	++_uptimeSeconds;
-	if (+_uptimeSeconds % 600 == 0) { // every 10 minutes
+	if (+_uptimeSeconds % 600 < 10) { // every 10 minutes
 		_minimumHeap10min = system_get_free_heap_size();
 		_HeapLowErr10min = 0;
 	}
@@ -395,6 +395,7 @@ void Application::checkRam()
 			runtimeInfo.setMinfreeHeap10min(_minimumHeap10min);
 			runtimeInfo.setHeapLowErrUptime(_HeapLowErrUptime);
 			runtimeInfo.setHeapLowErr10min(_HeapLowErr10min);	
+			runtimeInfo.setActiveConnections(webserver.getWebsocketConnectionCount());
 		}
 		String runtimeNotification;
 		if(codec.render({0, JsonRPC::Message::Kind::notification, F("runtime_info")}, root.asRuntimeInfo(), runtimeNotification)) {

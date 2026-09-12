@@ -123,7 +123,8 @@
             "minfreeHeapRuntime": { "$ref": "value-types/$defs/non-negative-integer" },
             "minfreeHeap10min": { "$ref": "value-types/$defs/non-negative-integer" },
             "heapLowErrUptime": { "$ref": "value-types/$defs/non-negative-integer" },
-            "heapLowErr10min": { "$ref": "value-types/$defs/non-negative-integer" }
+            "heapLowErr10min": { "$ref": "value-types/$defs/non-negative-integer" },
+            "activeConnections": { "$ref": "value-types/$defs/non-negative-integer" }
         }
     },
     "debug-info": {

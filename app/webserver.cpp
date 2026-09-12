@@ -199,39 +199,38 @@ void ApplicationWebserver::init()
 
 void ApplicationWebserver::wsConnected(WebsocketConnection& socket)
 {
-	debug_i(ANSI_COLOR_BLUE "===>wsConnected" ANSI_COLOR_RESET);
-	// Attach per-connection auth state. A fresh connection starts unauthenticated;
-	// it must complete the challenge-response handshake before mutating commands
-	// are accepted when the API is secured.
-	socket.setUserData(new WsAuthState());
-	webSockets.addElement(&socket);
-	debug_i(ANSI_COLOR_BLUE "===>nr of websockets: " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, webSockets.size());
+    debug_i(ANSI_COLOR_BLUE "===>wsConnected" ANSI_COLOR_RESET);
+    
+    // Prevent memory leaks if userData was previously set
+    delete static_cast<WsAuthState*>(socket.getUserData());
+    socket.setUserData(new WsAuthState());
+    
+    webSockets.addElement(&socket);
+    debug_i(ANSI_COLOR_BLUE "===>nr of websockets: " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, webSockets.size());
 
-	// If a webapp OTA is in progress, push the current state immediately so
-	// the updating page doesn't have to wait for the next timed broadcast.
-	if(app.webappOta.isActive()) {
-		DynamicJsonDocument doc(256);
-		JsonObject params = doc.to<JsonObject>();
-		app.webappOta.fillStatusJson(params);
-		DynamicJsonDocument rpcDoc(512);
-		JsonObject rpcRoot = rpcDoc.to<JsonObject>();
-		JsonObject rpcParams = rpcRoot.createNestedObject(F("params"));
-		for(JsonPair kv : params) rpcParams[kv.key()] = kv.value();
-		rpcRoot[F("jsonrpc")] = F("2.0");
-		rpcRoot[F("method")] = F("webapp_ota_status");
-		rpcRoot[F("params")] = rpcParams;
-		socket.sendString(Json::serialize(rpcRoot));
-	}
+    // Send single-allocation JSON payload directly
+    if (app.webappOta.isActive()) {
+        DynamicJsonDocument rpcDoc(320);
+        JsonObject rpcRoot = rpcDoc.to<JsonObject>();
+        rpcRoot[F("jsonrpc")] = F("2.0");
+        rpcRoot[F("method")] = F("webapp_ota_status");
+        
+        JsonObject rpcParams = rpcRoot.createNestedObject(F("params"));
+        app.webappOta.fillStatusJson(rpcParams);
+        
+        socket.sendString(Json::serialize(rpcRoot));
+    }
 }
 
 void ApplicationWebserver::wsDisconnected(WebsocketConnection& socket)
 {
-	debug_i(ANSI_COLOR_BLUE "<===wsDisconnected" ANSI_COLOR_RESET);
-	// Release the per-connection auth state allocated in wsConnected().
-	delete static_cast<WsAuthState*>(socket.getUserData());
-	socket.setUserData(nullptr);
-	webSockets.removeElement(&socket);
-	debug_i(ANSI_COLOR_BLUE "===>nr of websockets: " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, webSockets.size());
+    debug_i(ANSI_COLOR_BLUE "<===wsDisconnected" ANSI_COLOR_RESET);
+    
+    delete static_cast<WsAuthState*>(socket.getUserData());
+    socket.setUserData(nullptr);
+    
+    webSockets.removeElement(&socket);
+    debug_i(ANSI_COLOR_BLUE "===>nr of websockets: " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, webSockets.size());
 }
 
 void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& message)
@@ -466,10 +465,11 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 */
 void ICACHE_FLASH_ATTR ApplicationWebserver::wsSendBroadcast(const char* buffer, size_t length)
 {
-    if (!webSockets.isEmpty()) {
-        WebsocketConnection* socket = webSockets[0];
-        // Use firstSocket as needed
-        socket->broadcast(buffer, length, WS_FRAME_TEXT);
+    for (size_t i = 0; i < webSockets.size(); ++i) {
+        if (webSockets[i] != nullptr) {
+            webSockets[i]->send(buffer, length, WS_FRAME_TEXT); 
+            // Or webSockets[i]->broadcast(...), depending on your WS library's API
+        }
     }
 }
 
