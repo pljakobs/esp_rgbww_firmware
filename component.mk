@@ -159,9 +159,9 @@ ifndef WEBAPP_VERSION
 	$(error can not find webapp/VERSION file - please ensure the source code is complete)
 endif
 
-.PHONY: api-schema-rebuild
-api-schema-rebuild:
-	$(Q) node $(PROJECT_DIR)/tools/generate-api-schemas.mjs
+#.PHONY: api-schema-rebuild
+#api-schema-rebuild:
+#	$(Q) node $(PROJECT_DIR)/tools/generate-api-schemas.mjs
 
 # Keep browser/OpenAPI projections synchronized whenever ConfigDB C++ is rebuilt.
 # configdb-rebuild: api-schema-rebuild
