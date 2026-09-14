@@ -620,12 +620,9 @@ size_t Controllers::JsonPrinter::operator()() {
             n += p->print('{');
             n += printProperty("id", (int)localId, false, 3);
             // Avoid temporary String allocations — use const char* directly
-            String localHostnameStr = WifiStation.getHostname();
-            const char* localHostname = localHostnameStr.c_str();
-            String localIpStr = WifiStation.getIP().toString();
-            const char* localIp = localIpStr.c_str();
-            n += printProperty("hostname", localHostname, false, 3);
-            n += printProperty("ip_address", localIp, false, 3);
+            
+            n += printProperty("hostname", WifiStation.getHostname(), false, 3);
+            n += printProperty("ip_address", WifiStation.getIP().toString(), false, 3);
             n += printProperty("host_type", hostTypeToString(HOST_TYPE_CONTROLLER), false, 3);
             n += printProperty("visible", true, false, 3);
             n += printProperty("state", (int)LOCALHOST, true, 3);
@@ -660,22 +657,31 @@ size_t Controllers::JsonPrinter::printIndent(size_t level) {
 }
 
 size_t Controllers::JsonPrinter::printString(const char* str) {
+    if (str == nullptr) {
+        return p->print("\"\"");
+    }
+
     size_t n = 0;
     n += p->print('"');
+    
     // Escape special characters
-    for (unsigned i = 0; i < strlen(str); i++) {
-        char c = str[i];
+    while (*str != '\0') {
+        char c = *str++;
         switch (c) {
-            case '"': n += p->print("\\\""); break;
+            case '"':  n += p->print("\\\""); break;
             case '\\': n += p->print("\\\\"); break;
-            case '\n': n += p->print("\\n"); break;
-            case '\r': n += p->print("\\r"); break;
-            case '\t': n += p->print("\\t"); break;
-            default: n += p->print(c); break;
+            case '\n': n += p->print("\\n");  break;
+            case '\r': n += p->print("\\r");  break;
+            case '\t': n += p->print("\\t");  break;
+            default:   n += p->print(c);      break;
         }
     }
     n += p->print('"');
     return n;
+}
+
+size_t Controllers::JsonPrinter::printProperty(const char* name, const String& value, bool isLast, size_t indentLevel) {
+    return printProperty(name, value.c_str(), isLast, indentLevel);
 }
 
 size_t Controllers::JsonPrinter::printProperty(const char* name, const char* value, bool isLast, size_t indentLevel) {
