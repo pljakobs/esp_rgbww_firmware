@@ -34,7 +34,9 @@
 #include <FlashString/Stream.hpp>
 #include <fileMap.h>
 #include <apihandler.h>
-#include <osapi.h>
+#if defined(ESP8266)
+  #include <osapi.h>
+#endif
 
 #ifdef RSYSLOG
 #ifndef SMING_RELEASE
