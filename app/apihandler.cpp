@@ -233,7 +233,7 @@ bool Api::dispatchCommand(const String& method, const String& params, String& er
 		return false;
 	}
 
-	StaticJsonDocument<512> doc;
+	DynamicJsonDocument doc(512);
 	DeserializationError err = deserializeJson(doc, params);
 	if(err) {
 		if(err == DeserializationError::NoMemory) {

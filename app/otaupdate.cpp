@@ -171,7 +171,7 @@
 
 void ApplicationOTA::broadcastOtaStatus(int step, const String& message)
 {
-	StaticJsonDocument<128> doc;
+	DynamicJsonDocument doc(128);
 	JsonObject params = doc.to<JsonObject>();
 	params[F("status")] = step;
 	params[F("message")] = message;
@@ -624,7 +624,7 @@ void ApplicationOTA::saveStatus(OTASTATUS newStatus)
 {
 	debug_i(ANSI_COLOR_BLUE "ApplicationOTA::saveStatus " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE " to rom partition rom" ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE "\n" ANSI_COLOR_RESET, newStatus, app.getRomSlot());
 	status = newStatus;
-	StaticJsonDocument<128> doc;
+	DynamicJsonDocument doc(128);
 	JsonObject root = doc.to<JsonObject>();
 	root[F("status")] = int(newStatus);
 	Json::saveToFile(root, OTA_STATUS_FILE);
@@ -633,7 +633,7 @@ void ApplicationOTA::saveStatus(OTASTATUS newStatus)
 OTASTATUS ApplicationOTA::loadStatus()
 {
 	debug_i(ANSI_COLOR_BLUE "ApplicationOTA::loadStatus" ANSI_COLOR_RESET);
-	StaticJsonDocument<128> doc;
+	DynamicJsonDocument doc(128);
 	if(Json::loadFromFile(doc, OTA_STATUS_FILE)) {
 		OTASTATUS status = (OTASTATUS)doc[F("status")].as<int>();
 		return status;

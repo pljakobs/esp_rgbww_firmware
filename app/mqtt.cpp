@@ -292,7 +292,7 @@ void AppMqttClient::publishCurrentRaw(const ChannelOutput& raw)
 
 	debug_d("ApplicationMQTTClient::publishCurrentRaw\n");
 
-	StaticJsonDocument<200> doc;
+	DynamicJsonDocument doc(200);
 	JsonObject root = doc.to<JsonObject>();
 	JsonObject rawJson = root.createNestedObject(F("raw"));
 	rawJson[F("r")] = raw.r;
@@ -325,7 +325,7 @@ void AppMqttClient::publishCurrentHsv(const HSVCT& color)
 	int ct;
 	color.asRadian(h, s, v, ct);
 
-	StaticJsonDocument<200> doc;
+	DynamicJsonDocument doc(200);
 	JsonObject root = doc.to<JsonObject>();
 	JsonObject hsv = root.createNestedObject(F("hsv"));
 	hsv[F("h")] = h;

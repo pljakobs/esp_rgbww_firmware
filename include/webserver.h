@@ -37,7 +37,7 @@
 // (e.g. repeated /info polls from the browser) can push the device into OOM.
 // During the download we therefore raise the heap floor so non-essential
 // requests are shed with 429 instead of being processed into a crash.
-#define WEBAPP_OTA_MIN_HEAP 12000
+#define WEBAPP_OTA_MIN_HEAP 10000
 
 // Inbound HTTP connection limits (ESP8266). Each accepted connection holds lwIP
 // TCP buffers + an HttpServerConnection worth of heap. During a webapp OTA the
@@ -46,12 +46,12 @@
 // download to leave headroom and avoid OOM crashes. Restored when OTA finishes.
 #ifdef ARCH_ESP8266
     #define WEBSERVER_MAX_CONN_OTA 4
-    #define WEBSERVER_MAX_CONN_DEFAULT 5
+    #define WEBSERVER_MAX_CONN_DEFAULT 6
     #define WEBAPP_OTA_MAX_CONN 4
 #else
-    #define WEBSERVER_MAX_CONN_OTA 6
+    #define WEBSERVER_MAX_CONN_OTA 8
     #define WEBSERVER_MAX_CONN_DEFAULT 10
-    #define WEBAPP_OTA_MAX_CONN 6
+    #define WEBAPP_OTA_MAX_CONN 8
 #endif
 
 

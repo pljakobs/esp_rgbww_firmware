@@ -927,7 +927,7 @@ void WebappOta::broadcastStatus() const
         debug_w(ANSI_COLOR_YELLOW "WebappOta::broadcastStatus - skipping, low heap (" ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW ")" ANSI_COLOR_RESET, app.getFreeHeapSize());
         return;
     }
-    StaticJsonDocument<256> doc;
+    DynamicJsonDocument doc(256);
     JsonObject params = doc.to<JsonObject>();
     fillStatusJson(params);
     app.wsBroadcast(F("webapp_ota_status"), params);

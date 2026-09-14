@@ -78,7 +78,7 @@ bool parseAbsOrRelValue(const JsonVariantConst& source, Optional<AbsOrRelValue>&
 bool JsonProcessor::onColor(const String& json, String& msg, bool relay)
 {
 	debug_e(ANSI_COLOR_RED "JsonProcessor::onColor: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED "" ANSI_COLOR_RESET, json.c_str());
-	StaticJsonDocument<400> doc;
+	DynamicJsonDocument doc(400);
 	if(!Json::deserialize(doc, json)) {
 		msg = F("malformed json");
 		return false;
@@ -157,7 +157,7 @@ bool JsonProcessor::onColor(JsonObject root, String& msg, bool relay)
  */
 bool JsonProcessor::onStop(const String& json, String& msg, bool relay)
 {
-	StaticJsonDocument<256> doc;
+	DynamicJsonDocument doc(256);
 	if(!Json::deserialize(doc, json)) {
 		msg = F("malformed json");
 		return false;
@@ -205,7 +205,7 @@ bool JsonProcessor::onStop(JsonObject root, String& msg, bool relay)
  */
 bool JsonProcessor::onSkip(const String& json, String& msg, bool relay)
 {
-	StaticJsonDocument<256> doc;
+	DynamicJsonDocument doc(256);
 	if(!Json::deserialize(doc, json)) {
 		msg = F("malformed json");
 		return false;
@@ -255,7 +255,7 @@ bool JsonProcessor::onSkip(JsonObject root, String& msg, bool relay)
  */
 bool JsonProcessor::onPause(const String& json, String& msg, bool relay)
 {
-	StaticJsonDocument<256> doc;
+	DynamicJsonDocument doc(256);
 	if(!Json::deserialize(doc, json)) {
 		msg = F("malformed json");
 		return false;
@@ -307,7 +307,7 @@ bool JsonProcessor::onPause(JsonObject root, String& msg, bool relay)
  */
 bool JsonProcessor::onContinue(const String& json, String& msg, bool relay)
 {
-	StaticJsonDocument<256> doc;
+	DynamicJsonDocument doc(256);
 	if(!Json::deserialize(doc, json)) {
 		msg = F("malformed json");
 		return false;
@@ -352,7 +352,7 @@ bool JsonProcessor::onContinue(JsonObject root, String& msg, bool relay)
  */
 bool JsonProcessor::onBlink(const String& json, String& msg, bool relay)
 {
-	StaticJsonDocument<256> doc;
+	DynamicJsonDocument doc(256);
 	if(!Json::deserialize(doc, json)) {
 		msg = F("malformed json");
 		return false;
@@ -400,7 +400,7 @@ bool JsonProcessor::onBlink(JsonObject root, String& msg, bool relay)
  */
 bool JsonProcessor::onToggle(const String& json, String& msg, bool relay)
 {
-	StaticJsonDocument<256> doc;
+	DynamicJsonDocument doc(256);
 	if(!Json::deserialize(doc, json)) {
 		msg = F("malformed json");
 		return false;
@@ -498,7 +498,7 @@ bool JsonProcessor::onSingleColorCommand(JsonObject root, String& errorMsg)
  */
 bool JsonProcessor::onDirect(const String& json, String& msg, bool relay)
 {
-	StaticJsonDocument<256> doc;
+	DynamicJsonDocument doc(256);
 	if(!Json::deserialize(doc, json)) {
 		msg = F("malformed json");
 		return false;
@@ -778,7 +778,7 @@ void JsonProcessor::addChannelStatesToCmd(JsonObject root, const RGBWWLed::Chann
 
 bool JsonProcessor::onSetOn(const String& json, String& msg, bool relay)
 {
-	StaticJsonDocument<512> doc;
+	DynamicJsonDocument doc(512);
 	if(!Json::deserialize(doc, json)) {
 		msg = F("malformed json");
 		return false;
@@ -804,7 +804,7 @@ bool JsonProcessor::onSetOn(JsonObject root, String& msg, bool relay) {
 
 bool JsonProcessor::onSetOff(const String& json, String& msg, bool relay)
 {
-	StaticJsonDocument<512> doc;
+	DynamicJsonDocument doc(512);
 	if(!Json::deserialize(doc, json)) {
 		msg = F("malformed json");
 		return false;
