@@ -34,6 +34,7 @@
 #include <FlashString/Stream.hpp>
 #include <fileMap.h>
 #include <apihandler.h>
+#include <osapi.h>
 
 #ifdef RSYSLOG
 #ifndef SMING_RELEASE
@@ -99,6 +100,21 @@ static void onOsMessage(OsMessage& msg)
 #endif
 
 #ifdef ARCH_ESP8266
+extern "C" {
+
+	uint32_t __stack_chk_guard = 0x00000a0d; // Canary reference value
+
+	void __attribute__((noreturn)) __stack_chk_fail(void) {
+	    // Custom stack overflow handling
+	    os_printf("FATAL: Stack protection canary check failed!\n");
+	    system_restart();
+	    while (1) {} // Hold until hardware WDT triggers if reset fails
+	}
+
+}
+#endif
+
+#ifdef ARCH_ESP8266
 
 // include partition file  and rboot for initial OTA
 namespace
@@ -136,9 +152,10 @@ extern "C" void __wrap_user_pre_init(void)
 //         + excvaddr(4) + depc(4) + stackBase(4) + stackCount(4)
 //         + stackWords[53](212) = 256 bytes exactly
 // Output format is compatible with Sming decode-stacktrace.py.
-#define CRASH_RTC_SLOT    64
-#define CRASH_RTC_MAGIC   0xDEADC0DEu
-#define CRASH_STACK_WORDS 54
+#define CRASH_RTC_SLOT         68 // Moved from 64 to avoid rBoot collision
+#define CRASH_RTC_MAGIC 0xDEADC0DEu
+#define CRASH_RTC_MAGIC_OVERFLOW 0xBAD57AC0u
+#define CRASH_STACK_WORDS 50
 
 struct CrashDump {
 	uint32_t magic;
@@ -146,11 +163,11 @@ struct CrashDump {
 	uint32_t exccause;
 	uint32_t epc1, epc2, epc3;
 	uint32_t excvaddr, depc;
-	uint32_t stackBase;   // sp at crash time — needed for decode-stacktrace address column
+	uint32_t stackBase;
 	uint32_t stackCount;
 	uint32_t stackWords[CRASH_STACK_WORDS];
 };
-static_assert(sizeof(CrashDump) == 256, "CrashDump must fit exactly in RTC user memory");
+static_assert(sizeof(CrashDump) == 240, "CrashDump must fit safely between slot 68 and 127");
 
 static CrashDump g_crashDump;
 static bool g_crashDumpValid = false;
@@ -159,24 +176,32 @@ static bool g_crashDumpValid = false;
 // Keep it minimal: only SDK primitive writes are safe here.
 extern "C" void custom_crash_callback(struct rst_info* ri, uint32_t stack, uint32_t stack_end)
 {
-	CrashDump dump{};
-	dump.magic    = CRASH_RTC_MAGIC;
-	dump.reason   = ri->reason;
-	dump.exccause = ri->exccause;
-	dump.epc1     = ri->epc1;
-	dump.epc2     = ri->epc2;
-	dump.epc3     = ri->epc3;
-	dump.excvaddr = ri->excvaddr;
-	dump.depc     = ri->depc;
-	dump.stackBase = stack;
+    CrashDump dump{};
+    dump.reason   = ri->reason;
+    dump.exccause = ri->exccause;
+    dump.epc1     = ri->epc1;
+    dump.epc2     = ri->epc2;
+    dump.epc3     = ri->epc3;
+    dump.excvaddr = ri->excvaddr;
+    dump.depc     = ri->depc;
+    dump.stackBase = stack;
 
-	uint32_t count = 0;
-	for(uint32_t addr = stack; addr < stack_end && count < CRASH_STACK_WORDS; addr += 4) {
-		dump.stackWords[count++] = *reinterpret_cast<const uint32_t*>(addr);
-	}
-	dump.stackCount = count;
+    // Check if the stack pointer is within valid ESP8266 DRAM bounds
+    if (stack >= 0x3FFE8000u && stack < 0x40000000u) {
+        dump.magic = CRASH_RTC_MAGIC;
+        
+        uint32_t count = 0;
+        for (uint32_t addr = stack; addr < stack_end && count < CRASH_STACK_WORDS; addr += 4) {
+            dump.stackWords[count++] = *reinterpret_cast<const uint32_t*>(addr);
+        }
+        dump.stackCount = count;
+    } else {
+        // Stack pointer is out-of-bounds (Stack Overflow / Corruption)
+        dump.magic = CRASH_RTC_MAGIC_OVERFLOW;
+        dump.stackCount = 0; // Skip reading invalid memory to avoid nested exception
+    }
 
-	system_rtc_mem_write(CRASH_RTC_SLOT, &dump, sizeof(dump));
+    system_rtc_mem_write(CRASH_RTC_SLOT, &dump, sizeof(dump));
 }
 
 #endif // ARCH_ESP8266
@@ -272,7 +297,7 @@ void onReady()
 	#ifdef ARCH_HOST
 	// Consume all but ~20kB of the (tracked) heap so the emulator runs close to
 	// the low-memory conditions seen on the device.
-	//
+	//	
 	// Getting the compiler to actually perform (and keep) the allocation needs
 	// two tricks:
 	//   1. A compiler barrier on the returned pointer, so the escaped value is
@@ -879,10 +904,11 @@ void Application::readCrashDump()
 {
 	CrashDump dump{};
 	system_rtc_mem_read(CRASH_RTC_SLOT, &dump, sizeof(dump));
-	if(dump.magic == CRASH_RTC_MAGIC) {
+	if(dump.magic == CRASH_RTC_MAGIC || dump.magic == CRASH_RTC_MAGIC_OVERFLOW) {
 		g_crashDump = dump;
 		g_crashDumpValid = true;
-		// clear magic so we don't re-report on the next boot
+		
+		// Clear magic so it doesn't re-report on subsequent reboots
 		dump.magic = 0;
 		system_rtc_mem_write(CRASH_RTC_SLOT, &dump, sizeof(dump));
 	}
@@ -987,57 +1013,56 @@ void Application::reportCrashDump()
     debug_i(ANSI_COLOR_BLUE "Application::reportCrashDump" ANSI_COLOR_RESET);
     
 #ifdef ARCH_ESP8266
-    debug_i(ANSI_COLOR_BLUE "esp8266 codepath" ANSI_COLOR_RESET);
     if(g_crashDumpValid) {
         g_crashDumpValid = false;
         fullDumpReported = true;
         
-        // Emit in the format that Sming decode-stacktrace.py recognises.
-        // "pc=" line puts the tool into IN_REGISTERS state.
-        debug_w(ANSI_COLOR_YELLOW "pc=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " sp=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " excvaddr=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW "" ANSI_COLOR_RESET,
-                g_crashDump.epc1, g_crashDump.stackBase, g_crashDump.excvaddr);
-                
-        // Emit remaining exception registers on a separate line
-        // (the tool picks these up as generic r00/r01 style or passes them through)
-        debug_w(ANSI_COLOR_YELLOW "epc2=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " epc3=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " exccause=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW " depc=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " reason=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW "" ANSI_COLOR_RESET,
-                g_crashDump.epc2, g_crashDump.epc3,
-                g_crashDump.exccause, g_crashDump.depc, g_crashDump.reason);
-                
-        // Stack dump in the format "xxxxxxxx:  XXXXXXXX XXXXXXXX XXXXXXXX XXXXXXXX"
-        debug_w(ANSI_COLOR_YELLOW "Stack dump:" ANSI_COLOR_RESET);
-        uint32_t addr = g_crashDump.stackBase;
-        for(uint32_t i = 0; i < g_crashDump.stackCount; i += 4, addr += 16) {
-            uint32_t w0 = g_crashDump.stackWords[i];
-            uint32_t w1 = (i + 1 < g_crashDump.stackCount) ? g_crashDump.stackWords[i + 1] : 0;
-            uint32_t w2 = (i + 2 < g_crashDump.stackCount) ? g_crashDump.stackWords[i + 2] : 0;
-            uint32_t w3 = (i + 3 < g_crashDump.stackCount) ? g_crashDump.stackWords[i + 3] : 0;
-            debug_w(ANSI_COLOR_YELLOW "" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW ":  " ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " " ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " " ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " " ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW "" ANSI_COLOR_RESET, addr, w0, w1, w2, w3);
+        if (g_crashDump.magic == CRASH_RTC_MAGIC_OVERFLOW) {
+            // Handle Stack Overflow / Corrupted SP
+            debug_e(ANSI_COLOR_RED "*** STACK POINTER OUT OF BOUNDS ***" ANSI_COLOR_RESET);
+            debug_e(ANSI_COLOR_RED "Corrupted SP: 0x%08x (Valid DRAM range: 0x3FFE8000 - 0x3FFFFFFF)" ANSI_COLOR_RESET, 
+                    g_crashDump.stackBase);
+            
+            // Format pc= line so decode-stacktrace.py still extracts the program counter
+            debug_w(ANSI_COLOR_YELLOW "pc=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " sp=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " excvaddr=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_RESET,
+                    g_crashDump.epc1, g_crashDump.stackBase, g_crashDump.excvaddr);
+            
+            debug_w(ANSI_COLOR_YELLOW "epc2=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " epc3=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " exccause=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW " depc=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " reason=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_RESET,
+                    g_crashDump.epc2, g_crashDump.epc3, g_crashDump.exccause, g_crashDump.depc, g_crashDump.reason);
+            
+            debug_e(ANSI_COLOR_RED "Stack dump skipped to prevent secondary execution fault." ANSI_COLOR_RESET);
+        } else {
+            // Standard Stack Dump Format
+            debug_w(ANSI_COLOR_YELLOW "pc=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " sp=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " excvaddr=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_RESET,
+                    g_crashDump.epc1, g_crashDump.stackBase, g_crashDump.excvaddr);
+                    
+            debug_w(ANSI_COLOR_YELLOW "epc2=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " epc3=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " exccause=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW " depc=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " reason=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_RESET,
+                    g_crashDump.epc2, g_crashDump.epc3, g_crashDump.exccause, g_crashDump.depc, g_crashDump.reason);
+                    
+            debug_w(ANSI_COLOR_YELLOW "Stack dump:" ANSI_COLOR_RESET);
+            uint32_t addr = g_crashDump.stackBase;
+            for(uint32_t i = 0; i < g_crashDump.stackCount; i += 4, addr += 16) {
+                uint32_t w0 = g_crashDump.stackWords[i];
+                uint32_t w1 = (i + 1 < g_crashDump.stackCount) ? g_crashDump.stackWords[i + 1] : 0;
+                uint32_t w2 = (i + 2 < g_crashDump.stackCount) ? g_crashDump.stackWords[i + 2] : 0;
+                uint32_t w3 = (i + 3 < g_crashDump.stackCount) ? g_crashDump.stackWords[i + 3] : 0;
+                debug_w(ANSI_COLOR_YELLOW "" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW ":  " ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " " ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " " ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " " ANSI_COLOR_CYAN "%08x" ANSI_COLOR_RESET, addr, w0, w1, w2, w3);
+            }
         }
-    } else {
-        debug_i(ANSI_COLOR_BLUE "Application::reportCrashDump - no crash dump found" ANSI_COLOR_RESET);
     }
 #endif
 
-    // Fallback: emit reason/registers if we didn't already emit a full dump above.
-    // On ESP32 this is always the path (no crash callback available).
-    // On ESP8266 this fires if the RTC magic was invalid or if a hardware WDT bypassed the software vectors.
+    // Fallback if no full RTC dump was available
     if(!fullDumpReported && rtc_info != nullptr &&
        (rtc_info->reason == REASON_EXCEPTION_RST ||
         rtc_info->reason == REASON_SOFT_WDT_RST  ||
         rtc_info->reason == REASON_WDT_RST)) {
         
         debug_w(ANSI_COLOR_YELLOW "*** CRASH REBOOT DETECTED ***" ANSI_COLOR_RESET);
-        
-        // Formatted specifically with "pc=" to allow decode-stacktrace.py to extract 
-        // the Instruction Pointer (epc1) during hardware-level lockups.
         debug_w(ANSI_COLOR_YELLOW "pc=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " excvaddr=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " reason=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW " exccause=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_RESET,
                 rtc_info->epc1, rtc_info->excvaddr, rtc_info->reason, rtc_info->exccause);
-                
-        // Supplementary registers to give extra context if available
         debug_w(ANSI_COLOR_YELLOW "epc2=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " epc3=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_RESET,
                 rtc_info->epc2, rtc_info->epc3);
-    } else if (!fullDumpReported) {
-        debug_i(ANSI_COLOR_BLUE "Application::reportCrashDump - no crash detected" ANSI_COLOR_RESET);
     }
 }
 

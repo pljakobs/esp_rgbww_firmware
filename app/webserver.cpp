@@ -1403,7 +1403,7 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response){
 	if(!preflightRequest(request, response, { HttpMethod::GET },app.ota.isProccessing() ? 10000 : 0)) return;
 
 	// Build params from query string
-	StaticJsonDocument<64> paramsDoc;
+	DynamicJsonDocument paramsDoc(64);
 	JsonObject params = paramsDoc.to<JsonObject>();
 	String versionParam = request.getQueryParameter(F("V"));
 	if(!versionParam.length()) {
@@ -1738,7 +1738,7 @@ void ApplicationWebserver::onSystemReq(HttpRequest& request, HttpResponse& respo
 		return;
 	}
 
-	StaticJsonDocument<128> doc;
+	DynamicJsonDocument doc(128);
 	if(!parseJsonBody(request, response, doc, F("could not get HTTP body"))) {
 		return;
 	}
@@ -1796,7 +1796,7 @@ void ApplicationWebserver::onUpdate(HttpRequest& request, HttpResponse& response
 			return;
 		}
 
-		StaticJsonDocument<512> doc;
+		DynamicJsonDocument doc(512);
 		if(!parseJsonBody(request, response, doc, F("could not parse HTTP body"))) {
 			return;
 		}
@@ -1880,7 +1880,7 @@ void ApplicationWebserver::onStop(HttpRequest& request, HttpResponse& response)
 	}
     */
 
-	StaticJsonDocument<256> doc;
+	DynamicJsonDocument doc(256);
 	if(!parseJsonBody(request, response, doc, F("could not get HTTP body"))) {
 		return;
 	}
@@ -1899,7 +1899,7 @@ void ApplicationWebserver::onSkip(HttpRequest& request, HttpResponse& response)
 {
     if(!preflightRequest(request, response, {HttpMethod::POST})) return;
     
-	StaticJsonDocument<256> doc;
+	DynamicJsonDocument doc(256);
 	if(!parseJsonBody(request, response, doc, F("could not get HTTP body"))) {
 		return;
 	}
@@ -1918,7 +1918,7 @@ void ApplicationWebserver::onPause(HttpRequest& request, HttpResponse& response)
 {
     if(!preflightRequest(request, response, {HttpMethod::POST})) return;
     
-	StaticJsonDocument<256> doc;
+	DynamicJsonDocument doc(256);
 	if(!parseJsonBody(request, response, doc, F("could not get HTTP body"))) {
 		return;
 	}
@@ -1937,7 +1937,7 @@ void ApplicationWebserver::onContinue(HttpRequest& request, HttpResponse& respon
 {
     if(!preflightRequest(request, response, {HttpMethod::POST})) return;
     
-	StaticJsonDocument<256> doc;
+	DynamicJsonDocument doc(256);
 	if(!parseJsonBody(request, response, doc, F("could not get HTTP body"))) {
 		return;
 	}
@@ -1956,7 +1956,7 @@ void ApplicationWebserver::onBlink(HttpRequest& request, HttpResponse& response)
 {
     if(!preflightRequest(request, response, {HttpMethod::POST})) return;
 
-	StaticJsonDocument<256> doc;
+	DynamicJsonDocument doc(256);
 	if(!parseJsonBody(request, response, doc, F("could not get HTTP body"))) {
 		return;
 	}
@@ -1975,7 +1975,7 @@ void ApplicationWebserver::onToggle(HttpRequest& request, HttpResponse& response
 {
     if(!preflightRequest(request, response, {HttpMethod::POST})) return;
     
-	StaticJsonDocument<256> doc;
+	DynamicJsonDocument doc(256);
 	if(!parseJsonBody(request, response, doc, F("could not get HTTP body"))) {
 		return;
 	}
@@ -1998,7 +1998,7 @@ void ApplicationWebserver::onHosts(HttpRequest& request, HttpResponse& response)
     if(!app.controllers) {
         setCorsHeaders(response);
 		debug_i(ANSI_COLOR_BLUE "Controllers not initialized" ANSI_COLOR_RESET);
-        sendApiCode(response, API_CODES::API_BAD_REQUEST, F("Controllers not initialized"));
+		DynamicJsonDocument doc(256);
         return;
     }
 
@@ -2075,7 +2075,7 @@ void ApplicationWebserver::onSetOn(HttpRequest &request, HttpResponse &response)
 		return;
 	}
 
-	StaticJsonDocument<256> doc;
+	DynamicJsonDocument doc(256);
 	if(!parseJsonBody(request, response, doc, F("could not get HTTP body"))) {
 		return;
 	}
@@ -2098,7 +2098,7 @@ void ApplicationWebserver::onSetOff(HttpRequest &request, HttpResponse &response
 		return;
 	}
 
-	StaticJsonDocument<256> doc;
+	DynamicJsonDocument doc(256);
 	if(!parseJsonBody(request, response, doc, F("could not get HTTP body"))) {
 		return;
 	}
