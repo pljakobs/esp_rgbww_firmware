@@ -433,7 +433,7 @@ private:
 
     // Pre-network Huffman ring buffer — heap-allocated before begin(),
     // freed after drainPreNetBuffer() so the ~6 KB is returned to the heap.
-    static constexpr uint16_t PRE_NET_BUF_SIZE = 6144;
+    static constexpr uint16_t PRE_NET_BUF_SIZE = 8192;
     std::unique_ptr<uint8_t[]>         _ringMem;
     std::unique_ptr<HuffmanRingBuffer> _preNetBuf;
     std::unique_ptr<HuffmanEncoder>    _encoder;
