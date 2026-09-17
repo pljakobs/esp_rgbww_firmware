@@ -19,8 +19,6 @@
 
 #include <Wiring/WVector.h>
 
-#include "jsonrpcmessage.h"
-
 class EventServer : public TcpServer{
 public:
     EventServer() : webServer(nullptr), enabled(false) {} // Empty constructor
@@ -41,14 +39,14 @@ private:
 	virtual void onClient(TcpClient *client) override;
 	virtual void onClientComplete(TcpClient& client, bool succesfull) override;
 
-	void sendToClients(JsonRpcMessage& rpcMsg);
+	// Dispatches an already serialized JSON-RPC frame.
+	void sendPayload(const String& payload, bool broadcastWs = true);
 
 	static const int _tcpPort = 9090;
 	static const int _connectionTimeout = 120;
 	static const int _keepAliveInterval = 60;
 	
     Timer _keepAliveTimer;
-	int _nextId = 1;
 
 	bool enabled;
 

@@ -40,6 +40,15 @@
         "allow_web_icons":{
           "type":"boolean",
           "default":true
+        },
+        "UI":{
+          "type":"object",
+          "properties":{
+            "dark_mode":{
+              "type":"boolean",
+              "default":false
+            }
+          }
         }
       }
     },
@@ -49,6 +58,58 @@
         "url":{
           "type":"string",
           "default":"http://lightinator.de/version.json"
+        }
+      }
+    },
+    "webapp":{
+      "type":"object",
+      "properties":{
+        "enabled":{
+          "type":"boolean",
+          "default":true
+        },
+        "api_base_url":{
+          "type":"string",
+          "default":"http://lightinator.de/api"
+        },
+        "installed_version":{
+          "type":"string",
+          "default":""
+        },
+        "installed_md5":{
+          "type":"string",
+          "default":""
+        },
+        "last_check_status":{
+          "type":"string",
+          "default":""
+        },
+        "in_progress":{
+          "type":"boolean",
+          "default":false
+        },
+        "current": {
+          "type":"object",
+          "properties": {
+            "version": { "type":"string", "default":"" },
+            "branch": { "type":"string", "default":"" },
+            "type": { "type":"string", "default":"" },
+            "basepath": { "type":"string", "default":"" },
+            "min_firmware": { "type":"string", "default":"" },
+            "total_size": { "type":"integer", "minimum":0, "default":0 },
+            "files": {
+              "type":"array",
+              "items": {
+                "type":"object",
+                "properties": {
+                  "filename": { "type":"string", "default":"" },
+                  "md5": { "type":"string", "default":"" },
+                  "size": { "type":"integer", "minimum":0, "default":0 }
+                }
+              }
+            },
+            "comment": { "type":"string", "default":"" }
+          }
         }
       }
     },

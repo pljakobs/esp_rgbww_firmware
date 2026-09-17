@@ -495,7 +495,7 @@ if [[ "$HOST_CI_SKIP_BUILD" != "1" ]]; then
   set -u
 
   echo "===== Host build output =====" > "$BUILD_LOG"
-  make SMING_ARCH=Host configdb-rebuild 2>&1 | tee -a "$BUILD_LOG"
+  make SMING_ARCH=Host 2>&1 | tee -a "$BUILD_LOG"
   make SMING_ARCH=Host flash DISABLE_WERROR=1 COM_SPEED=115200 2>&1 | tee -a "$BUILD_LOG"
 
   # Collect non-fatal compiler warnings from the Host build output for CI visibility.
@@ -636,7 +636,13 @@ run_smoke_phase 0
 smoke_phase_rc=$?
 set -e
 if [[ "$smoke_phase_rc" -eq 200 ]]; then
+  set +e
   run_smoke_phase 1
+  smoke_phase_rc=$?
+  set -e
+  if [[ "$smoke_phase_rc" -ne 0 ]]; then
+    exit "$smoke_phase_rc"
+  fi
 elif [[ "$smoke_phase_rc" -ne 0 ]]; then
   exit "$smoke_phase_rc"
 fi
@@ -646,7 +652,13 @@ run_rgbww_phase 0
 rgbww_phase_rc=$?
 set -e
 if [[ "$rgbww_phase_rc" -eq 200 ]]; then
+  set +e
   run_rgbww_phase 1
+  rgbww_phase_rc=$?
+  set -e
+  if [[ "$rgbww_phase_rc" -ne 0 ]]; then
+    exit "$rgbww_phase_rc"
+  fi
 elif [[ "$rgbww_phase_rc" -ne 0 ]]; then
   exit "$rgbww_phase_rc"
 fi

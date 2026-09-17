@@ -51,23 +51,20 @@ TelemetryClient::~TelemetryClient() {
 void TelemetryClient::start() {
 	
 	AppConfig::Network network(*app.cfg);
-	strncpy(_telemetryURL, network.telemetry.getUrl().c_str(), TELEMETRY_URL_MAX_SIZE);
-    _telemetryURL[TELEMETRY_URL_MAX_SIZE - 1] = '\0';
-	strncpy(_telemetryUser, network.telemetry.getUser().c_str(), TELEMETRY_USER_MAX_SIZE);
-    _telemetryUser[TELEMETRY_USER_MAX_SIZE - 1] = '\0';
-	strncpy(_telemetryPass, network.telemetry.getPassword().c_str(), TELEMETRY_PASS_MAX_SIZE);
-    _telemetryPass[TELEMETRY_PASS_MAX_SIZE - 1] = '\0';
+	String telemetryURL = network.telemetry.getUrl();
+	String telemetryUser = network.telemetry.getUser();
+	String telemetryPass = network.telemetry.getPassword();
 	_telemetryStats=network.telemetry.getStatsEnabled();
 	_telemetryLog=network.telemetry.getLogEnabled();
 
-	if((_telemetryStats  or _telemetryLog ) && strlen(_telemetryURL) > 0){
-		debug_i("Application::startServices - starting remote telemetry");
+	if((_telemetryStats  or _telemetryLog ) && telemetryURL.length() > 0){
+		debug_i(ANSI_COLOR_BLUE "Application::startServices - starting remote telemetry" ANSI_COLOR_RESET);
 
-		debug_i("Application::startServices - telemetry mqtt server: %s", _telemetryURL);
-		connect(_telemetryURL, _telemetryUser, _telemetryPass);
+		debug_i(ANSI_COLOR_BLUE "Application::startServices - telemetry mqtt server: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, telemetryURL.c_str());
+		connect(telemetryURL, telemetryUser, telemetryPass);
 	}
 	else {
-		debug_i("Application::startServices - mqtt telemetry disabled");
+		debug_i(ANSI_COLOR_BLUE "Application::startServices - mqtt telemetry disabled" ANSI_COLOR_RESET);
 		stop();
 	}
 }
@@ -102,7 +99,7 @@ void TelemetryClient::connect(const char* telemetryURL, const char* telemetryUse
 		// Build URL: mqtt://user:pass@server:port
 		char url[256];
         snprintf(url, sizeof(url), "mqtt://%s:%s@%s", telemetryUser, telemetryPass, telemetryURL);
-        debug_i("Telemetry MQTT connecting to %s", url);
+        debug_i(ANSI_COLOR_BLUE "Telemetry MQTT connecting to " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, url);
         char clientId[64];
         snprintf(clientId, sizeof(clientId), "telemetry_client_%s", _chipId);
 		mqtt->connect(url, clientId);
@@ -110,7 +107,7 @@ void TelemetryClient::connect(const char* telemetryURL, const char* telemetryUse
 		mqtt->setConnectedHandler([this](MqttClient& client, mqtt_message_t* message) { return this->onConnected(client, message); });
 		mqtt->setMessageHandler([this](MqttClient& client, mqtt_message_t* message) { return this->onMessageReceived(client, message); });
 	} else {
-		Serial.println("Telemetry MQTT not configured properly");
+		debug_i(ANSI_COLOR_BLUE "Telemetry MQTT not configured properly" ANSI_COLOR_RESET);
 	}
 }
 
@@ -119,20 +116,28 @@ void TelemetryClient::connect(const String& telemetryURL, const String& telemetr
 }
 
 void TelemetryClient::reconnect() {
+    // Schedule the actual stop+connect from the top of the event loop via a
+    // 1-second timer.  Calling stop() (which deletes the MqttClient) and then
+    // delay(1000) here would yield the event loop while stale TCP callbacks
+    // still reference the deleted object → use-after-free crash.
+    _reconnectTimer.initializeMs<1000>(TimerDelegate(&TelemetryClient::doReconnect, this)).startOnce();
+}
+
+void TelemetryClient::doReconnect() {
     stop();
-    delay(1000); // brief delay before reconnecting
-    connect(_telemetryURL, _telemetryUser, _telemetryPass);
- }
+    AppConfig::Network network(*app.cfg);
+    connect(network.telemetry.getUrl(), network.telemetry.getUser(), network.telemetry.getPassword());
+}
 
 void TelemetryClient::onComplete(TcpClient& client, bool success) {
 	if (!success) {
-		Serial.println("Telemetry MQTT connection failed");
+		debug_i(ANSI_COLOR_BLUE "Telemetry MQTT connection failed" ANSI_COLOR_RESET);
 		_isRunning = false;
 	}
 }
 
 int TelemetryClient::onConnected(MqttClient& client, mqtt_message_t* message) {
-	Serial.println("Telemetry MQTT connected");
+	debug_i(ANSI_COLOR_BLUE "Telemetry MQTT connected" ANSI_COLOR_RESET);
     _isRunning = true;
 	return 0;
 }
@@ -153,7 +158,7 @@ bool TelemetryClient::publish(const char* topic, const JsonDocument& doc) {
 		if ((_telemetryStats || _telemetryLog ) && !_reconnectPending) {
 			unsigned long now = millis();
 			if (now - _lastReconnectAttempt > 10000) { // 10s gate
-				debug_i("TelemetryClient: attempting reconnect");
+				debug_i(ANSI_COLOR_BLUE "TelemetryClient: attempting reconnect" ANSI_COLOR_RESET);
 				_reconnectPending = true;
 				_lastReconnectAttempt = now;
 				reconnect();
@@ -166,8 +171,12 @@ bool TelemetryClient::publish(const char* topic, const JsonDocument& doc) {
 	buildTopic(topic, fullTopic, sizeof(fullTopic));
 	String payload;
 	serializeJson(doc, payload);
-	debug_i("Telemetry MQTT publishing %s to topic: %s", payload.c_str(), fullTopic);
+	debug_i(ANSI_COLOR_BLUE "Telemetry MQTT publishing " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " to topic: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, payload.c_str(), fullTopic);
 	return mqtt->publish(fullTopic, payload);
+}
+
+bool TelemetryClient::stat(const String& payload) {
+	return publish("monitor", payload);
 }
 // Add to TelemetryClient class definition in telemetry.h:
 // Timer _reconnectGateTimer;
@@ -182,10 +191,9 @@ bool TelemetryClient::publish(const String& topic, const JsonDocument& doc) {
 
 bool TelemetryClient::publish(const char* topic, const char* payload) {
     if (!_isRunning || !mqtt || mqtt->getConnectionState() != eTCS_Connected) {
-        // Serial.println("Telemetry MQTT not connected");
         return false;
     }
-    debug_i("Telemetry MQTT publishing %s to topic: %s", payload, topic);
+    debug_i(ANSI_COLOR_BLUE "Telemetry MQTT publishing " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " to topic: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, payload, topic);
     char fullTopic[TELEMETRY_TOPIC_MAX_SIZE];
     buildTopic(topic, fullTopic, sizeof(fullTopic));
     return mqtt->publish(fullTopic, payload);

@@ -22,6 +22,7 @@
 #pragma once
 #include <RGBWWCtrl.h>
 #include <otaupdate.h>
+#include <webappota.h>
 #include <controllers.h>
 #include <mdnsHandler.h>
 #ifndef SMING_RELEASE
@@ -33,6 +34,8 @@
 static const char* fw_git_version = GITVERSION;
 static const char* fw_git_date = GITDATE;
 static const char* sming_git_version = SMING_VERSION;
+
+class Api;
 
 
 // main forward declarations
@@ -53,7 +56,7 @@ public:
     void forget_wifi_and_restart();
     bool delayedCMD(String cmd, int delay);
 
-    void wsBroadcast(String message);
+    void wsBroadcast(const String& message);
     void wsBroadcast(String cmd, String message);
     void wsBroadcast(const String& cmd, const JsonObject& params);
 
@@ -67,6 +70,11 @@ public:
 
     void checkRam();
     void reportCrashDump();
+
+    // Crash-loop rollback guard: switch to the other ROM after repeated quick crashes.
+    void checkCrashLoop();
+    void markFirmwareHealthy();
+
 #ifdef ARCH_ESP8266
     void readCrashDump();
     inline bool isTempBoot() { return _bootmode == MODE_TEMP_ROM; };
@@ -85,7 +93,7 @@ public:
     uint32_t getUptime();
     void uptimeCounter();
     size_t getFreeHeapSize();
-    bool checkHeap(size_t minHeap);
+    bool checkHeap(uint32_t minHeap);
     size_t getMinimumHeapUptime() { return _minimumHeapUptime; }
     size_t getMinimumHeap10min() { return _minimumHeap10min; }
     size_t getHeapLowErrUptime() { return _HeapLowErrUptime; }
@@ -103,9 +111,11 @@ public:
     UdpSyslogStream udpSyslogStream;
 #endif
     APPLedCtrl rgbwwctrl;
+    std::unique_ptr<Api> api;
     std::unique_ptr<Controllers> controllers;
     
     ApplicationOTA ota;
+    WebappOta webappOta;
     std::unique_ptr<AppConfig> cfg;
     std::unique_ptr<AppData> data;
 
@@ -143,6 +153,7 @@ private:
     void listFiles();
     void logRestart();
     void pollResetButton();
+    void sendTelemetry();
 
     Timer _systimer;
     int _bootmode = 0;
@@ -155,19 +166,19 @@ private:
 
     Timer _uptimetimer;
     Timer _checkRamTimer;
+    Timer _sendTelemetryTimer;
     Timer _resetPinTimer;
+    Timer _crashHealthyTimer;
 
-    uint32_t _uptimeMinutes = 0;
-    size_t _minimumHeapUptime = 32768;
-    size_t _minimumHeap10min=32768;
-    size_t _HeapLowErrUptime=0;
-    size_t _HeapLowErr10min=0;
+    uint32_t _uptimeSeconds   = 0;
+    size_t _minimumHeapUptime = 0x80000;
+    size_t _minimumHeap10min  = 0x80000;
+    size_t _HeapLowErrUptime  = 0;
+    size_t _HeapLowErr10min   = 0;
 
     std::array<int, 17> _lastToggles;
 
-    uint32_t jsonrpc_id = 0;
-
-    int8_t clearPin = 16; //  GPIO16 is the default for the old mrpj boards, newer boards will load from pinconfig 
+    int8_t clearPin  = 16; //  GPIO16 is the default for the old mrpj boards, newer boards will load from pinconfig 
     int8_t _clearPin = -1;
 
     bool _reboot_reported=false;

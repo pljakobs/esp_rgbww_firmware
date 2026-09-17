@@ -376,10 +376,10 @@ def test_info_endpoint(smoke_config: SmokeConfig) -> None:
     except json.JSONDecodeError:
         fail_with_trace("/info returned invalid JSON", trace)
 
-    required_keys = ["git_version", "build_type", "sming", "connection"]
-    missing_keys = [key for key in required_keys if key not in payload]
-    if missing_keys:
-        fail_with_trace(f"Missing keys in /info response: {', '.join(missing_keys)}", trace)
+    # Validate top-level payload structure directly:
+    required_keys = {"version", "device", "app", "sming"}
+    if not required_keys.issubset(payload.keys()):
+        fail_with_trace("/info response missing expected top-level fields", trace)
 
     actual_ip = payload.get("connection", {}).get("ip")
     if actual_ip != smoke_config.app_ip:

@@ -42,10 +42,10 @@ EventServer::~EventServer()
 void EventServer::start(ApplicationWebserver& webServer)
 {
 	this->webServer = &webServer;
-	debug_i("Starting event server with webserver referal\n");
+	debug_i(ANSI_COLOR_BLUE "Starting event server with webserver referal\n" ANSI_COLOR_RESET);
 	setTimeOut(_connectionTimeout);
 	if(not listen(_tcpPort)) {
-		debug_e("EventServer failed to open listening port!");
+		debug_e(ANSI_COLOR_RED "EventServer failed to open listening port!" ANSI_COLOR_RESET);
 	}
 
 	auto fnc = TimerDelegate(&EventServer::publishKeepAlive, this);
@@ -119,54 +119,55 @@ void EventServer::onClientComplete(TcpClient& client, bool succesfull)
  */
 void EventServer::publishCurrentState(const ChannelOutput& raw, const HSVCT* pHsv)
 {
-	//debug_i("EventServer::publishCurrentState\n");
+	//debug_i(ANSI_COLOR_BLUE "EventServer::publishCurrentState\n" ANSI_COLOR_RESET);
 	const bool hasHsv = (pHsv != nullptr);
 	const bool sameRaw = (raw == _lastRaw);
 	const bool sameMode = (hasHsv == _lastHasHsv);
 	const bool sameHsv = (!hasHsv || (*pHsv == _lastHsv));
 	if(sameRaw && sameMode && sameHsv) // No change
 		return;
-/*
 	unsigned long currentTime = millis();
 	if(currentTime - _lastEventTime < _minEventInterval) {
-		debug_i("eventserver, droppinging currentState event");
+		debug_d("eventserver, dropping currentState event\n");
 		return; // Silently discard this event
 	}
-*/
 	_lastRaw = raw;
 	_lastHasHsv = hasHsv;
 	if(hasHsv) {
 		_lastHsv = *pHsv;
 	}
-//	_lastEventTime = currentTime;
+	_lastEventTime = currentTime;
 
-	JsonRpcMessage msg(F("color_event"));
-	JsonObject root = msg.getParams();
+	auto& codec = rpcCodec();
+	Jsonrpc::Root root(codec.db());
+	if(auto update = root.update()) {
+		auto color = update.toColor();
+		if(pHsv) {
+			float h, s, v;
+			int ct;
+			pHsv->asRadian(h, s, v, ct);
 
-	root[F("mode")] = pHsv ? "hsv" : "raw";
-
-	JsonObject rawJson = root.createNestedObject(F("raw"));
-	rawJson[F("r")] = raw.r;
-	rawJson[F("g")] = raw.g;
-	rawJson[F("b")] = raw.b;
-	rawJson[F("ww")] = raw.ww;
-	rawJson[F("cw")] = raw.cw;
-
-	if(pHsv) {
-		float h, s, v;
-		int ct;
-		pHsv->asRadian(h, s, v, ct);
-
-		JsonObject hsvJson = root.createNestedObject(F("hsv"));
-		hsvJson[F("h")] = h;
-		hsvJson[F("s")] = s;
-		hsvJson[F("v")] = v;
-		hsvJson[F("ct")] = ct;
+			auto hsv = color.toHsv();
+			hsv.setH(h);
+			hsv.setS(s);
+			hsv.setV(v);
+			hsv.setCt(ct);
+		} else {
+			auto rawColor = color.toRaw();
+			rawColor.setR(raw.r);
+			rawColor.setG(raw.g);
+			rawColor.setB(raw.b);
+			rawColor.setWw(raw.ww);
+			rawColor.setCw(raw.cw);
+		}
 	}
 
 	debug_d("EventServer::publishCurrentColor\n");
 
-	sendToClients(msg);
+	String payload;
+	if(codec.render({0, JsonRPC::Message::Kind::notification, F("color_event")}, root.asColor(), payload)) {
+		sendPayload(payload);
+	}
 }
 
 /**
@@ -181,24 +182,41 @@ void EventServer::publishClockSlaveStatus(int offset, uint32_t interval)
 {
 	debug_d("EventServer::publishClockSlaveStatus: offset: %d | interval :%d\n", offset, interval);
 
-	JsonRpcMessage msg(F("clock_slave_status"));
-	JsonObject root = msg.getParams();
-	root[F("offset")] = offset;
-	root[F("current_interval")] = interval;
-	sendToClients(msg);
+	auto& codec = rpcCodec();
+	Jsonrpc::Root root(codec.db());
+	if(auto update = root.update()) {
+		auto status = update.toClockSlaveStatus();
+		status.setOffset(offset);
+		status.setCurrentInterval(interval);
+	}
+
+	String payload;
+	if(codec.render({0, JsonRPC::Message::Kind::notification, F("clock_slave_status")}, root.asClockSlaveStatus(),
+					payload)) {
+		sendPayload(payload);
+	}
 }
 
 /**
- * @brief Publishes a keep-alive message to the clients.
- * 
- * This function creates a JSON-RPC message with the method "keep_alive" and sends it to all connected clients.
+ * @brief Publishes a keep-alive message to the raw TCP clients.
+ *
+ * WebSocket liveness is handled by PING/PONG control frames in the webserver,
+ * so this heartbeat is not broadcast there.
  */
 void EventServer::publishKeepAlive()
 {
 	debug_d("EventServer::publishKeepAlive\n");
 
-	JsonRpcMessage msg(F("keep_alive"));
-	sendToClients(msg);
+	auto& codec = rpcCodec();
+	Jsonrpc::Root root(codec.db());
+	if(auto update = root.update()) {
+		update.toKeepAlive();
+	}
+
+	String payload;
+	if(codec.render({0, JsonRPC::Message::Kind::notification, F("keep_alive")}, root.asKeepAlive(), payload)) {
+		sendPayload(payload, false);
+	}
 }
 
 /**
@@ -213,12 +231,19 @@ void EventServer::publishTransitionFinished(const String& name, bool requeued)
 {
 	debug_d("EventServer::publishTransitionComplete: %s\n", name.c_str());
 
-	JsonRpcMessage msg(F("transition_finished"));
-	JsonObject root = msg.getParams();
-	root[F("name")] = name;
-	root[F("requeued")] = requeued;
+	auto& codec = rpcCodec();
+	Jsonrpc::Root root(codec.db());
+	if(auto update = root.update()) {
+		auto finished = update.toTransitionFinished();
+		finished.setName(name);
+		finished.setRequeued(requeued);
+	}
 
-	sendToClients(msg);
+	String payload;
+	if(codec.render({0, JsonRPC::Message::Kind::notification, F("transition_finished")}, root.asTransitionFinished(),
+					payload)) {
+		sendPayload(payload);
+	}
 }
 
 /**
@@ -235,18 +260,23 @@ void EventServer::publishTransitionFinished(const String& name, bool requeued)
  *
  * @param rpcMsg The JSON-RPC message to be sent to the clients.
  */
-void EventServer::sendToClients(JsonRpcMessage& rpcMsg)
+/**
+ * @brief Sends an already serialized JSON-RPC frame to all connected clients.
+ *
+ * @note this is a bit of a cludge right now. I assume that mid term, I will deprecate the pure tcp
+ *      connection and only use the websocket connection. I'm keeping it for now to maintain compatibility
+ *      with the fhem module
+ */
+void EventServer::sendPayload(const String& payload, bool broadcastWs)
 {
-	//Serial.printf("EventServer: sendToClient: %x, Vector: %x Tests: %d\n", _client, _clients.elementAt(0), _tests[0]);
-	rpcMsg.setId(_nextId++);
-
-	String jsonStr = Json::serialize(rpcMsg.getRoot());
-	debug_i("EventServer::sendToClients: %s\n", jsonStr.c_str());
+	debug_d("EventServer::sendPayload: %s\n", payload.c_str());
 
 	for(unsigned i = 0; i < connections.size(); ++i) {
 		auto pClient = reinterpret_cast<TcpClient*>(connections[i]);
-		pClient->sendString(jsonStr);
+		pClient->sendString(payload);
 	}
 
-	app.wsBroadcast(jsonStr);
+	if(broadcastWs) {
+		app.wsBroadcast(payload);
+	}
 }

@@ -54,6 +54,9 @@ app-config/*
 app-data/*
 # don't include the webapp files, they need to come from the deployment
 webapp/*
+# except the static bootstrap files owned by the firmware repo
+!webapp/captive.html
+!webapp/updating.html
 include/filelist.h
 
 # exclude local script to update db that is under constant development
@@ -68,7 +71,10 @@ latex
 latex/*
 
 debug_Esp32.hw
-include/fileList.h
+# fileList.h is normally downloaded from webapp CI, but for experimental
+# builds the minimal 3-entry version is committed directly in the repo.
+# The negation below allows git to track it.
+!include/fileList.h
 flashloop.sh
 colgrep
 colgrep.cfg

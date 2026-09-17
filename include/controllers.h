@@ -29,6 +29,13 @@
 
 class Controllers {
 public:
+    enum HostType {
+        HOST_TYPE_UNKNOWN,
+        HOST_TYPE_ALIAS,
+        HOST_TYPE_CONTROLLER,
+        HOST_TYPE_WALLPANEL,
+    };
+
     enum ControllerState {
         NOT_FOUND, INCOMPLETE, OFFLINE, ONLINE, LOCALHOST
     };
@@ -41,6 +48,7 @@ public:
         unsigned int id = 0;
         char hostname[CONTROLLER_HOSTNAME_MAX_SIZE] = {0};
         char ipAddress[CONTROLLER_IP_MAX_SIZE] = {0};
+        HostType hostType = HOST_TYPE_UNKNOWN;
         ControllerState state = NOT_FOUND;
         int ttl = 0;
     };
@@ -48,7 +56,9 @@ public:
     struct VisibleController {
         unsigned int id;
         int ttl;
+        HostType hostType = HOST_TYPE_UNKNOWN;
         ControllerState state;
+        bool webAppCompatible = false;
     };
 
     class Iterator {
@@ -81,6 +91,7 @@ public:
         
         size_t printIndent(size_t level);
         size_t printString(const char* str);
+        size_t printProperty(const char* name, const String& value, bool isLast = false, size_t indentLevel = 0);
         size_t printProperty(const char* name, const char* value, bool isLast = false, size_t indentLevel = 2);
         size_t printProperty(const char* name, int value, bool isLast = false, size_t indentLevel = 2);
         size_t printProperty(const char* name, bool value, bool isLast = false, size_t indentLevel = 2);
@@ -118,9 +129,18 @@ public:
     ~Controllers();
 
     // Core methods
-    void addOrUpdate(unsigned int id, const char* hostname, const char* ipAddress, int ttl);
-    void addOrUpdate(unsigned int id, const String& hostname, const String& ipAddress, int ttl);
+    void addOrUpdate(unsigned int id, const char* hostname, const char* ipAddress, const char* webAppVersion, int ttl, HostType hostType = HOST_TYPE_UNKNOWN);
+    void addOrUpdate(unsigned int id, const String& hostname, const String& ipAddress, const String& webAppVersion, int ttl, HostType hostType = HOST_TYPE_UNKNOWN);
     void removeExpired(int elapsedSeconds);
+    void clearWebappCompatibility() {
+        for (auto& controller : visibleControllers) {
+            controller.webAppCompatible = false;
+        }
+    }
+    IpAddress getNextCompatibleWebappController();
+
+    static HostType hostTypeFromString(const String& type);
+    static const char* hostTypeToString(HostType type);
     
     // Query methods
     ControllerInfo getController(unsigned int id);
@@ -147,7 +167,6 @@ public:
     size_t getTotalCount();
     
     // Utility
-    void init();
     void update();
     void forgetControllers();
 
@@ -163,6 +182,7 @@ private:
     static const size_t INVALID_INDEX = SIZE_MAX;
     
     std::vector<VisibleController> visibleControllers;
+    uint8_t lastWebappControllerIndex=0;
     
     // Helper methods
     size_t findVisibleControllerIndex(unsigned int id);

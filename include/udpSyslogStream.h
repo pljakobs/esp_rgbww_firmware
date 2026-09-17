@@ -54,6 +54,9 @@ public:
     static const uint16_t SYSLOG_PORT = 514;
     // Max message payload — leaves ~40 bytes headroom for RFC 3164 header within 512-byte UDP
     static const size_t MAX_MSG_LEN = 470;
+    // Pre-network Huffman buffering: capture boot-time log output (incl. crash dumps)
+    // before the UDP route exists, then replay it on drainPreNetBuffer() after GotIP.
+    static constexpr bool PRE_NET_HUFFMAN_ENABLED = true;
 
     UdpSyslogStream()
     {
@@ -63,11 +66,13 @@ public:
         _pending[0] = false;
         _pending[1] = false;
 
-        // Allocate pre-network Huffman codec on the heap.
-        auto* mem = new uint8_t[PRE_NET_BUF_SIZE];
-        _ringMem.reset(mem);
-        _preNetBuf.reset(new HuffmanRingBuffer(mem, PRE_NET_BUF_SIZE));
-        _encoder.reset(new HuffmanEncoder(*_preNetBuf));
+        if(PRE_NET_HUFFMAN_ENABLED) {
+            // Allocate pre-network Huffman codec on the heap.
+            auto* mem = new uint8_t[PRE_NET_BUF_SIZE];
+            _ringMem.reset(mem);
+            _preNetBuf.reset(new HuffmanRingBuffer(mem, PRE_NET_BUF_SIZE));
+            _encoder.reset(new HuffmanEncoder(*_preNetBuf));
+        }
     }
 
     /**
@@ -105,6 +110,8 @@ public:
     void drainPreNetBuffer()
     {
         if(!_preNetBuf) {
+            // Experimental no-buffer mode: GotIP reached, switch to direct UDP path.
+            _ready = true;
             return;
         }
 
@@ -115,7 +122,7 @@ public:
         // by _replayingFrame) must bypass the ring buffer path and go to UDP.
         _draining = true;
 
-        debug_i("drainPreNetBuffer: %u messages, %u/%u bytes used, %u evicted",
+        debug_i(ANSI_COLOR_BLUE "drainPreNetBuffer: " ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE " messages, " ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE "/" ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE " bytes used, " ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE " evicted" ANSI_COLOR_RESET,
                 _preNetBuf->count(), _preNetBuf->used(), _preNetBuf->capacity(),
                 _preNetBuf->evictedCount());
         // Capture a random nonce; the sentinel itself is sent at the start of
@@ -176,10 +183,24 @@ private:
             }
         }
 
-        uint8_t  frame[HuffmanEncoder::OUTPUT_BUF_SIZE];
-        char     msg[MAX_MSG_LEN + 1];
+        // The frame (512 B) + msg (471 B) staging buffers used to sit on the
+        // CONT stack, pushing _drainStep()'s frame to ~1 KB — a quarter of the
+        // 4 KB ESP8266 task stack.  Drain is a boot-time-only, timer-paced path,
+        // so move them into one transient heap block (auto-freed on every
+        // return) to keep the stack safe.  NB: use malloc(), not
+        // `new(std::nothrow)[]` — the latter drags in libstdc++'s nothrow
+        // operator new[], which multiply-defines Sming's own on ESP8266.
+        constexpr size_t kFrameCap = HuffmanEncoder::OUTPUT_BUF_SIZE;
+        std::unique_ptr<uint8_t, void(*)(void*)> staging(
+            static_cast<uint8_t*>(malloc(kFrameCap + MAX_MSG_LEN + 1)), &free);
+        if(!staging) {
+            _drainTimer.startOnce(); // heap exhausted — retry on the next tick
+            return;
+        }
+        uint8_t* frame = staging.get();
+        char*    msg   = reinterpret_cast<char*>(staging.get() + kFrameCap);
         uint16_t frameLen, msgLen;
-        if(!_preNetBuf->read(frame, sizeof(frame), frameLen)) {
+        if(!_preNetBuf->read(frame, kFrameCap, frameLen)) {
             // Ring buffer exhausted — drain complete.  From now on writes go
             // directly to UDP via the normal path.
             _encoder.reset();
@@ -412,7 +433,7 @@ private:
 
     // Pre-network Huffman ring buffer — heap-allocated before begin(),
     // freed after drainPreNetBuffer() so the ~6 KB is returned to the heap.
-    static constexpr uint16_t PRE_NET_BUF_SIZE = 6144;
+    static constexpr uint16_t PRE_NET_BUF_SIZE = 8192;
     std::unique_ptr<uint8_t[]>         _ringMem;
     std::unique_ptr<HuffmanRingBuffer> _preNetBuf;
     std::unique_ptr<HuffmanEncoder>    _encoder;

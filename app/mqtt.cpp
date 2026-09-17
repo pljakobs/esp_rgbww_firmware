@@ -21,6 +21,7 @@
  */
 #include <RGBWWCtrl.h>
 #include <Network/Mqtt/MqttBuffer.h>
+#include <apihandler.h>
 
 AppMqttClient::AppMqttClient()
 {
@@ -66,13 +67,13 @@ void AppMqttClient::connect()
         return;
     }
 	if(!mqtt ){
-		debug_i("no mqtt client object");
+		debug_i(ANSI_COLOR_BLUE "no mqtt client object" ANSI_COLOR_RESET);
 		return;
 	}
 	if(mqtt->getConnectionState() == TcpClientState::eTCS_Connected ||
 	   mqtt->getConnectionState() == TcpClientState::eTCS_Connecting)
 	   {
-		debug_i("mqtt already connecting");
+		debug_i(ANSI_COLOR_BLUE "mqtt already connecting" ANSI_COLOR_RESET);
 		return;
 	   }
 	
@@ -82,13 +83,13 @@ void AppMqttClient::connect()
 		debugf("Unable to set the last will and testament. Most probably there is not enough memory on the device.");
 	}
 	//    0);app.cfg.network.mqtt.username, app.cfg.network.mqtt.password);
-	//debug_i("MqttClient: Server: %s Port: %d\n", app.cfg.network.mqtt.server.c_str(), app.cfg.network.mqtt.port);
+	//debug_i(ANSI_COLOR_BLUE "MqttClient: Server: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " Port: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "\n" ANSI_COLOR_RESET, app.cfg.network.mqtt.server.c_str(), app.cfg.network.mqtt.port);
 	Url url;
 	{
 		AppConfig::Network network(*app.cfg);
 		url = F("mqtt://") + network.mqtt.getUsername() + F(":") + network.mqtt.getPassword() + F("@") +
 				  network.mqtt.getServer() + F(":") + String(network.mqtt.getPort());
-        debug_i("mqtt url: %s, id: %s", url.toString().c_str(), _id.c_str());
+        debug_i(ANSI_COLOR_BLUE "mqtt url: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ", id: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, url.toString().c_str(), _id.c_str());
 		
 	} // end ConfigDB network context
 #ifdef ENABLE_SSL
@@ -112,29 +113,29 @@ void AppMqttClient::connect()
 // ToDo: rework this so the class is less depending on the app itself but rather the app initializes the calls
 void AppMqttClient::init()
 {
-	debug_i("mqtt - init");
+	debug_i(ANSI_COLOR_BLUE "mqtt - init" ANSI_COLOR_RESET);
 	AppConfig::General general(*app.cfg);
 	if(general.getDeviceName().length() > 0) {
-		debug_w("AppMqttClient::init: building MQTT ID from device name: '%s'\n", general.getDeviceName().c_str());
+		debug_w(ANSI_COLOR_YELLOW "AppMqttClient::init: building MQTT ID from device name: '" ANSI_COLOR_CYAN "%s" ANSI_COLOR_YELLOW "'\n" ANSI_COLOR_RESET, general.getDeviceName().c_str());
 		_id = general.getDeviceName();
 	} else {
-		debug_w("AppMqttClient::init: building MQTT ID from chip id (device name is: '%s')\n",
+		debug_w(ANSI_COLOR_YELLOW "AppMqttClient::init: building MQTT ID from chip id (device name is: '" ANSI_COLOR_CYAN "%s" ANSI_COLOR_YELLOW "')\n" ANSI_COLOR_RESET,
 				general.getDeviceName().c_str());
 		_id = String("rgbww_") + String(system_get_chip_id());
-		debug_i("AppMqttClient::init: ID: %s\n", _id.c_str());
+		debug_i(ANSI_COLOR_BLUE "AppMqttClient::init: ID: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "\n" ANSI_COLOR_RESET, _id.c_str());
 	}
 	
-	debug_i("finished mqtt init\n");
+	debug_i(ANSI_COLOR_BLUE "finished mqtt init\n" ANSI_COLOR_RESET);
 }
 
 void AppMqttClient::start()
 {
-	debug_i("Start MQTT");
+	debug_i(ANSI_COLOR_BLUE "Start MQTT" ANSI_COLOR_RESET);
 
     _running = true;
 	init();
     if(mqtt) {
-        debug_i("mqttclient start - reusing existing mqtt client");
+        debug_i(ANSI_COLOR_BLUE "mqttclient start - reusing existing mqtt client" ANSI_COLOR_RESET);
         connect();
         return;
 	}
@@ -145,7 +146,7 @@ void AppMqttClient::start()
 }
 
 int AppMqttClient::onConnected(MqttClient& client, mqtt_message_t* message){
-	debug_i("MQTT Broker connected!!");
+	debug_i(ANSI_COLOR_BLUE "MQTT Broker connected!!" ANSI_COLOR_RESET);
 	// Reset discovery flag so config is re-published after a broker restart.
 	// Retained discovery messages can be lost when a broker restarts; re-publishing
 	// ensures HA always has a valid discovery payload.
@@ -170,7 +171,7 @@ int AppMqttClient::onConnected(MqttClient& client, mqtt_message_t* message){
 		if(network.mqtt.homeassistant.getEnable()){
 			initHomeAssistant();
 		}else{
-			debug_i("home assistant compatibility disabled");
+			debug_i(ANSI_COLOR_BLUE "home assistant compatibility disabled" ANSI_COLOR_RESET);
 		}
 	} 
 	return 0;
@@ -200,14 +201,14 @@ int AppMqttClient::onMessageReceived(MqttClient& client, mqtt_message_t* msg)
 
     String message = MqttBuffer(msg->publish.content);
     
-    debug_i("MQTT: Received message on topic: %s", topic.c_str());
-    debug_i("MQTT: Message content: %s", message.c_str());
+    debug_i(ANSI_COLOR_BLUE "MQTT: Received message on topic: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, topic.c_str());
+    debug_i(ANSI_COLOR_BLUE "MQTT: Message content: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, message.c_str());
     
     // Check if this is a Home Assistant command
     if (_haEnabled) {
         String haCommandTopic = _haDiscoveryPrefix + F("/light/") + _haNodeId + F("/") + _haObjectId + F("/set");
         if (topic == haCommandTopic) {
-            debug_i("HA: Main light command received on topic: %s", topic.c_str());
+            debug_i(ANSI_COLOR_BLUE "HA: Main light command received on topic: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, topic.c_str());
             handleHomeAssistantCommand(message);
             return 0;
         }
@@ -218,7 +219,7 @@ int AppMqttClient::onMessageReceived(MqttClient& client, mqtt_message_t* msg)
         for (unsigned i = 0; i < activeChannels.count(); i++) {
             String channelCommandTopic = _haDiscoveryPrefix + F("/light/") + _haNodeId + F("/") + activeChannels[i] + F("/set");
             if (topic == channelCommandTopic) {
-                debug_i("HA: Channel command received for '%s' on topic: %s", activeChannels[i].c_str(), topic.c_str());
+                debug_i(ANSI_COLOR_BLUE "HA: Channel command received for '" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "' on topic: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, activeChannels[i].c_str(), topic.c_str());
                 handleChannelCommand(activeChannels[i], message);
                 return 0;
             }
@@ -233,21 +234,33 @@ int AppMqttClient::onMessageReceived(MqttClient& client, mqtt_message_t* msg)
 			uint32_t clock = message.toInt();
 			app.rgbwwctrl.onMasterClock(clock);
 		}
-	} else if(sync.getCmdSlaveEnabled() && topic == sync.getCmdSlaveTopic()) {
-		app.jsonproc.onJsonRpc(message);
-	} else if(sync.getColorSlaveEnabled() && (topic == sync.getColorSlaveTopic())) {
-		String error;
-		app.jsonproc.onColor(message, error, false);
+    } else if((sync.getCmdSlaveEnabled() && topic == sync.getCmdSlaveTopic()) ||
+              (sync.getColorSlaveEnabled() && topic == sync.getColorSlaveTopic())) {
+        if(!app.api) {
+            debug_w(ANSI_COLOR_YELLOW "MQTT sync command ignored: api not initialized" ANSI_COLOR_RESET);
+            return 0;
+        }
+
+        if(topic == sync.getCmdSlaveTopic()) {
+            String error;
+            if(!app.api->dispatchJsonRpc(message, error, false)) {
+                debug_w(ANSI_COLOR_YELLOW "MQTT cmd failed: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_YELLOW "" ANSI_COLOR_RESET, error.c_str());
+            }
+        } else {
+            String error;
+            if(!app.api->dispatchCommand(F("color"), message, error, false)) {
+                debug_w(ANSI_COLOR_YELLOW "MQTT color failed: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_YELLOW "" ANSI_COLOR_RESET, error.c_str());
+            }
+        }
 	}
 	return 0;
 }
 
 void AppMqttClient::publish(const String& topic, const String& data, bool retain)
 {
-	//Serial.printf("AppMqttClient::publish: Topic: %s | Data: %s\n", topic.c_str(), data.c_str());
-
+	
 	if(!mqtt) {
-		debug_w("ApplicationMQTTClient::publish: no MQTT object\n");
+		debug_w(ANSI_COLOR_YELLOW "ApplicationMQTTClient::publish: no MQTT object\n" ANSI_COLOR_RESET);
 		return;
 	}
 
@@ -255,7 +268,7 @@ void AppMqttClient::publish(const String& topic, const String& data, bool retain
 	if(state == TcpClientState::eTCS_Connected) {
 		mqtt->publish(topic, data, retain);
 	} else {
-		debug_w("ApplicationMQTTClient::publish: not connected.\n");
+		debug_w(ANSI_COLOR_YELLOW "ApplicationMQTTClient::publish: not connected.\n" ANSI_COLOR_RESET);
 	}
 
 	/*
@@ -279,7 +292,7 @@ void AppMqttClient::publishCurrentRaw(const ChannelOutput& raw)
 
 	debug_d("ApplicationMQTTClient::publishCurrentRaw\n");
 
-	StaticJsonDocument<200> doc;
+	DynamicJsonDocument doc(200);
 	JsonObject root = doc.to<JsonObject>();
 	JsonObject rawJson = root.createNestedObject(F("raw"));
 	rawJson[F("r")] = raw.r;
@@ -312,7 +325,7 @@ void AppMqttClient::publishCurrentHsv(const HSVCT& color)
 	int ct;
 	color.asRadian(h, s, v, ct);
 
-	StaticJsonDocument<200> doc;
+	DynamicJsonDocument doc(200);
 	JsonObject root = doc.to<JsonObject>();
 	JsonObject hsv = root.createNestedObject(F("hsv"));
 	hsv[F("h")] = h;
@@ -378,40 +391,134 @@ void AppMqttClient::publishCommand(const String& method, const JsonObject& param
 {
 	debug_d("ApplicationMQTTClient::publishCommand: %s\n", method.c_str());
 
-	JsonRpcMessage msg(method);
+	String msgStr;
+	if(method == F("wifi_status") || method == F("transition_finished") || method == F("clock_slave_status") ||
+	   method == F("keep_alive") || method == F("color_event")) {
+		auto& codec = rpcCodec();
+		Jsonrpc::Root root(codec.db());
+		if(auto update = root.update()) {
+			if(method == F("transition_finished")) {
+				auto finished = update.toTransitionFinished();
+				finished.setName(params[F("name")] | "");
+				finished.setRequeued(params[F("requeued")] | false);
+			} else if(method == F("clock_slave_status")) {
+				auto status = update.toClockSlaveStatus();
+				status.setOffset(params[F("offset")] | 0);
+				status.setCurrentInterval(params[F("current_interval")] | 0);
+			} else if(method == F("keep_alive")) {
+				update.toKeepAlive();
+			} else if(method == F("color_event")) {
+				auto color = update.toColor();
+				if(params.containsKey(F("raw"))) {
+					auto raw = color.toRaw();
+					auto p = params[F("raw")].as<JsonObject>();
+					raw.setR(p[F("r")] | 0);
+					raw.setG(p[F("g")] | 0);
+					raw.setB(p[F("b")] | 0);
+					raw.setWw(p[F("ww")] | 0);
+					raw.setCw(p[F("cw")] | 0);
+				} else if(params.containsKey(F("hsv"))) {
+					auto hsv = color.toHsv();
+					auto p = params[F("hsv")].as<JsonObject>();
+					hsv.setH(p[F("h")] | 0.0f);
+					hsv.setS(p[F("s")] | 0.0f);
+					hsv.setV(p[F("v")] | 0.0f);
+					hsv.setCt(p[F("ct")] | 0);
+				}
+			}
+		}
+		if(method == F("wifi_status")) {
+			if(codec.render({0, JsonRPC::Message::Kind::notification, method}, root.asWifiStatus(), msgStr)) {
+				publish(buildTopic(F("command")), msgStr, false);
+				return;
+			}
+		} else if(method == F("transition_finished")) {
+			if(codec.render({0, JsonRPC::Message::Kind::notification, method}, root.asTransitionFinished(), msgStr)) {
+				publish(buildTopic(F("command")), msgStr, false);
+				return;
+			}
+		} else if(method == F("clock_slave_status")) {
+			if(codec.render({0, JsonRPC::Message::Kind::notification, method}, root.asClockSlaveStatus(), msgStr)) {
+				publish(buildTopic(F("command")), msgStr, false);
+				return;
+			}
+		} else if(method == F("keep_alive")) {
+			if(codec.render({0, JsonRPC::Message::Kind::notification, method}, root.asKeepAlive(), msgStr)) {
+				publish(buildTopic(F("command")), msgStr, false);
+				return;
+			}
+		} else if(method == F("color_event")) {
+			if(codec.render({0, JsonRPC::Message::Kind::notification, method}, root.asColor(), msgStr)) {
+				publish(buildTopic(F("command")), msgStr, false);
+				return;
+			}
+		}
+	}
 
-	if(params.size() > 0)
-		msg.getRoot()[F("params")] = params;
-
-	String msgStr = Json::serialize(msg.getRoot());
-	publish(buildTopic(F("command")), msgStr, false);
+    auto& codec = rpcCodec();
+    Jsonrpc::Root root(codec.db());
+    if(auto update = root.update()) {
+        auto command = update.toCommandFields();
+        command.setCmd(method);
+        command.setT(params[F("t")] | 0);
+        command.setS(params[F("s")] | 0);
+        command.setR(params[F("r")] | false);
+        command.setD(params[F("d")] | 0);
+        command.setName(params[F("name")] | "");
+        command.setQ(params[F("q")] | "");
+        if(params.containsKey(F("raw"))) {
+            auto raw = command.raw;
+            auto value = params[F("raw")].as<JsonObject>();
+            raw.setR(value[F("r")] | 0);
+            raw.setG(value[F("g")] | 0);
+            raw.setB(value[F("b")] | 0);
+            raw.setWw(value[F("ww")] | 0);
+            raw.setCw(value[F("cw")] | 0);
+        }
+        if(params.containsKey(F("hsv"))) {
+            auto hsv = command.hsv;
+            auto value = params[F("hsv")].as<JsonObject>();
+            hsv.setH(value[F("h")] | 0.0f);
+            hsv.setS(value[F("s")] | 0.0f);
+            hsv.setV(value[F("v")] | 0.0f);
+            hsv.setCt(value[F("ct")] | 0);
+        }
+    }
+    if(codec.render({0, JsonRPC::Message::Kind::notification, method}, root.asCommandFields(), msgStr)) {
+        publish(buildTopic(F("command")), msgStr, false);
+    }
 }
 
 void AppMqttClient::publishTransitionFinished(const String& name, bool requeued)
 {
 	debug_d("ApplicationMQTTClient::publishTransitionFinished: %s\n", name.c_str());
 
-	StaticJsonDocument<200> doc;
-	JsonObject root = doc.to<JsonObject>();
-	root[F("name")] = name;
-	root[F("requequed")] = requeued;
+	auto& codec = rpcCodec();
+	Jsonrpc::Root root(codec.db());
+	if(auto update = root.update()) {
+		auto finished = update.toTransitionFinished();
+		finished.setName(name);
+		finished.setRequeued(requeued);
+	}
 
-	String jsonMsg = Json::serialize(root);
-	publish(buildTopic(F("transition_finished")), jsonMsg, true);
+	String jsonMsg;
+	if(codec.renderPayload(root.asTransitionFinished(), jsonMsg)) {
+		publish(buildTopic(F("transition_finished")), jsonMsg, true);
+	}
 }
 
 void AppMqttClient::initHomeAssistant() {
     AppConfig::Network network(*app.cfg);
     _haEnabled = network.mqtt.homeassistant.getEnable();
-    debug_i("intialize Home Assistant topics");
+    debug_i(ANSI_COLOR_BLUE "intialize Home Assistant topics" ANSI_COLOR_RESET);
     if (!_haEnabled) {
         return;
     }
     
     _haDiscoveryPrefix = network.mqtt.homeassistant.getDiscoveryPrefix();
     _haNodeId = network.mqtt.homeassistant.getNodeId();
-    debug_i("HA::discoveryPrefix: %s",_haDiscoveryPrefix.c_str());
-	debug_i("HA::NodeId: %s", _haNodeId.c_str());
+    debug_i(ANSI_COLOR_BLUE "HA::discoveryPrefix: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET,_haDiscoveryPrefix.c_str());
+	debug_i(ANSI_COLOR_BLUE "HA::NodeId: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, _haNodeId.c_str());
     
     // If node_id is empty, use the device ID (controller name)
     if (_haNodeId.length() == 0) {
@@ -428,15 +535,15 @@ void AppMqttClient::initHomeAssistant() {
     // Object ID for this light entity
     _haObjectId = "1";
     
-    debug_i("HA::NodeId (device): %s", _haNodeId.c_str());
-    debug_i("HA::UniqueId (chip): %s", _haUniqueId.c_str());
-    debug_i("HA::ObjectId (entity): %s", _haObjectId.c_str());
+    debug_i(ANSI_COLOR_BLUE "HA::NodeId (device): " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, _haNodeId.c_str());
+    debug_i(ANSI_COLOR_BLUE "HA::UniqueId (chip): " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, _haUniqueId.c_str());
+    debug_i(ANSI_COLOR_BLUE "HA::ObjectId (entity): " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, _haObjectId.c_str());
     
     // Subscribe to the HA command topic
     if (mqtt && mqtt->getConnectionState() == TcpClientState::eTCS_Connected) {
         String commandTopic = _haDiscoveryPrefix + F("/light/") + _haNodeId + F("/") + _haObjectId + F("/set");
         mqtt->subscribe(commandTopic);
-        debug_i("Subscribed to HA command topic: %s", commandTopic.c_str());
+        debug_i(ANSI_COLOR_BLUE "Subscribed to HA command topic: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, commandTopic.c_str());
     }
     
     // Publish the discovery configuration
@@ -459,62 +566,58 @@ void AppMqttClient::publishHomeAssistantConfig() {
     // Update node_id with clean name if it was auto-generated
     if (_haNodeId == deviceName || _haNodeId.indexOf(' ') >= 0) {
         _haNodeId = cleanDeviceName;
-        debug_i("Updated HA node_id to clean version: %s", _haNodeId.c_str());
+        debug_i(ANSI_COLOR_BLUE "Updated HA node_id to clean version: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, _haNodeId.c_str());
     }
     
-    // Create config document
-    StaticJsonDocument<768> doc;
-    
-    // Basic configuration
-    doc[F("name")] = deviceName;  // Display name can have spaces
-    doc[F("unique_id")] = _haUniqueId;  // Use chip-based unique ID
-    doc[F("availability_topic")] = buildTopic(F("availability"));
-    doc[F("payload_available")] = F("online");
-    doc[F("payload_not_available")] = F("offline");
-    doc[F("state_topic")] = _haDiscoveryPrefix + F("/light/") + _haNodeId + F("/") + _haObjectId + F("/state");
-    doc[F("command_topic")] = _haDiscoveryPrefix + F("/light/") + _haNodeId + F("/") + _haObjectId + F("/set");
-    doc[F("schema")] = F("json");
-    
-    // Light features - Main light uses HSV scaling
-    doc[F("brightness")] = true;
-    doc[F("brightness_scale")] = 100;  // HSV V is 0-100%
-    doc[F("color_mode")] = true;
-    
-    // Supported color modes - dynamic based on current configuration
-    JsonArray colorModes = doc.createNestedArray(F("supported_color_modes"));
+    auto& codec = rpcCodec();
+    Jsonrpc::Root root(codec.db());
+    auto update = root.update();
+    if(!update) return;
+    auto discovery = update.toHaDiscoveryMain();
+    discovery.setName(deviceName);
+    discovery.setUniqueId(_haUniqueId);
+    discovery.setAvailabilityTopic(buildTopic(F("availability")));
+    discovery.setPayloadAvailable(F("online"));
+    discovery.setPayloadNotAvailable(F("offline"));
+    discovery.setStateTopic(_haDiscoveryPrefix + F("/light/") + _haNodeId + F("/") + _haObjectId + F("/state"));
+    discovery.setCommandTopic(_haDiscoveryPrefix + F("/light/") + _haNodeId + F("/") + _haObjectId + F("/set"));
+    discovery.setSchema(F("json"));
+    discovery.setBrightness(true);
+    discovery.setBrightnessScale(100);
+    discovery.setColorMode(true);
+
     Vector<String> supportedModes;
     getSupportedColorModes(supportedModes);
     for (unsigned i = 0; i < supportedModes.count(); i++) {
-        colorModes.add(supportedModes[i]);
+        discovery.supportedColorModes.addItem(supportedModes[i]);
     }
     
     // Add white temperature support for modes with warm white
     int colorMode = getCurrentColorMode();
     if (colorMode == 1 || colorMode == 3) { // RGBWW or RGBWWCW
-        doc[F("min_mireds")] = 153;  // ~6500K
-        doc[F("max_mireds")] = 370;  // ~2700K
+        discovery.setMinMireds(153);
+        discovery.setMaxMireds(370);
     }
     
     // Optimization
-    doc[F("optimistic")] = false;
-    doc[F("retain")] = true;
-    
-    // Device info
-    JsonObject device = doc.createNestedObject(F("device"));
-    JsonArray identifiers = device.createNestedArray(F("identifiers"));
-    identifiers.add(_haUniqueId);  // Use chip-based unique ID for device identification
-    device[F("name")] = deviceName;  // Display name can have spaces
-    device[F("model")] = F("RGBWW Controller");
-    device[F("manufacturer")] = F("ESP RGBWW Firmware");
-    device[F("sw_version")] = GITVERSION;
+    discovery.setOptimistic(false);
+    discovery.setRetain(true);
+    discovery.device.identifiers.addItem(_haUniqueId);
+    discovery.device.setName(deviceName);
+    discovery.device.setModel(F("RGBWW Controller"));
+    discovery.device.setManufacturer(F("ESP RGBWW Firmware"));
+    discovery.device.setSwVersion(GITVERSION);
     
     // Publish discovery message
     String configTopic = _haDiscoveryPrefix + F("/light/") + _haNodeId + F("/") + _haObjectId + F("/config");
     
-    debug_i("Publishing HA config to topic: %s", configTopic.c_str());
-    debug_i("Device name: '%s', Node ID: '%s', Unique ID: '%s'", deviceName.c_str(), _haNodeId.c_str(), _haUniqueId.c_str());
+    debug_i(ANSI_COLOR_BLUE "Publishing HA config to topic: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, configTopic.c_str());
+    debug_i(ANSI_COLOR_BLUE "Device name: '" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "', Node ID: '" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "', Unique ID: '" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "'" ANSI_COLOR_RESET, deviceName.c_str(), _haNodeId.c_str(), _haUniqueId.c_str());
     
-    publish(configTopic, Json::serialize(doc), true);
+    String configPayload;
+    if(codec.renderPayload(root.asHaDiscoveryMain(), configPayload)) {
+        publish(configTopic, configPayload, true);
+    }
     
     _haConfigPublished = true;
     
@@ -526,8 +629,7 @@ void AppMqttClient::publishHomeAssistantConfig() {
     }
     
     // Publish initial state
-    HSVCT currentHsv = app.rgbwwctrl.getCurrentColor();
-    publishHAState(app.rgbwwctrl.getCurrentOutput(), &currentHsv);
+    publishHAState(app.rgbwwctrl.getCurrentOutput(), &app.rgbwwctrl.getCurrentColor());
 }
 
 void AppMqttClient::publishChannelConfig(const String& channelName) {
@@ -539,40 +641,38 @@ void AppMqttClient::publishChannelConfig(const String& channelName) {
     // Topic: homeassistant/light/node_id/channel_name/config
     String configTopic = _haDiscoveryPrefix + F("/light/") + _haNodeId + F("/") + channelName + F("/config");
     
-    // Create channel discovery JSON
-    StaticJsonDocument<512> doc;
-    
-    // Basic configuration
-    doc[F("name")] = deviceName + F(" ") + channelName;  // Display name with channel
-    doc[F("unique_id")] = _haUniqueId + F("_") + channelName;    // Unique ID per channel
-    doc[F("state_topic")] = _haDiscoveryPrefix + F("/light/") + _haNodeId + F("/") + channelName + F("/state");
-    doc[F("command_topic")] = _haDiscoveryPrefix + F("/light/") + _haNodeId + F("/") + channelName + F("/set");
-    doc[F("schema")] = F("json");
-    
-    // Channel only supports brightness - use raw channel scaling
-    doc[F("brightness")] = true;
-    doc[F("brightness_scale")] = 1023;  // Raw channel scaling 0-1023
-    doc[F("color_mode")] = false;  // Individual channels don't support color
-    
-    // Device info - link to same device as main light
-    JsonObject device = doc.createNestedObject(F("device"));
-    JsonArray identifiers = device.createNestedArray(F("identifiers"));
-    identifiers.add(_haUniqueId);  // Same device as main light
-    device[F("name")] = deviceName;
-    device[F("model")] = F("RGBWW Controller");
-    device[F("manufacturer")] = F("ESP RGBWW Firmware");
-    device[F("sw_version")] = GITVERSION;
+    auto& codec = rpcCodec();
+    Jsonrpc::Root root(codec.db());
+    auto update = root.update();
+    if(!update) return;
+    auto discovery = update.toHaDiscoveryChannel();
+    discovery.setName(deviceName + F(" ") + channelName);
+    discovery.setUniqueId(_haUniqueId + F("_") + channelName);
+    discovery.setStateTopic(_haDiscoveryPrefix + F("/light/") + _haNodeId + F("/") + channelName + F("/state"));
+    discovery.setCommandTopic(_haDiscoveryPrefix + F("/light/") + _haNodeId + F("/") + channelName + F("/set"));
+    discovery.setSchema(F("json"));
+    discovery.setBrightness(true);
+    discovery.setBrightnessScale(1023);
+    discovery.setColorMode(false);
+    discovery.device.identifiers.addItem(_haUniqueId);
+    discovery.device.setName(deviceName);
+    discovery.device.setModel(F("RGBWW Controller"));
+    discovery.device.setManufacturer(F("ESP RGBWW Firmware"));
+    discovery.device.setSwVersion(GITVERSION);
     
     // Subscribe to channel command topic
     if (mqtt && mqtt->getConnectionState() == TcpClientState::eTCS_Connected) {
         String commandTopic = _haDiscoveryPrefix + F("/light/") + _haNodeId + F("/") + channelName + F("/set");
         mqtt->subscribe(commandTopic);
-    debug_i("Subscribed to channel command topic: %s", commandTopic.c_str());
+    debug_i(ANSI_COLOR_BLUE "Subscribed to channel command topic: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, commandTopic.c_str());
     }
     
     // Publish channel discovery message
-    debug_i("Publishing channel config for %s to: %s", channelName.c_str(), configTopic.c_str());
-    publish(configTopic, Json::serialize(doc), true);
+    debug_i(ANSI_COLOR_BLUE "Publishing channel config for " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " to: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, channelName.c_str(), configTopic.c_str());
+    String configPayload;
+    if(codec.renderPayload(root.asHaDiscoveryChannel(), configPayload)) {
+        publish(configTopic, configPayload, true);
+    }
 }
 
 void AppMqttClient::publishHAState(const ChannelOutput& raw, const HSVCT* pHsv) {
@@ -580,10 +680,8 @@ void AppMqttClient::publishHAState(const ChannelOutput& raw, const HSVCT* pHsv) 
         return;
     }
     
-    debug_i("HA: Publishing main light state");
-    debug_i("HA: Raw values - R:%d G:%d B:%d WW:%d CW:%d", raw.r, raw.g, raw.b, raw.ww, raw.cw);
-    
-    StaticJsonDocument<256> doc;
+    debug_i(ANSI_COLOR_BLUE "HA: Publishing main light state" ANSI_COLOR_RESET);
+    debug_i(ANSI_COLOR_BLUE "HA: Raw values - R:" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " G:" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " B:" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " WW:" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " CW:" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, raw.r, raw.g, raw.b, raw.ww, raw.cw);
     
     // Get HSV values
     HSVCT color = pHsv ? *pHsv : app.rgbwwctrl.getCurrentColor();
@@ -591,43 +689,56 @@ void AppMqttClient::publishHAState(const ChannelOutput& raw, const HSVCT* pHsv) 
     int ct;
     color.asRadian(h, s, v, ct);
     
-    debug_i("HA: HSV values - H:%.3f deg, S:%.1f%%, V:%.1f%%, CT:%d", h, s, v, ct);
+    debug_i(ANSI_COLOR_BLUE "HA: HSV values - H:" ANSI_COLOR_CYAN "%.3f" ANSI_COLOR_BLUE " deg, S:" ANSI_COLOR_CYAN "%.1f" ANSI_COLOR_BLUE "" ANSI_COLOR_CYAN "%%" ANSI_COLOR_BLUE ", V:" ANSI_COLOR_CYAN "%.1f" ANSI_COLOR_BLUE "" ANSI_COLOR_CYAN "%%" ANSI_COLOR_BLUE ", CT:" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, h, s, v, ct);
     
     // asRadian() actually returns H in degrees (0-360°) and S,V in percentages (0-100%)
     float hue_degrees = h;      // Already in degrees
     float sat_percent = s;      // Already in percent  
     float val_percent = v;      // Already in percent
     
-    debug_i("HA: Converted for HA - H:%.1f°, S:%.1f%%, V:%.1f%%", hue_degrees, sat_percent, val_percent);
+    debug_i(ANSI_COLOR_BLUE "HA: Converted for HA - H:" ANSI_COLOR_CYAN "%.1f" ANSI_COLOR_BLUE "°, S:" ANSI_COLOR_CYAN "%.1f" ANSI_COLOR_BLUE "" ANSI_COLOR_CYAN "%%" ANSI_COLOR_BLUE ", V:" ANSI_COLOR_CYAN "%.1f" ANSI_COLOR_BLUE "" ANSI_COLOR_CYAN "%%" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, hue_degrees, sat_percent, val_percent);
     
-    // State and brightness - Use 0-100 scale as configured in discovery
-    doc[F("state")] = v > 0 ? F("ON") : F("OFF");
-    doc[F("brightness")] = (uint8_t)val_percent;  // V is already 0-100%, use directly
+    const char* stateStr = v > 0 ? "ON" : "OFF";
+    const uint8_t brightness = (uint8_t)val_percent;
 
     // Report the correct color_mode: "color_temp" when CT is active on a white-capable
     // device, otherwise "hs". Sending the wrong mode violates the HA MQTT JSON light
     // contract and causes HA to ignore the state update.
     int colorMode = getCurrentColorMode();
     bool supportsCT = (colorMode == 1 || colorMode == 3); // RGBWW or RGBWWCW
+
+    auto& codec = rpcCodec();
+    Jsonrpc::Root root(codec.db());
+    String statePayload;
+    bool rendered = false;
     if (supportsCT && ct > 0) {
         // Convert firmware CT (0–100) back to mireds for HA
         int mireds = 153 + ct * 217 / 100;
-        doc[F("color_mode")] = F("color_temp");
-        if (v > 0) {
-            doc[F("color_temp")] = mireds;
+        if(auto update = root.update()) {
+            auto state = update.toHaStateColorTemp();
+            state.setState(stateStr);
+            state.setBrightness(brightness);
+            state.setColorMode(F("color_temp"));
+            state.setColorTemp(v > 0 ? mireds : 0);
         }
+        rendered = codec.renderPayload(root.asHaStateColorTemp(), statePayload);
     } else {
-        doc[F("color_mode")] = F("hs");
-        // Always include color object when color_mode is hs (HA requires it even when OFF)
-        JsonObject color_obj = doc.createNestedObject(F("color"));
-        color_obj[F("h")] = hue_degrees;   // 0-360 degrees
-        color_obj[F("s")] = sat_percent;   // 0-100 percent
+        if(auto update = root.update()) {
+            auto state = update.toHaStateHs();
+            state.setState(stateStr);
+            state.setBrightness(brightness);
+            state.setColorMode(F("hs"));
+            state.color.setH(hue_degrees);
+            state.color.setS(sat_percent);
+        }
+        rendered = codec.renderPayload(root.asHaStateHs(), statePayload);
     }
     
     String stateTopic = _haDiscoveryPrefix + F("/light/") + _haNodeId + F("/") + _haObjectId + F("/state");
-    String statePayload = Json::serialize(doc);
-    debug_i("HA: Publishing to topic '%s': %s", stateTopic.c_str(), statePayload.c_str());
-    publish(stateTopic, statePayload, true);
+    if(rendered) {
+        debug_i(ANSI_COLOR_BLUE "HA: Publishing to topic '" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "': " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, stateTopic.c_str(), statePayload.c_str());
+        publish(stateTopic, statePayload, true);
+    }
     
     // Publish individual channel states
     Vector<String> activeChannels;
@@ -641,8 +752,6 @@ void AppMqttClient::publishChannelState(const String& channelName, const Channel
     if (!_haEnabled) {
         return;
     }
-    
-    StaticJsonDocument<128> doc;
     
     int channelValue = 0;
     
@@ -660,55 +769,62 @@ void AppMqttClient::publishChannelState(const String& channelName, const Channel
         channelValue = raw.cw;
     }
     
-    debug_i("HA: Publishing channel '%s' state: %d (0-1023 scale)", channelName.c_str(), channelValue);
+    debug_i(ANSI_COLOR_BLUE "HA: Publishing channel '" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "' state: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " (0-1023 scale)" ANSI_COLOR_RESET, channelName.c_str(), channelValue);
     
-    // Use raw 0-1023 scaling as configured in discovery
-    doc[F("state")] = channelValue > 0 ? F("ON") : F("OFF");
-    doc[F("brightness")] = channelValue;  // Direct 0-1023 value
+    auto& codec = rpcCodec();
+    Jsonrpc::Root root(codec.db());
+    if(auto update = root.update()) {
+        auto state = update.toHaChannelState();
+        state.setState(channelValue > 0 ? "ON" : "OFF");
+        state.setBrightness(channelValue);
+    }
+    String statePayload;
+    if(!codec.renderPayload(root.asHaChannelState(), statePayload)) {
+        return;
+    }
     
     String stateTopic = _haDiscoveryPrefix + F("/light/") + _haNodeId + F("/") + channelName + F("/state");
-    String statePayload = Json::serialize(doc);
-    debug_i("HA: Publishing to topic '%s': %s", stateTopic.c_str(), statePayload.c_str());
+    debug_i(ANSI_COLOR_BLUE "HA: Publishing to topic '" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "': " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, stateTopic.c_str(), statePayload.c_str());
     publish(stateTopic, statePayload, true);
 }
 
 void AppMqttClient::handleChannelCommand(const String& channelName, const String& message) {
-    debug_i("HA: Processing channel command for '%s': %s", channelName.c_str(), message.c_str());
+    debug_i(ANSI_COLOR_BLUE "HA: Processing channel command for '" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "': " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, channelName.c_str(), message.c_str());
     
     // Parse JSON command
     DynamicJsonDocument root(256);
     auto error = deserializeJson(root, message);
     if (error) {
-        debug_e("HA: Failed to parse channel command JSON: %s", error.c_str());
+        debug_e(ANSI_COLOR_RED "HA: Failed to parse channel command JSON: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED "" ANSI_COLOR_RESET, error.c_str());
         return;
     }
     
     // Get current raw values
     ChannelOutput currentRaw = app.rgbwwctrl.getCurrentOutput();
-    debug_i("HA: Current raw values - R:%d G:%d B:%d WW:%d CW:%d", 
+    debug_i(ANSI_COLOR_BLUE "HA: Current raw values - R:" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " G:" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " B:" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " WW:" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " CW:" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, 
             currentRaw.r, currentRaw.g, currentRaw.b, currentRaw.ww, currentRaw.cw);
     
     // Handle state command
     if (root.containsKey(F("state"))) {
         String state = root[F("state")].as<String>();
-        debug_i("HA: Channel state command: %s", state.c_str());
+        debug_i(ANSI_COLOR_BLUE "HA: Channel state command: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, state.c_str());
         if (state == F("OFF")) {
             // Turn off this channel
             if (channelName == F("red")) {
                 currentRaw.r = 0;
-                debug_i("HA: Setting red channel to 0");
+                debug_i(ANSI_COLOR_BLUE "HA: Setting red channel to 0" ANSI_COLOR_RESET);
             } else if (channelName == F("green")) {
                 currentRaw.g = 0;
-                debug_i("HA: Setting green channel to 0");
+                debug_i(ANSI_COLOR_BLUE "HA: Setting green channel to 0" ANSI_COLOR_RESET);
             } else if (channelName == F("blue")) {
                 currentRaw.b = 0;
-                debug_i("HA: Setting blue channel to 0");
+                debug_i(ANSI_COLOR_BLUE "HA: Setting blue channel to 0" ANSI_COLOR_RESET);
             } else if (channelName == F("warmwhite") || channelName == F("warm_white")) {
                 currentRaw.ww = 0;
-                debug_i("HA: Setting warm white channel to 0");
+                debug_i(ANSI_COLOR_BLUE "HA: Setting warm white channel to 0" ANSI_COLOR_RESET);
             } else if (channelName == F("coldwhite") || channelName == F("cool_white")) {
                 currentRaw.cw = 0;
-                debug_i("HA: Setting cool white channel to 0");
+                debug_i(ANSI_COLOR_BLUE "HA: Setting cool white channel to 0" ANSI_COLOR_RESET);
             }
         }
     }
@@ -716,46 +832,46 @@ void AppMqttClient::handleChannelCommand(const String& channelName, const String
     // Handle brightness command (0-1023 scale as configured in discovery)
     if (root.containsKey(F("brightness"))) {
         int brightness = root[F("brightness")].as<int>();
-        debug_i("HA: Channel brightness command: %d (0-1023 scale)", brightness);
+        debug_i(ANSI_COLOR_BLUE "HA: Channel brightness command: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " (0-1023 scale)" ANSI_COLOR_RESET, brightness);
         
         // Clamp to valid range 0-1023
         int originalBrightness = brightness;
         brightness = (brightness < 0) ? 0 : ((brightness > 1023) ? 1023 : brightness);
         if (brightness != originalBrightness) {
-            debug_w("HA: Clamped brightness from %d to %d", originalBrightness, brightness);
+            debug_w(ANSI_COLOR_YELLOW "HA: Clamped brightness from " ANSI_COLOR_CYAN "%d" ANSI_COLOR_YELLOW " to " ANSI_COLOR_CYAN "%d" ANSI_COLOR_YELLOW "" ANSI_COLOR_RESET, originalBrightness, brightness);
         }
         
         if (channelName == F("red")) {
             currentRaw.r = brightness;
-            debug_i("HA: Setting red channel to %d", brightness);
+            debug_i(ANSI_COLOR_BLUE "HA: Setting red channel to " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, brightness);
         } else if (channelName == F("green")) {
             currentRaw.g = brightness;
-            debug_i("HA: Setting green channel to %d", brightness);
+            debug_i(ANSI_COLOR_BLUE "HA: Setting green channel to " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, brightness);
         } else if (channelName == F("blue")) {
             currentRaw.b = brightness;
-            debug_i("HA: Setting blue channel to %d", brightness);
+            debug_i(ANSI_COLOR_BLUE "HA: Setting blue channel to " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, brightness);
         } else if (channelName == F("warmwhite") || channelName == F("warm_white")) {
             currentRaw.ww = brightness;
-            debug_i("HA: Setting warm white channel to %d", brightness);
+            debug_i(ANSI_COLOR_BLUE "HA: Setting warm white channel to " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, brightness);
         } else if (channelName == F("coldwhite") || channelName == F("cool_white")) {
             currentRaw.cw = brightness;
-            debug_i("HA: Setting cool white channel to %d", brightness);
+            debug_i(ANSI_COLOR_BLUE "HA: Setting cool white channel to " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, brightness);
         }
     }
     
-    debug_i("HA: New raw values - R:%d G:%d B:%d WW:%d CW:%d", 
+    debug_i(ANSI_COLOR_BLUE "HA: New raw values - R:" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " G:" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " B:" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " WW:" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " CW:" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, 
             currentRaw.r, currentRaw.g, currentRaw.b, currentRaw.ww, currentRaw.cw);
     
     // Apply the changes
-    debug_i("HA: Applying changes to LED controller");
+    debug_i(ANSI_COLOR_BLUE "HA: Applying changes to LED controller" ANSI_COLOR_RESET);
     app.rgbwwctrl.setRAW(currentRaw);
     
     // Publish state update for this channel only
-    debug_i("HA: Publishing state update for channel '%s'", channelName.c_str());
+    debug_i(ANSI_COLOR_BLUE "HA: Publishing state update for channel '" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "'" ANSI_COLOR_RESET, channelName.c_str());
     publishChannelState(channelName, currentRaw);
 
     // Also publish the main light state to keep them in sync
-    debug_i("HA: Publishing main light state update");
+    debug_i(ANSI_COLOR_BLUE "HA: Publishing main light state update" ANSI_COLOR_RESET);
     publishHAState(currentRaw, nullptr);
 }
 
@@ -764,20 +880,28 @@ void AppMqttClient::handleHomeAssistantCommand(const String& message) {
         return;
     }
     
-    debug_i("HA: Processing main light command: %s", message.c_str());
+    debug_i(ANSI_COLOR_BLUE "HA: Processing main light command: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, message.c_str());
     
-    StaticJsonDocument<256> doc;
+    DynamicJsonDocument doc(256);
+    if(doc.capacity() == 0) {
+        debug_e(ANSI_COLOR_RED "HA: command doc alloc failed" ANSI_COLOR_RESET);
+        return;
+    }
     DeserializationError parseError = deserializeJson(doc, message);
     if (parseError) {
-        debug_e("HA: Failed to parse command JSON: %s", parseError.c_str());
+        debug_e(ANSI_COLOR_RED "HA: Failed to parse command JSON: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED "" ANSI_COLOR_RESET, parseError.c_str());
         return;
     }
     
     String state = doc[F("state")];
-    debug_i("HA: Command state: %s", state.c_str());
+    debug_i(ANSI_COLOR_BLUE "HA: Command state: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, state.c_str());
     
     // Create a JSON command that works with your existing system
-    StaticJsonDocument<256> cmdDoc;
+    DynamicJsonDocument cmdDoc(256);
+    if(cmdDoc.capacity() == 0) {
+        debug_e(ANSI_COLOR_RED "HA: command build doc alloc failed" ANSI_COLOR_RESET);
+        return;
+    }
     JsonObject root = cmdDoc.to<JsonObject>();
     JsonObject hsv = root.createNestedObject(F("hsv"));
     
@@ -787,7 +911,7 @@ void AppMqttClient::handleHomeAssistantCommand(const String& message) {
         if (doc.containsKey(F("brightness"))) {
             float brightness_raw = doc[F("brightness")].as<float>();
             brightness = brightness_raw;  // Now using 0-100 scale directly
-            debug_i("HA: Brightness from HA: %.1f (0-100 scale)", brightness);
+            debug_i(ANSI_COLOR_BLUE "HA: Brightness from HA: " ANSI_COLOR_CYAN "%.1f" ANSI_COLOR_BLUE " (0-100 scale)" ANSI_COLOR_RESET, brightness);
         }
         
         // Handle color
@@ -795,14 +919,14 @@ void AppMqttClient::handleHomeAssistantCommand(const String& message) {
             float h = doc[F("color")][F("h")];  // HA sends 0-360 degrees
             float s = doc[F("color")][F("s")];  // HA sends 0-100 percent
             
-            debug_i("HA: Color from HA - H: %.1f°, S: %.1f%%", h, s);
+            debug_i(ANSI_COLOR_BLUE "HA: Color from HA - H: " ANSI_COLOR_CYAN "%.1f" ANSI_COLOR_BLUE "°, S: " ANSI_COLOR_CYAN "%.1f" ANSI_COLOR_BLUE "" ANSI_COLOR_CYAN "%%" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, h, s);
             
             // LED controller expects H: 0-360°, S: 0-100%, V: 0-100%
             hsv[F("h")] = h;                 // Keep as 0-360 degrees
             hsv[F("s")] = s;                 // Keep as 0-100 percentage
             hsv[F("v")] = brightness;        // Keep as 0-100 percentage
             
-            debug_i("HA: Converted to internal - H: %.1f°, S: %.1f%%, V: %.1f%%", 
+            debug_i(ANSI_COLOR_BLUE "HA: Converted to internal - H: " ANSI_COLOR_CYAN "%.1f" ANSI_COLOR_BLUE "°, S: " ANSI_COLOR_CYAN "%.1f" ANSI_COLOR_BLUE "" ANSI_COLOR_CYAN "%%" ANSI_COLOR_BLUE ", V: " ANSI_COLOR_CYAN "%.1f" ANSI_COLOR_BLUE "" ANSI_COLOR_CYAN "%%" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, 
                     hsv[F("h")].as<float>(), hsv[F("s")].as<float>(), hsv[F("v")].as<float>());
         } else if (doc.containsKey(F("color_temp"))) {
             // HA sends color_temp in mireds; convert to firmware CT scale (0–100)
@@ -811,7 +935,7 @@ void AppMqttClient::handleHomeAssistantCommand(const String& message) {
             int ct = (mireds - 153) * 100 / 217;
             ct = (ct < 0) ? 0 : ((ct > 100) ? 100 : ct);
             
-            debug_i("HA: color_temp from HA: %d mireds → ct=%d", mireds, ct);
+            debug_i(ANSI_COLOR_BLUE "HA: color_temp from HA: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " mireds → ct=" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, mireds, ct);
             
             // Keep current hue, desaturate for pure white at the requested temperature
             HSVCT currentColor = app.rgbwwctrl.getCurrentColor();
@@ -834,7 +958,7 @@ void AppMqttClient::handleHomeAssistantCommand(const String& message) {
             hsv[F("s")] = cur_s;             // Keep as 0-100 percentage  
             hsv[F("v")] = brightness;        // Use brightness as 0-100 percentage
             
-            debug_i("HA: Brightness only change - keeping current color, new V: %.1f%%", brightness);
+            debug_i(ANSI_COLOR_BLUE "HA: Brightness only change - keeping current color, new V: " ANSI_COLOR_CYAN "%.1f" ANSI_COLOR_BLUE "" ANSI_COLOR_CYAN "%%" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, brightness);
         }
     } else {
         // Turn off - keep current color but set brightness to 0
@@ -847,7 +971,7 @@ void AppMqttClient::handleHomeAssistantCommand(const String& message) {
         hsv[F("s")] = cur_s;             // Keep as 0-100 percentage
         hsv[F("v")] = 0;                 // Turn off (0%)
         
-        debug_i("HA: Turning OFF - keeping current color, setting V to 0%%");
+        debug_i(ANSI_COLOR_BLUE "HA: Turning OFF - keeping current color, setting V to 0" ANSI_COLOR_CYAN "%%" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET);
     }
     
     root[F("cmd")] = F("fade");
@@ -856,21 +980,24 @@ void AppMqttClient::handleHomeAssistantCommand(const String& message) {
     int transition_ms = 500;  // Default 500ms
     if (doc.containsKey(F("transition"))) {
         transition_ms = doc[F("transition")].as<int>() * 1000;  // Convert seconds to milliseconds
-        debug_i("HA: Transition time: %d ms", transition_ms);
+        debug_i(ANSI_COLOR_BLUE "HA: Transition time: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " ms" ANSI_COLOR_RESET, transition_ms);
     }
     root[F("t")] = transition_ms;
     
     String ledCommand = Json::serialize(root);
-    debug_i("HA: Sending to LED controller: %s", ledCommand.c_str());
-    
-    // Process the command through your existing system
+    debug_i(ANSI_COLOR_BLUE "HA: Sending to LED controller: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, ledCommand.c_str());
+
+    if(!app.api) {
+        debug_w(ANSI_COLOR_YELLOW "HA command ignored: api not initialized" ANSI_COLOR_RESET);
+        return;
+    }
+
+    // Route through Api so command marshalling stays centralized while internals evolve.
     String errorMsg;
-    app.jsonproc.onColor(ledCommand, errorMsg, false);
-    
-    if (errorMsg.length() > 0) {
-        debug_e("HA: LED controller error: %s", errorMsg.c_str());
+    if(!app.api->dispatchCommand(F("color"), root, errorMsg, false)) {
+        debug_e(ANSI_COLOR_RED "HA: LED controller error: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED "" ANSI_COLOR_RESET, errorMsg.c_str());
     } else {
-        debug_i("HA: LED controller command processed successfully");
+        debug_i(ANSI_COLOR_BLUE "HA: LED controller command processed successfully" ANSI_COLOR_RESET);
     }
     
     // Publish state update after processing

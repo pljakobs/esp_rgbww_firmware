@@ -33,9 +33,16 @@
 #include <VersionListener.h>
 #include <FlashString/Stream.hpp>
 #include <fileMap.h>
+#include <apihandler.h>
+#if defined(ESP8266)
+  #include <osapi.h>
+#endif
+
+#ifdef RSYSLOG
 #ifndef SMING_RELEASE
 #include <MultiOutputStream.h>
 #include <udpSyslogStream.h>
+#endif
 #endif
 
 #if ARCH_ESP8266
@@ -95,6 +102,21 @@ static void onOsMessage(OsMessage& msg)
 #endif
 
 #ifdef ARCH_ESP8266
+extern "C" {
+
+	uint32_t __stack_chk_guard = 0x00000a0d; // Canary reference value
+
+	void __attribute__((noreturn)) __stack_chk_fail(void) {
+	    // Custom stack overflow handling
+	    os_printf("FATAL: Stack protection canary check failed!\n");
+	    system_restart();
+	    while (1) {} // Hold until hardware WDT triggers if reset fails
+	}
+
+}
+#endif
+
+#ifdef ARCH_ESP8266
 
 // include partition file  and rboot for initial OTA
 namespace
@@ -132,9 +154,10 @@ extern "C" void __wrap_user_pre_init(void)
 //         + excvaddr(4) + depc(4) + stackBase(4) + stackCount(4)
 //         + stackWords[53](212) = 256 bytes exactly
 // Output format is compatible with Sming decode-stacktrace.py.
-#define CRASH_RTC_SLOT    64
-#define CRASH_RTC_MAGIC   0xDEADC0DEu
-#define CRASH_STACK_WORDS 54
+#define CRASH_RTC_SLOT         68 // Moved from 64 to avoid rBoot collision
+#define CRASH_RTC_MAGIC 0xDEADC0DEu
+#define CRASH_RTC_MAGIC_OVERFLOW 0xBAD57AC0u
+#define CRASH_STACK_WORDS 50
 
 struct CrashDump {
 	uint32_t magic;
@@ -142,11 +165,11 @@ struct CrashDump {
 	uint32_t exccause;
 	uint32_t epc1, epc2, epc3;
 	uint32_t excvaddr, depc;
-	uint32_t stackBase;   // sp at crash time — needed for decode-stacktrace address column
+	uint32_t stackBase;
 	uint32_t stackCount;
 	uint32_t stackWords[CRASH_STACK_WORDS];
 };
-static_assert(sizeof(CrashDump) == 256, "CrashDump must fit exactly in RTC user memory");
+static_assert(sizeof(CrashDump) == 240, "CrashDump must fit safely between slot 68 and 127");
 
 static CrashDump g_crashDump;
 static bool g_crashDumpValid = false;
@@ -155,31 +178,114 @@ static bool g_crashDumpValid = false;
 // Keep it minimal: only SDK primitive writes are safe here.
 extern "C" void custom_crash_callback(struct rst_info* ri, uint32_t stack, uint32_t stack_end)
 {
-	CrashDump dump{};
-	dump.magic    = CRASH_RTC_MAGIC;
-	dump.reason   = ri->reason;
-	dump.exccause = ri->exccause;
-	dump.epc1     = ri->epc1;
-	dump.epc2     = ri->epc2;
-	dump.epc3     = ri->epc3;
-	dump.excvaddr = ri->excvaddr;
-	dump.depc     = ri->depc;
-	dump.stackBase = stack;
+    CrashDump dump{};
+    dump.reason   = ri->reason;
+    dump.exccause = ri->exccause;
+    dump.epc1     = ri->epc1;
+    dump.epc2     = ri->epc2;
+    dump.epc3     = ri->epc3;
+    dump.excvaddr = ri->excvaddr;
+    dump.depc     = ri->depc;
+    dump.stackBase = stack;
 
-	uint32_t count = 0;
-	for(uint32_t addr = stack; addr < stack_end && count < CRASH_STACK_WORDS; addr += 4) {
-		dump.stackWords[count++] = *reinterpret_cast<const uint32_t*>(addr);
-	}
-	dump.stackCount = count;
+    // Check if the stack pointer is within valid ESP8266 DRAM bounds
+    if (stack >= 0x3FFE8000u && stack < 0x40000000u) {
+        dump.magic = CRASH_RTC_MAGIC;
+        
+        uint32_t count = 0;
+        for (uint32_t addr = stack; addr < stack_end && count < CRASH_STACK_WORDS; addr += 4) {
+            dump.stackWords[count++] = *reinterpret_cast<const uint32_t*>(addr);
+        }
+        dump.stackCount = count;
+    } else {
+        // Stack pointer is out-of-bounds (Stack Overflow / Corruption)
+        dump.magic = CRASH_RTC_MAGIC_OVERFLOW;
+        dump.stackCount = 0; // Skip reading invalid memory to avoid nested exception
+    }
 
-	system_rtc_mem_write(CRASH_RTC_SLOT, &dump, sizeof(dump));
+    system_rtc_mem_write(CRASH_RTC_SLOT, &dump, sizeof(dump));
 }
 
 #endif // ARCH_ESP8266
 
+// ─── Crash-loop rollback guard ───────────────────────────────────────────────
+// If the firmware crash-reboots repeatedly in quick succession we assume the
+// running ROM is broken and boot the other slot instead. The counters live in
+// memory that survives a reset (RTC on ESP8266/ESP32) but is cleared by a real
+// power-cycle, so pulling the plug always yields a clean slate.
+//
+//  - CRASHLOOP_THRESHOLD consecutive unexpected reboots -> switch to the other ROM
+//    ("unexpected" = anything that isn't a deliberate software restart or a
+//    deep-sleep wake; reset-reason codes are too unreliable on the ESP8266 to
+//    tell a real crash apart from a hang/brown-out, so we count them all).
+//  - counters are cleared once the firmware has run for CRASHLOOP_HEALTHY_MS
+//    without rebooting (Application::markFirmwareHealthy), which is what enforces
+//    the "within x seconds" window.
+//  - at most CRASHLOOP_MAX_SWITCHES automatic switches per episode, so two broken
+//    ROMs don't ping-pong forever (the device then just keeps rebooting in place
+//    until it is power-cycled, re-flashed, or OTA'd to a known-good build).
+//
+// Override any of the numbers from component.mk via -D... if desired.
+#ifndef CRASHLOOP_THRESHOLD
+#define CRASHLOOP_THRESHOLD 5
+#endif
+#ifndef CRASHLOOP_HEALTHY_MS
+#define CRASHLOOP_HEALTHY_MS 60000
+#endif
+#ifndef CRASHLOOP_MAX_SWITCHES
+#define CRASHLOOP_MAX_SWITCHES 2
+#endif
+#define CRASHLOOP_MAGIC 0xC1A5107Du
+
+struct CrashLoopGuard {
+	uint32_t magic;
+	uint16_t bootCount;   // consecutive unexpected reboots (not a deliberate restart)
+	uint16_t switchCount; // automatic ROM switches this episode
+};
+
+#if defined(ARCH_ESP8266)
+// RTC user memory blocks: the crash dump uses 64-127 and rboot uses 64, so the
+// upper half (128-191) of the 512-byte user area is free for the guard.
+#define CRASHLOOP_RTC_SLOT 128
+static CrashLoopGuard loadCrashGuard()
+{
+	CrashLoopGuard g{};
+	system_rtc_mem_read(CRASHLOOP_RTC_SLOT, &g, sizeof(g));
+	return g;
+}
+static void saveCrashGuard(const CrashLoopGuard& g)
+{
+	system_rtc_mem_write(CRASHLOOP_RTC_SLOT, &g, sizeof(g));
+}
+#elif defined(ARCH_ESP32)
+#include <esp_attr.h>
+// RTC slow memory: retained across software/watchdog/panic resets, but holds
+// garbage after a power-on/brown-out (hence the magic check below).
+static RTC_NOINIT_ATTR CrashLoopGuard rtcCrashGuard;
+static CrashLoopGuard loadCrashGuard()
+{
+	return rtcCrashGuard;
+}
+static void saveCrashGuard(const CrashLoopGuard& g)
+{
+	rtcCrashGuard = g;
+}
+#else
+// Host / other: no persistence across resets (fine for emulator testing).
+static CrashLoopGuard hostCrashGuard{};
+static CrashLoopGuard loadCrashGuard()
+{
+	return hostCrashGuard;
+}
+static void saveCrashGuard(const CrashLoopGuard& g)
+{
+	hostCrashGuard = g;
+}
+#endif
+
 Application app;
 
-#ifndef SMING_RELEASE
+#if !(defined SMING_RELEASE) && (defined RSYSLOG)
 MultiOutputStream debugStream;
 
 size_t debugStreamOutputCallback(const char* buffer, unsigned int length)
@@ -190,20 +296,49 @@ size_t debugStreamOutputCallback(const char* buffer, unsigned int length)
 
 void onReady()
 {
-	
+	#ifdef ARCH_HOST
+	// Consume all but ~20kB of the (tracked) heap so the emulator runs close to
+	// the low-memory conditions seen on the device.
+	//	
+	// Getting the compiler to actually perform (and keep) the allocation needs
+	// two tricks:
+	//   1. A compiler barrier on the returned pointer, so the escaped value is
+	//      considered "used" and the malloc call can't be dead-code eliminated.
+	//   2. memset with a NON-zero value; memset-to-zero right after malloc gets
+	//      folded into calloc and then dropped as a dead store, which is why the
+	//      tracked free heap previously never moved.
+	static uint8_t* heapHog = nullptr;
+	auto free = system_get_free_heap_size();
+	if (free>20000){
+		size_t take = free - 24000;
+		debug_i(ANSI_COLOR_BLUE "onReady: free heap %d, allocating %d bytes to squeeze heap to ~20k" ANSI_COLOR_RESET, free, (int)take);
+		heapHog = static_cast<uint8_t*>(malloc(take));
+		asm volatile("" : : "g"(heapHog) : "memory"); // don't let the allocation be optimised away
+		if (heapHog) {
+			memset(heapHog, 0xA5, take); // non-zero so it isn't turned back into an elidable calloc
+			asm volatile("" : : : "memory");
+		}
+		debug_i(ANSI_COLOR_BLUE "onReady: heapHog allocated %d bytes, free heap now %d" ANSI_COLOR_RESET, (int)take, system_get_free_heap_size());
+	}
+	#endif
 	//System.setCpuFrequencye(CF_160MHz);
+	debug_i(ANSI_COLOR_BLUE "getting reset info from rtc" ANSI_COLOR_RESET);
 	app.rtc_info = system_get_rst_info();
+	debug_i(ANSI_COLOR_BLUE "Reboot reason: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE ", exccause: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, app.rtc_info->reason, app.rtc_info->exccause);
 	
 #ifdef ARCH_ESP8266
 	app.readCrashDump();
 	osMessageInterceptor.begin(onOsMessage);
-	debug_i("starting os message interceptor");
+	debug_i(ANSI_COLOR_BLUE "starting os message interceptor" ANSI_COLOR_RESET);
 #endif
+
+	// Crash-loop rollback: may switch ROM and restart before we bring anything up.
+	app.checkCrashLoop();
 
 #ifdef ARCH_ESP32
 	esp_wifi_set_ps (WIFI_PS_NONE);
 #endif
-#ifndef SMING_RELEASE
+#if !(defined SMING_RELEASE) && (defined RSYSLOG)
 	Serial.systemDebugOutput(false); // disable direct Serial hook; output now goes through debugStreamOutputCallback only
 	auto oldCallback = m_setPuts(&debugStreamOutputCallback);
 	debugStream.addStream(&Serial, false);
@@ -236,10 +371,8 @@ void init(){
 	Serial.systemDebugOutput(true);
 	
 	// System.setCpuFrequency(CpuCycleClockFast::cpuFrequency());
-
-	Serial.print(_F("Available heap: "));
-	Serial.println(app.getFreeHeapSize());
-	Serial.println("===starting cpu profiling===");
+	debug_i(ANSI_COLOR_BLUE "Available heap: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "\r\n" ANSI_COLOR_RESET, app.getFreeHeapSize());
+	debug_i(ANSI_COLOR_BLUE "===starting cpu profiling===" ANSI_COLOR_RESET);
 	onReady(); // this is just in preparation for cpu profiling
 }
 
@@ -266,62 +399,96 @@ Application::~Application()
 
 void Application::uptimeCounter()
 {
-	++_uptimeMinutes;
-	if (_uptimeMinutes % 10 ==0){
-		_minimumHeap10min=system_get_free_heap_size();
-		_HeapLowErr10min=0;
+	++_uptimeSeconds;
+	if (+_uptimeSeconds % 600 < 10) { // every 10 minutes
+		_minimumHeap10min = system_get_free_heap_size();
+		_HeapLowErr10min = 0;
 	}
 	
 }
 
 void Application::checkRam()
 {
-	// Create JSON object with uptime and free heap
-	StaticJsonDocument<256> doc;
-	time_t now = time(nullptr); // should be unix time if ntp is running
-	doc[F("id")] = (uint32_t)system_get_chip_id();
-	doc[F("time")] = now;	
-	doc[F("uptime")] = _uptimeMinutes*60;
-	doc[F("ip")] = WifiStation.getIP().toString();
-	doc[F("freeHeap")] = getFreeHeapSize();
-	doc[F("minimumfreeHeapRuntime")]=_minimumHeapUptime;
-	doc[F("minimumfreeHeap10min")]=_minimumHeap10min;
-	doc[F("heapLowErrUptime")]=_HeapLowErrUptime;
-	doc[F("heapLowErr10min")]=_HeapLowErr10min;
-	doc[F("firmware")] = fw_git_version;
-	doc[F("build")] = BUILD_TYPE;
-	doc[F("soc")] = SOC;
-	doc[F("neighbours")]=app.controllers->getVisibleCount();
-	
-	if (app.rtc_info->reason!= 0 && !_reboot_reported)
+	// generate and send memory update to fronend
 	{
-		AppConfig::Network::Telemetry telemetryCfg(*cfg);
-
-		doc[F("reboot")][F("number")] = telemetryCfg.getNumReboots();
-		doc[F("reboot")][F("reason")] = app.rtc_info->reason;
-		doc[F("reboot")][F("exccause")] = app.rtc_info->exccause;
-		doc[F("reboot")][F("epc1")] = app.rtc_info->epc1;
-		doc[F("reboot")][F("epc2")] = app.rtc_info->epc2;
-		doc[F("reboot")][F("epc3")] = app.rtc_info->epc3;
-		doc[F("reboot")][F("excvaddr")] = app.rtc_info->excvaddr;
-		doc[F("reboot")][F("depc")] = app.rtc_info->depc;
-	}
-	doc[F("mDNS")][F("received")] = _mDNS_received;
-	doc[F("mDNS")][F("replies")] = _mDNS_replies;
-
-	debug_i("Free heap: %d, uptime: %d", getFreeHeapSize(), millis() / 1000);
-	if (!telemetryClient.stat(doc))
-	{
-		debug_i("Failed to publish monitor data to telemetry MQTT");
-		/* 
-		if (!telemetryClient.isRunning()){
-			debug_i("restarting telemetry MQTT client");
-			telemetryClient.reconnect();
+		debug_i(ANSI_COLOR_BLUE "Free heap: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE ", uptime: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, getFreeHeapSize(), millis() / 1000);
+		auto& codec = rpcCodec();
+		Jsonrpc::Root root(codec.db());
+		if(auto update = root.update()){
+			auto runtimeInfo = update.toRuntimeInfo();
+			runtimeInfo.setUptime(_uptimeSeconds );
+			runtimeInfo.setHeapFree(getFreeHeapSize());
+			runtimeInfo.setMinfreeHeapRuntime(_minimumHeapUptime);
+			runtimeInfo.setMinfreeHeap10min(_minimumHeap10min);
+			runtimeInfo.setHeapLowErrUptime(_HeapLowErrUptime);
+			runtimeInfo.setHeapLowErr10min(_HeapLowErr10min);	
+			runtimeInfo.setActiveConnections(webserver.getWebsocketConnectionCount());
 		}
-		*/
+		String runtimeNotification;
+		if(codec.render({0, JsonRPC::Message::Kind::notification, F("runtime_info")}, root.asRuntimeInfo(), runtimeNotification)) {
+			debug_i(ANSI_COLOR_GREEN "checkRam: runtime info rendered successfully" ANSI_COLOR_RESET);
+			webserver.wsSendRuntimeInfo(runtimeNotification.c_str(), runtimeNotification.length());
+		} else {
+			debug_e(ANSI_COLOR_RED "checkRam: runtime info render failed, skipping tick" ANSI_COLOR_RESET);
+		}
+	}
+}
+	
+void Application::sendTelemetry()
+{
+	// generate and send telemetry 
+	{
+		const uint32_t freeHeap = getFreeHeapSize();
+		const uint32_t rebootReason = app.rtc_info->reason;
+		AppConfig::Network::Telemetry telemetryCfg(*cfg);
+		auto& codec = rpcCodec();
+		Jsonrpc::Root root(codec.db());
+		if(auto update = root.update()) {
+			auto telemetry = update.toTelemetryParams();
+			telemetry.setId(system_get_chip_id());
+			telemetry.setTime(time(nullptr));
+			telemetry.setUptime(+_uptimeSeconds * 60);
+			telemetry.setIp(WifiStation.getIP().toString());
+			telemetry.setFreeHeap(freeHeap);
+			telemetry.setMinHeapRuntime(_minimumHeapUptime);
+			telemetry.setMinHeap10min(_minimumHeap10min);
+			telemetry.setHeapLowErrUptime(_HeapLowErrUptime);
+			telemetry.setHeapLowErr10min(_HeapLowErr10min);
+			telemetry.setFirmware(fw_git_version);
+			telemetry.setBuild(BUILD_TYPE);
+			telemetry.setSoc(SOC);
+			telemetry.setNeighbours(app.controllers->getVisibleCount());
+			telemetry.reboot.setNumber(telemetryCfg.getNumReboots());
+			telemetry.reboot.setReason(rebootReason);
+			telemetry.reboot.setExccause(app.rtc_info->exccause);
+			telemetry.reboot.setEpc1(app.rtc_info->epc1);
+			telemetry.reboot.setEpc2(app.rtc_info->epc2);
+			telemetry.reboot.setEpc3(app.rtc_info->epc3);
+			telemetry.reboot.setExcvaddr(app.rtc_info->excvaddr);
+			telemetry.reboot.setDepc(app.rtc_info->depc);
+			telemetry.mDNS.setReceived(_mDNS_received);
+			telemetry.mDNS.setReplies(_mDNS_replies);
+		}
+		String telemetryPayload;
+		if(!codec.renderPayload(root.asTelemetryParams(), telemetryPayload)) {
+			debug_e(ANSI_COLOR_RED "checkRam: telemetry render failed, skipping tick" ANSI_COLOR_RESET);
+			return;
+		}
+		
+		if (!telemetryClient.stat(telemetryPayload))
+		{
+			debug_i(ANSI_COLOR_BLUE "Failed to publish monitor data to telemetry MQTT" ANSI_COLOR_RESET);
+			/* 
+			if (!telemetryClient.isRunning()){
+				debug_i(ANSI_COLOR_BLUE "restarting telemetry MQTT client" ANSI_COLOR_RESET);
+				telemetryClient.reconnect();
+			}
+			*/
+		}
 	}
 	
 	if (app.rtc_info->reason!= 0 && !_reboot_reported){
+		debug_i(ANSI_COLOR_BLUE "Reboot reason: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE ", exccause: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, app.rtc_info->reason, app.rtc_info->exccause);
 		_reboot_reported=true;	
 		AppConfig::Network::Telemetry telemetryCfg(*cfg);
 		auto reboots=telemetryCfg.getNumReboots();
@@ -339,9 +506,15 @@ size_t Application::getFreeHeapSize(){
 	return fh;
 }
 
-bool Application::checkHeap( size_t minHeap)
+bool Application::checkHeap( uint32_t minHeap)
 {
-	if(getFreeHeapSize()<minHeap){
+	uint32_t fh = getFreeHeapSize();
+	if (fh<6000)
+	{
+		// minimize heap usage by increasing the minHeap threshold when we're critical anyway. This should preserve some heap for receive packet buffers and thus improve stability
+		minHeap=minHeap*1.5;
+	}
+	if(fh<minHeap){
 		_HeapLowErrUptime++;
 		_HeapLowErr10min++;
 		return false;
@@ -351,81 +524,91 @@ bool Application::checkHeap( size_t minHeap)
 
 void Application::init()
 {
-	debug_i("ESP RGBWW Controller Version %s\r\n", fw_git_version);
-	debug_i("Sming Version: %s\r\n", sming_git_version);
+	debug_i(ANSI_COLOR_BLUE "ESP RGBWW Controller Version " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "\r\n" ANSI_COLOR_RESET, fw_git_version);
+	debug_i(ANSI_COLOR_BLUE "Sming Version: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "\r\n" ANSI_COLOR_RESET, sming_git_version);
 
-	debug_i("Platform: %s\r\n", SOC);
+	debug_i(ANSI_COLOR_BLUE "Platform: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "\r\n" ANSI_COLOR_RESET, SOC);
 
 #if defined(ARCH_ESP8266) //|| defined(ESP32)
 	/*
     * verify for new partition layout
     */
-	debug_i("application init, \nspiffs0 found: %s\nspiffs1 found: %s\nlfs1 found: %s\nlfs1 found: %s ",
+	debug_i(ANSI_COLOR_BLUE "application init, \nspiffs0 found: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "\nspiffs1 found: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "\nlfs1 found: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "\nlfs1 found: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " " ANSI_COLOR_RESET,
 			Storage::findPartition(F("spiffs0")) ? F("true") : F("false"),
 			Storage::findPartition(F("spiffs1")) ? F("true") : F("false"),
 			Storage::findPartition(PART0) ? F("true") : F("false"),
 			Storage::findPartition(F("lfs1")) ? F("true") : F("false"));
 	if(!Storage::findPartition(PART0) && !Storage::findPartition(F("lfs1"))) {
 		// mount existing data partition
-		debug_i("application init (with spiffs) => Mounting file system");
+		debug_i(ANSI_COLOR_BLUE "application init (with spiffs) => Mounting file system" ANSI_COLOR_RESET);
 	
-		debug_i("application init => switching file systems - partition 1");
+		debug_i(ANSI_COLOR_BLUE "application init => switching file systems - partition 1" ANSI_COLOR_RESET);
 		ota.switchPartitions();
-		debug_i("application init => saving config");
+		debug_i(ANSI_COLOR_BLUE "application init => saving config" ANSI_COLOR_RESET);
 	}
 
 #endif
 
-	//load settings
-	_uptimetimer.initializeMs(60000, TimerDelegate(&Application::uptimeCounter, this)).start();
-	_checkRamTimer.initializeMs(30000, TimerDelegate(&Application::checkRam, this)).start();
+	//initialize timers
+	_uptimetimer.initializeMs(1000, TimerDelegate(&Application::uptimeCounter, this)).start();
+	_checkRamTimer.initializeMs(5000, TimerDelegate(&Application::checkRam, this)).start();
+	_sendTelemetryTimer.initializeMs(60000, TimerDelegate(&Application::sendTelemetry, this)).start();
+
+	// Once we've stayed up this long without crashing, declare the running ROM
+	// healthy and clear the crash-loop counters (enforces the "within x seconds" window).
+	_crashHealthyTimer.initializeMs(CRASHLOOP_HEALTHY_MS, TimerDelegate(&Application::markFirmwareHealthy, this)).startOnce();
 
 #ifdef ARCH_ESP8266
 	// load boot information
 	uint8 bootmode, bootslot;
-	debug_i("Application::init - loading boot info");
+	debug_i(ANSI_COLOR_BLUE "Application::init - loading boot info" ANSI_COLOR_RESET);
 	if(rboot_get_last_boot_mode(&bootmode)) {
 		if(bootmode == MODE_TEMP_ROM) {
-			debug_i("Application::init - temp boot, rebooting after OTA");
+			debug_i(ANSI_COLOR_BLUE "Application::init - temp boot, rebooting after OTA" ANSI_COLOR_RESET);
 			System.restart();
 		} else {
-			debug_i("Application::init - normal boot");
+			debug_i(ANSI_COLOR_BLUE "Application::init - normal boot" ANSI_COLOR_RESET);
 		}
 		_bootmode = bootmode;
 	}
 #endif
 
-debug_i("Application::init - check running partition");
+debug_i(ANSI_COLOR_BLUE "Application::init - check running partition" ANSI_COLOR_RESET);
+// TODO(ota-integration): avoid reaching into ota internals (app.ota.ota).
+// Use only ApplicationOTA wrapper methods to keep module boundaries stable.
 auto part=app.ota.ota.getRunningPartition();
-debug_i("Application::init - running partition %s", part.name());
+debug_i(ANSI_COLOR_BLUE "Application::init - running partition " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, part.name());
 
-#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
+#if defined(ARCH_ESP8266) || defined(ARCH_ESP32) || defined(ARCH_HOST)
+	// Mount the data filesystem on every architecture. On Host this drives the
+	// emulated flash backing file + LittleFS (the same code path as the device),
+	// instead of the host-OS passthrough which bypassed LittleFS and the OTA
+	// staging logic entirely.
 	mountfs(getRomSlot());
 	// ToDo - rework mounting filesystem
 	if(_fs_mounted) {
 		Directory dir;
 		if(dir.open()) {
 			while(dir.next()) {
-				Serial.print("  ");
+				Serial.print(_F("  "));
 				Serial.println(dir.stat().name);
 			}
 		}
 		Serial << dir.count() << _F(" files found") << endl << endl;
 	}
+#endif
 
-//#if defined(ARCH_ESP8266) || defined(ESP32)
+	// TODO(ota-integration): checkAtBoot() is also called later in init().
+	// Consolidate to a single invocation point and document ordering constraints.
+#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
 	app.ota.checkAtBoot();
-//#endif
 #endif
 	(void)getFreeHeapSize(); // sample heap after fs mount + OTA check
-#ifdef ARCH_HOST
-	debug_i("mounting host file system");
-	fileSetFileSystem(&IFS::Host::getFileSystem());
-#endif
 
 	// initialize config and data
 	cfg =  std::make_unique<AppConfig>(configDB_PATH);
 	data = std::make_unique<AppData>(dataDB_PATH);
+	api = std::make_unique<Api>();
 	controllers = std::make_unique<Controllers>();
 	(void)getFreeHeapSize(); // sample heap after ConfigDB + Controllers construction
 
@@ -438,16 +621,16 @@ debug_i("Application::init - running partition %s", part.name());
 		AppConfig::Hardware hardware(*cfg);
 		uint32_t currentVersion=hardware.getVersion();
 
-		debug_i("make pinconfig stream");
+		debug_i(ANSI_COLOR_BLUE "make pinconfig stream" ANSI_COLOR_RESET);
 		FSTR::Stream fs(fileMap["config/pinconfig.json"]);	
 		//Serial.println(fileMap["config/pinconfig.json"]);
-		debug_i("get file Version");
+		debug_i(ANSI_COLOR_BLUE "get file Version" ANSI_COLOR_RESET);
 		uint32_t fileVersion=getVersion(fs);
-		debug_i("fileVersion %i", fileVersion);	
+		debug_i(ANSI_COLOR_BLUE "fileVersion " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, fileVersion);	
 		if(fileVersion == -1){
-			debug_i("Application::init - no version found in pinconfig");
+			debug_i(ANSI_COLOR_BLUE "Application::init - no version found in pinconfig" ANSI_COLOR_RESET);
 		}
-		debug_i("Application::init - hardware version: %d, file version: %d", currentVersion, fileVersion);
+		debug_i(ANSI_COLOR_BLUE "Application::init - hardware version: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE ", file version: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, currentVersion, fileVersion);
 		if(fileVersion>currentVersion){
 			if(auto hardwareUpdate = hardware.update()){
 				hardwareUpdate.importFromStream(ConfigDB::Json::format, fs);
@@ -472,10 +655,10 @@ debug_i("Application::init - running partition %s", part.name());
 				}
 			}
 		}
-		debug_i("Application::init - clear pin %d", clearPin);
+		debug_i(ANSI_COLOR_BLUE "Application::init - clear pin " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, clearPin);
 		if(clearPin >= 0) {
 			pinMode(clearPin, INPUT);
-			debug_i("Application::init - clear pin set to input");
+			debug_i(ANSI_COLOR_BLUE "Application::init - clear pin set to input" ANSI_COLOR_RESET);
 		
 			_clearPin = clearPin;
             _resetPinTimer.initializeMs(100, TimerDelegate(&Application::pollResetButton, this)).start();
@@ -483,7 +666,7 @@ debug_i("Application::init - running partition %s", part.name());
 		#if !defined(ARCH_HOST)
 
 			if(clearPin >=0 && digitalRead(clearPin) < 1) {
-				debug_i("CLR button low - resetting settings");
+				debug_i(ANSI_COLOR_BLUE "CLR button low - resetting settings" ANSI_COLOR_RESET);
 				// ConfigDB - decide if to reload defaults or load a specific saved version
 				// perhaps by holding the clear pin low for a certain time along with blink codes?
 				// cfg.reset();
@@ -493,7 +676,7 @@ debug_i("Application::init - running partition %s", part.name());
 		#endif
 	}
 
-	debug_i("Application::init - hardware config loaded");
+	debug_i(ANSI_COLOR_BLUE "Application::init - hardware config loaded" ANSI_COLOR_RESET);
 	
 
 // check if we need to reset settings
@@ -501,17 +684,20 @@ debug_i("Application::init - running partition %s", part.name());
 
 	// check ota
 #ifdef ARCH_ESP8266
+	// TODO(ota-integration): duplicate boot-state check; review with the earlier
+	// checkAtBoot() call and keep exactly one call site unless two-phase behavior
+	// is explicitly required and documented.
 	ota.checkAtBoot();
 #endif
 	
 	{
-		debug_i("application init => checking ConfigDB");
+		debug_i(ANSI_COLOR_BLUE "application init => checking ConfigDB" ANSI_COLOR_RESET);
 		AppConfig::General general(*cfg);
-		debug_i("application init => config is %s", general.getIsInitialized()?"initialized":"not initialized");
+		debug_i(ANSI_COLOR_BLUE "application init => config is " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, general.getIsInitialized()?"initialized":"not initialized");
 		if(!general.getIsInitialized()) {
-			debug_i("application init => reading config");
+			debug_i(ANSI_COLOR_BLUE "application init => reading config" ANSI_COLOR_RESET);
 
-			debug_i("Application::init - first run");
+			debug_i(ANSI_COLOR_BLUE "Application::init - first run" ANSI_COLOR_RESET);
 			_first_run = true;
 
 			if(auto generalUpdate = general.update()) {
@@ -519,7 +705,7 @@ debug_i("Application::init - running partition %s", part.name());
 			}
 
 		} else {
-			debug_i("ConfigDB already initialized. resetting hardware definition");
+			debug_i(ANSI_COLOR_BLUE "ConfigDB already initialized. resetting hardware definition" ANSI_COLOR_RESET);
 			{
 			if (auto generalUpdate= general.update()){
 				generalUpdate.supportedColorModels.loadArrayDefaults();
@@ -548,37 +734,30 @@ debug_i("Application::init - running partition %s", part.name());
 			snprintf(myName_buf, sizeof(myName_buf), "rgbww-%x", myId);
 			myName = myName_buf;
 		}
-		app.controllers->addOrUpdate( myId,myName, WifiStation.getIP().toString(), 1200); // add myself to the list
+		app.controllers->addOrUpdate( myId,myName, WifiStation.getIP().toString(), "", Controllers::HostType::HOST_TYPE_CONTROLLER); // add myself to the list
 	}
 
-	/*
-	Serial << endl << _F("** Stream **") << endl;
-	Serial << "#########################################################################################"<<endl;
-	cfg->exportToStream(ConfigDB::Json::format, Serial);
-	Serial <<endl;
-	Serial << "#########################################################################################"<<endl;
-	*/
 
 	
 	/// initialize led ctrl
 	rgbwwctrl.init();
-	debug_i("ledctrl initialized");
+	debug_i(ANSI_COLOR_BLUE "ledctrl initialized" ANSI_COLOR_RESET);
 	(void)getFreeHeapSize(); // sample heap after LED ctrl init (PWM + color config)
 
 	initButtons();
-	debug_i("buttons initialized");
+	debug_i(ANSI_COLOR_BLUE "buttons initialized" ANSI_COLOR_RESET);
 
 	// initialize webserver
 	app.webserver.init();
-	debug_i("webserver initialized");
+	debug_i(ANSI_COLOR_BLUE "webserver initialized" ANSI_COLOR_RESET);
 	(void)getFreeHeapSize(); // sample heap after route registration
 
-	debug_i("pin config string %s", fileMap["pin_config"]);
+	debug_i(ANSI_COLOR_BLUE "pin config string " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, fileMap["pin_config"]);
 
-	debug_i("start network init");
+	debug_i(ANSI_COLOR_BLUE "start network init" ANSI_COLOR_RESET);
 	// initialize networking
 	network.init();
-	debug_i("network initizalized, ssid: %s", WifiStation.getSSID().c_str());
+	debug_i(ANSI_COLOR_BLUE "network initizalized, ssid: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, WifiStation.getSSID().c_str());
 	(void)getFreeHeapSize(); // sample heap after WiFi init
 	{
 		AppConfig::Network network(*cfg);
@@ -587,10 +766,12 @@ debug_i("Application::init - running partition %s", part.name());
 			uint16_t port = network.rsyslog.getPort();
 			AppConfig::General general(*cfg);
 			String myName=general.getDeviceName();
-			debug_i("Initializing remote syslog with host %s and port %d", host.c_str(), port);
-#ifndef SMING_RELEASE
+			debug_i(ANSI_COLOR_BLUE "Initializing remote syslog with host " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " and port " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, host.c_str(), port);
+#if !(defined SMING_RELEASE) && (defined RSYSLOG)
 			app.udpSyslogStream.begin(host, port, myName, F("Lightinator"));
 #endif
+		} else {
+			debug_i(ANSI_COLOR_BLUE "Remote syslog disabled" ANSI_COLOR_RESET);
 		}
 	}
 	
@@ -600,7 +781,7 @@ void Application::initButtons()
 {
 	Vector<String> buttons;
 	{
-		debug_i("Application::initButtons");
+		debug_i(ANSI_COLOR_BLUE "Application::initButtons" ANSI_COLOR_RESET);
 		AppConfig::General general(*cfg);
 
 		if(general.getButtonsConfig().length() <= 0)
@@ -608,7 +789,7 @@ void Application::initButtons()
 
 		String buttonsConfig = general.getButtonsConfig();
 
-		debug_i("Configuring buttons using string: '%s'", buttonsConfig.c_str());
+		debug_i(ANSI_COLOR_BLUE "Configuring buttons using string: '" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "'" ANSI_COLOR_RESET, buttonsConfig.c_str());
 
 		splitString(buttonsConfig, ',', buttons);
 	} // end of ConfigDB general context
@@ -619,10 +800,10 @@ void Application::initButtons()
 
 		uint32_t pin = buttons[i].toInt();
 		if(pin >= _lastToggles.size()) {
-			debug_i("Pin %d is invalid. Max is %d", pin, _lastToggles.size() - 1);
+			debug_i(ANSI_COLOR_BLUE "Pin " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " is invalid. Max is " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, pin, _lastToggles.size() - 1);
 			continue;
 		}
-		debug_i("Configuring button: '%s'", buttons[i].c_str());
+		debug_i(ANSI_COLOR_BLUE "Configuring button: '" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "'" ANSI_COLOR_RESET, buttons[i].c_str());
 
 		_lastToggles[pin] = 0ul;
 
@@ -634,13 +815,27 @@ void Application::initButtons()
 // Will be called when system initialization was completed
 void Application::startServices()
 {
-	debug_i("Application::startServices");
+	debug_i(ANSI_COLOR_BLUE "Application::startServices" ANSI_COLOR_RESET);
+
+	app.reportCrashDump(); // report crash dump if available
 
 	rgbwwctrl.start();
-	webserver.start();
+	static Timer webserverStartTimer;
+    webserverStartTimer.initializeMs(4000, TimerDelegate([this]() {
+        debug_i(ANSI_COLOR_BLUE "Application::startServices - starting webserver after delay" ANSI_COLOR_RESET);
+        webserver.start();
 
+        {
+            debug_i(ANSI_COLOR_BLUE "Application::startServices - starting NTP" ANSI_COLOR_RESET);
+            AppConfig::Root appcfg(*cfg);
+            if(appcfg.events.getServerEnabled()) {
+                eventserver.setEnabled(true);
+                eventserver.start(app.webserver);
+            }
+        } // end of ConfigDB root context
+    })).startOnce();
 	{
-		debug_i("Application::startServices - starting NTP");
+		debug_i(ANSI_COLOR_BLUE "Application::startServices - starting NTP" ANSI_COLOR_RESET);
 		AppConfig::Root appcfg(*cfg);
 		if(appcfg.events.getServerEnabled()) {
 			eventserver.setEnabled(true);
@@ -650,15 +845,15 @@ void Application::startServices()
 }
 void Application::startNetworkServices()
 {
-	debug_i("Application::startServices - starting mqtt");
+	debug_i(ANSI_COLOR_BLUE "Application::startServices - starting mqtt" ANSI_COLOR_RESET);
 	bool mqttEnabled = false;
 	{
 		AppConfig::Network network(*cfg);
 		AppConfig::General general(*cfg);
-		debug_i("Application::startServices - mqtt enabled: %s", network.mqtt.getEnabled() ? "true" : "false");
+		debug_i(ANSI_COLOR_BLUE "Application::startServices - mqtt enabled: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, network.mqtt.getEnabled() ? "true" : "false");
 		String mqttClientId = network.mqtt.homeassistant.getNodeId();
 		if(mqttClientId.length() > 0) {
-			debug_i("Application::startServices - mqtt client id: %s", mqttClientId.c_str());
+			debug_i(ANSI_COLOR_BLUE "Application::startServices - mqtt client id: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, mqttClientId.c_str());
 		} else {
 			if(general.getDeviceName().length() > 0) {
 				mqttClientId = general.getDeviceName();
@@ -669,7 +864,7 @@ void Application::startNetworkServices()
 		mqttEnabled = network.mqtt.getEnabled();
 	} // close ConfigDB contexts before mqttclient.init() opens its own
 	mqttclient.init(); // initialize mqtt client with node name
-	debug_i("Application::startServices - mqtt client initialized");
+	debug_i(ANSI_COLOR_BLUE "Application::startServices - mqtt client initialized" ANSI_COLOR_RESET);
 	(void)getFreeHeapSize(); // sample heap after MQTT client init
 	if(mqttEnabled) {
 		mqttclient.start();
@@ -680,7 +875,7 @@ void Application::startNetworkServices()
 
 void Application::stopServices()
 {
-	debug_i("Application::stopServices");
+	debug_i(ANSI_COLOR_BLUE "Application::stopServices" ANSI_COLOR_RESET);
 
 	// Stop timers first so no new work is queued while sockets are closing.
 	_systimer.stop();
@@ -711,60 +906,173 @@ void Application::readCrashDump()
 {
 	CrashDump dump{};
 	system_rtc_mem_read(CRASH_RTC_SLOT, &dump, sizeof(dump));
-	if(dump.magic == CRASH_RTC_MAGIC) {
+	if(dump.magic == CRASH_RTC_MAGIC || dump.magic == CRASH_RTC_MAGIC_OVERFLOW) {
 		g_crashDump = dump;
 		g_crashDumpValid = true;
-		// clear magic so we don't re-report on the next boot
+		
+		// Clear magic so it doesn't re-report on subsequent reboots
 		dump.magic = 0;
 		system_rtc_mem_write(CRASH_RTC_SLOT, &dump, sizeof(dump));
 	}
 }
 #endif
 
+void Application::checkCrashLoop()
+{
+	CrashLoopGuard g = loadCrashGuard();
+	bool reseeded = false;
+	if(g.magic != CRASHLOOP_MAGIC) {
+		// Uninitialised RTC (power-on / brown-out / first boot): start clean.
+		g.magic = CRASHLOOP_MAGIC;
+		g.bootCount = 0;
+		g.switchCount = 0;
+		reseeded = true;
+	}
+
+	const uint32_t reason = (rtc_info != nullptr) ? rtc_info->reason : uint32_t(REASON_DEFAULT_RST);
+
+	// Reset-reason codes are unreliable on the ESP8266: many hard faults (heap
+	// corruption, hangs, brown-outs) surface as a bare watchdog/unknown reset that
+	// is NOT reported as an exception. So instead of whitelisting "crash" reasons we
+	// count *every* boot that wasn't a deliberate restart, and clear the counter
+	// once the firmware has proven it can stay up (markFirmwareHealthy). Only an
+	// intentional software restart (config apply, OTA, our own ROM switch) and
+	// wake-from-deep-sleep are treated as healthy reboots.
+	const bool deliberate = (reason == REASON_SOFT_RESTART) || (reason == REASON_DEEP_SLEEP_AWAKE);
+
+	debug_i(ANSI_COLOR_BLUE "crash-loop guard: boot reason=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE " deliberate=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE " loaded count=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE "/" ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE " switches=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE " magic=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_RESET,
+			reason, (unsigned)deliberate, g.bootCount, (unsigned)CRASHLOOP_THRESHOLD, g.switchCount, reseeded ? "reseeded" : "ok");
+
+	if(deliberate) {
+		// Intentional reboot: don't hold it against the firmware. The healthy timer
+		// clears the counter once we've stayed up long enough. Persist in case we
+		// freshly seeded the magic.
+		saveCrashGuard(g);
+		return;
+	}
+
+	if(g.bootCount < 0xFFFF) {
+		g.bootCount++;
+	}
+	debug_w(ANSI_COLOR_YELLOW "crash-loop guard: unexpected reboot (reason " ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW ") count=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW "/" ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW " switches=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_RESET,
+			reason, g.bootCount, (unsigned)CRASHLOOP_THRESHOLD, g.switchCount);
+
+	if(g.bootCount < CRASHLOOP_THRESHOLD) {
+		saveCrashGuard(g);
+		return;
+	}
+
+	if(g.switchCount >= CRASHLOOP_MAX_SWITCHES) {
+		// Both ROMs already tried and still crashing — stop flipping to avoid an
+		// endless ping-pong (and needless flash writes). Keep switchCount so we
+		// remember, but clear crashCount so we don't re-evaluate every single boot.
+		debug_e(ANSI_COLOR_RED "crash-loop guard: switch budget (" ANSI_COLOR_CYAN "%u" ANSI_COLOR_RED ") exhausted; both ROMs appear unstable. Staying put until power-cycle / re-flash / OTA." ANSI_COLOR_RESET,
+				(unsigned)CRASHLOOP_MAX_SWITCHES);
+		g.bootCount = 0;
+		saveCrashGuard(g);
+		return;
+	}
+
+#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
+	g.switchCount++;
+	g.bootCount = 0;
+	saveCrashGuard(g); // persist BEFORE restart so the decision survives the reboot
+	auto before = ota.ota.getRunningPartition();
+	auto after = ota.ota.getNextBootPartition();
+	debug_e(ANSI_COLOR_RED "crash-loop guard: " ANSI_COLOR_CYAN "%u" ANSI_COLOR_RED " crashes in a row -> switching ROM from " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED " to " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED " (switch #" ANSI_COLOR_CYAN "%u" ANSI_COLOR_RED ")" ANSI_COLOR_RESET,
+			(unsigned)CRASHLOOP_THRESHOLD, before.name().c_str(), after.name().c_str(), g.switchCount);
+	if(ota.ota.setBootPartition(after)) {
+		System.restart(100);
+		return;
+	}
+	// Switch failed: undo the accounting so we can retry next crash.
+	debug_e(ANSI_COLOR_RED "crash-loop guard: setBootPartition failed, staying on current ROM" ANSI_COLOR_RESET);
+	g.switchCount--;
+	saveCrashGuard(g);
+#else
+	// No OTA/ROM switching on host builds.
+	g.bootCount = 0;
+	saveCrashGuard(g);
+#endif
+}
+
+void Application::markFirmwareHealthy()
+{
+	CrashLoopGuard g = loadCrashGuard();
+	if(g.magic == CRASHLOOP_MAGIC && (g.bootCount != 0 || g.switchCount != 0)) {
+		debug_i(ANSI_COLOR_GREEN "crash-loop guard: firmware stable for " ANSI_COLOR_CYAN "%u" ANSI_COLOR_GREEN " ms, clearing counters (was count=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_GREEN " switches=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_GREEN ")" ANSI_COLOR_RESET,
+				(unsigned)CRASHLOOP_HEALTHY_MS, g.bootCount, g.switchCount);
+	}
+	g.magic = CRASHLOOP_MAGIC;
+	g.bootCount = 0;
+	g.switchCount = 0;
+	saveCrashGuard(g);
+}
+
 void Application::reportCrashDump()
 {
-	bool fullDumpReported = false;
+    bool fullDumpReported = false;
+    debug_i(ANSI_COLOR_BLUE "Application::reportCrashDump" ANSI_COLOR_RESET);
+    
 #ifdef ARCH_ESP8266
-	if(g_crashDumpValid) {
-		g_crashDumpValid = false;
-		fullDumpReported = true;
-		// Emit in the format that Sming decode-stacktrace.py recognises.
-		// "pc=" line puts the tool into IN_REGISTERS state.
-		debug_w("pc=0x%08x sp=0x%08x excvaddr=0x%08x",
-		        g_crashDump.epc1, g_crashDump.stackBase, g_crashDump.excvaddr);
-		// Emit remaining exception registers on a separate line
-		// (the tool picks these up as generic r00/r01 style or passes them through)
-		debug_w("epc2=0x%08x epc3=0x%08x exccause=%u depc=0x%08x reason=%u",
-		        g_crashDump.epc2, g_crashDump.epc3,
-		        g_crashDump.exccause, g_crashDump.depc, g_crashDump.reason);
-		// Stack dump in the format "xxxxxxxx:  XXXXXXXX XXXXXXXX XXXXXXXX XXXXXXXX"
-		debug_w("Stack dump:");
-		uint32_t addr = g_crashDump.stackBase;
-		for(uint32_t i = 0; i < g_crashDump.stackCount; i += 4, addr += 16) {
-			uint32_t w0 = g_crashDump.stackWords[i];
-			uint32_t w1 = (i + 1 < g_crashDump.stackCount) ? g_crashDump.stackWords[i + 1] : 0;
-			uint32_t w2 = (i + 2 < g_crashDump.stackCount) ? g_crashDump.stackWords[i + 2] : 0;
-			uint32_t w3 = (i + 3 < g_crashDump.stackCount) ? g_crashDump.stackWords[i + 3] : 0;
-			debug_w("%08x:  %08x %08x %08x %08x", addr, w0, w1, w2, w3);
-		}
-	}
+    if(g_crashDumpValid) {
+        g_crashDumpValid = false;
+        fullDumpReported = true;
+        
+        if (g_crashDump.magic == CRASH_RTC_MAGIC_OVERFLOW) {
+            // Handle Stack Overflow / Corrupted SP
+            debug_e(ANSI_COLOR_RED "*** STACK POINTER OUT OF BOUNDS ***" ANSI_COLOR_RESET);
+            debug_e(ANSI_COLOR_RED "Corrupted SP: 0x%08x (Valid DRAM range: 0x3FFE8000 - 0x3FFFFFFF)" ANSI_COLOR_RESET, 
+                    g_crashDump.stackBase);
+            
+            // Format pc= line so decode-stacktrace.py still extracts the program counter
+            debug_w(ANSI_COLOR_YELLOW "pc=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " sp=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " excvaddr=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_RESET,
+                    g_crashDump.epc1, g_crashDump.stackBase, g_crashDump.excvaddr);
+            
+            debug_w(ANSI_COLOR_YELLOW "epc2=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " epc3=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " exccause=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW " depc=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " reason=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_RESET,
+                    g_crashDump.epc2, g_crashDump.epc3, g_crashDump.exccause, g_crashDump.depc, g_crashDump.reason);
+            
+            debug_e(ANSI_COLOR_RED "Stack dump skipped to prevent secondary execution fault." ANSI_COLOR_RESET);
+        } else {
+            // Standard Stack Dump Format
+            debug_w(ANSI_COLOR_YELLOW "pc=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " sp=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " excvaddr=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_RESET,
+                    g_crashDump.epc1, g_crashDump.stackBase, g_crashDump.excvaddr);
+                    
+            debug_w(ANSI_COLOR_YELLOW "epc2=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " epc3=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " exccause=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW " depc=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " reason=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_RESET,
+                    g_crashDump.epc2, g_crashDump.epc3, g_crashDump.exccause, g_crashDump.depc, g_crashDump.reason);
+                    
+            debug_w(ANSI_COLOR_YELLOW "Stack dump:" ANSI_COLOR_RESET);
+            uint32_t addr = g_crashDump.stackBase;
+            for(uint32_t i = 0; i < g_crashDump.stackCount; i += 4, addr += 16) {
+                uint32_t w0 = g_crashDump.stackWords[i];
+                uint32_t w1 = (i + 1 < g_crashDump.stackCount) ? g_crashDump.stackWords[i + 1] : 0;
+                uint32_t w2 = (i + 2 < g_crashDump.stackCount) ? g_crashDump.stackWords[i + 2] : 0;
+                uint32_t w3 = (i + 3 < g_crashDump.stackCount) ? g_crashDump.stackWords[i + 3] : 0;
+                debug_w(ANSI_COLOR_YELLOW "" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW ":  " ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " " ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " " ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " " ANSI_COLOR_CYAN "%08x" ANSI_COLOR_RESET, addr, w0, w1, w2, w3);
+            }
+        }
+    }
 #endif
-	// Fallback: emit reason/registers if we didn't already emit a full dump above.
-	// On ESP32 this is always the path (no crash callback available).
-	// On ESP8266 this fires only if the RTC magic was invalid (rare: RTC scrambled on hard reset).
-	if(!fullDumpReported && rtc_info != nullptr &&
-	   (rtc_info->reason == REASON_EXCEPTION_RST ||
-	    rtc_info->reason == REASON_SOFT_WDT_RST  ||
-	    rtc_info->reason == REASON_WDT_RST)) {
-		debug_w("*** CRASH REBOOT: reason=%u exccause=%u epc1=0x%08x excvaddr=0x%08x",
-		        rtc_info->reason, rtc_info->exccause, rtc_info->epc1, rtc_info->excvaddr);
-	}
+
+    // Fallback if no full RTC dump was available
+    if(!fullDumpReported && rtc_info != nullptr &&
+       (rtc_info->reason == REASON_EXCEPTION_RST ||
+        rtc_info->reason == REASON_SOFT_WDT_RST  ||
+        rtc_info->reason == REASON_WDT_RST)) {
+        
+        debug_w(ANSI_COLOR_YELLOW "*** CRASH REBOOT DETECTED ***" ANSI_COLOR_RESET);
+        debug_w(ANSI_COLOR_YELLOW "pc=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " excvaddr=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " reason=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW " exccause=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_RESET,
+                rtc_info->epc1, rtc_info->excvaddr, rtc_info->reason, rtc_info->exccause);
+        debug_w(ANSI_COLOR_YELLOW "epc2=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " epc3=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_RESET,
+                rtc_info->epc2, rtc_info->epc3);
+    }
 }
+
 void Application::restart()
 {
 	static bool gracefulRestartInProgress = false;
 
-	debug_i("Application::restart");
+	debug_i(ANSI_COLOR_BLUE "Application::restart" ANSI_COLOR_RESET);
 	if(network.isApActive()) {
 		network.stopAp();
 		_systimer.initializeMs(500, TimerDelegate(&Application::restart, this)).startOnce();
@@ -784,7 +1092,7 @@ void Application::restart()
 
 void Application::reset()
 {
-	debug_i("Application::reset");
+	debug_i(ANSI_COLOR_BLUE "Application::reset" ANSI_COLOR_RESET);
 	//cfg.reset();
 	rgbwwctrl.colorReset();
 	network.forgetWifi();
@@ -794,14 +1102,14 @@ void Application::reset()
 
 void Application::forget_wifi_and_restart()
 {
-	debug_i("Application::forget_wifi_and_restart");
+	debug_i(ANSI_COLOR_BLUE "Application::forget_wifi_and_restart" ANSI_COLOR_RESET);
 	network.forgetWifi();
 	_systimer.initializeMs(500, TimerDelegate(&Application::restart, this)).startOnce();
 }
 
 bool Application::delayedCMD(String cmd, int delay)
 {
-	debug_i("Application::delayedCMD cmd: %s - delay: %i", cmd.c_str(), delay);
+	debug_i(ANSI_COLOR_BLUE "Application::delayedCMD cmd: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " - delay: " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, cmd.c_str(), delay);
 	if(cmd.equals(F("reset"))) {
 		wsBroadcast(F("notification"), F("Controller will reset and restart"));
 		wsBroadcast(F("webapp_cmd"), F("reload"));
@@ -813,7 +1121,7 @@ bool Application::delayedCMD(String cmd, int delay)
 		telemetryClient.log(F("delaycmd restart"));
 		_systimer.initializeMs(delay, TimerDelegate(&Application::restart, this)).startOnce();
 	} else if(cmd.equals(F("clear_ota_restart"))) {
-		debug_i("Application::delayedCMD: clearing OTA status before restart");
+		debug_i(ANSI_COLOR_BLUE "Application::delayedCMD: clearing OTA status before restart" ANSI_COLOR_RESET);
 		ota.saveStatus(OTASTATUS::OTA_NOT_UPDATING);
 		wsBroadcast(F("notification"), F("Controller will restart (OTA status cleared)"));
 		wsBroadcast(F("webapp_cmd"), F("reload"));
@@ -848,15 +1156,6 @@ bool Application::delayedCMD(String cmd, int delay)
 	return true;
 }
 
-void Application::listSpiffsPartitions()
-{
-	Serial.println(_F("** Enumerate registered partitions"));
-	mountfs(1);
-	listFiles();
-	mountfs(0);
-	listFiles();
-}
-
 bool Application::mountfs(int slot)
 {
 	/*
@@ -866,59 +1165,52 @@ bool Application::mountfs(int slot)
     *
     */
 
-#ifdef ARCH_HOST
 	/*
-     * host file system
-     */
-	debug_i("mounting host file system");
-	fileSetFileSystem(&IFS::Host::getFileSystem());
-	_fs_mounted = true;
-	return _fs_mounted;
-#else
-	/*
-     * on device file system
+     * data file system (SPIFFS/LittleFS on the flash device). On Host this runs
+     * against the emulated flash backing file, so the same LittleFS code path is
+     * exercised as on the target instead of the host-OS passthrough.
      */
 
 	auto part = Storage::findPartition(F("spiffs") + String(slot));
 	if(part) {
-		debug_i("mouting spiffs partition %i at %x, length %d", slot, part.address(), part.size());
+		debug_i(ANSI_COLOR_BLUE "mouting spiffs partition " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE " at " ANSI_COLOR_CYAN "%x" ANSI_COLOR_BLUE ", length " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, slot, part.address(), part.size());
 		_fs_mounted = spiffs_mount(part);
 		return _fs_mounted;
 	} else {
 		part = Storage::findPartition(F("lfs0"));
 		if(part) {
-			debug_i("mouting primary littlefs partition at %x, length %d", part.address(), part.size());
+			debug_i(ANSI_COLOR_BLUE "mouting primary littlefs partition at " ANSI_COLOR_CYAN "%x" ANSI_COLOR_BLUE ", length " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, part.address(), part.size());
 			if(lfs_mount(part)) {
 				_fs_mounted = true;
 				return _fs_mounted;
 			} else {
 				auto secondary = Storage::findPartition(F("lfs1"));
 				if(!secondary) {
-					debug_e("primary partition mount failed and secondary lfs partition was not found");
+					debug_e(ANSI_COLOR_RED "primary partition mount failed and secondary lfs partition was not found" ANSI_COLOR_RESET);
 					_fs_mounted = false;
 					return _fs_mounted;
 				}
-				debug_e("primary partition mount failed, mounting secondary lfs partition  at %x, length %d",
+				debug_e(ANSI_COLOR_RED "primary partition mount failed, mounting secondary lfs partition  at " ANSI_COLOR_CYAN "%x" ANSI_COLOR_RED ", length " ANSI_COLOR_CYAN "%d" ANSI_COLOR_RED "" ANSI_COLOR_RESET,
 						secondary.address(), secondary.size());
 				_fs_mounted = lfs_mount(secondary);
 				return _fs_mounted;
 			};
 		}
-		debug_i("partition is neither spiffs nor lfs");
+		debug_i(ANSI_COLOR_BLUE "partition is neither spiffs nor lfs" ANSI_COLOR_RESET);
 		_fs_mounted = false;
 		return _fs_mounted;
 	}
-#endif
+
 }
 
 void Application::listFiles()
 {
 	if(FileHandle file = fileOpen(F("VERSION"), IFS::OpenFlag::Read)) {
-		debug_i("found VERSION file");
+		debug_i(ANSI_COLOR_BLUE "found VERSION file" ANSI_COLOR_RESET);
 		char buffer[64];
 		int bytesRead = fileRead(file, buffer, sizeof(buffer));
 		if(bytesRead < 0) {
-			debug_e("Failed reading VERSION file");
+			debug_e(ANSI_COLOR_RED "Failed reading VERSION file" ANSI_COLOR_RESET);
 			fileClose(file);
 			return;
 		}
@@ -926,39 +1218,38 @@ void Application::listFiles()
 			bytesRead = sizeof(buffer) - 1;
 		}
 		buffer[bytesRead] = '\0';
-		debug_i("\nweb app version String: %s", buffer);
+		debug_i(ANSI_COLOR_BLUE "\nweb app version String: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, buffer);
 		fileClose(file);
 	} else {
-		debug_i("Partition has no version file\n");
+		debug_i(ANSI_COLOR_BLUE "Partition has no version file\n" ANSI_COLOR_RESET);
 	}
 
 	Directory dir;
 	if(dir.open()) {
 		while(dir.next()) {
-			Serial.print("  ");
-			Serial.println(dir.stat().name);
+			debug_i(ANSI_COLOR_CYAN " %s" ANSI_COLOR_RESET, dir.stat().name);
 		}
 	}
-	debug_i("%i files found", dir.count());
+	debug_i( ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE " files found" ANSI_COLOR_RESET, dir.count());
 }
 
 void Application::umountfs()
 {
 	/*
-    debug_i("Application::umountfs");
+    debug_i(ANSI_COLOR_BLUE "Application::umountfs" ANSI_COLOR_RESET);
     auto part = Storage::findPartition(F("spiffs")+String(slot));
     if (part){
-        debug_i("unmouting spiffs partition %i at %x, length %d", slot,part.address(), part.size());
+        debug_i(ANSI_COLOR_BLUE "unmouting spiffs partition " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE " at " ANSI_COLOR_CYAN "%x" ANSI_COLOR_BLUE ", length " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, slot,part.address(), part.size());
         return spiffs_unmount(part);
     }else{
         part = Storage::findPartition(F("littlefs")+String(slot));
         if(part){
-            debug_i("mouting littlefs partition %i at %x, length %d", slot,part.address(), part.size());
+            debug_i(ANSI_COLOR_BLUE "mouting littlefs partition " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE " at " ANSI_COLOR_CYAN "%x" ANSI_COLOR_BLUE ", length " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, slot,part.address(), part.size());
             return true;
             //lfs doesn't seem to define umount
             //return lfs_umount(part);
         }
-        debug_i("partition is neither spiffs nor lfs");
+        debug_i(ANSI_COLOR_BLUE "partition is neither spiffs nor lfs" ANSI_COLOR_RESET);
     }
     */
 }
@@ -966,23 +1257,7 @@ void Application::umountfs()
 void Application::switchRom()
 {
 	//ToDo - rewrite to use ota.getRunningPartition() and ota.getNextBootPartition()
-	debug_i("Application::switchRom");
-
-	/* old
-
-    int slot = getRomSlot();
-    debug_i("    current ROM: %i", slot);
-    if (slot == 0) {
-        slot = 1;
-    } else {
-        slot = 0;
-    }
-#ifdef ARCH_ESP8266
-    debug_i("    switching to ROM %i\r\n",slot);
-    rboot_set_current_rom(slot);
-
-#endif
-    */
+	debug_i(ANSI_COLOR_BLUE "Application::switchRom" ANSI_COLOR_RESET);
 	app.ota.doSwitch();
 }
 #else
@@ -1004,7 +1279,7 @@ int Application::getRomSlot()
 /*
 *	send a jsonrpc message from a fully constructed JsonRpcMessage object string
 */
-void Application::wsBroadcast(String message)
+void Application::wsBroadcast(const String& message)
 {
     size_t length = message.length();
     if(length > MAX_LOG_LINE_SIZE) length = MAX_LOG_LINE_SIZE;
@@ -1022,31 +1297,163 @@ void Application::wsBroadcast(String message)
 */
 void Application::wsBroadcast(String cmd, String message)
 {
-	JsonRpcMessage msg(cmd);
-	msg.setId(jsonrpc_id++);
-	JsonObject root = msg.getParams();
-	root[F("message")] = message;
-
-	String jsonStr = Json::serialize(msg.getRoot());
-	wsBroadcast(jsonStr);
+	auto& codec = rpcCodec();
+	Jsonrpc::Root root(codec.db());
+	if(auto update = root.update()) {
+		auto event = update.toMessageEvent();
+		event.setMessage(message);
+	}
+	String jsonStr;
+	if(codec.render({0, JsonRPC::Message::Kind::notification, cmd}, root.asMessageEvent(), jsonStr)) {
+		wsBroadcast(jsonStr);
+	}
 }
 
 void Application::wsBroadcast(const String& cmd, const JsonObject& params)
 {
-	JsonRpcMessage msg(cmd);
-	msg.setId(jsonrpc_id++);
-	JsonObject root = msg.getParams();
-    for (JsonPair kv : params) {
-        root[kv.key()] = kv.value();
-    }
-	String jsonStr = Json::serialize(msg.getRoot());
-	//debug_i("Application::wsBroadcast: %s", jsonStr.c_str());
-	wsBroadcast(jsonStr);
+	if(cmd == F("wifi_status")) {
+		auto& codec = rpcCodec();
+		Jsonrpc::Root root(codec.db());
+		if(auto update = root.update()) {
+			auto wifi = update.toWifiStatus();
+			if(params.containsKey(F("message"))) {
+				wifi.setMessage(params[F("message")] | "");
+			}
+			if(params.containsKey(F("station"))) {
+				JsonObject station = params[F("station")].as<JsonObject>();
+				auto s = wifi.station;
+				s.setConnected(station[F("connected")] | false);
+				s.setSsid(station[F("ssid")] | "");
+				s.setDhcp(station[F("dhcp")] | false);
+				s.setIp(station[F("ip")] | "");
+				s.setNetmask(station[F("netmask")] | "");
+				s.setGateway(station[F("gateway")] | "");
+				s.setMac(station[F("mac")] | "");
+			}
+			if(params.containsKey(F("ap"))) {
+				JsonObject ap = params[F("ap")].as<JsonObject>();
+				auto a = wifi.ap;
+				a.setEnabled(ap[F("enabled")] | false);
+				a.setSsid(ap[F("ssid")] | "");
+				a.setIp(ap[F("ip")] | "");
+			}
+		}
+		String jsonStr;
+		if(codec.render({0, JsonRPC::Message::Kind::notification, cmd}, root.asWifiStatus(), jsonStr)) {
+			wsBroadcast(jsonStr);
+			return;
+		}
+	} else if(cmd == F("transition_finished")) {
+		auto& codec = rpcCodec();
+		Jsonrpc::Root root(codec.db());
+		if(auto update = root.update()) {
+			auto finished = update.toTransitionFinished();
+			finished.setName(params[F("name")] | "");
+			finished.setRequeued(params[F("requeued")] | false);
+		}
+		String jsonStr;
+		if(codec.render({0, JsonRPC::Message::Kind::notification, cmd}, root.asTransitionFinished(), jsonStr)) {
+			wsBroadcast(jsonStr);
+			return;
+		}
+	} else if(cmd == F("clock_slave_status")) {
+		auto& codec = rpcCodec();
+		Jsonrpc::Root root(codec.db());
+		if(auto update = root.update()) {
+			auto status = update.toClockSlaveStatus();
+			status.setOffset(params[F("offset")] | 0);
+			status.setCurrentInterval(params[F("current_interval")] | 0);
+		}
+		String jsonStr;
+		if(codec.render({0, JsonRPC::Message::Kind::notification, cmd}, root.asClockSlaveStatus(), jsonStr)) {
+			wsBroadcast(jsonStr);
+			return;
+		}
+	} else if(cmd == F("keep_alive")) {
+		auto& codec = rpcCodec();
+		Jsonrpc::Root root(codec.db());
+		if(auto update = root.update()) {
+			update.toKeepAlive();
+		}
+		String jsonStr;
+		if(codec.render({0, JsonRPC::Message::Kind::notification, cmd}, root.asKeepAlive(), jsonStr)) {
+			wsBroadcast(jsonStr);
+			return;
+		}
+	} else if(cmd == F("color_event")) {
+		auto& codec = rpcCodec();
+		Jsonrpc::Root root(codec.db());
+		if(auto update = root.update()) {
+			auto color = update.toColor();
+			if(params.containsKey(F("raw"))) {
+				auto raw = color.toRaw();
+				auto p = params[F("raw")].as<JsonObject>();
+				raw.setR(p[F("r")] | 0);
+				raw.setG(p[F("g")] | 0);
+				raw.setB(p[F("b")] | 0);
+				raw.setWw(p[F("ww")] | 0);
+				raw.setCw(p[F("cw")] | 0);
+			} else if(params.containsKey(F("hsv"))) {
+				auto hsv = color.toHsv();
+				auto p = params[F("hsv")].as<JsonObject>();
+				hsv.setH(p[F("h")] | 0.0f);
+				hsv.setS(p[F("s")] | 0.0f);
+				hsv.setV(p[F("v")] | 0.0f);
+				hsv.setCt(p[F("ct")] | 0);
+			}
+		}
+		String jsonStr;
+		if(codec.render({0, JsonRPC::Message::Kind::notification, cmd}, root.asColor(), jsonStr)) {
+			wsBroadcast(jsonStr);
+			return;
+		}
+	}
+
+	auto& codec = rpcCodec();
+	Jsonrpc::Root root(codec.db());
+	String jsonStr;
+	if(cmd == F("notification") || cmd == F("webapp_cmd")) {
+		if(auto update = root.update()) {
+			update.toMessageEvent().setMessage(params[F("message")] | "");
+		}
+		if(codec.render({0, JsonRPC::Message::Kind::notification, cmd}, root.asMessageEvent(), jsonStr)) {
+			wsBroadcast(jsonStr);
+		}
+		return;
+	}
+	if(cmd == F("ota_status")) {
+		if(auto update = root.update()) {
+			auto status = update.toOtaStatus();
+			status.setStatus(params[F("status")] | 0);
+			status.setMessage(params[F("message")] | "");
+		}
+		if(codec.render({0, JsonRPC::Message::Kind::notification, cmd}, root.asOtaStatus(), jsonStr)) {
+			wsBroadcast(jsonStr);
+		}
+		return;
+	}
+	if(cmd == F("webapp_ota_status")) {
+		if(auto update = root.update()) {
+			auto status = update.toWebappOtaStatus();
+			status.setState(params[F("state")] | "");
+			status.setFile(params[F("file")] | 0);
+			status.setTotal(params[F("total")] | 0);
+			status.setFilePath(params[F("file_path")] | "");
+			status.setVersion(params[F("version")] | "");
+			status.setLastStatus(params[F("last_status")] | "");
+			status.setInProgress(params[F("in_progress")] | false);
+		}
+		if(codec.render({0, JsonRPC::Message::Kind::notification, cmd}, root.asWebappOtaStatus(), jsonStr)) {
+			wsBroadcast(jsonStr);
+		}
+		return;
+	}
+	debug_w(ANSI_COLOR_YELLOW "Unsupported schema-driven websocket event: %s" ANSI_COLOR_RESET, cmd.c_str());
 }
 
 void Application::onCommandRelay(const String& method, const JsonObject& params)
 {
-	debug_i("Application::onCommandRelay");
+	debug_i(ANSI_COLOR_BLUE "Application::onCommandRelay" ANSI_COLOR_RESET);
 	AppConfig::Sync sync(*cfg);
 	if(sync.getCmdMasterEnabled())
 		mqttclient.publishCommand(method, params);
@@ -1057,10 +1464,10 @@ void Application::onButtonTogglePressed(int pin)
 	/*
 	uint32_t now = millis();
 	uint32_t diff = now - _lastToggles[pin];
-	debug_i("Application::onButtonTogglePressed");
+	debug_i(ANSI_COLOR_BLUE "Application::onButtonTogglePressed" ANSI_COLOR_RESET);
 	AppConfig::General general(*cfg);
 	if(diff > (uint32_t)general.getButtonsDebounceMs()) { // debounce
-		debug_i("Button %d pressed - toggle", pin);
+		debug_i(ANSI_COLOR_BLUE "Button " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " pressed - toggle" ANSI_COLOR_RESET, pin);
 		rgbwwctrl.toggle();
 		_lastToggles[pin] = now;
 	} else {
@@ -1082,7 +1489,7 @@ void Application::pollResetButton()
         
         // 30 ticks * 100ms = 3000ms (3 seconds)
         if (holdCounter >= 30) {
-            debug_w("Emergency ROM Switch triggered via Reset Pin!");
+            debug_w(ANSI_COLOR_YELLOW "Emergency ROM Switch triggered via Reset Pin!" ANSI_COLOR_RESET);
 
             // Reset counter to prevent multiple triggers (though we reboot anyway)
             holdCounter = 0;
@@ -1104,5 +1511,5 @@ void Application::pollResetButton()
 
 uint32_t Application::getUptime()
 {
-	return _uptimeMinutes * 60u;
+	return+_uptimeSeconds;
 }

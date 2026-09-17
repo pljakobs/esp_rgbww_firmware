@@ -30,6 +30,7 @@ jobs:
   # Update soc_json/soc_csv here when adding an SOC.
   generate-matrix:
     runs-on: ubuntu-latest
+    #runs-on: self-hosted
     outputs:
       soc_json: ${{ steps.set.outputs.soc_json }}
       soc_csv: ${{ steps.set.outputs.soc_csv }}
@@ -43,6 +44,8 @@ jobs:
   host-smoke:
 
     runs-on: ubuntu-latest
+    #runs-on: self-hosted
+    #runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 35
     steps:
       - name: Determine branch
@@ -418,6 +421,7 @@ jobs:
   build:
     needs: [generate-matrix, host-smoke]
     runs-on: ubuntu-latest
+    #runs-on: self-hosted
     strategy:
       fail-fast: true
       matrix:

@@ -24,8 +24,46 @@
 
 
 #include <RGBWWCtrl.h>
+#include <apihandler.h>
 
-#define MIN_HEAP_FREE 8192
+#define MIN_HEAP_FREE 4096
+
+namespace {
+bool parseAbsOrRelValue(const JsonVariantConst& source, Optional<AbsOrRelValue>& target,
+						AbsOrRelValue::Type type = AbsOrRelValue::Type::Percent)
+{
+	if(source.isNull()) {
+		return false;
+	}
+
+	if(source.is<const char*>()) {
+		const char* value = source.as<const char*>();
+		if(value != nullptr && value[0] != '\0') {
+			target = AbsOrRelValue(value, type);
+			return true;
+		}
+		return false;
+	}
+
+	if(source.is<float>() || source.is<double>()) {
+		target = AbsOrRelValue(static_cast<float>(source.as<double>()), type);
+		return true;
+	}
+
+	if(source.is<int>() || source.is<long>() || source.is<unsigned int>() || source.is<unsigned long>()) {
+		target = AbsOrRelValue(static_cast<int>(source.as<long>()), type);
+		return true;
+	}
+
+	String value;
+	if(Json::getValue(source, value)) {
+		target = AbsOrRelValue(value, type);
+		return true;
+	}
+
+	return false;
+}
+}
 /**
  * @brief Processes the color JSON data.
  *
@@ -39,11 +77,10 @@
  */
 bool JsonProcessor::onColor(const String& json, String& msg, bool relay)
 {
-	debug_e("JsonProcessor::onColor: %s", json.c_str());
-	StaticJsonDocument<400> doc;
-	DeserializationError err = deserializeJson(doc, json);
-	if(err) {
-		msg = F("Invalid JSON");
+	debug_e(ANSI_COLOR_RED "JsonProcessor::onColor: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED "" ANSI_COLOR_RESET, json.c_str());
+	DynamicJsonDocument doc(400);
+	if(!Json::deserialize(doc, json)) {
+		msg = F("malformed json");
 		return false;
 	}
 	return onColor(doc.as<JsonObject>(), msg, relay);
@@ -64,33 +101,36 @@ bool JsonProcessor::onColor(JsonObject root, String& msg, bool relay)
 {
 	bool result = false;
 	if(!app.checkHeap(MIN_HEAP_FREE)) {
-		debug_i("out of memory in processing onColor");
+		debug_i(ANSI_COLOR_BLUE "out of memory in processing onColor" ANSI_COLOR_RESET);
 		msg = F("out of memory in processing onColor");
 		return false;
 	}
 	auto cmds = root[F("cmds")].as<JsonArray>();
 	if(!cmds.isNull()) {
-		Vector<String> errors;
+		String errors;  // Accumulate directly without Vector
 		// multi command post (needs testing)
-		debug_i("  multi command post");
+		debug_i(ANSI_COLOR_BLUE "  multi command post" ANSI_COLOR_RESET);
 		for(unsigned i = 0; i < cmds.size(); ++i) {
-			debug_i("command %i: %s", i, cmds[i].as<String>().c_str());
-			String msg;
-			if(!onSingleColorCommand(cmds[i], msg))
-				errors.add(msg);
+			debug_i(ANSI_COLOR_BLUE "command " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE ": " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, i, cmds[i].as<String>().c_str());
+			String errorMsg;
+			if(!onSingleColorCommand(cmds[i], errorMsg)) {
+				// Build error message directly without Vector copy
+				if(errors.length() > 0) errors += "|";
+				errors.concat(i);
+				errors += ": ";
+				errors += errorMsg;
+				result = false;
+			}
 		}
 
-		if(errors.size() == 0)
+		if(!errors.length())
 			result = true;
 		else {
-			String msg;
-			for(unsigned i = 0; i < errors.size(); ++i)
-				msg += String(i) + ": " + errors[i] + "|";
 			result = false;
-			debug_i("  multi command post, %s", msg.c_str());
+			debug_i(ANSI_COLOR_BLUE "  multi command post, " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, errors.c_str());
 		}
 	} else {
-		debug_i("  single command post %s", msg.c_str());
+		debug_i(ANSI_COLOR_BLUE "  single command post " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, msg.c_str());
 		if(onSingleColorCommand(root, msg))
 			result = true;
 		else
@@ -117,8 +157,11 @@ bool JsonProcessor::onColor(JsonObject root, String& msg, bool relay)
  */
 bool JsonProcessor::onStop(const String& json, String& msg, bool relay)
 {
-	StaticJsonDocument<256> doc;
-	Json::deserialize(doc, json);
+	DynamicJsonDocument doc(256);
+	if(!Json::deserialize(doc, json)) {
+		msg = F("malformed json");
+		return false;
+	}
 	return onStop(doc.as<JsonObject>(), msg, relay);
 }
 
@@ -162,8 +205,11 @@ bool JsonProcessor::onStop(JsonObject root, String& msg, bool relay)
  */
 bool JsonProcessor::onSkip(const String& json, String& msg, bool relay)
 {
-	StaticJsonDocument<256> doc;
-	Json::deserialize(doc, json);
+	DynamicJsonDocument doc(256);
+	if(!Json::deserialize(doc, json)) {
+		msg = F("malformed json");
+		return false;
+	}
 	return onSkip(doc.as<JsonObject>(), msg, relay);
 }
 
@@ -209,8 +255,11 @@ bool JsonProcessor::onSkip(JsonObject root, String& msg, bool relay)
  */
 bool JsonProcessor::onPause(const String& json, String& msg, bool relay)
 {
-	StaticJsonDocument<256> doc;
-	Json::deserialize(doc, json);
+	DynamicJsonDocument doc(256);
+	if(!Json::deserialize(doc, json)) {
+		msg = F("malformed json");
+		return false;
+	}
 	return onPause(doc.as<JsonObject>(), msg, relay);
 }
 
@@ -258,8 +307,11 @@ bool JsonProcessor::onPause(JsonObject root, String& msg, bool relay)
  */
 bool JsonProcessor::onContinue(const String& json, String& msg, bool relay)
 {
-	StaticJsonDocument<256> doc;
-	Json::deserialize(doc, json);
+	DynamicJsonDocument doc(256);
+	if(!Json::deserialize(doc, json)) {
+		msg = F("malformed json");
+		return false;
+	}
 	return onContinue(doc.as<JsonObject>(), msg, relay);
 }
 
@@ -300,8 +352,11 @@ bool JsonProcessor::onContinue(JsonObject root, String& msg, bool relay)
  */
 bool JsonProcessor::onBlink(const String& json, String& msg, bool relay)
 {
-	StaticJsonDocument<256> doc;
-	Json::deserialize(doc, json);
+	DynamicJsonDocument doc(256);
+	if(!Json::deserialize(doc, json)) {
+		msg = F("malformed json");
+		return false;
+	}
 	return onBlink(doc.as<JsonObject>(), msg, relay);
 }
 
@@ -345,8 +400,11 @@ bool JsonProcessor::onBlink(JsonObject root, String& msg, bool relay)
  */
 bool JsonProcessor::onToggle(const String& json, String& msg, bool relay)
 {
-	StaticJsonDocument<256> doc;
-	Json::deserialize(doc, json);
+	DynamicJsonDocument doc(256);
+	if(!Json::deserialize(doc, json)) {
+		msg = F("malformed json");
+		return false;
+	}
 	return onToggle(doc.as<JsonObject>(), msg, relay);
 }
 
@@ -385,7 +443,7 @@ bool JsonProcessor::onSingleColorCommand(JsonObject root, String& errorMsg)
 	RequestParameters params;
 	parseRequestParams(root, params);
 	if(params.checkParams(errorMsg) != 0) {
-		debug_i("checkParams failed:",errorMsg.c_str());
+		debug_i(ANSI_COLOR_BLUE "checkParams failed:" ANSI_COLOR_RESET,errorMsg.c_str());
 		return false;
 	}
 
@@ -414,12 +472,12 @@ bool JsonProcessor::onSingleColorCommand(JsonObject root, String& errorMsg)
 		}
 	} else {
 		errorMsg = F("No color object!");
-		debug_i("no color object");
+		debug_i(ANSI_COLOR_BLUE "no color object" ANSI_COLOR_RESET);
 		return false;
 	}
 
 	if(!queueOk) {
-		debug_i("queue full");
+		debug_i(ANSI_COLOR_BLUE "queue full" ANSI_COLOR_RESET);
 		errorMsg = F("Queue full");
 	}
 	return queueOk;
@@ -440,8 +498,11 @@ bool JsonProcessor::onSingleColorCommand(JsonObject root, String& errorMsg)
  */
 bool JsonProcessor::onDirect(const String& json, String& msg, bool relay)
 {
-	StaticJsonDocument<256> doc;
-	Json::deserialize(doc, json);
+	DynamicJsonDocument doc(256);
+	if(!Json::deserialize(doc, json)) {
+		msg = F("malformed json");
+		return false;
+	}
 	return onDirect(doc.as<JsonObject>(), msg, relay);
 }
 
@@ -485,59 +546,39 @@ bool JsonProcessor::onDirect(JsonObject root, String& msg, bool relay)
  */
 void JsonProcessor::parseRequestParams(JsonObject root, RequestParameters& params)
 {
-	String value;
-
 	JsonObject hsv = root[F("hsv")];
 	if(!hsv.isNull()) {
 		params.mode = RequestParameters::Mode::Hsv;
-		if(Json::getValue(hsv[F("h")], value))
-			params.hsv.h = AbsOrRelValue(value, AbsOrRelValue::Type::Hue);
-		if(Json::getValue(hsv[F("s")], value))
-			params.hsv.s = AbsOrRelValue(value);
-		if(Json::getValue(hsv[F("v")], value))
-			params.hsv.v = AbsOrRelValue(value);
-		if(Json::getValue(hsv[F("ct")], value))
-			params.hsv.ct = AbsOrRelValue(value, AbsOrRelValue::Type::Ct);
+		parseAbsOrRelValue(hsv[F("h")], params.hsv.h, AbsOrRelValue::Type::Hue);
+		parseAbsOrRelValue(hsv[F("s")], params.hsv.s);
+		parseAbsOrRelValue(hsv[F("v")], params.hsv.v);
+		parseAbsOrRelValue(hsv[F("ct")], params.hsv.ct, AbsOrRelValue::Type::Ct);
 
 		JsonObject from = hsv[F("from")];
 		if(!from.isNull()) {
 			params.hasHsvFrom = true;
-			if(Json::getValue(from[F("h")], value))
-				params.hsv.h = AbsOrRelValue(value, AbsOrRelValue::Type::Hue);
-			if(Json::getValue(from[F("s")], value))
-				params.hsv.s = AbsOrRelValue(value);
-			if(Json::getValue(from[F("v")], value))
-				params.hsv.v = AbsOrRelValue(value);
-			if(Json::getValue(from[F("ct")], value))
-				params.hsv.ct = AbsOrRelValue(value, AbsOrRelValue::Type::Ct);
+			parseAbsOrRelValue(from[F("h")], params.hsvFrom.h, AbsOrRelValue::Type::Hue);
+			parseAbsOrRelValue(from[F("s")], params.hsvFrom.s);
+			parseAbsOrRelValue(from[F("v")], params.hsvFrom.v);
+			parseAbsOrRelValue(from[F("ct")], params.hsvFrom.ct, AbsOrRelValue::Type::Ct);
 		}
 	} else if(!root[F("raw")].isNull()) {
 		JsonObject raw = root[F("raw")];
 		params.mode = RequestParameters::Mode::Raw;
-		if(Json::getValue(raw[F("r")], value))
-			params.raw.r = AbsOrRelValue(value, AbsOrRelValue::Type::Raw);
-		if(Json::getValue(raw[F("g")], value))
-			params.raw.g = AbsOrRelValue(value, AbsOrRelValue::Type::Raw);
-		if(Json::getValue(raw[F("b")], value))
-			params.raw.b = AbsOrRelValue(value, AbsOrRelValue::Type::Raw);
-		if(Json::getValue(raw[F("ww")], value))
-			params.raw.ww = AbsOrRelValue(value, AbsOrRelValue::Type::Raw);
-		if(Json::getValue(raw[F("cw")], value))
-			params.raw.cw = AbsOrRelValue(value, AbsOrRelValue::Type::Raw);
+		parseAbsOrRelValue(raw[F("r")], params.raw.r, AbsOrRelValue::Type::Raw);
+		parseAbsOrRelValue(raw[F("g")], params.raw.g, AbsOrRelValue::Type::Raw);
+		parseAbsOrRelValue(raw[F("b")], params.raw.b, AbsOrRelValue::Type::Raw);
+		parseAbsOrRelValue(raw[F("ww")], params.raw.ww, AbsOrRelValue::Type::Raw);
+		parseAbsOrRelValue(raw[F("cw")], params.raw.cw, AbsOrRelValue::Type::Raw);
 
 		JsonObject from = raw[F("from")];
 		if(!from.isNull()) {
 			params.hasRawFrom = true;
-			if(Json::getValue(from[F("r")], value))
-				params.rawFrom.r = AbsOrRelValue(value, AbsOrRelValue::Type::Raw);
-			if(Json::getValue(from[F("g")], value))
-				params.rawFrom.g = AbsOrRelValue(value, AbsOrRelValue::Type::Raw);
-			if(Json::getValue(from[F("b")], value))
-				params.rawFrom.b = AbsOrRelValue(value, AbsOrRelValue::Type::Raw);
-			if(Json::getValue(from[F("ww")], value))
-				params.rawFrom.ww = AbsOrRelValue(value, AbsOrRelValue::Type::Raw);
-			if(Json::getValue(from[F("cw")], value))
-				params.rawFrom.cw = AbsOrRelValue(value, AbsOrRelValue::Type::Raw);
+			parseAbsOrRelValue(from[F("r")], params.rawFrom.r, AbsOrRelValue::Type::Raw);
+			parseAbsOrRelValue(from[F("g")], params.rawFrom.g, AbsOrRelValue::Type::Raw);
+			parseAbsOrRelValue(from[F("b")], params.rawFrom.b, AbsOrRelValue::Type::Raw);
+			parseAbsOrRelValue(from[F("ww")], params.rawFrom.ww, AbsOrRelValue::Type::Raw);
+			parseAbsOrRelValue(from[F("cw")], params.rawFrom.cw, AbsOrRelValue::Type::Raw);
 		}
 	}
 
@@ -560,14 +601,14 @@ void JsonProcessor::parseRequestParams(JsonObject root, RequestParameters& param
 	Json::getValue(root[F("cmd")], params.cmd);
 
 	if(!root[F("q")].isNull()) {
-		String q = root[F("q")];
-		if(q == F("back"))
+		const char* q = root[F("q")] | "";
+		if(strcmp(q, "back") == 0)
 			params.queue = QueuePolicy::Back;
-		else if(q == F("front"))
+		else if(strcmp(q, "front") == 0)
 			params.queue = QueuePolicy::Front;
-		else if(q == F("front_reset"))
+		else if(strcmp(q, "front_reset") == 0)
 			params.queue = QueuePolicy::FrontReset;
-		else if(q == F("single"))
+		else if(strcmp(q, "single") == 0)
 			params.queue = QueuePolicy::Single;
 		else {
 			params.queue = QueuePolicy::Invalid;
@@ -577,24 +618,24 @@ void JsonProcessor::parseRequestParams(JsonObject root, RequestParameters& param
 	JsonArray arr;
 	if(Json::getValue(root[F("channels")], arr)) {
 		for(size_t i = 0; i < arr.size(); ++i) {
-			String str = arr[i];
-			if(str == F("h")) {
+			const char* str = arr[i] | "";
+			if(strcmp(str, "h") == 0) {
 				params.channels.add(CtrlChannel::Hue);
-			} else if(str == F("s")) {
+			} else if(strcmp(str, "s") == 0) {
 				params.channels.add(CtrlChannel::Sat);
-			} else if(str == F("v")) {
+			} else if(strcmp(str, "v") == 0) {
 				params.channels.add(CtrlChannel::Val);
-			} else if(str == F("ct")) {
+			} else if(strcmp(str, "ct") == 0) {
 				params.channels.add(CtrlChannel::ColorTemp);
-			} else if(str == F("r")) {
+			} else if(strcmp(str, "r") == 0) {
 				params.channels.add(CtrlChannel::Red);
-			} else if(str == F("g")) {
+			} else if(strcmp(str, "g") == 0) {
 				params.channels.add(CtrlChannel::Green);
-			} else if(str == F("b")) {
+			} else if(strcmp(str, "b") == 0) {
 				params.channels.add(CtrlChannel::Blue);
-			} else if(str == F("ww")) {
+			} else if(strcmp(str, "ww") == 0) {
 				params.channels.add(CtrlChannel::WarmWhite);
-			} else if(str == F("cw")) {
+			} else if(strcmp(str, "cw") == 0) {
 				params.channels.add(CtrlChannel::ColdWhite);
 			}
 		}
@@ -664,31 +705,31 @@ int JsonProcessor::RequestParameters::checkParams(String& errorMsg) const
 bool JsonProcessor::onJsonRpc(const String& json)
 {
 	debug_d("JsonProcessor::onJsonRpc: %s\n", json.c_str());
-	JsonRpcMessageIn rpc(json);
-	if(!rpc.isValid()) {
-		debug_w("JsonProcessor::onJsonRpc: malformed json: %s", rpc.getError().c_str());
-		return false;
+	if(app.api) {
+		String errorMsg;
+		return app.api->dispatchJsonRpc(json, errorMsg, false);
 	}
 
+	JsonRpcMessageIn rpc(json);
 	String msg;
-	String method = rpc.getMethod();
-	if(method == F("color")) {
+	const char* method = rpc.getMethod();
+	if(strcmp(method, "color") == 0) {
 		return onColor(rpc.getParams(), msg, false);
-	} else if(method == F("stop")) {
+	} else if(strcmp(method, "stop") == 0) {
 		return onStop(rpc.getParams(), msg, false);
-	} else if(method == F("blink")) {
+	} else if(strcmp(method, "blink") == 0) {
 		return onBlink(rpc.getParams(), msg, false);
-	} else if(method == F("skip")) {
+	} else if(strcmp(method, "skip") == 0) {
 		return onSkip(rpc.getParams(), msg, false);
-	} else if(method == F("pause")) {
+	} else if(strcmp(method, "pause") == 0) {
 		return onPause(rpc.getParams(), msg, false);
-	} else if(method == F("continue")) {
+	} else if(strcmp(method, "continue") == 0) {
 		return onContinue(rpc.getParams(), msg, false);
-	} else if(method == F("direct")) {
+	} else if(strcmp(method, "direct") == 0) {
 		return onDirect(rpc.getParams(), msg, false);
-	} else {
-		return false;
 	}
+
+	return false;
 }
 
 /**
@@ -734,6 +775,17 @@ void JsonProcessor::addChannelStatesToCmd(JsonObject root, const RGBWWLed::Chann
 	}
 	}
 }
+
+bool JsonProcessor::onSetOn(const String& json, String& msg, bool relay)
+{
+	DynamicJsonDocument doc(512);
+	if(!Json::deserialize(doc, json)) {
+		msg = F("malformed json");
+		return false;
+	}
+	return onSetOn(doc.as<JsonObject>(), msg, relay);
+}
+
 bool JsonProcessor::onSetOn(JsonObject root, String& msg, bool relay) {
 	RequestParameters params;
 	parseRequestParams(root, params);
@@ -748,6 +800,16 @@ bool JsonProcessor::onSetOn(JsonObject root, String& msg, bool relay) {
 	);
 	// Optionally relay or set msg
 	return true;
+}
+
+bool JsonProcessor::onSetOff(const String& json, String& msg, bool relay)
+{
+	DynamicJsonDocument doc(512);
+	if(!Json::deserialize(doc, json)) {
+		msg = F("malformed json");
+		return false;
+	}
+	return onSetOff(doc.as<JsonObject>(), msg, relay);
 }
 
 bool JsonProcessor::onSetOff(JsonObject root, String& msg, bool relay) {

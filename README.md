@@ -1,4 +1,4 @@
-
+[![Build Status](https://github.com/pljakobs/esp_rgbww_firmware/actions/workflows/build_firmware.yml/badge.svg?branch=develop)](https://github.com/pljakobs/esp_rgbww_firmware/actions/workflows/build_firmware.yml)
 
 # ESP RGBWW Firmware
 
@@ -7,12 +7,6 @@ Open-source firmware for ESP8266/ESP32-based RGBWW(CW) LED controllers, supporti
 This is a fork of [Patrick Jahns' original firmware](https://github.com/patrickjahns/esp_rgbww_firmware) and [VBS's extension](https://github.com/verybadsoldier/esp_rgbww_firmware), significantly extended with multi-controller synchronisation, a rich JSON HTTP API, MQTT with Home Assistant auto-discovery, OTA updates, mDNS, rsyslog support, and a modern Vue/Quasar web application.
 
 ---
-
-## build status:
-
-[![Build Status experimental](https://github.com/pljakobs/esp_rgbww_firmware/actions/workflows/build_firmware.yml/badge.svg?branch=experimental)](https://github.com/pljakobs/esp_rgbww_firmware/actions/workflows/build_firmware.yml)
-[![Build Status develop](https://github.com/pljakobs/esp_rgbww_firmware/actions/workflows/build_firmware.yml/badge.svg?branch=develop)](https://github.com/pljakobs/esp_rgbww_firmware/actions/workflows/build_firmware.yml)
-[![Build Status testing](https://github.com/pljakobs/esp_rgbww_firmware/actions/workflows/build_firmware.yml/badge.svg?branch=testing)](https://github.com/pljakobs/esp_rgbww_firmware/actions/workflows/build_firmware.yml)
 
 ## Table of Contents
 
@@ -303,11 +297,15 @@ All endpoints are on port **80**. Responses are JSON. When security is enabled, 
 
 CORS headers are always present. `OPTIONS` requests are answered with `200 {"success":true}`.
 
+Many of the read and command endpoints below are also available over the WebSocket JSON-RPC API described in [WebSocket API](#websocket-api). HTTP remains fully supported; the webapp now prefers WebSocket first and falls back to HTTP when required.
+
 ---
 
 ### `GET /info`
 
 Returns device identity and runtime state.
+
+Also available via WebSocket JSON-RPC methods `info` and `getInfo`.
 
 **Query parameter:** `?v=2` — returns the extended v2 format (recommended).
 
@@ -360,6 +358,8 @@ Returns device identity and runtime state.
 
 Returns the current output state.
 
+Also available via WebSocket JSON-RPC methods `color` and `getColor`.
+
 ```json
 {
   "raw": { "r": 255, "g": 128, "b": 0, "ww": 0, "cw": 0 },
@@ -378,6 +378,8 @@ Send a color command. See [Color Command Reference](#color-command-reference).
 ### `GET /config`
 
 Returns the full configuration as JSON. Suitable for backup and programmatic inspection.
+
+Also available via WebSocket JSON-RPC methods `config` and `getConfig`.
 
 ### `POST /config`
 
@@ -411,6 +413,8 @@ curl -X POST http://<device>/config \
 
 Returns available Wi-Fi networks (up to 25). Trigger a scan first with `POST /scan_networks`.
 
+Also available via WebSocket JSON-RPC methods `networks` and `getNetworks`.
+
 ```json
 {
   "scanning": false,
@@ -423,6 +427,8 @@ Returns available Wi-Fi networks (up to 25). Trigger a scan first with `POST /sc
 ### `POST /scan_networks`
 
 Initiates an asynchronous Wi-Fi scan. Poll `GET /networks` for results.
+
+Also available via WebSocket JSON-RPC command `scan_networks`.
 
 ---
 
@@ -438,13 +444,15 @@ Submit Wi-Fi credentials to connect to a network.
 
 ### `GET /ping`
 
-Simple availability check. Returns `{"success":true}`.
+Simple availability check. Returns `{"ping":"pong"}`.
 
 ---
 
 ### `POST /system`
 
 System control commands.
+
+Also available via WebSocket JSON-RPC command `system`.
 
 | `cmd` | Description |
 |-------|-------------|
@@ -453,7 +461,7 @@ System control commands.
 | `debug` | Enable/disable debug output (also requires `"enable": true/false`) |
 
 ```bash
-curl -X POST http://<device>/system -H "Content-Type: application/json" -d '{"cmd":"restart"}'
+curl -X POST http://<device>/system -d '{"cmd":"restart"}'
 ```
 
 ---
@@ -462,9 +470,13 @@ curl -X POST http://<device>/system -H "Content-Type: application/json" -d '{"cm
 
 Turn the output on (restore last colour) or off immediately.
 
+Also available via WebSocket JSON-RPC commands `on` / `off` (plus aliases `setOn` / `setOff`).
+
 ### `POST /toggle`
 
 Toggle between on and off.
+
+Also available via WebSocket JSON-RPC command `toggle`.
 
 ---
 
@@ -472,21 +484,31 @@ Toggle between on and off.
 
 Stop animation and clear queue. Equivalent to skip + clear.
 
+Also available via WebSocket JSON-RPC command `stop`.
+
 ### `POST /skip`
 
 Skip the current animation step, jumping immediately to its end state.
+
+Also available via WebSocket JSON-RPC command `skip`.
 
 ### `POST /pause`
 
 Pause the animation queue.
 
+Also available via WebSocket JSON-RPC command `pause`.
+
 ### `POST /continue`
 
 Resume a paused animation queue.
 
+Also available via WebSocket JSON-RPC command `continue`.
+
 ### `POST /blink`
 
 Trigger an instant blink of the current color.
+
+Also available via WebSocket JSON-RPC command `blink`.
 
 ```json
 { "ramp": 500 }
@@ -713,7 +735,64 @@ Event types pushed:
 
 ## WebSocket API
 
-Connect to `ws://<device>/ws`. The controller pushes the same events as the TCP event server:
+Connect to `ws://<device>/ws`.
+
+The socket serves two roles:
+
+- **JSON-RPC request/response API** for reads and commands
+- **push events** for live state updates and notifications
+
+### JSON-RPC request format
+
+```json
+{ "jsonrpc": "2.0", "id": 1, "method": "info", "params": { "V": "2" } }
+```
+
+### JSON-RPC success response
+
+```json
+{ "jsonrpc": "2.0", "id": 1, "result": { "device": { "soc": "esp8266" } } }
+```
+
+### JSON-RPC error response
+
+```json
+{ "jsonrpc": "2.0", "id": 1, "error": "method not implemented" }
+```
+
+### Supported request/command methods
+
+| Method | Purpose |
+|--------|---------|
+| `info`, `getInfo` | Read runtime/device information |
+| `color`, `getColor` | Read current color state |
+| `config`, `getConfig` | Read full configuration |
+| `hosts`, `getHosts` | Read known peer controllers |
+| `networks`, `getNetworks` | Read current Wi-Fi scan results |
+| `scan_networks` | Trigger asynchronous Wi-Fi scan |
+| `system` | Execute system command (`restart`, `debug`, etc.) |
+| `color` | Execute color / animation payload |
+| `on`, `setOn` | Turn output on |
+| `off`, `setOff` | Turn output off |
+| `toggle` | Toggle on/off |
+| `stop` | Stop animation and clear queue |
+| `skip` | Skip current transition |
+| `pause` | Pause animation queue |
+| `continue` | Resume paused queue |
+| `blink` | Trigger blink |
+| `direct` | Apply direct color change |
+| `authenticate` | Complete the challenge-response auth handshake (see [Security](#security)) |
+
+The `keep_alive` message is reserved for connection maintenance and is handled automatically by the webapp.
+
+When `security.api_secured` is enabled, every method except `authenticate` and
+`keep_alive` requires the connection to first complete the challenge-response
+handshake described in [Security](#security). Unauthenticated calls are rejected
+with JSON-RPC error `-32001` and a fresh `challenge`.
+
+### Push events
+
+The controller also pushes the same events as the TCP event server:
 
 ```json
 { "type": "color",   "data": { "raw": { "r": 255 }, "hsv": { "h": 1.047 } } }
@@ -721,21 +800,94 @@ Connect to `ws://<device>/ws`. The controller pushes the same events as the TCP 
 { "type": "notification", "data": "new SSID, MyNetwork" }
 ```
 
-The webapp uses this connection for live status updates.
+The webapp uses this connection both for live status updates and for request/response API traffic when available.
 
 ---
 
 ## Security
 
-Disabled by default. Enable via:
+API access can be protected by a single shared password. It is **disabled by
+default**. Enable it and set the password via the configuration API:
 
 ```json
 { "security": { "api_secured": true, "api_password": "mysecret" } }
 ```
 
-When enabled, every HTTP request must include `Authorization: Basic <base64(:<password>)>`. There is no username — use just the password preceded by a colon in the base64-encoded string.
+There is **no username** — the password is the only shared secret. It is used
+by both the HTTP REST API (HTTP Basic) and the WebSocket JSON-RPC API
+(challenge-response). When `api_secured` is `false`, all endpoints are open and
+no credentials are checked.
+
+### HTTP REST API — HTTP Basic
+
+When enabled, every HTTP request must include an `Authorization` header:
+
+```
+Authorization: Basic <base64(":" + password)>
+```
+
+The username portion is ignored, so the base64 payload is simply a colon
+followed by the password (e.g. `base64(":mysecret")`). A request without valid
+credentials is answered with:
+
+```
+HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Basic realm="RGBWW Server"
+Connection: close
+```
+
+### WebSocket JSON-RPC API — challenge-response
+
+The WebSocket API does **not** use HTTP Basic. Instead each connection must
+complete a per-connection challenge-response handshake before any state-changing
+method is accepted. The `authenticate` method and `keep_alive` pings are always
+allowed through; every other method requires an authenticated connection.
+
+**1. Trigger a challenge.** Send any secured method (or an `authenticate`
+request with no hash). If the connection is not yet authenticated, the
+controller replies with JSON-RPC error code `-32001` and a top-level
+`challenge` — a 32-character lowercase-hex nonce (16 random bytes):
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "error": { "code": -32001, "message": "authentication required" },
+  "challenge": "3f9a1c...e7"
+}
+```
+
+**2. Compute the response hash.** Concatenate the challenge and the password
+with a colon separator and take the lowercase-hex SHA-256 digest:
+
+```
+hash = SHA256( challenge + ":" + password )   // lowercase hex
+```
+
+**3. Send the `authenticate` request** with the computed hash:
+
+```json
+{ "jsonrpc": "2.0", "id": 2, "method": "authenticate", "params": { "hash": "<hash>" } }
+```
+
+**4. Result.** On success the controller marks the connection authenticated and
+consumes the nonce:
+
+```json
+{ "jsonrpc": "2.0", "id": 2, "result": { "authenticated": true } }
+```
+
+On failure it returns error `-32001` again together with a **fresh** `challenge`
+(the previous nonce is single-use), so the client can retry. Because the
+challenge is per-connection and single-use, the hash cannot be replayed on a new
+connection.
+
+> Browsers compute the digest with `crypto.subtle.digest("SHA-256", ...)`; the
+> firmware uses the same `SHA256(challenge + ":" + password)` formula, so both
+> sides must produce identical lowercase-hex output.
 
 The AP password defaults to `configesp` and should be changed before deployment.
+
 
 ---
 

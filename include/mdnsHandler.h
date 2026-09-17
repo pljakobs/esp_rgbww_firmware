@@ -24,7 +24,10 @@
 #include <Network/Mdns/debug.h>
 #include <map>
 #include <memory>
+#include <vector>
 #include <controllers.h>
+
+
 
 #pragma once
 
@@ -190,8 +193,11 @@ public:
         if (_instance.length() > 0) {
             txt.add(F("fn=") + _instance);
         }
+        txt.add(F("type=CONTROLLER"));
+        txt.add(F("host_type=CONTROLLER"));
         txt.add(F("path=/"));
         txt.add(F("v=2"));
+
     }
 
 private:
@@ -201,14 +207,15 @@ private:
 /**
  * _lightinator._tcp  —  controller-to-controller swarm gossip
  * Browsed by: other Lightinator controllers only.
- * Carries swarm topology metadata (leader status, group membership).
+ * Carries swarm topology metadata (leader status only). Group membership is
+ * NOT advertised: leadership is computed locally from the synced config DB.
  */
 class LEDControllerSwarmService : public mDNS::Service {
 public:
+    void setWebVersion(const String& webVersion) { _webVersion = webVersion; }
+    
     void setInstance(const String& instance) { _instance = instance; }
     void setLeader(bool isLeader)             { _isLeader = isLeader; }
-    void setGroups(const Vector<String>& g)   { _groups = g; }
-    void setLeadingGroups(const Vector<String>& g) { _leadingGroups = g; }
 
     String getInstance() override { return _instance; }
     String getName() override { return F("lightinator"); }
@@ -219,25 +226,19 @@ public:
         char idStr[16];
         snprintf(idStr, sizeof(idStr), "id=%u", system_get_chip_id());
         txt.add(idStr);
+        txt.add(F("type=CONTROLLER"));
+        txt.add(F("host_type=CONTROLLER"));
         txt.add(_isLeader ? F("isLeader=1") : F("isLeader=0"));
-        if (_groups.size() > 0) {
-            String groupList;
-            for (size_t i = 0; i < _groups.size(); i++) {
-                if (i > 0) groupList += ",";
-                groupList += _groups[i];
-            }
-            txt.add(F("groups=") + groupList);
-        }
-        for (size_t i = 0; i < _leadingGroups.size(); i++) {
-            txt.add(F("leads_") + _leadingGroups[i] + "=1");
-        }
+        txt.add(F("webapp=") + getWebappVersion());
+        debug_i("[mDNS] API Service TXT records: %s", txt.toString().c_str());
     }
 
 private:
+    String getWebappVersion();
+
     String _instance;
     bool _isLeader = false;
-    Vector<String> _groups;
-    Vector<String> _leadingGroups;
+    String _webVersion;
 };
 
 
@@ -271,9 +272,18 @@ public:
         snprintf(idStr, sizeof(idStr), "id=%u", system_get_chip_id());
         txt.add(idStr);
         switch (_hostType) {
-            case HostType::Device: txt.add(F("type=host"));   break;
-            case HostType::Leader: txt.add(F("type=leader")); break;
-            case HostType::Group:  txt.add(F("type=group"));  break;
+            case HostType::Device:
+                txt.add(F("type=CONTROLLER"));
+                txt.add(F("host_type=CONTROLLER"));
+                break;
+            case HostType::Leader:
+                txt.add(F("type=ALIAS"));
+                txt.add(F("host_type=ALIAS"));
+                break;
+            case HostType::Group:
+                txt.add(F("type=ALIAS"));
+                txt.add(F("host_type=ALIAS"));
+                break;
         }
     }
 
@@ -329,11 +339,6 @@ public:
     bool onMessage(mDNS::Message& message) override;
 
     /**
-     * @brief Add a discovered host to the list
-     */
-    void addHost(const char* hostname, const char* ip_address, int ttl, unsigned int id);
-
-    /**
      * @brief Send WebSocket update about discovered hosts
      */
     void sendWsUpdate(const char* type, JsonObject host);
@@ -343,6 +348,15 @@ public:
      * @param enable true to become leader, false to relinquish leadership
      */
     void checkGroupLeadership();
+
+    /**
+     * @brief Set the web version for the API service
+     * @param v The web version string
+     * 
+     * sets the web version for the API service, which is included in the mDNS TXT records.
+     * this is so that other controllers can find compatible sources for the webapp
+     */
+    void setWebVersion(const String& v);
 
 
 private:
@@ -355,8 +369,8 @@ private:
     String searchName;
     // Swarm gossip service type — controllers browse this exclusively
     const char* service = "_lightinator._tcp.local";
-    int _mdnsTimerInterval = 15000; // Increased from 10000
-    int conntrack = 0;
+    const char* wallPanelService = "_wall-panel-api._tcp.local";
+    int _mdnsTimerInterval = 30000; // Increased from 10000
     int _currentMdnsTimerInterval;
     unsigned long _lastMessageTime = 0;
     int _messageCount = 0;
@@ -371,8 +385,16 @@ private:
     void becomeGroupLeader(const char* groupId, const char* groupName);
     void relinquishGroupLeadership(const char* groupId);
 
-    // Track group leadership
-    Vector<String> _leadingGroups;
+    // Track group leadership.
+    // Group IDs have the form "<chipId>-<localId>": chipId is up to 12 decimal
+    // digits, localId is 8 chars, plus '-' and NUL = 22; padded to 32 for
+    // alignment. Stored as fixed buffers (contiguous std::vector) to avoid the
+    // per-element heap churn of a Vector<String>.
+    static constexpr size_t GROUP_ID_BUFLEN = 32;
+    struct GroupId {
+        char value[GROUP_ID_BUFLEN];
+    };
+    std::vector<GroupId> _leadingGroups;
     std::map<String, std::unique_ptr<mDNS::Responder>> _groupResponders;
     std::map<String, std::unique_ptr<LEDControllerWebService>> _groupWebServices;
 
@@ -385,7 +407,6 @@ private:
     // Discovery methods
     static void sendSearchCb(void* pTimerArg);
     void sendSearch();
-    // void queryKnownControllers(uint8_t batchIndex);
 
     // Service instances
     LEDControllerAPIService  ledControllerAPIService;  // _lightinator-api._tcp: external tools

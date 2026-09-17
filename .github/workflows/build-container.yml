@@ -1,5 +1,8 @@
 name: Build Container
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 on:
   schedule:
     - cron: "2 10 * * *" # Runs daily at 2:10  UTC
@@ -8,13 +11,14 @@ on:
 jobs:
   check-updates:
     runs-on: ubuntu-latest
+    #runs-on: self-hosted
     outputs:
       updated: ${{ steps.check.outputs.updated }}
     steps:
-      - name: Check for updates in sminghub/sming
+      - name: Check for updates in pljakobs/Sming
         id: check
         run: |
-          latest_commit=$(curl -s "https://api.github.com/repos/SmingHub/Sming/commits/develop" | jq -r '.commit.committer.date')
+          latest_commit=$(curl -s "https://api.github.com/repos/pljakobs/Sming/commits/develop" | jq -r '.commit.committer.date')
           latest_commit_date=$(date -d "$latest_commit" +%s)
           current_date=$(date +%s)
           difference=$(( (current_date - latest_commit_date) / 86400 ))
@@ -25,6 +29,7 @@ jobs:
           fi
   build:
     runs-on: ubuntu-latest
+    #runs-on: self-hosted
     needs: check-updates
     if: needs.check-updates.outputs.updated == 'true' || github.event_name == 'workflow_dispatch'
     steps:
@@ -58,6 +63,7 @@ jobs:
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
+          no-cache: true
           context: .
           file: docker/Dockerfile
           push: true

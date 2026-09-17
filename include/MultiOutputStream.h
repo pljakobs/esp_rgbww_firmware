@@ -49,13 +49,13 @@ public:
         // Check for duplicates
         for (auto existing : unbufferedStreams) {
             if (existing == stream) {
-                Serial.println("MultiOutputStream: WARNING - Unbuffered stream already added!");
+                Serial.println(F("MultiOutputStream: WARNING - Unbuffered stream already added!"));
                 return;
             }
         }
         
         unbufferedStreams.push_back(stream);
-        Serial.printf("MultiOutputStream: Added unbuffered stream (total: %u)\n", unbufferedStreams.size());
+        Serial.printf(_F("MultiOutputStream: Added unbuffered stream (total: %u)\n"), unbufferedStreams.size());
     
     }
 

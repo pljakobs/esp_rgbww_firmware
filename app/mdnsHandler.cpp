@@ -25,15 +25,34 @@
 #include <mdnsHandler.h>
 #include <RGBWWCtrl.h>
 #include "app-data.h"
-#include <Network/Http/HttpRequest.h>
-#include <Network/Http/HttpClient.h>
+#include <application.h>
 
+extern Application app;
 
+//ToDo: verify if mDNS with group names can be implemented with a single handler instance and multiple responders, or if we need to create separate handler instances for each group (potentially with shared responder logic) to properly manage group-specific state and avoid conflicts in service registration and message handling.
 //#define DEBUG_MDNS 
 
 // No global pointer needed — swarm state is managed via the
 // ledControllerSwarmService member of mdnsHandler directly.
 
+String LEDControllerSwarmService::getWebappVersion() {
+    #ifdef DEBUG_MDNS
+    debug_i(ANSI_COLOR_YELLOW "[mDNS] LEDControllerSwarmService" ANSI_COLOR_BLUE "Getting webapp version for mDNS TXT records" ANSI_COLOR_RESET);
+    #endif
+    if (_webVersion.length() > 0) {
+        #ifdef DEBUG_MDNS
+        debug_i(ANSI_COLOR_YELLOW "[mDNS] LEDControllerSwarmService" ANSI_COLOR_BLUE "Using cached webapp version: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, _webVersion.c_str());
+        #endif
+        return _webVersion;
+    } else {
+        AppConfig::Root::Webapp webapp(*app.cfg);
+        _webVersion = webapp.getInstalledVersion();
+        #ifdef DEBUG_MDNS
+        debug_i(ANSI_COLOR_YELLOW "[mDNS] LEDControllerSwarmService" ANSI_COLOR_BLUE "Fetched webapp version from config: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, _webVersion.c_str());
+        #endif
+        return _webVersion;
+    }
+}
 mdnsHandler::mdnsHandler() {
     // Initialize with default values
     _currentMdnsTimerInterval = _mdnsTimerInterval;
@@ -63,10 +82,10 @@ void mdnsHandler::setHostname(const char* newHostname)
     // Relinquish all leadership roles before changing hostname
     relinquishLeadership();
 
-    // Create a copy of the group IDs to avoid iterator invalidation
-    Vector<String> groupsToRelinquish = _leadingGroups;
-    for (const String& groupId : groupsToRelinquish) {
-        relinquishGroupLeadership(groupId.c_str());
+    // Create a copy of the group IDs to avoid iterator invalidation only if needed
+    std::vector<GroupId> groupsToRelinquish = _leadingGroups;
+    for (const auto& g : groupsToRelinquish) {
+        relinquishGroupLeadership(g.value);
     }
 
     // Sanitize the hostname
@@ -92,7 +111,7 @@ void mdnsHandler::setHostname(const char* newHostname)
     primaryResponder->begin(san_buf);
 
 #ifdef DEBUG_MDNS
-    debug_i("Registered hostname: %s", san_buf);
+    debug_i(ANSI_COLOR_BLUE "Registered hostname: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, san_buf);
 #endif
 
     // Register all three services on the primary responder:
@@ -109,17 +128,17 @@ void mdnsHandler::setHostname(const char* newHostname)
 
 void mdnsHandler::setSearchName(const char* name)
 {
-    debug_i("setting searchName to %s", name);
-    searchName = name;
+    debug_i(ANSI_COLOR_BLUE "setting searchName to " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, name);
+    searchName = String(name);
 }
 
 void mdnsHandler::start()
 {
     using namespace mDNS;
 
-    debug_i("########################################################");
-    debug_i("# mdns Handler initialized, Source Port: %d, TARGET Port: %d", MDNS_SOURCE_PORT, MDNS_TARGET_PORT);
-    debug_i("########################################################");
+    debug_i(ANSI_COLOR_BLUE "########################################################" ANSI_COLOR_RESET);
+    debug_i(ANSI_COLOR_BLUE "# mdns Handler initialized, Source Port: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE ", TARGET Port: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, MDNS_SOURCE_PORT, MDNS_TARGET_PORT);
+    debug_i(ANSI_COLOR_BLUE "########################################################" ANSI_COLOR_RESET);
     
     // Get device hostname from configuration and set it
     String hostName;
@@ -142,7 +161,7 @@ void mdnsHandler::start()
 
     // Set up leadership election with delay
     #ifdef DEBUG_MDNS
-    debug_i("starting leader election timer timer");
+    debug_i(ANSI_COLOR_BLUE "starting leader election timer timer" ANSI_COLOR_RESET);
     #endif 
     _leaderElectionTimer.setCallback(mdnsHandler::checkForLeadershipCb, this);
     _leaderElectionTimer.setIntervalMs(_mdnsTimerInterval * LEADER_ELECTION_DELAY);
@@ -153,7 +172,7 @@ void mdnsHandler::start()
     
     // Set up timer for periodic mDNS searches
     #ifdef DEBUG_MDNS
-    debug_i("starting mDNS search timer");
+    debug_i(ANSI_COLOR_BLUE "starting mDNS search timer" ANSI_COLOR_RESET);
     #endif 
     _mdnsSearchTimer.setCallback(mdnsHandler::sendSearchCb, this);
     _mdnsSearchTimer.setIntervalMs(_currentMdnsTimerInterval);
@@ -162,7 +181,7 @@ void mdnsHandler::start()
     // Register the main handler
     mDNS::server.addHandler(*this); 
     #ifdef DEBUG_MDNS
-    debug_i("mDNS server started");
+    debug_i(ANSI_COLOR_BLUE "mDNS server started" ANSI_COLOR_RESET);
     #endif
 }
 
@@ -186,14 +205,14 @@ bool mdnsHandler::onMessage(mDNS::Message& message)
     }
 
 #ifdef DEBUG_MDNS
-    debug_i("onMessage handler called");
+    debug_i(ANSI_COLOR_BLUE "onMessage handler called" ANSI_COLOR_RESET);
 #endif
     using namespace mDNS;
 
     // Check if we're interested in this message
     if (!message.isReply()) {
 #ifdef DEBUG_MDNS
-        debug_i("Ignoring query");
+        debug_i(ANSI_COLOR_BLUE "Ignoring query" ANSI_COLOR_RESET);
 #endif
         return false;
     }
@@ -202,7 +221,7 @@ bool mdnsHandler::onMessage(mDNS::Message& message)
     auto srv_answer = message[mDNS::ResourceType::SRV];
     if (srv_answer == nullptr) {
 #ifdef DEBUG_MDNS
-        debug_i("No SRV record in this message");
+        debug_i(ANSI_COLOR_BLUE "No SRV record in this message" ANSI_COLOR_RESET);
 #endif
         // Let's check if this is a direct A record response without SRV
         auto a_answer = message[mDNS::ResourceType::A];
@@ -216,13 +235,16 @@ bool mdnsHandler::onMessage(mDNS::Message& message)
     const String answerNameString = String(srv_answer->getName());
     const char* answerName = answerNameString.c_str();
 #ifdef DEBUG_MDNS
-    debug_i("answerName: %ssearchName: %s", answerName, searchName.c_str());
+    debug_i(ANSI_COLOR_BLUE "answerName: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "searchName: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, answerName, searchName.c_str());
 #endif
 
-    // Check if this is a swarm service response (_lightinator._tcp)
+    // Check if this is a swarm or wall-panel service response
     const char* swarm_suffix = "._lightinator._tcp.local";
+    const char* wallpanel_suffix = "._wall-panel-api._tcp.local";
     const char* p_swarm = strstr(answerName, swarm_suffix);
-    if (p_swarm != nullptr && p_swarm[strlen(swarm_suffix)] == '\0') {
+    const char* p_wallpanel = strstr(answerName, wallpanel_suffix);
+    if ((p_swarm != nullptr && p_swarm[strlen(swarm_suffix)] == '\0') ||
+        (p_wallpanel != nullptr && p_wallpanel[strlen(wallpanel_suffix)] == '\0')) {
         return processSwarmServiceResponse(message);
     } else {
         const char* http_tcp_local = "._http._tcp.local";
@@ -230,12 +252,20 @@ bool mdnsHandler::onMessage(mDNS::Message& message)
         if (p != nullptr && p[strlen(http_tcp_local)] == '\0') {
             // This is likely a hostname response
             size_t hostname_len = p - answerName;
-            char hostname[hostname_len + 1];
-            strncpy(hostname, answerName, hostname_len);
+            // Bound the copy to a fixed buffer: answerName comes straight off
+            // the network, so a VLA sized from it would let a remote peer decide
+            // how much stack this frame consumes (unbounded alloca, CWE-789) —
+            // dangerous on the shared SYS/network stack this runs on.  A single
+            // mDNS label never exceeds 63 bytes; 64 covers the label + NUL.
+            char hostname[64];
+            if (hostname_len >= sizeof(hostname)) {
+                hostname_len = sizeof(hostname) - 1;
+            }
+            memcpy(hostname, answerName, hostname_len);
             hostname[hostname_len] = '\0';
 
 #ifdef DEBUG_MDNS
-            debug_i("Processing hostname response for: %s", hostname);
+            debug_i(ANSI_COLOR_BLUE "Processing hostname response for: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, hostname);
 #endif
 
             // Extract hostname data from the message
@@ -254,7 +284,7 @@ bool mdnsHandler::processSwarmServiceResponse(mDNS::Message& message)
     bool msgHasA = false, msgHasTXT = false;
 
 #ifdef DEBUG_MDNS
-    debug_i("Found matching SRV record");
+    debug_i(ANSI_COLOR_BLUE "Found matching SRV record" ANSI_COLOR_RESET);
 #endif
 
     // Extract required information from the message
@@ -296,27 +326,24 @@ bool mdnsHandler::processSwarmServiceResponse(mDNS::Message& message)
             if (isLeaderTxt == "1") {
                 _leaderDetected = true;
 #ifdef DEBUG_MDNS
-                debug_i("Detected leader: %s", info.hostName);
+                debug_i(ANSI_COLOR_BLUE "Detected leader: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, info.hostName);
 #endif
             }
 
             // Get hostname type
-            String hostnameType = txt[F("type")];
+            String hostnameType = txt[F("host_type")];
+            if (hostnameType.length() == 0) {
+                hostnameType = txt[F("type")];
+            }
             if (hostnameType.length() == 0)
                 hostnameType = F("undefined");
 #ifdef DEBUG_MDNS
-            debug_i("Hostname %s, type: %s", info.hostName, hostnameType.c_str());
+            debug_i(ANSI_COLOR_BLUE "Hostname " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ", type: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, info.hostName, hostnameType.c_str());
 #endif
-
-            // Only add to host table if this is a device hostname
-            if (hostnameType == F("host")) {
-                app.controllers->addOrUpdate(info.ID, info.hostName, info.ipAddr.toString(), info.ttl);
-            } else {
-                // For leader/group hostnames, just log them
-#ifdef DEBUG_MDNS
-                debug_i("Detected %s hostname: %s (ID: %u)", hostnameType.c_str(), info.hostName, info.ID);
-#endif
-            }
+            // todo: add webapVersion to controler database
+            String webappVersion = txt[F("webapp")];
+            const Controllers::HostType hostType = Controllers::hostTypeFromString(hostnameType);
+            app.controllers->addOrUpdate(info.ID, info.hostName, info.ipAddr.toString(), webappVersion, info.ttl, hostType);
         }
         return true;
     } else {
@@ -345,7 +372,7 @@ bool mdnsHandler::processHostnameARecord(mDNS::Message& message, mDNS::Answer* a
     String ipAddress = a_answer->getRecordString();
     unsigned int ttl = a_answer->getTtl();
 #ifdef DEBUG_MDNS
-    debug_i("Got A record for hostname: %s, IP: %s", hostname, ipAddress.c_str());
+    debug_i(ANSI_COLOR_BLUE "Got A record for hostname: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ", IP: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, hostname, ipAddress.c_str());
 #endif
 
     // Look up ID by hostname in our persistent controller database
@@ -359,7 +386,7 @@ bool mdnsHandler::processHostnameARecord(mDNS::Message& message, mDNS::Answer* a
         if (strcasecmp(hostname, storedName.c_str()) == 0) {
             controllerId = (*it).getId().toInt();
 #ifdef DEBUG_MDNS
-            debug_i("Found matching controller ID: %u", controllerId);
+            debug_i(ANSI_COLOR_BLUE "Found matching controller ID: " ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, controllerId);
 #endif
             break;
         }
@@ -367,7 +394,7 @@ bool mdnsHandler::processHostnameARecord(mDNS::Message& message, mDNS::Answer* a
 
     // Only process if we found the controller ID
     if (controllerId > 0) {
-        app.controllers->addOrUpdate(controllerId, hostname, ipAddress, ttl);
+        app.controllers->addOrUpdate(controllerId, hostname,"", ipAddress, ttl);
         return true;
     }
 
@@ -375,7 +402,7 @@ bool mdnsHandler::processHostnameARecord(mDNS::Message& message, mDNS::Answer* a
     //_pendingHostnameResolutions[hostname] = ipAddress;
 
 #ifdef DEBUG_MDNS
-    debug_i("Hostname stored for later ID resolution: %s", hostname);
+    debug_i(ANSI_COLOR_BLUE "Hostname stored for later ID resolution: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, hostname);
 #endif
 
     return false; // Not fully processed yet
@@ -398,7 +425,7 @@ bool mdnsHandler::processHostnameResponse(mDNS::Message& message, const char* ho
             ipAddress = a_answer->getRecordString();
             ttl = a_answer->getTtl();
 #ifdef DEBUG_MDNS
-            debug_i("Hostname IP address: %s (TTL: %u)", ipAddress.c_str(), ttl);
+            debug_i(ANSI_COLOR_BLUE "Hostname IP address: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " (TTL: " ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE ")" ANSI_COLOR_RESET, ipAddress.c_str(), ttl);
 #endif
         } else {
             // No A record, can't proceed
@@ -415,26 +442,24 @@ bool mdnsHandler::processHostnameResponse(mDNS::Message& message, const char* ho
             mDNS::Resource::TXT txt(*txt_answer);
             controllerId = txt["id"].toInt();
             controllerType = txt["type"];
+            const char* webappVersion = txt["webapp"].c_str();
 #ifdef DEBUG_MDNS
-            debug_i("Found controller ID: %u, type: %s", controllerId, controllerType.c_str());
+            debug_i(ANSI_COLOR_BLUE "Found controller ID: " ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE ", type: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, controllerId, controllerType.c_str());
 #endif
 
-            // If we have an ID and it's a host type, add the host
-            if (controllerId > 0 && controllerType == "host") {
-                app.controllers->addOrUpdate(controllerId, hostname, ipAddress, ttl);
+            if (controllerId > 0) {
+                Controllers::HostType hostType = Controllers::hostTypeFromString(txt["host_type"]);
+                if (hostType == Controllers::HOST_TYPE_UNKNOWN) {
+                    hostType = Controllers::hostTypeFromString(controllerType);
+                }
+                app.controllers->addOrUpdate(controllerId, hostname, ipAddress, webappVersion, ttl, hostType);
                 return true;
-            } else if (controllerId > 0) {
-                // Log but don't add non-host entries
-#ifdef DEBUG_MDNS
-                debug_i("Ignoring non-host entry: %s (ID: %u, type: %s)", hostname, controllerId,
-                        controllerType.c_str());
-#endif
             }
         }
     }
     // No valid TXT record or not a host type - don't fall back to hostname lookup
 #ifdef DEBUG_MDNS
-    debug_i("No valid host TXT record found for %s - ignoring", hostname);
+    debug_i(ANSI_COLOR_BLUE "No valid host TXT record found for " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " - ignoring" ANSI_COLOR_RESET, hostname);
 #endif
     return false;
 }
@@ -447,8 +472,13 @@ void mdnsHandler::sendSearch()
 
     // Search for the service
     bool ok = mDNS::server.search(service);
+    bool wallPanelOk = mDNS::server.search(wallPanelService);
+#ifndef DEBUG_MDNS
+    (void)wallPanelOk;
+#endif
 #ifdef DEBUG_MDNS
-    debug_i("search('%s'): %s", service, ok ? "OK" : "FAIL");
+    debug_i(ANSI_COLOR_BLUE "search('" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "'): " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, service, ok ? "OK" : "FAIL");
+    debug_i(ANSI_COLOR_BLUE "search('" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "'): " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, wallPanelService, wallPanelOk ? "OK" : "FAIL");
 #endif
 
     // Periodically check if there is still a leader in the network
@@ -477,94 +507,12 @@ void mdnsHandler::sendSearch()
 
 void mdnsHandler::sendSearchCb(void* pTimerArg) {
 #ifdef DEBUG_MDNS
-    debug_i("sendSearchCb called");
+    debug_i(ANSI_COLOR_BLUE "sendSearchCb called" ANSI_COLOR_RESET);
 #endif
     mdnsHandler* pThis = static_cast<mdnsHandler*>(pTimerArg);
     pThis->sendSearch();
 }
 
-/**
- * @brief Query known controllers directly to improve discovery reliability
- * 
- * This method reads the persistent storage to find controllers that have been
- * discovered before and sends direct mDNS queries for them, rather than just
- * waiting to discover them through service announcements.
- * 
- * @param batchIndex Which subset of controllers to query (to avoid congestion)
- */
-/*
-void mdnsHandler::queryKnownControllers(uint8_t batchIndex) 
-{
-    // Access the controllers from persistent storage
-    AppData::Root::Controllers controllers(*app.data);
-    
-    // Get total count of controllers to determine batch size
-    size_t totalControllers = 0;
-    for (auto it = controllers.begin(); it != controllers.end(); ++it) {
-        totalControllers++;
-    }
-    
-    if (totalControllers == 0) {
-        return; // No controllers to query
-    }
-    
-    // Calculate how many controllers to query per batch (5 batches total)
-    // Always at least 1, at most 20% of total controllers per batch
-    size_t batchSize = max((size_t)1, totalControllers / 5);
-    size_t startIdx = batchIndex * batchSize;
-    size_t endIdx = min(startIdx + batchSize, totalControllers);
-    
-    // Skip this batch if it's out of range
-    if (startIdx >= totalControllers) {
-        return;
-    }
-    
-    // Process controllers in the current batch
-    size_t currentIdx = 0;
-    for (auto it = controllers.begin(); it != controllers.end(); ++it) {
-        // Skip controllers not in the current batch
-        if (currentIdx < startIdx) {
-            currentIdx++;
-            continue;
-        }
-        
-        if (currentIdx >= endIdx) {
-            break;
-        }
-
-        String hostname = (*it).getName();
-        String ipAddress = (*it).getIpAddress();
-        String hostname_local = hostname + ".local";
-
-        if(app.controllers->getControllerTTLForId((*it).getId().toInt()) > (_mdnsPingInterval*3)/2) {
-            break; // No need to ping if TTL is still good
-        }
-        // Start ping for this controller
-
-        #ifdef DEBUG_MDNS
-        debug_i("starting ping on %s[%s]", hostname, ipAddress.c_str());
-        #endif
-
-       
-        #ifdef DEBUG_MDNS
-        debug_i("starting mdns query for %s[%s]", hostname_local.c_str(), ipAddress.c_str());
-        #endif
-        
-        // Query for this host using standard search
-        mDNS::server.search(hostname_local.c_str(), mDNS::ResourceType::PTR);
-        
-        // Also search for the swarm service
-        String swarm_service = "_lightinator._tcp.local";
-        mDNS::server.search(swarm_service, mDNS::ResourceType::PTR);
-
-        #ifdef DEBUG_MDNS
-        debug_i("Querying for controller: %s", hostname.c_str());
-        #endif
-
-        currentIdx++;
-    }
-}
-    */
 void mdnsHandler::sendWsUpdate(const char* type, JsonObject host)
 {
     String hostString;
@@ -577,14 +525,14 @@ void mdnsHandler::sendWsUpdate(const char* type, JsonObject host)
 void mdnsHandler::checkForLeadership() {
     if (_leaderDetected) {
         #ifdef DEBUG_MDNS
-        debug_i("Leader already exists in network, not becoming leader");
+        debug_i(ANSI_COLOR_BLUE "Leader already exists in network, not becoming leader" ANSI_COLOR_RESET);
         #endif
         _leaderCheckCounter = 0;  // Reset counter when a leader is detected
         return;
     }
 
     #ifdef DEBUG_MDNS
-    debug_i("No leader detected (check round %d)", _leaderCheckCounter + 1);
+    debug_i(ANSI_COLOR_BLUE "No leader detected (check round " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE ")" ANSI_COLOR_RESET, _leaderCheckCounter + 1);
     #endif
     
     // Increment leader check counter
@@ -601,11 +549,11 @@ void mdnsHandler::checkForLeadership() {
     if (hasHighestId || _leaderCheckCounter >= LEADERSHIP_MAX_FAIL_COUNT) {
         if (hasHighestId) {
             #ifdef DEBUG_MDNS
-            debug_i("No leader detected and we have highest ID, becoming leader");
+            debug_i(ANSI_COLOR_BLUE "No leader detected and we have highest ID, becoming leader" ANSI_COLOR_RESET);
             #endif
         } else {
             #ifdef DEBUG_MDNS
-            debug_i("No leader detected after %d checks, becoming leader as a failsafe", LEADERSHIP_MAX_FAIL_COUNT);
+            debug_i(ANSI_COLOR_BLUE "No leader detected after " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " checks, becoming leader as a failsafe" ANSI_COLOR_RESET, LEADERSHIP_MAX_FAIL_COUNT);
             #endif
         }
         
@@ -613,7 +561,7 @@ void mdnsHandler::checkForLeadership() {
         _leaderCheckCounter = 0;  // Reset counter
     } else {
         #ifdef DEBUG_MDNS
-        debug_i("Not becoming leader, another controller has higher ID (check %d/%d)", 
+        debug_i(ANSI_COLOR_BLUE "Not becoming leader, another controller has higher ID (check " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "/" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE ")" ANSI_COLOR_RESET, 
                 _leaderCheckCounter, LEADERSHIP_MAX_FAIL_COUNT);
         #endif
 
@@ -649,7 +597,7 @@ void mdnsHandler::becomeLeader() {
     mDNS::server.addHandler(*leaderResponder);
 
     #ifdef DEBUG_MDNS
-    debug_i("This controller is now the global leader (lightinator.local)");
+    debug_i(ANSI_COLOR_BLUE "This controller is now the global leader (lightinator.local)" ANSI_COLOR_RESET);
     #endif
 }
 
@@ -668,7 +616,7 @@ void mdnsHandler::relinquishLeadership() {
     // Clean up leader web service
     leaderWebService.reset();
     #ifdef DEBUG_MDNS
-    debug_i("This controller is no longer the global leader");
+    debug_i(ANSI_COLOR_BLUE "This controller is no longer the global leader" ANSI_COLOR_RESET);
     #endif
 }
 
@@ -680,8 +628,12 @@ void mdnsHandler::checkGroupLeadership() {
     
     // Get access to all groups and track our memberships
     AppData::Root::Groups groups(*app.data);
-    
-    // Build map of group ID -> group name for easier reference
+
+    // We can lead at most as many groups as exist; reserve up front so the
+    // push_back()s in becomeGroupLeader() don't trigger reallocations.
+    _leadingGroups.reserve(groups.getItemCount());
+
+    // Build map of group ID -> group name for easier reference (avoid redundant String copies)
     std::map<String, String> groupNames;
     
     // Scan for our group memberships
@@ -729,7 +681,7 @@ void mdnsHandler::checkGroupLeadership() {
             if (hasHighestId) {
                 groupsToLead.add(groupId);
                 #ifdef DEBUG_MDNS
-                debug_i("This device should be the leader for group: %s", groupName.c_str());
+                debug_i(ANSI_COLOR_BLUE "This device should be the leader for group: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, groupName.c_str());
                 #endif
             }
         }
@@ -737,13 +689,13 @@ void mdnsHandler::checkGroupLeadership() {
     
     // Step 3: Set up leadership for groups where we should be leader
     for (size_t i = 0; i < groupsToLead.size(); i++) {
-        String groupId = groupsToLead[i];
+        const String& groupId = groupsToLead[i];
         String groupName = groupNames[groupId];
 
         // Only set up leadership if we're not already leader for this group
         bool alreadyLeader = false;
-        for (int j = 0; j < _leadingGroups.size(); j++) {
-            if (_leadingGroups[j] == groupId) {
+        for (const auto& g : _leadingGroups) {
+            if (groupId == g.value) {
                 alreadyLeader = true;
                 break;
             }
@@ -754,37 +706,35 @@ void mdnsHandler::checkGroupLeadership() {
     }
 
     // Step 4: Relinquish leadership for groups where we no longer should be leader
-    Vector<String> groupsToRelinquish;
+    std::vector<GroupId> groupsToRelinquish;
 
-    for (size_t i = 0; i < _leadingGroups.size(); i++) {
-        String groupId = _leadingGroups[i];
+    for (const auto& g : _leadingGroups) {
+        const char* groupId = g.value;
 
         // If we're no longer a member or shouldn't be leader, relinquish
-        bool shouldRelinquish = true;
+        bool stillMember = false;
         for (int j = 0; j < memberGroups.size(); j++) {
             if (memberGroups[j] == groupId) {
-                shouldRelinquish = false;
+                stillMember = true;
                 break;
             }
         }
-        if (shouldRelinquish) {
-            groupsToRelinquish.add(groupId);
-        } else {
-            shouldRelinquish = true;
+        bool stillLeader = false;
+        if (stillMember) {
             for (int j = 0; j < groupsToLead.size(); j++) {
                 if (groupsToLead[j] == groupId) {
-                    shouldRelinquish = false;
+                    stillLeader = true;
                     break;
                 }
             }
-            if (shouldRelinquish) {
-                groupsToRelinquish.add(groupId);
-            }
+        }
+        if (!stillMember || !stillLeader) {
+            groupsToRelinquish.push_back(g);
         }
     }
 
-    for (size_t i = 0; i < groupsToRelinquish.size(); i++) {
-        relinquishGroupLeadership(groupsToRelinquish[i].c_str());
+    for (const auto& g : groupsToRelinquish) {
+        relinquishGroupLeadership(g.value);
     }
     
     // Step 5: Update our service TXT records with current group info
@@ -792,42 +742,19 @@ void mdnsHandler::checkGroupLeadership() {
 }
 
 void mdnsHandler::updateServiceTxtRecords() {
-    // Get our current group memberships
-    Vector<String> memberGroups;
-    uint32_t myId = system_get_chip_id();
-    AppData::Root::Groups groups(*app.data);
-    
-    // Build list of groups we're members of
-    for (auto it = groups.begin(); it != groups.end(); ++it) {
-        auto& currentGroup = *it;
-        
-        // Check if we're a member
-        for (auto controllerIt = currentGroup.controllerIds.begin(); 
-             controllerIt != currentGroup.controllerIds.end(); 
-             ++controllerIt) {
-            
-            if (String(*controllerIt).toInt() == myId) {
-                memberGroups.add(currentGroup.getId());
-                break;
-            }
-        }
-    }
-    
-    // Update swarm service with current group and leader state
+    // Group membership is no longer advertised via mDNS. Leadership is computed
+    // locally from the synced config DB, so only the leader flag is published.
     ledControllerSwarmService.setLeader(_isLeader);
-    ledControllerSwarmService.setGroups(memberGroups);
-    ledControllerSwarmService.setLeadingGroups(_leadingGroups);
 
     #ifdef DEBUG_MDNS
-    debug_i("Updated service TXT records with %d group memberships and %d leading groups", 
-            memberGroups.size(), _leadingGroups.size());
+    debug_i(ANSI_COLOR_BLUE "Updated service TXT records (leader=" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE ")" ANSI_COLOR_RESET, _isLeader);
     #endif
 }
 
 void mdnsHandler::becomeGroupLeader(const char* groupId, const char* groupName)
 {
 #ifdef DEBUG_MDNS
-    debug_i("Becoming leader for group: %s (ID: %s)", groupName, groupId);
+    debug_i(ANSI_COLOR_BLUE "Becoming leader for group: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " (ID: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ")" ANSI_COLOR_RESET, groupName, groupId);
 #endif
 
     // Sanitize the group name for use as a hostname
@@ -836,7 +763,7 @@ void mdnsHandler::becomeGroupLeader(const char* groupId, const char* groupName)
     Util::sanitizeHostname(san_buf, sizeof(san_buf));
 
 #ifdef DEBUG_MDNS
-    debug_i("Sanitized group name: %s", san_buf);
+    debug_i(ANSI_COLOR_BLUE "Sanitized group name: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, san_buf);
 #endif
 
     // Create responder for this group's hostname
@@ -857,10 +784,13 @@ void mdnsHandler::becomeGroupLeader(const char* groupId, const char* groupName)
     _groupWebServices[groupId] = std::move(webService);
 
     // Track that we're now leading this group
-    _leadingGroups.add(groupId);
+    GroupId g;
+    strncpy(g.value, groupId, sizeof(g.value) - 1);
+    g.value[sizeof(g.value) - 1] = '\0';
+    _leadingGroups.push_back(g);
 
 #ifdef DEBUG_MDNS
-    debug_i("This controller is now leader for group: %s (%s.local)", groupName, san_buf);
+    debug_i(ANSI_COLOR_BLUE "This controller is now leader for group: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " (" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ".local)" ANSI_COLOR_RESET, groupName, san_buf);
 #endif
 }
 
@@ -878,7 +808,7 @@ void mdnsHandler::relinquishGroupLeadership(const char* groupId)
     }
 
 #ifdef DEBUG_MDNS
-    debug_i("Relinquishing leadership for group: %s (ID: %s)", groupName.c_str(), groupId);
+    debug_i(ANSI_COLOR_BLUE "Relinquishing leadership for group: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " (ID: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ")" ANSI_COLOR_RESET, groupName.c_str(), groupId);
 #endif
 
     // Remove the responder from mDNS server
@@ -893,15 +823,26 @@ void mdnsHandler::relinquishGroupLeadership(const char* groupId)
     }
 
     // Remove from our list of led groups
-    for (int i = 0; i < _leadingGroups.size(); i++) {
-        if (_leadingGroups[i] == groupId) {
-            _leadingGroups.remove(i);
+    for (auto it = _leadingGroups.begin(); it != _leadingGroups.end(); ++it) {
+        if (strcmp(it->value, groupId) == 0) {
+            _leadingGroups.erase(it);
             break;
         }
     }
 
 
 #ifdef DEBUG_MDNS
-    debug_i("This controller is no longer leader for group: %s", groupName);
+    debug_i(ANSI_COLOR_BLUE "This controller is no longer leader for group: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, groupName);
 #endif
+}
+
+void mdnsHandler::setWebVersion(const String& v) {
+    ledControllerSwarmService.setWebVersion(v);
+    
+    // Trigger an announcement on the primary responder so network peers 
+    // update their cached TXT records immediately without service re-init.
+if (primaryResponder) {
+        primaryResponder->removeService(ledControllerAPIService);
+        primaryResponder->addService(ledControllerAPIService);
+    }
 }

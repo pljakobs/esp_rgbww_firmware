@@ -1,0 +1,2 @@
+Assertion "invalid socket state for poll" failed at line 2120 in /opt/sming/Sming/Components/lwip/lwip/src/core/tcp.c
+Assertion "invalid socket state for poll" failed at line 2120 in /opt/sming/Sming/Components/lwip/lwip/src/core/tcp.c

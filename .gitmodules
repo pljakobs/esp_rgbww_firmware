@@ -4,3 +4,7 @@
 	url = https://github.com/pljakobs/RGBWWled.git
 	branch = origin/feature/fade
 
+[submodule "Components/JsonWriter"]
+	path = Components/JsonWriter
+	url = https://github.com/pljakobs/JsonWriter.git
+	branch = main

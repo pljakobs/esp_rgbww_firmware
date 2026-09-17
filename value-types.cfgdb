@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "string-value": {
+      "type": "string"
+    },
+    "boolean-value": {
+      "type": "boolean"
+    },
+    "integer-value": {
+      "type": "integer"
+    },
+    "non-negative-integer": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "raw-value": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1023
+    },
+    "hue-value": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 360
+    },
+    "color-temperature": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 65535
+    },
+    "percentage-value": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "mac-address": {
+      "type": "string",
+      "pattern": "^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$"
+    },
+    "ip-address": {
+      "type": "string",
+      "format": "ipv4"
+    },
+    "transition-duration": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 65535
+    },
+    "error-code": {
+      "type": "integer",
+      "minimum": -32768,
+      "maximum": 32767
+    },
+    "error-msg": {
+      "type": "object",
+      "properties": {
+        "code": { "$ref": "#/$defs/error-code" },
+        "message": { "$ref": "#/$defs/string-value" },
+        "data": { "$ref": "#/$defs/string-value" }
+      },
+      "required": ["code", "message"],
+      "additionalProperties": false
+    }
+  }
+}

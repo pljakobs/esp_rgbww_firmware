@@ -26,21 +26,49 @@
 
 extern Application app;
 
+Controllers::HostType Controllers::hostTypeFromString(const String& type)
+{
+    if(type.equalsIgnoreCase(F("ALIAS")) || type.equalsIgnoreCase(F("leader")) || type.equalsIgnoreCase(F("group"))) {
+        return HOST_TYPE_ALIAS;
+    }
+    if(type.equalsIgnoreCase(F("CONTROLLER")) || type.equalsIgnoreCase(F("host"))) {
+        return HOST_TYPE_CONTROLLER;
+    }
+    if(type.equalsIgnoreCase(F("WALLPANEL")) || type.equalsIgnoreCase(F("wall_panel"))) {
+        return HOST_TYPE_WALLPANEL;
+    }
+    return HOST_TYPE_UNKNOWN;
+}
+
+const char* Controllers::hostTypeToString(HostType type)
+{
+    switch(type) {
+    case HOST_TYPE_ALIAS:
+        return "ALIAS";
+    case HOST_TYPE_CONTROLLER:
+        return "CONTROLLER";
+    case HOST_TYPE_WALLPANEL:
+        return "WALLPANEL";
+    default:
+        return "UNKNOWN";
+    }
+}
+
 // Constructor
 Controllers::Controllers() {
-    debug_i("Controllers constructor called");
+    debug_i(ANSI_COLOR_BLUE "Controllers constructor called" ANSI_COLOR_RESET);
     if (!app.data) {
-        debug_e("app.data is NULL in Controllers constructor!");
+        debug_e(ANSI_COLOR_RED "app.data is NULL in Controllers constructor!" ANSI_COLOR_RESET);
         return;
     }
-    debug_i("Controllers constructor: accessing ConfigDB...");
+    debug_i(ANSI_COLOR_BLUE "Controllers constructor: accessing ConfigDB..." ANSI_COLOR_RESET);
     AppData::Root::Controllers controllers(*app.data);
     size_t count = 0;
     for (auto it = controllers.begin(); it != controllers.end(); ++it) {
         count++;
-        debug_i("Found controller ID: %s", (*it).getId().c_str());
+        debug_i(ANSI_COLOR_BLUE "Found controller ID: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, (*it).getId().c_str());
     }
-    debug_i("Controllers constructor: found %d controllers in DB", count);
+    debug_i(ANSI_COLOR_BLUE "Controllers constructor: found " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " controllers in DB" ANSI_COLOR_RESET, count);
     visibleControllers.reserve(std::max(count, static_cast<size_t>(10)));
 
     // Ensure local controller is always present
@@ -56,10 +84,11 @@ Controllers::Controllers() {
         VisibleController localCtrl;
         localCtrl.id = localId;
         localCtrl.ttl = 0;
+        localCtrl.hostType = HOST_TYPE_CONTROLLER;
         localCtrl.state = LOCALHOST;
         visibleControllers.push_back(localCtrl);
     }
-    debug_i("Controllers constructor completed");
+    debug_i(ANSI_COLOR_BLUE "Controllers constructor completed" ANSI_COLOR_RESET);
 }
 
 // Destructor
@@ -67,12 +96,12 @@ Controllers::~Controllers() {
 }
 
 // Core methods
-void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char* ipAddress, int ttl) {
+void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char* ipAddress, const char* webAppVersion,  int ttl, HostType hostType) {
     #ifdef DEBUG_MDNS
-        debug_i("Controllers::addOrUpdate id=%u, hostname=%s, ip=%s, ttl=%d", id, hostname, ipAddress, ttl);
+        debug_i(ANSI_COLOR_BLUE "Controllers::addOrUpdate id=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE ", hostname=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ", ip=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ", webAppVersion=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ", ttl=" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, id, hostname, ipAddress, webAppVersion, ttl);
     #endif
     if(hostname == nullptr || hostname[0] == '\0' || ipAddress == nullptr || ipAddress[0] == '\0') {
-        debug_w("Empty hostname or IP address provided, skipping addOrUpdate");
+        debug_w(ANSI_COLOR_YELLOW "Empty hostname or IP address provided, skipping addOrUpdate" ANSI_COLOR_RESET);
         return;
     }
     // Find existing visible controller
@@ -81,13 +110,33 @@ void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char*
     if (index != INVALID_INDEX) {
         // Update existing
         visibleControllers[index].ttl = ttl;
+        if (hostType != HOST_TYPE_UNKNOWN) {
+            visibleControllers[index].hostType = hostType;
+        }
         visibleControllers[index].state = (ttl > 0) ? ONLINE : OFFLINE;
+        {
+            AppConfig::Root::Webapp webapp(*app.cfg);
+            if(webapp.getInstalledVersion() != nullptr && strlen(webAppVersion) > 0 && strcmp(webAppVersion, webapp.getInstalledVersion().c_str()) == 0) {
+                visibleControllers[index].webAppCompatible = true;
+            } else {
+                visibleControllers[index].webAppCompatible = false;
+            }
+        }
     } else {
         // Add new visible controller
         VisibleController newController;
         newController.id = id;
         newController.ttl = ttl;
+        newController.hostType = hostType;
         newController.state = (ttl > 0) ? ONLINE : OFFLINE;
+        {
+            AppConfig::Root::Webapp webapp(*app.cfg);
+            if(webapp.getInstalledVersion() != nullptr && strlen(webAppVersion) > 0 && strcmp(webAppVersion, webapp.getInstalledVersion().c_str()) == 0) {
+                newController.webAppCompatible = true;
+            } else {
+                newController.webAppCompatible = false;
+            }
+        }
         visibleControllers.push_back(newController);
     }
 
@@ -97,22 +146,22 @@ void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char*
     if (auto controllersUpdate = controllers.update()) {
         // Find the specific controller to update (must iterate)
         for (auto controllerItem : controllersUpdate) {
-            if (controllerItem.getId() == String(id)) {
+            if (controllerItem.getId().toInt() == id) {
                 foundInConfig = true;
                 #ifdef DEBUG_MDNS
-                debug_i("Hostname %s already in list", hostname);
+                debug_i(ANSI_COLOR_BLUE "Hostname " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " already in list" ANSI_COLOR_RESET, hostname);
                 #endif
 
                 // Always update IP address
                 if (controllerItem.getIpAddress() != ipAddress) {
-                    debug_i("IP address changed from %s to %s", 
+                    debug_i(ANSI_COLOR_BLUE "IP address changed from " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " to " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, 
                            controllerItem.getIpAddress().c_str(), ipAddress);
                     controllerItem.setIpAddress(ipAddress);
                 }
                 
                 // Only update hostname if this is NOT a group or leader hostname
                 if ( controllerItem.getName() != hostname) {
-                    debug_i("Hostname changed from %s to %s", 
+                    debug_i(ANSI_COLOR_BLUE "Hostname changed from " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " to " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, 
                            controllerItem.getName().c_str(), hostname);
                     controllerItem.setName(hostname);
                 }
@@ -120,11 +169,11 @@ void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char*
             }
         }
     } else {
-        debug_e("error: failed to open hosts db for update");
+        debug_e(ANSI_COLOR_RED "error: failed to open hosts db for update" ANSI_COLOR_RESET);
     }
 
     if(!foundInConfig) {
-        debug_i("Hostname %s not in list adding to hostname db", hostname);
+        debug_i(ANSI_COLOR_BLUE "Hostname " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " not in list adding to hostname db" ANSI_COLOR_RESET, hostname);
 
         if(auto controllersUpdate = controllers.update()) {
             auto newController = controllersUpdate.addItem();
@@ -132,14 +181,13 @@ void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char*
             newController.setIpAddress(ipAddress);
             newController.setId(String(id));
         } else {
-            debug_e("error: failed to add host");
+            debug_e(ANSI_COLOR_RED "error: failed to add host" ANSI_COLOR_RESET);
         }
     }
-
 }
 
-void Controllers::addOrUpdate(unsigned int id, const String& hostname, const String& ipAddress, int ttl) {
-    addOrUpdate(id, hostname.c_str(), ipAddress.c_str(), ttl);
+void Controllers::addOrUpdate(unsigned int id, const String& hostname, const String& ipAddress, const String& webAppVersion, int ttl, HostType hostType) {
+    addOrUpdate(id, hostname.c_str(), ipAddress.c_str(), webAppVersion.c_str(), ttl, hostType);
 }
 
 void Controllers::removeExpired(int elapsedSeconds) {
@@ -148,7 +196,7 @@ void Controllers::removeExpired(int elapsedSeconds) {
         if (controller.id == (unsigned int)system_get_chip_id() || controller.state == LOCALHOST) {
             continue;
         }
-        controller.ttl -= elapsedSeconds;
+        controller.ttl = std::max(0, controller.ttl - elapsedSeconds);
         if (controller.ttl <= 0) {
             controller.state = OFFLINE;
         }
@@ -280,10 +328,6 @@ size_t Controllers::getTotalCount() {
 }
 
 // Utility
-void Controllers::init() {
-    // Additional initialization if needed
-}
-
 void Controllers::update() {
     // Update logic if needed
 }
@@ -292,9 +336,9 @@ void Controllers::forgetControllers(){
     visibleControllers.clear();
     if (auto controllersUpdate = AppData::Root::Controllers(*app.data).update()) {
         controllersUpdate.clear();
-        debug_i("Cleared all controllers from ConfigDB");
+        debug_i(ANSI_COLOR_BLUE "Cleared all controllers from ConfigDB" ANSI_COLOR_RESET);
     } else {
-        debug_e("error: failed to open hosts db for clearing, now %i controllers known", getTotalCount());
+        debug_e(ANSI_COLOR_RED "error: failed to open hosts db for clearing, now " ANSI_COLOR_CYAN "%i" ANSI_COLOR_RED " controllers known" ANSI_COLOR_RESET, getTotalCount());
     }
 }
 
@@ -324,11 +368,13 @@ Controllers::ControllerInfo Controllers::Iterator::operator*() {
             strncpy(info.ipAddress, configItem.getIpAddress().c_str(), CONTROLLER_IP_MAX_SIZE);
             info.state = OFFLINE;
             info.ttl = 0;
+            info.hostType = HOST_TYPE_UNKNOWN;
             
             // Check if controller is visible
             size_t visibleIndex = manager.findVisibleControllerIndex(info.id);
             if (visibleIndex != Controllers::INVALID_INDEX) {
                 info.ttl = manager.visibleControllers[visibleIndex].ttl;
+                info.hostType = manager.visibleControllers[visibleIndex].hostType;
                 info.state = (info.ttl > 0) ? ONLINE : OFFLINE;
             } else if (strlen(info.hostname) == 0 || strlen(info.ipAddress) == 0) {
                 info.state = INCOMPLETE;
@@ -383,11 +429,13 @@ Controllers::ControllerInfo Controllers::findById(unsigned int id) {
             strncpy(info.ipAddress, controller.getIpAddress().c_str(), CONTROLLER_IP_MAX_SIZE);
             info.state = OFFLINE;
             info.ttl = 0;
+            info.hostType = HOST_TYPE_UNKNOWN;
             
             // Check if visible
             size_t visibleIndex = findVisibleControllerIndex(id);
             if (visibleIndex != INVALID_INDEX) {
                 info.ttl = visibleControllers[visibleIndex].ttl;
+                info.hostType = visibleControllers[visibleIndex].hostType;
                 info.state = (info.ttl > 0) ? ONLINE : OFFLINE;
             } else if (strlen(info.hostname) == 0 || strlen(info.ipAddress) == 0) {
                 info.state = INCOMPLETE;
@@ -465,7 +513,7 @@ bool Controllers::JsonPrinter::shouldIncludeController(const Controllers::Contro
         default:
             result = false;
     }
-    debug_i("%s controller: %u, hostname: %s, ip: %s, state: %d, ttl: %d", result?"return": "skip", info.id, info.hostname, info.ipAddress, info.state, info.ttl);
+    debug_i(ANSI_COLOR_BLUE "" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " controller: " ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE ", hostname: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ", ip: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ", state: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE ", ttl: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, result?"return": "skip", info.id, info.hostname, info.ipAddress, info.state, info.ttl);
 
     return result;
 }
@@ -504,10 +552,12 @@ size_t Controllers::JsonPrinter::operator()() {
                 strncpy(info.ipAddress, configItem.getIpAddress().c_str(), CONTROLLER_IP_MAX_SIZE);
                 info.state = OFFLINE;
                 info.ttl = 0;
+                info.hostType = HOST_TYPE_UNKNOWN;
                 // Check if controller is visible (online)
                 size_t visibleIndex = manager.findVisibleControllerIndex(info.id);
                 if (visibleIndex != INVALID_INDEX) {
                     info.ttl = manager.visibleControllers[visibleIndex].ttl;
+                    info.hostType = manager.visibleControllers[visibleIndex].hostType;
                     if (manager.visibleControllers[visibleIndex].state == LOCALHOST) {
                         info.state = LOCALHOST;
                     } else {
@@ -541,6 +591,7 @@ size_t Controllers::JsonPrinter::operator()() {
         n += printProperty("id", (int)info.id, false, 3);
         n += printProperty("hostname", info.hostname, false, 3);
         n += printProperty("ip_address", info.ipAddress, false, 3);
+        n += printProperty("host_type", hostTypeToString(info.hostType), false, 3);
         n += printProperty("visible", (info.state == ONLINE || info.state == LOCALHOST), false, 3);
         n += printProperty("state", (int)info.state, true, 3);
         n += p->print('}');
@@ -568,10 +619,11 @@ size_t Controllers::JsonPrinter::operator()() {
             n += printIndent(2);
             n += p->print('{');
             n += printProperty("id", (int)localId, false, 3);
-            String localHostname = WifiStation.getHostname();
-            String localIp = WifiStation.getIP().toString();
-            n += printProperty("hostname", localHostname.c_str(), false, 3);
-            n += printProperty("ip_address", localIp.c_str(), false, 3);
+            // Avoid temporary String allocations — use const char* directly
+            
+            n += printProperty("hostname", WifiStation.getHostname(), false, 3);
+            n += printProperty("ip_address", WifiStation.getIP().toString(), false, 3);
+            n += printProperty("host_type", hostTypeToString(HOST_TYPE_CONTROLLER), false, 3);
             n += printProperty("visible", true, false, 3);
             n += printProperty("state", (int)LOCALHOST, true, 3);
             n += p->print('}');
@@ -605,22 +657,31 @@ size_t Controllers::JsonPrinter::printIndent(size_t level) {
 }
 
 size_t Controllers::JsonPrinter::printString(const char* str) {
+    if (str == nullptr) {
+        return p->print("\"\"");
+    }
+
     size_t n = 0;
     n += p->print('"');
+    
     // Escape special characters
-    for (unsigned i = 0; i < strlen(str); i++) {
-        char c = str[i];
+    while (*str != '\0') {
+        char c = *str++;
         switch (c) {
-            case '"': n += p->print("\\\""); break;
+            case '"':  n += p->print("\\\""); break;
             case '\\': n += p->print("\\\\"); break;
-            case '\n': n += p->print("\\n"); break;
-            case '\r': n += p->print("\\r"); break;
-            case '\t': n += p->print("\\t"); break;
-            default: n += p->print(c); break;
+            case '\n': n += p->print("\\n");  break;
+            case '\r': n += p->print("\\r");  break;
+            case '\t': n += p->print("\\t");  break;
+            default:   n += p->print(c);      break;
         }
     }
     n += p->print('"');
     return n;
+}
+
+size_t Controllers::JsonPrinter::printProperty(const char* name, const String& value, bool isLast, size_t indentLevel) {
+    return printProperty(name, value.c_str(), isLast, indentLevel);
 }
 
 size_t Controllers::JsonPrinter::printProperty(const char* name, const char* value, bool isLast, size_t indentLevel) {
@@ -745,3 +806,28 @@ std::unique_ptr<Controllers::JsonStream> Controllers::createJsonStream(JsonFilte
     auto printer = printJson(dummyPrint, filter, pretty);
     return std::make_unique<JsonStream>(std::move(printer));
 }
+
+IpAddress Controllers::getNextCompatibleWebappController() {
+    if (visibleControllers.empty()) {
+        return IpAddress(255, 255, 255, 255);
+    }
+
+    size_t numControllers = visibleControllers.size();
+    
+    // We loop at most 'numControllers' times to check everyone once
+    for (size_t i = 0; i < numControllers; ++i) {
+        // Calculate the next index to inspect, wrapping around to 0 if we hit the end
+        size_t currentIndex = (lastWebappControllerIndex + i) % numControllers;
+        const auto& controller = visibleControllers[currentIndex];
+
+        if (controller.webAppCompatible ) {
+            // Store the next starting position for the subsequent call
+            lastWebappControllerIndex = (currentIndex + 1) % numControllers;
+            debug_i( "Found compatible webapp controller with ID: %u, IP: %s" , controller.id, getIpAddress(controller.id));
+            return IpAddress(getIpAddress(controller.id));
+        }
+    }
+
+    return IpAddress(255, 255, 255, 255); // Return empty if no online, compatible controllers exist
+}
+    

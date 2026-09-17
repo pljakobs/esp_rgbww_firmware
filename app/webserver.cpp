@@ -1,4 +1,5 @@
 #include <ArduinoJson.h>
+#include <IFS/FileSystem.h>
 
 /**
  * @file
@@ -23,8 +24,12 @@
  */
 
 #include <RGBWWCtrl.h>
+#include <apihandler.h>
 #include <Data/WebHelpers/base64.h>
+#include <Crypto/Sha2.h>
+#include <cstring>
 #include <memory>
+#include <stdio.h>
 
 #include <Network/Http/Websocket/WebsocketResource.h>
 #include <Storage.h>
@@ -37,73 +42,53 @@ extern "C" {
 
 #include <fileMap.h>
 
-struct TcpPcbStats
-{
-	uint8_t active_total{0};
-	uint8_t established{0};
-	uint8_t syn_sent{0};
-	uint8_t syn_rcvd{0};
-	uint8_t fin_wait_1{0};
-	uint8_t fin_wait_2{0};
-	uint8_t close_wait{0};
-	uint8_t closing{0};
-	uint8_t last_ack{0};
-	uint8_t time_wait{0};
-	uint8_t closed{0};
-};
-
-static TcpPcbStats getTcpPcbStats()
-{
-	TcpPcbStats stats;
-#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
-	for(const tcp_pcb* pcb = tcp_active_pcbs; pcb != nullptr; pcb = pcb->next) {
-		++stats.active_total;
-		switch(pcb->state) {
-		case ESTABLISHED:
-			++stats.established;
-			break;
-		case SYN_SENT:
-			++stats.syn_sent;
-			break;
-		case SYN_RCVD:
-			++stats.syn_rcvd;
-			break;
-		case FIN_WAIT_1:
-			++stats.fin_wait_1;
-			break;
-		case FIN_WAIT_2:
-			++stats.fin_wait_2;
-			break;
-		case CLOSE_WAIT:
-			++stats.close_wait;
-			break;
-		case CLOSING:
-			++stats.closing;
-			break;
-		case LAST_ACK:
-			++stats.last_ack;
-			break;
-		case TIME_WAIT:
-			++stats.time_wait;
-			break;
-		case CLOSED:
-			++stats.closed;
-			break;
-		default:
-			break;
-		}
-	}
-#endif
-	return stats;
-}
-
-static uint8_t getActiveTcpConnectionCount()
-{
-	return getTcpPcbStats().active_total;
-}
-
 //#define NOCACHE
 
+namespace {
+constexpr size_t INFO_DOC_CAPACITY_V1 = 512;
+constexpr size_t INFO_DOC_CAPACITY_V2 = 1224;
+constexpr size_t WS_INFO_RESPONSE_OVERHEAD = 300;
+constexpr size_t WS_INFO_RESPONSE_CAPACITY = INFO_DOC_CAPACITY_V1 + WS_INFO_RESPONSE_OVERHEAD;
+
+// Per-connection WebSocket authentication state, attached via setUserData().
+// Allocated in wsConnected(), released in wsDisconnected(). The challenge is a
+// one-shot nonce handed to the client in an "authentication required" reply and
+// consumed by the next "authenticate" message.
+struct WsAuthState {
+	bool authenticated = false;
+	bool runtimeInfoSubscribed = false;
+	String challenge;
+};
+
+// Generate a 16-byte random nonce as a 32-char lowercase hex string.
+String wsMakeChallenge()
+{
+	static const char hex[] = "0123456789abcdef";
+	char buf[33];
+	for(int i = 0; i < 16; i++) {
+		uint8_t b = static_cast<uint8_t>(os_random() & 0xFF);
+		buf[i * 2] = hex[b >> 4];
+		buf[i * 2 + 1] = hex[b & 0x0F];
+	}
+	buf[32] = '\0';
+	return String(buf);
+}
+
+// Shared-secret challenge-response digest used by the WebSocket auth handshake.
+// Canonical input is "<challenge>:<password>" (SHA-256, lowercase hex).
+// The client must compute the identical string to authenticate.
+String wsComputeAuthHash(const String& challenge, const String& password)
+{
+	String canonical;
+	canonical.reserve(challenge.length() + password.length() + 1);
+	canonical += challenge;
+	canonical += ':';
+	canonical += password;
+	Crypto::Sha256 ctx;
+	ctx.update(canonical.c_str(), canonical.length());
+	return Crypto::toString(ctx.getHash());
+}
+}
 
 // ToDo: think about implementing a parameterized API to read objects from appData by id
 
@@ -115,13 +100,51 @@ ApplicationWebserver::ApplicationWebserver()
 	HttpServerSettings settings;
 	settings.maxActiveConnections = HTTP_MAX_CONNECTIONS;
 	settings.minHeapSize = MINIMUM_HEAP_ACCEPT;
-	settings.keepAliveSeconds = 10; // do not close instantly when no transmission occurs. some clients are a bit slow (like FHEM)
+	settings.keepAliveSeconds = 5; // do not close instantly when no transmission occurs. some clients are a bit slow (like FHEM)
+#ifdef ARCH_ESP8266
+	// Stability workaround: reduce overlap pressure without starving browser traffic.
+	// Keep enough concurrent HTTP slots for page/API usage, but disable keepalive
+	// reuse on ESP8266 so sockets close immediately after each response.
+	settings.maxActiveConnections = WEBSERVER_MAX_CONN_DEFAULT;
+	settings.keepAliveSeconds = 0;
+#endif
+	// Retain a copy so setMaxActiveConnections() can re-configure the limit at
+	// runtime without losing the heap/keep-alive settings established here.
+	_serverSettings = settings;
 	configure(settings);
 
-	// workaround for bug in Sming 3.5.0
-	// https://github.com/SmingHub/Sming/issues/1236
-	setBodyParser("*", bodyToStringParser);
+	// Only JSON POST endpoints need the request body buffered into a String.
+	// The old wildcard parser caused heap pressure for every POST request.
+	setBodyParser(MIME_JSON, bodyToStringParser);
 }
+
+void ApplicationWebserver::setMaxActiveConnections(uint16_t n)
+{
+	if(_serverSettings.maxActiveConnections == n) {
+		return;
+	}
+	debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::setMaxActiveConnections " ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE " -> " ANSI_COLOR_CYAN "%u" ANSI_COLOR_RESET,
+			_serverSettings.maxActiveConnections, n);
+	_serverSettings.maxActiveConnections = n;
+	// configure() reassigns the live limit read by TcpServer::onAccept; it only
+	// adds body parsers, so the JSON body parser set in the constructor is kept.
+	configure(_serverSettings);
+}
+
+void ApplicationWebserver::applyOtaLoadShedding(bool otaActive)
+{
+#ifdef ARCH_ESP8266
+	// During the OTA download the outbound HTTP client + LittleFS writes hold most
+	// of the free heap. Clamp inbound connections to a single slot so a burst of
+	// browser polls (/info, /webapp_status) cannot allocate the device into OOM;
+	// restore the normal limit once the download completes. setMaxActiveConnections
+	// no-ops when the value is unchanged, so repeated calls are cheap.
+	setMaxActiveConnections(otaActive ? WEBAPP_OTA_MAX_CONN : WEBSERVER_MAX_CONN_DEFAULT);
+#else
+	(void)otaActive;
+#endif
+}
+
 
 void ApplicationWebserver::init()
 {
@@ -133,6 +156,8 @@ void ApplicationWebserver::init()
 	paths.set(F("/color"), HttpPathDelegate(&ApplicationWebserver::onColor, this));
 	paths.set(F("/networks"), HttpPathDelegate(&ApplicationWebserver::onNetworks, this));
 	paths.set(F("/scan_networks"), HttpPathDelegate(&ApplicationWebserver::onScanNetworks, this));
+	paths.set(F("/webapp_status"), HttpPathDelegate(&ApplicationWebserver::onWebappStatus, this));
+	paths.set(F("/webapp_check"), HttpPathDelegate(&ApplicationWebserver::onWebappCheck, this));
 	paths.set(F("/system"), HttpPathDelegate(&ApplicationWebserver::onSystemReq, this));
 	paths.set(F("/update"), HttpPathDelegate(&ApplicationWebserver::onUpdate, this));
 	paths.set(F("/connect"), HttpPathDelegate(&ApplicationWebserver::onConnect, this));
@@ -153,18 +178,20 @@ void ApplicationWebserver::init()
 	paths.set(F("/toggle"), HttpPathDelegate(&ApplicationWebserver::onToggle, this));
 
 	// redirectors for initial configuration
-	paths.set(F("/canonical.html"), HttpPathDelegate(&ApplicationWebserver::onIndex, this)); 
-	paths.set(F("/generate_204"), HttpPathDelegate(&ApplicationWebserver::onIndex, this)); //android
-	paths.set(F("/static/hotspot.txt"), HttpPathDelegate(&ApplicationWebserver::onIndex, this));
-	paths.set(F("/connecttest.txt"), HttpPathDelegate(&ApplicationWebserver::onIndex, this)); //Windows
-	paths.set(F("/hotspot-detect.html"), HttpPathDelegate(&ApplicationWebserver::onIndex, this)); //iOS/macOS
-	paths.set(F("/nmcheck.gnome.org"), HttpPathDelegate(&ApplicationWebserver::onIndex, this)); //Linux (NetworkManager)
+	paths.set(F("/canonical.html"), HttpPathDelegate(&ApplicationWebserver::onRedirector, this)); 
+	paths.set(F("/generate_204"), HttpPathDelegate(&ApplicationWebserver::onRedirector, this)); //android
+	paths.set(F("/static/hotspot.txt"), HttpPathDelegate(&ApplicationWebserver::onRedirector, this));
+	paths.set(F("/connecttest.txt"), HttpPathDelegate(&ApplicationWebserver::onRedirector, this)); //Windows
+	paths.set(F("/hotspot-detect.html"), HttpPathDelegate(&ApplicationWebserver::onRedirector, this)); //iOS/macOS
+	paths.set(F("/nmcheck.gnome.org"), HttpPathDelegate(&ApplicationWebserver::onRedirector, this)); //Linux (NetworkManager)
 
 	// websocket api
 	wsResource = new WebsocketResource();
 	wsResource->setConnectionHandler([this](WebsocketConnection& socket) { this->wsConnected(socket); });
+	wsResource->setMessageHandler([this](WebsocketConnection& socket, const String& message) {
+		this->wsMessage(socket, message);
+	});
 	wsResource->setDisconnectionHandler([this](WebsocketConnection& socket) { this->wsDisconnected(socket); });
-	wsResource->setMessageHandler([this](WebsocketConnection& socket, const String& message) { this->wsMessage(socket, message); });
 	paths.set("/ws", wsResource);
 
 	_init = true;
@@ -172,78 +199,265 @@ void ApplicationWebserver::init()
 
 void ApplicationWebserver::wsConnected(WebsocketConnection& socket)
 {
-	debug_i("===>wsConnected");
-	webSockets.addElement(&socket);
-	debug_i("===>nr of websockets: %i", webSockets.size());
+    debug_i(ANSI_COLOR_BLUE "===>wsConnected" ANSI_COLOR_RESET);
+    
+    // Prevent memory leaks if userData was previously set
+    delete static_cast<WsAuthState*>(socket.getUserData());
+    socket.setUserData(new WsAuthState());
+    
+    webSockets.addElement(&socket);
+    debug_i(ANSI_COLOR_BLUE "===>nr of websockets: " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, webSockets.size());
+
+    // Send single-allocation JSON payload directly
+    if (app.webappOta.isActive()) {
+        DynamicJsonDocument rpcDoc(320);
+        JsonObject rpcRoot = rpcDoc.to<JsonObject>();
+        rpcRoot[F("jsonrpc")] = F("2.0");
+        rpcRoot[F("method")] = F("webapp_ota_status");
+        
+        JsonObject rpcParams = rpcRoot.createNestedObject(F("params"));
+        app.webappOta.fillStatusJson(rpcParams);
+        
+        socket.sendString(Json::serialize(rpcRoot));
+    }
 }
 
 void ApplicationWebserver::wsDisconnected(WebsocketConnection& socket)
 {
-	debug_i("<===wsDisconnected");
-	webSockets.removeElement(&socket);
-	debug_i("===>nr of websockets: %i", webSockets.size());
+    debug_i(ANSI_COLOR_BLUE "<===wsDisconnected" ANSI_COLOR_RESET);
+    
+    delete static_cast<WsAuthState*>(socket.getUserData());
+    socket.setUserData(nullptr);
+    
+    webSockets.removeElement(&socket);
+    debug_i(ANSI_COLOR_BLUE "===>nr of websockets: " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, webSockets.size());
 }
 
 void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& message)
 {
-	StaticJsonDocument<1024> requestDoc;
-	DeserializationError err = deserializeJson(requestDoc, message);
-	if(err) {
-		socket.sendString(F("{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32700,\"message\":\"Parse error\"},\"id\":null}"));
+    debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::wsMessage: " ANSI_COLOR_GREEN " %s" ANSI_COLOR_RESET, message.c_str());
+
+    // Size the parse buffer from the incoming message so large payloads don't
+    // overflow a fixed capacity. Heap-allocated to keep it off the small stack.
+    const size_t requestCapacity = std::max<size_t>(1024, message.length() * 2);
+    DynamicJsonDocument requestDoc(requestCapacity);
+	String errorMsg;
+	int errorCode = 0;
+
+    if(!Json::deserialize(requestDoc, message)) {
+		String parseErrorPayload;
+		auto& codec = rpcCodec();
+		Jsonrpc::Root root(codec.db());
+		if(auto update = root.update()) {
+			auto error = update.toRpcError();
+			error.setCode(-32700);
+			error.setMessage(F("Parse error"));
+		}
+		if(codec.render({0, JsonRPC::Message::Kind::error, ""}, root.asRpcError(), parseErrorPayload)) {
+			socket.sendString(parseErrorPayload);
+		}
+        return;
+    }
+
+    JsonObject requestRoot = requestDoc.as<JsonObject>();
+	const char* method = requestRoot[F("method")] | "";
+    JsonVariant requestId = requestRoot[F("id")];
+	JsonObject params = requestRoot[F("params")];
+
+	// JSON-RPC 2.0 permits only a number, a string or null as the id. Reject
+	// anything else rather than echoing an illegal value back to the client.
+	if(!requestId.isNull() && !requestId.is<double>() && !requestId.is<const char*>()) {
+		String invalidIdPayload;
+		auto& codec = rpcCodec();
+		Jsonrpc::Root root(codec.db());
+		if(auto update = root.update()) {
+			auto error = update.toRpcError();
+			error.setCode(-32600);
+			error.setMessage(F("Invalid Request: id must be a string, a number or null"));
+		}
+		if(codec.render({0, JsonRPC::Message::Kind::error, method}, root.asRpcError(), invalidIdPayload)) {
+			socket.sendString(invalidIdPayload);
+		}
 		return;
 	}
 
-	JsonObject req = requestDoc.as<JsonObject>();
-	const char* method = req[F("method")] | "";
-	JsonVariant id = req[F("id")];
-
-	StaticJsonDocument<512> responseDoc;
-	JsonObject resp = responseDoc.to<JsonObject>();
-	resp[F("jsonrpc")] = F("2.0");
-	if(!id.isNull()) {
-		resp[F("id")] = id;
-	}
-
-	if(method[0] == '\0') {
-		JsonObject errorObj = resp.createNestedObject(F("error"));
-		errorObj[F("code")] = -32600;
-		errorObj[F("message")] = F("missing method");
-	} else {
-		JsonObject params = req[F("params")].as<JsonObject>();
-		String msg;
-		bool ok = false;
-		if(strcmp_P(method, PSTR("color")) == 0) {
-			ok = app.jsonproc.onColor(params, msg, false);
-		} else if(strcmp_P(method, PSTR("stop")) == 0) {
-			ok = app.jsonproc.onStop(params, msg, false);
-		} else if(strcmp_P(method, PSTR("skip")) == 0) {
-			ok = app.jsonproc.onSkip(params, msg, false);
-		} else if(strcmp_P(method, PSTR("pause")) == 0) {
-			ok = app.jsonproc.onPause(params, msg, false);
-		} else if(strcmp_P(method, PSTR("continue")) == 0) {
-			ok = app.jsonproc.onContinue(params, msg, false);
-		} else if(strcmp_P(method, PSTR("blink")) == 0) {
-			ok = app.jsonproc.onBlink(params, msg, false);
-		} else if(strcmp_P(method, PSTR("toggle")) == 0) {
-			ok = app.jsonproc.onToggle(params, msg, false);
-		} else if(strcmp_P(method, PSTR("direct")) == 0) {
-			ok = app.jsonproc.onDirect(params, msg, false);
-		} else {
-			msg = String(F("method not implemented: ")) + method;
+	auto parseTruthy = [](JsonVariantConst v, bool defaultValue) -> bool {
+		if(v.isNull()) {
+			return defaultValue;
 		}
+		if(v.is<bool>()) {
+			return v.as<bool>();
+		}
+		const char* txt = v.as<const char*>();
+		if(txt == nullptr || txt[0] == '\0') {
+			return defaultValue;
+		}
+		return !(std::strcmp(txt, "0") == 0 || std::strcmp(txt, "false") == 0 || std::strcmp(txt, "FALSE") == 0 ||
+				 std::strcmp(txt, "off") == 0 || std::strcmp(txt, "OFF") == 0 || std::strcmp(txt, "no") == 0 ||
+				 std::strcmp(txt, "NO") == 0);
+	};
 
-		if(ok) {
-			resp.createNestedObject(F("result"))[F("success")] = true;
+	debug_i(ANSI_COLOR_BLUE "Websocket message: method= " ANSI_COLOR_GREEN "%s" ANSI_COLOR_RESET, method);
+
+	// Determine target buffer capacity based on the specific method requested
+	size_t responseCapacity = 512; // Default for simple getters/commands
+	const bool isInfoMethod = (strcmp_P(method, PSTR("info")) == 0) || (strcmp_P(method, PSTR("getInfo")) == 0);
+	if(isInfoMethod) {
+		responseCapacity = WS_INFO_RESPONSE_CAPACITY;
+	}
+	const uint32_t infoHeapSnapshot = app.getFreeHeapSize();
+
+	// ---- Phase 1: decide the outcome without emitting any JSON ----------
+	// Streamed bytes can't be un-written, so all auth/method decisions (and any
+	// command side effects) happen here; phase 2 then streams the envelope once.
+	enum ResultKind { RK_None, RK_Authenticated, RK_SubTrue, RK_SubFalse, RK_CommandSuccess, RK_Data };
+	ResultKind resultKind = RK_None;
+	bool dataIsInfo = false;
+	String challenge; // non-empty => included in the JSON-RPC error object's "challenge" field
+
+	// ---- WebSocket authentication gate ----------------------------------
+	// When the API is secured, a connection must complete the challenge-
+	// response handshake before any state-changing method is accepted. Only the
+	// "authenticate" method is allowed through; connection liveness is handled
+	// below the RPC layer by PING/PONG control frames.
+	ensureSecurityCache();
+	const bool wsSecured = (_apiSecuredCache == 1);
+	WsAuthState* wsAuth = static_cast<WsAuthState*>(socket.getUserData());
+	const bool isAuthMethod = strcmp_P(method, PSTR("authenticate")) == 0;
+
+	if(isAuthMethod) {
+		const String clientHash = params[F("hash")] | "";
+		if(!wsSecured) {
+			// Nothing to prove when security is disabled.
+			if(wsAuth) {
+				wsAuth->authenticated = true;
+			}
+			resultKind = RK_Authenticated;
+		} else if(wsAuth == nullptr) {
+			errorCode = -32603;
+			errorMsg = F("internal error: no auth state");
+		} else if(wsAuth->challenge.length() == 0) {
+			// No outstanding challenge — issue one and ask the client to retry.
+			wsAuth->challenge = wsMakeChallenge();
+			errorCode = -32001;
+			errorMsg = F("authentication required");
+			challenge = wsAuth->challenge;
 		} else {
-			JsonObject errorObj = resp.createNestedObject(F("error"));
-			errorObj[F("code")] = -32601;
-			errorObj[F("message")] = msg;
+			const String expected = wsComputeAuthHash(wsAuth->challenge, _apiPasswordCache);
+			if(expected.length() && clientHash.equalsIgnoreCase(expected)) {
+				wsAuth->authenticated = true;
+				wsAuth->challenge = ""; // consume the nonce
+				resultKind = RK_Authenticated;
+			} else {
+				// Wrong hash — hand out a fresh challenge for the next attempt.
+				wsAuth->challenge = wsMakeChallenge();
+				errorCode = -32001;
+				errorMsg = F("authentication failed");
+				challenge = wsAuth->challenge;
+			}
+		}
+	} else if(wsSecured && (wsAuth == nullptr || !wsAuth->authenticated)) {
+		// Unauthenticated request on a secured API: refuse and issue a challenge.
+		challenge = wsMakeChallenge();
+		if(wsAuth) {
+			wsAuth->challenge = challenge;
+		}
+		errorCode = -32001;
+		errorMsg = F("authentication required");
+	} else if(method[0] == '\0') {
+		errorCode = -32600;
+		errorMsg = F("missing method");
+	} else if(std::strcmp(method, "runtime_info_subscribe") == 0 || std::strcmp(method, "subscribe_runtime_info") == 0) {
+		if(wsAuth) {
+			wsAuth->runtimeInfoSubscribed = true;
+		}
+		resultKind = RK_SubTrue;
+	} else if(std::strcmp(method, "runtime_info_unsubscribe") == 0 || std::strcmp(method, "unsubscribe_runtime_info") == 0) {
+		if(wsAuth) {
+			wsAuth->runtimeInfoSubscribed = false;
+		}
+		resultKind = RK_SubFalse;
+	} else if(!app.api) {
+		errorCode = -32603;
+		errorMsg = F("api not initialized");
+    } else {
+		const bool isColorGetter = (strcmp_P(method, PSTR("color")) == 0) && (params.isNull() || params.size() == 0);
+		const bool isDataMethod = isColorGetter || (strcmp_P(method, PSTR("getColor")) == 0) || isInfoMethod ||
+						(strcmp_P(method, PSTR("networks")) == 0) || (strcmp_P(method, PSTR("getNetworks")) == 0);
+
+		if(isDataMethod) {
+			// Data handlers always succeed for a known method; result is streamed in phase 2.
+			resultKind = RK_Data;
+			dataIsInfo = isInfoMethod;
+		} else {
+			// Command: execute now (side effects + success/error), stream the envelope after.
+			if(app.api->dispatchCommand(method, params, errorMsg, false)) {
+				resultKind = RK_CommandSuccess;
+			} else {
+				const bool methodMissing = errorMsg.length() == 0 || errorMsg.indexOf(F("method not implemented")) >= 0;
+				if(methodMissing) {
+					errorCode = -32601;
+					if(errorMsg.length() == 0) {
+						errorMsg = String(F("method not implemented: ")) + method;
+					}
+				} else {
+					errorCode = -32000;
+				}
+			}
+		}
+    }
+
+	// ---- Phase 2: stream the JSON-RPC envelope --------------------------
+	if(resultKind == RK_Data && errorMsg.length() == 0 && app.api != nullptr) {
+		const int requestIdValue = requestId.is<int>() ? requestId.as<int>() : 0;
+		String dataPayload;
+		if(app.api->renderData(method, params, dataPayload, requestIdValue)) {
+			socket.sendString(dataPayload);
+			return;
 		}
 	}
-
-	String responseStr;
-	serializeJson(responseDoc, responseStr);
-	socket.sendString(responseStr);
+	{
+		auto& codec = rpcCodec();
+		Jsonrpc::Root root(codec.db());
+		String rpcPayload;
+		bool rendered = false;
+		if(errorMsg.length()) {
+			if(auto update = root.update()) {
+				auto error = update.toRpcError();
+				error.setCode(errorCode);
+				error.setMessage(errorMsg);
+				if(challenge.length()) {
+					error.setChallenge(challenge);
+				}
+			}
+			rendered = codec.render({requestId.is<int>() ? requestId.as<int>() : 0,
+				JsonRPC::Message::Kind::error, method}, root.asRpcError(), rpcPayload);
+		} else if(resultKind == RK_Authenticated) {
+			if(auto update = root.update()) {
+				update.toAuthenticateResult().setAuthenticated(true);
+			}
+			rendered = codec.render({requestId.is<int>() ? requestId.as<int>() : 0,
+				JsonRPC::Message::Kind::result, method}, root.asAuthenticateResult(), rpcPayload);
+		} else if(resultKind == RK_SubTrue || resultKind == RK_SubFalse) {
+			if(auto update = root.update()) {
+				auto subscription = update.toSubscriptionResult();
+				subscription.setSubscribed(resultKind == RK_SubTrue);
+				subscription.setChannel(F("runtime_info"));
+			}
+			rendered = codec.render({requestId.is<int>() ? requestId.as<int>() : 0,
+				JsonRPC::Message::Kind::result, method}, root.asSubscriptionResult(), rpcPayload);
+		} else if(resultKind == RK_CommandSuccess) {
+			if(auto update = root.update()) {
+				update.toApiSuccess().setSuccess(true);
+			}
+			rendered = codec.render({requestId.is<int>() ? requestId.as<int>() : 0,
+				JsonRPC::Message::Kind::result, method}, root.asApiSuccess(), rpcPayload);
+		}
+		if(rendered) {
+			socket.sendString(rpcPayload);
+			return;
+		}
+	}
 }
 
 /*
@@ -251,12 +465,45 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 */
 void ICACHE_FLASH_ATTR ApplicationWebserver::wsSendBroadcast(const char* buffer, size_t length)
 {
-    if(buffer == nullptr || length == 0 || webSockets.isEmpty()) { return; }
-    for(unsigned i = 0; i < webSockets.size(); ++i) {
-        WebsocketConnection* socket = webSockets[i];
-        if(socket == nullptr) { continue; }
-        socket->send(buffer, length, WS_FRAME_TEXT);
+    for (size_t i = 0; i < webSockets.size(); ++i) {
+        if (webSockets[i] != nullptr) {
+            webSockets[i]->send(buffer, length, WS_FRAME_TEXT); 
+            // Or webSockets[i]->broadcast(...), depending on your WS library's API
+        }
     }
+}
+
+void ICACHE_FLASH_ATTR ApplicationWebserver::wsSendRuntimeInfo(const char* buffer, size_t length)
+{
+	if(webSockets.isEmpty() || buffer == nullptr || length == 0) {
+		return;
+	}
+
+	for(unsigned i = 0; i < webSockets.size(); i++) {
+		WebsocketConnection* socket = webSockets[i];
+		if(socket == nullptr) {
+			continue;
+		}
+		WsAuthState* wsAuth = static_cast<WsAuthState*>(socket->getUserData());
+		if(wsAuth != nullptr && wsAuth->runtimeInfoSubscribed) {
+			socket->sendString(String(buffer, length));
+		}
+	}
+}
+
+unsigned ApplicationWebserver::getHttpActiveConnections() const
+{
+	// Report the authoritative live connection count (added on accept, removed on
+	// destroy — this is what enforces maxConnections). The inherited activeClients
+	// counter can drift upward because onClientComplete is not guaranteed to fire
+	// for every accepted connection (aborted/reset sockets), which made the debug
+	// figure look like an unbounded "connection leak".
+	return getConnections().count();
+}
+
+unsigned ApplicationWebserver::getWebsocketConnectionCount() const
+{
+	return webSockets.size();
 }
 
 void ApplicationWebserver::start()
@@ -265,21 +512,41 @@ void ApplicationWebserver::start()
 		init();
 	}
 	listen(80);
+	_wsPingTimer.initializeMs(WS_PING_INTERVAL_MS, TimerDelegate(&ApplicationWebserver::wsPingAll, this)).start();
 	_running = true;
 }
 
 void ApplicationWebserver::stop()
 {
+	_wsPingTimer.stop();
 	close();
 	_running = false;
+}
+
+void ApplicationWebserver::wsPingAll()
+{
+	for(unsigned i = 0; i < webSockets.size(); i++) {
+		if(auto socket = webSockets[i]) {
+			socket->send("", 0, WS_FRAME_PING);
+		}
+	}
+}
+
+void ApplicationWebserver::ensureSecurityCache()
+{
+	if(_apiSecuredCache < 0) {
+		AppConfig::Root config(*app.cfg);
+		_apiSecuredCache = config.security.getApiSecured() ? 1 : 0;
+		_apiPasswordCache = config.security.getApiPassword();
+	}
 }
 
 bool ICACHE_FLASH_ATTR ApplicationWebserver::authenticateExec(HttpRequest& request, HttpResponse& response)
 {
 	{
-		debug_i("ApplicationWebserver::authenticated - checking general context");
-		AppConfig::Root config(*app.cfg);
-		if(!config.security.getApiSecured())
+		debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::authenticated - checking general context" ANSI_COLOR_RESET);
+		ensureSecurityCache();
+		if(_apiSecuredCache == 0)
 			return true;
 	} // end AppConfig general context
 
@@ -298,18 +565,13 @@ bool ICACHE_FLASH_ATTR ApplicationWebserver::authenticateExec(HttpRequest& reque
 	if(userPass.length() > 50) {
 		return false;
 	}
-	{
-		debug_i("ApplicationWebserver::authenticated - getting password");
-		AppConfig::Root config(*app.cfg);
-		userPass = base64_decode(userPass);
-		//debug_d("ApplicationWebserver::authenticated Password: '%s' - Expected password: '%s'", userPass.c_str(), config.security.getApiPassword.c_str());
 
-		if(userPass.endsWith(config.security.getApiPassword())) {
-			return true;
-		}
-		return false;
-
-	} //end AppConfig general context
+	debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::authenticated - getting password" ANSI_COLOR_RESET);
+	userPass = base64_decode(userPass);
+	if(userPass.endsWith(_apiPasswordCache)) {
+		return true;
+	}
+	return false;
 }
 
 bool ICACHE_FLASH_ATTR ApplicationWebserver::authenticated(HttpRequest& request, HttpResponse& response)
@@ -321,21 +583,25 @@ bool ICACHE_FLASH_ATTR ApplicationWebserver::authenticated(HttpRequest& request,
 		response.setHeader(F("WWW-Authenticate"), F("Basic realm=\"RGBWW Server\""));
 		response.setHeader(F("401 wrong credentials"), F("wrong credentials"));
 		response.setHeader(F("Connection"), F("close"));
+		// CORS headers must be present on the 401 too, otherwise a cross-origin
+		// browser blocks the response and fetch() rejects before the client can
+		// see the 401 and prompt for credentials.
+		setCorsHeaders(response);
 	}
 	return authenticated;
 }
 
-const char* ApplicationWebserver::getApiCodeMsg(API_CODES code)
+String ApplicationWebserver::getApiCodeMsg(API_CODES code)
 {
 	switch(code) {
 	case API_CODES::API_MISSING_PARAM:
-		return "missing param";
+		return F("missing param");
 	case API_CODES::API_UNAUTHORIZED:
-		return "authorization required";
+		return F("authorization required");
 	case API_CODES::API_UPDATE_IN_PROGRESS:
-		return "update in progress";
+		return F("update in progress");
 	default:
-		return "bad request";
+		return F("bad request");
 	}
 }
 
@@ -366,74 +632,131 @@ void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, c
 
 void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, const __FlashStringHelper* msg)
 {
-	if(msg == nullptr) {
-		sendApiCode(response, code, getApiCodeMsg(code));
+	String payload;
+	payload.reserve(code == API_CODES::API_UPDATE_IN_PROGRESS ? 512 : 64);
+	{
+		auto& codec = rpcCodec();
+		Jsonrpc::Root root(codec.db());
+		if(auto update = root.update()) {
+			if(code == API_CODES::API_SUCCESS) {
+				update.toApiSuccess().setSuccess(true);
+			} else {
+				update.toApiError().setError(msg == nullptr ? getApiCodeMsg(code) : String(msg));
+			}
+		}
+		if(code == API_CODES::API_SUCCESS) {
+			codec.renderPayload(root.asApiSuccess(), payload);
+		} else {
+			codec.renderPayload(root.asApiError(), payload);
+		}
+	}
+
+	if(!checkHeap(response)) {
 		return;
 	}
-	String flashMsg(msg);
-	sendApiCode(response, code, flashMsg);
-}
-
-void ApplicationWebserver::addInfoFields(JsonObject& obj)
-{
-	JsonObject dev = obj.createNestedObject(F("device"));
-
-	dev[F("deviceid")] = system_get_chip_id();
-	dev[F("soc")] = SOC;
-#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
-	dev[F("current_rom")] = String(app.ota.getRomPartition().name());
-#endif
-	JsonObject application = obj.createNestedObject(F("app"));
-	application[F("webapp_version")] = WEBAPP_VERSION;
-	application[F("git_version")] = fw_git_version;
-	application[F("build_type")] = BUILD_TYPE;
-	application[F("git_date")] = fw_git_date;
-
-	JsonObject sming = obj.createNestedObject(F("sming"));
-	sming[F("version")] = SMING_VERSION;
-	JsonObject run = obj.createNestedObject(F("runtime"));
-	run[F("uptime")] = app.getUptime();
-	run[F("heap_free")] = app.getFreeHeapSize();
-	run[F("minimumfreeHeapRuntime")]=app.getMinimumHeapUptime();
-	run[F("minimumfreeHeap10min")]=app.getMinimumHeap10min();
-	run[F("heapLowErrUptime")]=app.getHeapLowErrUptime();
-	run[F("heapLowErr10min")]=app.getHeapLowErr10min();
+	setCorsHeaders(response);
+	response.setHeader(F("accept"), F("GET, POST, OPTIONS"));
+	response.code = (code == API_CODES::API_SUCCESS) ? HTTP_STATUS_OK : HTTP_STATUS_BAD_REQUEST;
+	response.setContentType(MIME_JSON);
+	response.sendString(payload);
 }
 
 void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, const char* msg)
 {
-	const String stableMsg = (msg == nullptr) ? String(getApiCodeMsg(code)) : String(msg);
-	auto stream = std::make_unique<JsonObjectStream>();
-	JsonObject json = stream->getRoot();
+	if(msg == nullptr) {
+		sendApiCode(response, code, (const __FlashStringHelper*)nullptr);
+		return;
+	}
 
+	String payload;
+	payload.reserve(code == API_CODES::API_UPDATE_IN_PROGRESS ? 512 : 64);
+	{
+		auto& codec = rpcCodec();
+		Jsonrpc::Root root(codec.db());
+		if(auto update = root.update()) {
+			if(code == API_CODES::API_SUCCESS) {
+				update.toApiSuccess().setSuccess(true);
+			} else {
+				update.toApiError().setError(msg == nullptr ? getApiCodeMsg(code) : String(msg));
+			}
+		}
+		if(code == API_CODES::API_SUCCESS) {
+			codec.renderPayload(root.asApiSuccess(), payload);
+		} else {
+			codec.renderPayload(root.asApiError(), payload);
+		}
+	}
+
+	if(!checkHeap(response)) {
+		return;
+	}
 	setCorsHeaders(response);
 	response.setHeader(F("accept"), F("GET, POST, OPTIONS"));
+	response.code = (code == API_CODES::API_SUCCESS) ? HTTP_STATUS_OK : HTTP_STATUS_BAD_REQUEST;
+	response.setContentType(MIME_JSON);
+	response.sendString(payload);
+}
 
-	if(code == API_CODES::API_SUCCESS) {
-		json[F("success")] = true;
-		sendApiResponse(response, stream.release(), HTTP_STATUS_OK);
+bool ApplicationWebserver::parseJsonBody(HttpRequest& request, HttpResponse& response, JsonDocument& doc,
+											 const String& noBodyMessage)
+{
+	debug_i(ANSI_COLOR_BLUE "parseJsonBody: begin" ANSI_COLOR_RESET);
+	DeserializationError err = DeserializationError::EmptyInput;
+	auto bodyStream = request.getBodyStream();
+	if(bodyStream != nullptr) {
+		debug_i(ANSI_COLOR_BLUE "parseJsonBody: deserializeJson(stream), freeHeap=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_RESET,
+				app.getFreeHeapSize());
+		err = deserializeJson(doc, *bodyStream);
+		debug_i(ANSI_COLOR_BLUE "parseJsonBody: deserializeJson(stream) done" ANSI_COLOR_RESET);
 	} else {
-		if(code == API_CODES::API_UPDATE_IN_PROGRESS) {
-			debug_i("API update in progress, adding info to response");
-			JsonObject data = json.createNestedObject(F("info"));
-			addInfoFields(data);
-		}
+		debug_i(ANSI_COLOR_BLUE "parseJsonBody: bodyStream unavailable, fallback to getBody" ANSI_COLOR_RESET);
+		String body = request.getBody();
+		debug_i(ANSI_COLOR_BLUE "parseJsonBody: body length=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE ", freeHeap=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_RESET,
+				(unsigned)body.length(), app.getFreeHeapSize());
 
-		json[F("error")] = stableMsg;
-		sendApiResponse(response, stream.release(), HTTP_STATUS_BAD_REQUEST);
+		if(body.length()) {
+			debug_i(ANSI_COLOR_BLUE "parseJsonBody: deserializeJson(buffer)" ANSI_COLOR_RESET);
+			err = deserializeJson(doc, body.c_str(), body.length());
+			debug_i(ANSI_COLOR_BLUE "parseJsonBody: deserializeJson(buffer) done" ANSI_COLOR_RESET);
+		} else {
+			const String& contentLength = request.headers[HTTP_HEADER_CONTENT_LENGTH];
+			const String& contentType = request.headers[HTTP_HEADER_CONTENT_TYPE];
+			if(contentLength.length() && contentLength.toInt() > 0) {
+				if(contentType.indexOf(F("application/json")) != 0) {
+					sendApiCode(response, API_CODES::API_BAD_REQUEST,
+							F("Invalid JSON: send Content-Type: application/json"));
+				} else {
+					sendApiCode(response, API_CODES::API_BAD_REQUEST, F("Invalid JSON: body unavailable"));
+				}
+			} else {
+				sendApiCode(response, API_CODES::API_BAD_REQUEST,
+						noBodyMessage.length() ? noBodyMessage.c_str() : (const char*)nullptr);
+			}
+			return false;
+		}
 	}
+
+	if(err) {
+		char parseError[96];
+		snprintf(parseError, sizeof(parseError), "Invalid JSON: %s", err.c_str());
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, parseError);
+		return false;
+	}
+
+	return true;
 }
 
 void ApplicationWebserver::onFile(HttpRequest& request, HttpResponse& response)
 {
-	debug_i("http onFile");
-	if(!preflightRequest(request, response, {HttpMethod::GET, HttpMethod::HEAD})) return;
+	debug_i(ANSI_COLOR_BLUE "http onFile" ANSI_COLOR_RESET);
+	// LittleFS file serving buffers through lwIP — require more free heap than API calls.
+	if(!preflightRequest(request, response,true, {HttpMethod::GET, HttpMethod::HEAD}, 8000)) return;
 
 #ifdef ARCH_ESP8266
 	if(app.ota.isProccessing()) {
 		response.setContentType(MIME_TEXT);
 		response.code = HTTP_STATUS_SERVICE_UNAVAILABLE;
-		response.sendString("OTA in progress");
+		response.sendString(F("OTA in progress"));
 		return;
 	}
 #endif
@@ -444,7 +767,7 @@ void ApplicationWebserver::onFile(HttpRequest& request, HttpResponse& response)
 #endif
 
 	String fileName = request.uri.Path;
-	debug_i("ApplicationWebserver::onFile with uri path=%s",fileName.c_str());
+	debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::onFile with uri path=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET,fileName.c_str());
 	if(fileName[0] == '/')
 		fileName = fileName.substring(1);
 	if(fileName[0] == '.') {
@@ -453,16 +776,17 @@ void ApplicationWebserver::onFile(HttpRequest& request, HttpResponse& response)
 	}
 
 	String compressed = fileName + ".gz";
-	debug_i("searching file name %s", compressed.c_str());
+	debug_i(ANSI_COLOR_BLUE "searching file name " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, compressed.c_str());
 	auto v = fileMap[compressed];
 	if(v) {
-		debug_i("found");
+		debug_i(ANSI_COLOR_BLUE "found" ANSI_COLOR_RESET);
 		response.headers[HTTP_HEADER_CONTENT_ENCODING] = _F("gzip");
 	} else {
-		debug_i("searching file name %s", fileName.c_str());
+		debug_i(ANSI_COLOR_GREEN "searching file name %s" ANSI_COLOR_RESET, fileName.c_str());
 		v = fileMap[fileName];
 		if(!v) {
-			debug_i("file %s not found in filemap", fileName.c_str());
+			// file not found in fileMap, check if it exists in filesystem
+			debug_i(ANSI_COLOR_YELLOW "file %s not found in filemap" ANSI_COLOR_RESET, fileName.c_str());
 			if(!app.isFilesystemMounted()) {
 				response.setContentType(MIME_TEXT);
 				response.code = HTTP_STATUS_INTERNAL_SERVER_ERROR;
@@ -471,28 +795,37 @@ void ApplicationWebserver::onFile(HttpRequest& request, HttpResponse& response)
 			}
 			if(!fileExist(fileName) && !fileExist(fileName + ".gz") && WifiAccessPoint.isEnabled()) {
 				//if accesspoint is active and we couldn`t find the file - redirect to index
-				debug_d("ApplicationWebserver::onFile redirecting");
+				debug_d(ANSI_COLOR_GREEN "ApplicationWebserver::onFile redirecting" ANSI_COLOR_RESET);
 				response.headers[HTTP_HEADER_LOCATION] = F("http://") + WifiAccessPoint.getIP().toString() + "/";
 			} else {
 #ifndef NOCACHE
-				//response.setCache(604800, true); // It's important to use cache for better performance.
-				response.setHeader(F("Cache-Control"),F("public, max-age=604800, immutable"));
+			if (fileName == F("index.html") || fileName == F("/")) {
+                // Explicitly disable caching for index.html
+                response.setHeader(F("Cache-Control"), F("no-store, no-cache, must-revalidate, max-age=0"));
+                response.setHeader(F("Pragma"), F("no-cache")); // Legacy HTTP/1.0 fallback
+            } else {
+                // Static assets (JS/CSS/images with build hashes) can be aggressively cached
+                response.setHeader(F("Cache-Control"), F("public, max-age=604800, immutable"));
+            }
 #endif
-				response.code = HTTP_STATUS_OK;
-				response.sendFile(fileName);
+				
+				// sendFile with allowGzipFileCheck=true: tries fileName+".gz" first, sets
+				// Content-Encoding:gzip, and infers MIME from fileName (not fileName.gz).
+				debug_i(ANSI_COLOR_GREEN "sending file %s with gzip check" ANSI_COLOR_RESET, fileName.c_str());
+				response.sendFile(fileName, true);
 			}
 			return;
 		}
 	}
 
-	debug_i("found %s in fileMap", String(v.key()).c_str());
+	debug_i(ANSI_COLOR_BLUE "found " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " in fileMap" ANSI_COLOR_RESET, String(v.key()).c_str());
 	auto stream = std::make_unique<FSTR::Stream>(v.content());
 	response.sendDataStream(stream.release(), ContentType::fromFullFileName(fileName));
 
 }
 void ApplicationWebserver::onWebapp(HttpRequest& request, HttpResponse& response)
 {
-	debug_i("http onWebapp");
+	debug_i(ANSI_COLOR_BLUE "http onWebapp" ANSI_COLOR_RESET);
 	if(!preflightRequest(request, response, {HttpMethod::GET})) return;
 
 	response.headers[HTTP_HEADER_LOCATION] = F("/index.html");
@@ -502,9 +835,26 @@ void ApplicationWebserver::onWebapp(HttpRequest& request, HttpResponse& response
 	response.sendString(F("Redirecting to /index.html"));
 }
 
+void ApplicationWebserver::onRedirector(HttpRequest& request, HttpResponse& response)
+{
+	// OS/browser connectivity probes (generate_204, hotspot-detect, connecttest,
+	// nmcheck, ...) hit these paths repeatedly. While the webapp is downloading
+	// the heap is scarce, so shed them with 429 to make the client back off
+	// instead of driving the device into OOM. Kept deliberately allocation-light:
+	// no stream, no body.
+	if(app.webappOta.isActive()) {
+		debug_i(ANSI_COLOR_YELLOW "onRedirector: webapp download active, shedding probe %s (429)" ANSI_COLOR_RESET, request.uri.Path.c_str());
+		response.code = HTTP_STATUS_TOO_MANY_REQUESTS;
+		response.setHeader(F("Retry-After"), F("10"));
+		response.setHeader(F("Connection"), F("close"));
+		return;
+	}
+	onIndex(request, response);
+}
+
 void ApplicationWebserver::onIndex(HttpRequest& request, HttpResponse& response)
 {
-	debug_i("http onIndex");
+	debug_i(ANSI_COLOR_BLUE "http onIndex" ANSI_COLOR_RESET);
 	if(!preflightRequest(request, response, {HttpMethod::GET})) return;
 #ifdef ARCH_ESP8266
 	if(app.ota.isProccessing()) {
@@ -516,11 +866,96 @@ void ApplicationWebserver::onIndex(HttpRequest& request, HttpResponse& response)
 	}
 #endif
 
+	bool hasLfsIndex = app.isFilesystemMounted() &&
+	     (fileExist(F("index.html")) || fileExist(F("index.html.gz")));
+
+	// Case 1: AP active with no WiFi credentials → serve captive portal
+	if(WifiAccessPoint.isEnabled() && !WifiStation.isConnected() && !hasLfsIndex) {
+		debug_i(ANSI_COLOR_BLUE "onIndex: serving captive portal" ANSI_COLOR_RESET);
+		auto v = fileMap[F("captive.html")];
+		if(v) {
+			setCorsHeaders(response);
+			response.headers[HTTP_HEADER_CACHE_CONTROL] = F("no-store");
+			auto stream = std::make_unique<FSTR::Stream>(v.content());
+			response.sendDataStream(stream.release(), MIME_HTML);
+			return;
+		}
+	}
+
+	// Case 2: WiFi connected but webapp not yet in LFS → show progress page
+	if(WifiStation.isConnected() && !hasLfsIndex) {
+		debug_i(ANSI_COLOR_BLUE "onIndex: serving updating page" ANSI_COLOR_RESET);
+		// Kick off webapp OTA if not already running
+		if(!app.webappOta.isActive()) {
+			app.webappOta.checkForUpdate();
+		}
+		auto v = fileMap[F("updating.html")];
+		if(v) {
+			setCorsHeaders(response);
+			// Must not be cached — the page content changes with firmware and its
+			// poll interval is baked in. Heuristic caching would serve a stale copy.
+			response.headers[HTTP_HEADER_CACHE_CONTROL] = F("no-store");
+			auto stream = std::make_unique<FSTR::Stream>(v.content());
+			response.sendDataStream(stream.release(), MIME_HTML);
+			return;
+		}
+	}
+
+	// Normal: LFS webapp is present, redirect to index.html
 	response.headers[HTTP_HEADER_LOCATION] = F("/index.html");
 	setCorsHeaders(response);
-
 	response.code = HTTP_STATUS_PERMANENT_REDIRECT;
 	response.sendString(F("Redirecting to /index.html"));
+}
+
+void ApplicationWebserver::onWebappCheck(HttpRequest& request, HttpResponse& response)
+{
+	debug_i(ANSI_COLOR_BLUE "http onWebappCheck" ANSI_COLOR_RESET);
+	if(!preflightRequest(request, response, {HttpMethod::GET, HttpMethod::POST})) return;
+	if(!checkHeap(response)) return;
+
+	if(request.method == HttpMethod::POST) {
+		if(!app.webappOta.isActive()) {
+			app.webappOta.checkForUpdate(true /* ignoreEnabled: manual trigger */);
+		}
+	}
+
+	// Return current OTA status (same as /webapp_status but cache-busted).
+	// Stream directly from a JsonObjectStream to avoid a second serialized
+	// String buffer (peak-heap reduction on the low-heap ESP8266 path).
+	auto stream = std::make_unique<JsonObjectStream>(512);
+	if(!stream) {
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("low memory"));
+		return;
+	}
+	JsonObject json = stream->getRoot();
+	app.webappOta.fillStatusJson(json);
+
+	setCorsHeaders(response);
+	response.headers[HTTP_HEADER_CACHE_CONTROL] = F("no-store");
+	response.sendDataStream(stream.release(), MIME_JSON);
+}
+
+void ApplicationWebserver::onWebappStatus(HttpRequest& request, HttpResponse& response)
+{
+	debug_i(ANSI_COLOR_BLUE "http onWebappStatus" ANSI_COLOR_RESET);
+	if(!preflightRequest(request, response, {HttpMethod::GET}, 12000)) return;
+
+	unsigned long now = millis();
+	// Bypass cache when OTA is idle (terminal state) so updating.html sees the final result immediately.
+	bool otaActive = app.webappOta.isActive();
+	if(_webappStatusCache.length() == 0 || !otaActive || (now - _webappStatusCacheTime) >= WEBAPP_STATUS_CACHE_MS) {
+		DynamicJsonDocument doc(512);
+		JsonObject json = doc.to<JsonObject>();
+		app.webappOta.fillStatusJson(json);
+		_webappStatusCache = String();
+		serializeJson(doc, _webappStatusCache);
+		_webappStatusCacheTime = now;
+	}
+
+	setCorsHeaders(response);
+	response.headers[HTTP_HEADER_CONTENT_TYPE] = F("application/json");
+	response.sendString(_webappStatusCache);
 }
 
 bool ApplicationWebserver::checkHeap(HttpResponse& response)
@@ -528,17 +963,26 @@ bool ApplicationWebserver::checkHeap(HttpResponse& response)
 	return checkHeap(response, MINIMUM_HEAP);
 }
 
-bool ApplicationWebserver::checkHeap(HttpResponse& response, int minHeap)
+bool ApplicationWebserver::checkHeap(HttpResponse& response, uint32_t minHeap)
 {
-
-	if(!app.checkHeap(minHeap) ) {
-		setCorsHeaders(response);
-		response.code = HTTP_STATUS_TOO_MANY_REQUESTS;
-		response.setHeader(F("Retry-After"), "4");
-		debug_e("Not enough heap free, rejecting request. Free heap: %u", app.getFreeHeapSize());
-		return false;
+	// A zero request means "use the default floor". This matches the
+	// documented preflightRequest(minHeap=0) contract and ensures every handler
+	// — including those relying on the default — is actually heap-gated.
+	if(minHeap == 0) {
+		minHeap = MINIMUM_HEAP;
 	}
-	return true;
+	// While the webapp is downloading, the OTA client and filesystem writes hold
+	// a large chunk of heap. Serving additional JSON endpoints (e.g. repeated
+	// /info polls from the browser) on top of that pushes the device into OOM —
+	// we've observed onInfo drop the connection at ~6.8 KB free and the immediate
+	// client retry then crash the allocator. Raise the floor during the download
+	// so non-essential requests are shed with 429 (client backs off via
+	// Retry-After) instead of being processed into an out-of-memory crash.
+	if(app.webappOta.isActive() && minHeap < WEBAPP_OTA_MIN_HEAP) {
+		minHeap = WEBAPP_OTA_MIN_HEAP;
+	}
+
+	return app.checkHeap(minHeap);
 }
 
 /**
@@ -547,43 +991,90 @@ bool ApplicationWebserver::checkHeap(HttpResponse& response, int minHeap)
  * @param minHeap Optional minimum heap required (default 0 loops back to _minimumHeap)
  * @return true if request is valid and should proceed. false if response handled (e.g. error or options)
  */
-bool ApplicationWebserver::preflightRequest(HttpRequest& request, HttpResponse& response, std::initializer_list<HttpMethod> allowedMethods, int minHeap)
+bool ApplicationWebserver::preflightRequest(HttpRequest& request, HttpResponse& response, bool canRedirect, std::initializer_list<HttpMethod> allowedMethods,  uint32_t minHeap)
 {
-    // Default to no-cache for API/dynamic checks. 
-    // Static file handler (onFile) will override this if caching is desired.
-    debug_i("preflightRequest: %s %s", String((int)request.method).c_str(), request.uri.Path.c_str());
-    response.setHeader(F("Cache-Control"), F("no-cache, no-store, must-revalidate"));
-    response.setHeader(F("Pragma"), F("no-cache"));
-    response.setHeader(F("Expires"), F("0"));
+	debug_i(ANSI_COLOR_BLUE "preflightRequest: %d %s" ANSI_COLOR_RESET, (int)request.method, request.uri.Path.c_str());
+	const HttpMethod reqMethod = request.method;
 
+	debug_i(ANSI_COLOR_BLUE "checking heap..." ANSI_COLOR_RESET);
     // 1. Heap Check
-    if(!checkHeap(response, minHeap)) {
-        return false;
-    }
+	if (!checkHeap(response, minHeap)) {
+    	setCorsHeaders(response);
+		/*
+		if (canRedirect) {
+			auto filename = request.uri.Path;
+			
+			int dotIndex = filename.lastIndexOf('.');
+			bool isJavaScript = false;
 
+			if (dotIndex != -1 && dotIndex < (int)filename.length() - 1) {
+				// Point directly into the existing string buffer instead of allocating a new String object
+				const char* extPtr = filename.c_str() + dotIndex + 1;
+				
+				// Handle case-insensitivity using strcasecmp_P to protect against .JS uppercase variants
+				if (strcasecmp_P(extPtr, PSTR("js")) == 0) {
+					isJavaScript = true;
+				}
+				
+				debug_i(ANSI_COLOR_BLUE "Request for %s with extension %s failed heap check" ANSI_COLOR_RESET, filename.c_str(), extPtr);
+			} else {
+				debug_i(ANSI_COLOR_BLUE "Request for %s (no extension) failed heap check" ANSI_COLOR_RESET, filename.c_str());
+			}
+
+			// Only redirect if it is NOT a JavaScript asset
+			if (!isJavaScript) {
+				response.code = HTTP_STATUS_TEMPORARY_REDIRECT;
+				
+				// Building location header
+				String Location = F("http://") + app.controllers->getNextCompatibleWebappController().toString() + request.uri.Path;
+				response.headers[HTTP_HEADER_LOCATION] = Location;
+				
+				debug_i(ANSI_COLOR_RED "Not enough heap free, redirecting request to %s. Free heap: " ANSI_COLOR_CYAN "%u" ANSI_COLOR_RED " bytes" ANSI_COLOR_RESET, Location.c_str(), app.getFreeHeapSize());
+				return false;
+			} 
+		} else {
+		*/
+		response.code = HTTP_STATUS_TOO_MANY_REQUESTS;
+			
+			// Smart backoff: scale based on how far we are below threshold
+			// If OTA is active, wait longer to avoid hammering during download
+			// Otherwise, backoff increases with severity of heap shortage
+			const char* retryAfterHeader;
+			if(app.webappOta.isActive()) {
+				retryAfterHeader = "30";  // OTA download: give 30 seconds
+			} else {
+				// Scale backoff: 4s for slightly low, 10s for critically low
+				uint32_t freeHeap = app.getFreeHeapSize();
+				if(freeHeap < (minHeap / 2)) {
+					retryAfterHeader = "10";  // Critical: wait 10 seconds
+				} else if(freeHeap < (minHeap * 3 / 4)) {
+					retryAfterHeader = "5";   // Moderate: wait 6 seconds
+				} else {
+					retryAfterHeader = "2";   // Light: wait 4 seconds
+				}
+			}
+			
+			response.setHeader(F("Retry-After"), retryAfterHeader);
+			debug_e(ANSI_COLOR_RED "Not enough heap free, rejecting request. Free heap: " ANSI_COLOR_CYAN "%u" ANSI_COLOR_RED " bytes" ANSI_COLOR_RESET, app.getFreeHeapSize());
+			return false;
+		//}
+	}
+
+	debug_i(ANSI_COLOR_BLUE "heap check passed, checking OPTIONS..." ANSI_COLOR_RESET);
    // 2. CORS Preflight (OPTIONS) - Must handle this before method check or Auth
-    if(request.method == HttpMethod::OPTIONS) {
+    if(reqMethod == HttpMethod::OPTIONS) {
         setCorsHeaders(response);
         sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
-        debug_i("Handled OPTIONS preflight (generic)");
+        debug_i(ANSI_COLOR_BLUE "Handled OPTIONS preflight (generic)" ANSI_COLOR_RESET);
         return false; // Handled, stop processing
     }
-
+	debug_i(ANSI_COLOR_BLUE "OPTIONS check passed, checking method..." ANSI_COLOR_RESET);
     // 3. Method validation
     bool methodAllowed = false;
 
-    String allowedMethodsStr;
-    bool first = true;
+    debug_i(ANSI_COLOR_BLUE "Method check passed, checking authentication..." ANSI_COLOR_RESET);
     for(auto m : allowedMethods) {
-        if (!first) {
-             allowedMethodsStr += ", ";
-        }
-        allowedMethodsStr += String((int)m);
-        first = false;
-    }
-    
-    for(auto m : allowedMethods) {
-        if(request.method == m) {
+		if(reqMethod == m) {
             methodAllowed = true;
             break;
         }
@@ -591,28 +1082,30 @@ bool ApplicationWebserver::preflightRequest(HttpRequest& request, HttpResponse& 
 
     if(!methodAllowed) {
         setCorsHeaders(response);
-        String msg = F("Method not allowed. Allowed: ");
-        msg += allowedMethodsStr;
-        msg += F(". Current: ");
-        msg += String((int)request.method);
-        sendApiCode(response, API_CODES::API_BAD_REQUEST, msg.c_str());
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("Method not allowed"));
         return false;
     }
 
     // 4. Global Authentication
     // Responds with 401 if security is enabled and auth fails
+	debug_i(ANSI_COLOR_BLUE "Checking authentication..." ANSI_COLOR_RESET);
     if(!authenticated(request, response)) {
+		debug_i(ANSI_COLOR_RED "preflightRequest: %d %s - Authentication failed" ANSI_COLOR_RESET, (int)request.method, request.uri.Path.c_str());
         return false;
     }
 
-    // 5. Ensure CORS headers for actual response
+    // 5. Set cache-control headers and CORS headers only if all checks pass
+    // This prevents committed response headers from interfering with error responses downstream
+    response.setHeader(F("Cache-Control"), F("no-cache, no-store, must-revalidate"));
+    response.setHeader(F("Pragma"), F("no-cache"));
+    response.setHeader(F("Expires"), F("0"));
     setCorsHeaders(response);
     return true;
 }
 
 void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response)
 {
-	debug_i("onConfig");
+	debug_i(ANSI_COLOR_BLUE "onConfig" ANSI_COLOR_RESET);
 	if(!preflightRequest(request, response, {HttpMethod::POST, HttpMethod::GET}, 12000)) return;
 
 #ifdef ARCH_ESP8266
@@ -625,15 +1118,17 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 
 
 	if(request.method == HttpMethod::POST) {
-		debug_i("======================\nHTTP POST request received, ");
+		debug_i(ANSI_COLOR_BLUE "======================\nHTTP POST request received, " ANSI_COLOR_RESET);
 		app.telemetryClient.log(F("onConfig POST"));
+		// Invalidate the cached security flag so any password/secured changes take effect immediately.
+		_apiSecuredCache = -1;
 
 		/* ConfigDB importFomStream */
 		String oldIP, oldSSID, oldDeviceName, oldCurrentPinConfigName, oldSyslogHost;
 		bool mqttEnabled, dhcpEnabled,oldSyslogEnabled,oldTelemetryEnabled;
 		int oldColorMode,oldSyslogPort;
 		{
-			debug_i("ApplicationWebserver::onConfig storing old settings");
+			debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::onConfig storing old settings" ANSI_COLOR_RESET);
 			app.telemetryClient.log(F("onConfig storing old settings"));
 			AppConfig::Network network(*app.cfg);
 			oldIP = network.connection.getIp();
@@ -679,7 +1174,7 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 			bool newMqttEnabled,newDhcpEnabled,newSyslogEnabled, newTelemetryEnabled;
 			int newColorMode,newSyslogPort;
 			{
-				debug_i("ApplicationWebserver::onConfig getting new settings");
+				debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::onConfig getting new settings" ANSI_COLOR_RESET);
 				app.telemetryClient.log(F("onConfig getting new settings"));
 				AppConfig::Network network(*app.cfg);
 				newIP = network.connection.getIp();
@@ -711,7 +1206,7 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 			*/
 			if(oldIP != newIP) {
 				//if (restart) {
-				debug_i("ApplicationWebserver::onConfig ip settings changed - rebooting");
+				debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::onConfig ip settings changed - rebooting" ANSI_COLOR_RESET);
 				app.telemetryClient.log(F("onConfig ip settings changed - rebooting"));
 				String msg = F("new IP, ")+newIP;
 				app.wsBroadcast(F("notification"), msg);
@@ -733,7 +1228,7 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 			if(oldSSID != newSSID) {
 				//
 				if(WifiAccessPoint.isEnabled()) {
-					debug_i("ApplicationWebserver::onConfig wifiap settings changed - rebooting");
+					debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::onConfig wifiap settings changed - rebooting" ANSI_COLOR_RESET);
 					app.telemetryClient.log(F("onConfig wifiap settings changed - rebooting"));
 					// report the fact that the system will restart to the frontend
 					String msg = F("new SSID, ")+newSSID;
@@ -751,17 +1246,17 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 			if(mqttEnabled != newMqttEnabled) {
 				if(newMqttEnabled) {
 					if(!app.mqttclient.isRunning()) {
-						debug_i("ApplicationWebserver::onConfig mqtt settings changed - starting mqtt");
+						debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::onConfig mqtt settings changed - starting mqtt" ANSI_COLOR_RESET);
 						app.telemetryClient.log(F("onConfig mqtt settings changed - starting mqtt"));
 						app.mqttclient.start();
 					}
 				} else {
 					if(app.mqttclient.isRunning()) {
-						debug_i("ApplicationWebserver::onConfig mqtt settings changed - stopping mqtt");
+						debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::onConfig mqtt settings changed - stopping mqtt" ANSI_COLOR_RESET);
 						app.telemetryClient.log(F("onConfig mqtt settings changed - stopping mqtt"));
 						app.mqttclient.stop();
 					} else {
-						debug_i("mqttclient was not running, no need to stop");
+						debug_i(ANSI_COLOR_BLUE "mqttclient was not running, no need to stop" ANSI_COLOR_RESET);
 					}
 				}
 			
@@ -774,10 +1269,10 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 			*/
 			if(newTelemetryEnabled!=oldTelemetryEnabled){
 				if(newTelemetryEnabled){
-					debug_i("ApplicationWebserver::onConfig telemetry settings changed - starting telemetry");
+					debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::onConfig telemetry settings changed - starting telemetry" ANSI_COLOR_RESET);
 					app.telemetryClient.start();
 				}else{
-					debug_i("ApplicationWebserver::onConfig telemetry settings changed - stopping telemetry");
+					debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::onConfig telemetry settings changed - stopping telemetry" ANSI_COLOR_RESET);
 					app.telemetryClient.stop();
 				}
 			}
@@ -792,7 +1287,7 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 				if(newDhcpEnabled){
 					WifiStation.enableDHCP(true);
 				}else{
-					debug_i("ApplicationWebserver::onConfig ip settings changed - rebooting");
+					debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::onConfig ip settings changed - rebooting" ANSI_COLOR_RESET);
 					app.telemetryClient.log(F("onConfig ip settings changed - rebooting"));
 					String msg = F("new IP, ")+newIP;
 					app.wsBroadcast(F("notification"), msg);
@@ -851,10 +1346,10 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 #endif
 			}
 
-			debug_i("ApplicationWebserver::onConfig %i, %i",newColorMode,oldColorMode);
+			debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::onConfig " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE ", " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET,newColorMode,oldColorMode);
 			if (newColorMode!=oldColorMode){
 				// color Mode has been updated, requires reconfiguration, will restart for now
-				debug_i("ApplicationWebserver::onConfig color settings changed - restarting");
+				debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::onConfig color settings changed - restarting" ANSI_COLOR_RESET);
 				app.telemetryClient.log(F("onConfig color settings changed - restarting"));
 				String msg=F("Color Mode changed");
 				app.wsBroadcast(F("notification"), msg);
@@ -878,15 +1373,17 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
             }
             */
 
-			setCorsHeaders(response);
+			// Security settings may have changed (apiSecured/password), refresh lazily on next request.
+			_apiSecuredCache = -1;
+			_apiPasswordCache = String::nullstr;
+
 			sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 		} else {
 			//CofigDB provide correct error message
 
-			//debug_i("config api error %s",error_msg.c_str());
+			//debug_i(ANSI_COLOR_BLUE "config api error " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET,error_msg.c_str());
 			//JsonObject root = doc.as<JsonObject>();
 			//sendApiCode(response, API_CODES::API_MISSING_PARAM, error_msg);
-			setCorsHeaders(response);
 			sendApiCode(response, API_CODES::API_MISSING_PARAM);
 		}
 
@@ -894,7 +1391,6 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 		/*
          * /config GET
          */
-		setCorsHeaders(response);
 		app.telemetryClient.log(F("onConfig GET"));
 
 		auto configStream = app.cfg->createExportStream(ConfigDB::Json::format);
@@ -903,194 +1399,78 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 }
 
 void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response){
-	debug_i("onInfo");
-	if(!preflightRequest(request, response, { HttpMethod::GET },app.ota.isProccessing() ? 4000 : 0)) return;
+	debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::onInfo" ANSI_COLOR_RESET);
+	if(!preflightRequest(request, response, { HttpMethod::GET },app.ota.isProccessing() ? 10000 : 0)) return;
 
-	auto stream = std::make_unique<JsonObjectStream>();
-	JsonObject data = stream->getRoot();
-	debug_i("onInfo request v=%s", request.getQueryParameter(F("V")).c_str());
-	if(request.getQueryParameter(F("V")) == "2"||request.getQueryParameter(F("v")) == "2"  ){
-		debug_i("onInfo v2");
-		addInfoFields(data);
-		const auto tcpStats = getTcpPcbStats();
+	// Build params from query string
+	DynamicJsonDocument paramsDoc(64);
+	JsonObject params = paramsDoc.to<JsonObject>();
+	String versionParam = request.getQueryParameter(F("V"));
+	if(!versionParam.length()) {
+		versionParam = request.getQueryParameter(F("v"));
+	}
+	if(versionParam.length()) {
+		params[F("V")] = versionParam;
+	}
+	String sparseParam = request.getQueryParameter(F("sparse"));
+	if(!sparseParam.length()) {
+		sparseParam = request.getQueryParameter(F("S"));
+	}
+	if(!sparseParam.length()) {
+		sparseParam = F("1");
+	}
+	params[F("sparse")] = sparseParam;
+	const bool sparse = !(sparseParam == "0" || sparseParam == "false" || sparseParam == "FALSE" || sparseParam == "off" ||
+				sparseParam == "OFF" || sparseParam == "no" || sparseParam == "NO");
+	const uint32_t infoHeapSnapshot = app.getFreeHeapSize();
+	const bool isV2 = versionParam == "2";
+	const bool useSparseCache = sparse;
+	String* cachePayload = isV2 ? &_infoV2Cache : &_infoV1Cache;
+	unsigned long* cacheTime = isV2 ? &_infoV2CacheTime : &_infoV1CacheTime;
+	const unsigned long nowMs = millis();
 
-#ifndef SMING_RELEASE
-		{
-			const char* preNetState = "unknown";
-			switch(app.syslogPreNetState()) {
-			case UdpSyslogStream::PreNetState::Buffering:
-				preNetState = "buffering";
-				break;
-			case UdpSyslogStream::PreNetState::Draining:
-				preNetState = "draining";
-				break;
-			case UdpSyslogStream::PreNetState::Done:
-				preNetState = "done";
-				break;
-			}
-			JsonObject debug = data.createNestedObject(F("debug"));
-			debug[F("syslog_pre_net_state")] = preNetState;
-			debug[F("http_active_connections")] = activeClients;
-			debug[F("websocket_connections")] = webSockets.size();
-			debug[F("eventserver_clients")] = app.eventserver.activeClients;
-			debug[F("syslog_pre_net_buffer_allocated")] = app.udpSyslogStream.preNetBufferAllocated();
-			debug[F("syslog_pre_net_encoder_allocated")] = app.udpSyslogStream.preNetEncoderAllocated();
-			debug[F("syslog_pre_net_buffer_capacity")] = app.udpSyslogStream.preNetBufferCapacity();
-			debug[F("syslog_pre_net_buffer_used")] = app.udpSyslogStream.preNetBufferUsed();
-			debug[F("syslog_pre_net_buffer_frames")] = app.udpSyslogStream.preNetBufferedFrames();
-			debug[F("syslog_pre_net_buffer_evicted")] = app.udpSyslogStream.preNetEvictedFrames();
-		#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
-			debug[F("tcp_pcb_size")] = sizeof(tcp_pcb);
-			debug[F("tcp_active_estimated_bytes")] = static_cast<uint32_t>(tcpStats.active_total) * sizeof(tcp_pcb);
-		#else
-			debug[F("tcp_pcb_size")] = 0;
-			debug[F("tcp_active_estimated_bytes")] = 0;
-		#endif
-		}
-#endif
-		
-		JsonObject rgbww = data.createNestedObject(F("rgbww"));
-		rgbww[F("version")] = RGBWW_VERSION;
-		rgbww[F("queuesize")] = RGBWW_ANIMATIONQSIZE;
+	// Frequent UI polling can trigger repeated ConfigDB store opens;
+	// use a short cache window to lower pressure on FS/event queue.
+	if(useSparseCache && !app.ota.isProccessing() && cachePayload->length() > 0 && (nowMs - *cacheTime) < INFO_CACHE_MS) {
+		setCorsHeaders(response);
+		response.setHeader(F("accept"), F("GET, POST, OPTIONS"));
+		response.code = HTTP_STATUS_OK;
+		response.setContentType(MIME_JSON);
+		response.sendString(*cachePayload);
+		return;
+	}
 
+	String payload;
+	payload.reserve(isV2 ? INFO_DOC_CAPACITY_V2 : INFO_DOC_CAPACITY_V1);
+	app.api->renderData(F("info"), params, payload);
 
-		JsonObject con = data.createNestedObject(F("connection"));
-		con[F("connected")] = WifiStation.isConnected();
-		if(WifiStation.isConnected()) {
-			con[F("ssid")] = WifiStation.getSSID();
-			con[F("dhcp")] = WifiStation.isEnabledDHCP();
-			con[F("ip")] = WifiStation.getIP().toString();
-			con[F("netmask")] = WifiStation.getNetworkMask().toString();
-			con[F("gateway")] = WifiStation.getNetworkGateway().toString();
-			con[F("mac")] = WifiStation.getMAC();
-			con[F("rssi")] = WifiStation.getRssi();
+	if(useSparseCache && !app.ota.isProccessing()) {
+		*cachePayload = payload;
+		*cacheTime = nowMs;
+	}
 
-			JsonObject net = data.createNestedObject(F("network"));
-			net[F("max http connections")] = HTTP_MAX_CONNECTIONS;
-			net[F("tcp_connections")] = getActiveTcpConnectionCount();
-			net[F("tcp_active")]= tcpStats.active_total;
-			net[F("tcp_established")] = tcpStats.established;
-			net[F("tcp_syn_sent")] = tcpStats.syn_sent;
-			net[F("tcp_syn_rcvd")] = tcpStats.syn_rcvd;
-			net[F("tcp_fin_wait_1")] = tcpStats.fin_wait_1;
-			net[F("tcp_fin_wait_2")] = tcpStats.fin_wait_2;
-			net[F("tcp_close_wait")] = tcpStats.close_wait;
-			net[F("tcp_closing")] = tcpStats.closing;
-			net[F("tcp_last_ack")] = tcpStats.last_ack;
-			net[F("tcp_time_wait")] = tcpStats.time_wait;
-			net[F("tcp_closed")] = tcpStats.closed;
-		}
-		// Skip ConfigDB reads during OTA — they consume heap and flash I/O we can't afford
-		if(!app.ota.isProccessing()) {
-			AppConfig::Network network(*app.cfg);
-			JsonObject mqtt=data.createNestedObject(F("mqtt"));
-			if(network.mqtt.getEnabled() && !app.mqttclient.isRunning()) {
-				mqtt[F("status")] = F("configured but not running");
-			} else if(network.mqtt.getEnabled() && app.mqttclient.isRunning()) {
-				mqtt[F("status")] = F("running");
-			} else {
-				mqtt[F("status")] = F("disabled");
-			}
-			mqtt[F("enabled")] = network.mqtt.getEnabled();
-			mqtt[F("broker")] = network.mqtt.getServer();
-			mqtt[F("topic")] = network.mqtt.getTopicBase();
-			if(network.mqtt.homeassistant.getEnable())
-			{
-				JsonObject ha = data.createNestedObject("homeassistant");
-				ha[F("enabled")] = network.mqtt.homeassistant.getEnable();
-				ha[F("discovery_prefix")] = network.mqtt.homeassistant.getDiscoveryPrefix();
-				ha[F("Node ID")]= network.mqtt.homeassistant.getNodeId();
-			}
-		}
-
-		if(app.ota.isProccessing()) {
-			JsonObject ota=data.createNestedObject(F("ota"));
-			ota[F("status")] = F("in progress");
-		}
-
-	}else{
-		debug_i("old style onInfo");	
-		#ifdef ARCH_ESP8266
-			if(app.ota.isProccessing()) {
-				sendApiCode(response, API_CODES::API_UPDATE_IN_PROGRESS);
-				return;
-			}
-		#endif
-
-			data[F("deviceid")] = system_get_chip_id();
-		#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
-			data[F("current_rom")] = String(app.ota.getRomPartition().name());
-		#endif
-			data[F("git_version")] = fw_git_version;
-			data[F("build_type")] = BUILD_TYPE;
-			data[F("git_date")] = fw_git_date;
-			data[F("webapp_version")] = WEBAPP_VERSION;
-			data[F("sming")] = SMING_VERSION;
-			data[F("event_num_clients")] = app.eventserver.activeClients;
-			data[F("uptime")] = app.getUptime();
-			data[F("heap_free")] = app.getFreeHeapSize();
-			data[F("soc")]=SOC;
-			
-			/*
-			FileSystem::Info fsInfo;
-			app.getinfo(fsInfo);
-			JsonObject FS=data.createNestedObject("fs");
-			FS[F("mounted")] = fsInfo.partition?"true":"false";
-			FS[F("size")] = fsInfo.total;
-			FS[F("used")] = fsInfo.used;
-			FS[F("available")] = fsInfo.freeSpace;
-		*/
-			JsonObject rgbww = data.createNestedObject("rgbww");
-			rgbww[F("version")] = RGBWW_VERSION;
-			rgbww[F("queuesize")] = RGBWW_ANIMATIONQSIZE;
-
-			JsonObject con = data.createNestedObject("connection");
-			con[F("connected")] = WifiStation.isConnected();
-			con[F("ssid")] = WifiStation.getSSID();
-			con[F("dhcp")] = WifiStation.isEnabledDHCP();
-			con[F("ip")] = WifiStation.getIP().toString();
-			con[F("netmask")] = WifiStation.getNetworkMask().toString();
-			con[F("gateway")] = WifiStation.getNetworkGateway().toString();
-			con[F("mac")] = WifiStation.getMAC();
-			//con[F("mdnshostname")] = app.cfg.network.connection.mdnshostname.c_str();
-
-		}
-		sendApiResponse(response, stream.release());
-
+	if(!checkHeap(response)) {
+		return;
+	}
+	setCorsHeaders(response);
+	response.setHeader(F("accept"), F("GET, POST, OPTIONS"));
+	response.code = HTTP_STATUS_OK;
+	response.setContentType(MIME_JSON);
+	response.sendString(payload);
 }
+
 
 void ApplicationWebserver::onColorGet(HttpRequest& request, HttpResponse& response)
 {
-	debug_i("onColorGet");
-    /*
-	if(!checkHeap(response,2000))
-		return;
-    */
+	debug_i(ANSI_COLOR_BLUE "onColorGet" ANSI_COLOR_RESET);
 
-	auto stream = std::make_unique<JsonObjectStream>();
-	JsonObject json = stream->getRoot();
+	String payload;
+	payload.reserve(256);
+	app.api->renderData(F("color"), JsonObject(), payload);
 
-	JsonObject raw = json.createNestedObject("raw");
-	ChannelOutput output = app.rgbwwctrl.getCurrentOutput();
-	raw[F("r")] = output.r;
-	raw[F("g")] = output.g;
-	raw[F("b")] = output.b;
-	raw[F("ww")] = output.ww;
-	raw[F("cw")] = output.cw;
-
-	JsonObject hsv = json.createNestedObject("hsv");
-	float h, s, v;
-	int ct;
-	HSVCT c = app.rgbwwctrl.getCurrentColor();
-	c.asRadian(h, s, v, ct);
-	hsv[F("h")] = h;
-	hsv[F("s")] = s;
-	hsv[F("v")] = v;
-	hsv[F("ct")] = ct;
-
-	setCorsHeaders(response);
-
-	sendApiResponse(response, stream.release());
+	response.code = HTTP_STATUS_OK;
+	response.setContentType(MIME_JSON);
+	response.sendString(payload);
 
 }
 
@@ -1107,21 +1487,22 @@ void ApplicationWebserver::onColorGet(HttpRequest& request, HttpResponse& respon
  */
 void ApplicationWebserver::onColorPost(HttpRequest& request, HttpResponse& response)
 {
-	String body = request.getBody();
-
-	if(body == NULL) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("no body"));
+	debug_i(ANSI_COLOR_BLUE "onColorPost" ANSI_COLOR_RESET);
+	_colorPostDoc.clear();
+	if(!parseJsonBody(request, response, _colorPostDoc, F("no body"))) {
 		return;
 	}
 
-	debug_i("received color update with body legth %i and content %s", body.length(),body.c_str());
+	debug_i(ANSI_COLOR_BLUE "received color update" ANSI_COLOR_RESET);
 	String msg;
+	debug_i(ANSI_COLOR_BLUE "dispatching color update" ANSI_COLOR_RESET);
+	const bool ok = app.api->dispatchCommand(F("color"), _colorPostDoc.as<JsonObject>(), msg, true);
 
-	if(!app.jsonproc.onColor(body, msg)) {
-		debug_i("received color update with message %s", msg.c_str());
+	if(!ok) {
+		debug_i(ANSI_COLOR_BLUE "received color update with message " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, msg.c_str());
 		sendApiCode(response, API_CODES::API_BAD_REQUEST, msg);
 	} else {
-		debug_i("received color update with message %s", msg.c_str());
+		debug_i(ANSI_COLOR_BLUE "received color update with message " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, msg.c_str());
 		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 	}
 }
@@ -1144,17 +1525,17 @@ void ApplicationWebserver::onColor(HttpRequest& request, HttpResponse& response)
 		return;
 	}
 #endif
-	debug_i("received /color request");
+	debug_i(ANSI_COLOR_BLUE "received /color request" ANSI_COLOR_RESET);
 
 	bool error = false;
 	if(request.method == HttpMethod::POST) {
-		debug_i("POST");
+		debug_i(ANSI_COLOR_BLUE "POST" ANSI_COLOR_RESET);
 		ApplicationWebserver::onColorPost(request, response);
 	} else if(request.method == HttpMethod::GET) {
-		debug_i("GET");
+		debug_i(ANSI_COLOR_BLUE "GET" ANSI_COLOR_RESET);
 		ApplicationWebserver::onColorGet(request, response);
 	} else {
-		debug_i("found unimplementd http_method %i", (int)request.method);
+		debug_i(ANSI_COLOR_BLUE "found unimplementd http_method " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, (int)request.method);
 	}
 }
 
@@ -1189,7 +1570,7 @@ bool ApplicationWebserver::isPrintable(const String& str)
  */
 void ApplicationWebserver::onNetworks(HttpRequest& request, HttpResponse& response)
 {
-	debug_i("onNetworks");
+	debug_i(ANSI_COLOR_BLUE "onNetworks" ANSI_COLOR_RESET);
 	if(!preflightRequest(request, response, {HttpMethod::GET})) return;
 #ifdef ARCH_ESP8266
 	if(app.ota.isProccessing()) {
@@ -1198,40 +1579,18 @@ void ApplicationWebserver::onNetworks(HttpRequest& request, HttpResponse& respon
 	}
 #endif
 
-	auto stream = std::make_unique<JsonObjectStream>();
-	JsonObject json = stream->getRoot();
+	String payload;
+	payload.reserve(512);
+	app.api->renderData(F("networks"), JsonObject(), payload);
 
-	bool error = false;
-
-	if(app.network.isScanning()) {
-		json[F("scanning")] = true;
-	} else {
-		json[F("scanning")] = false;
-		JsonArray netlist = json.createNestedArray(F("available"));
-		BssList networks = app.network.getAvailableNetworks();
-		for(unsigned int i = 0; i < networks.count(); i++) {
-			if(networks[i].hidden)
-				continue;
-
-			// SSIDs may contain any byte values. Some are not printable and will cause the javascript client to fail
-			// on parsing the message. Try to filter those here
-			if(!ApplicationWebserver::isPrintable(networks[i].ssid)) {
-				debug_w("Filtered SSID due to unprintable characters: %s", networks[i].ssid.c_str());
-				continue;
-			}
-
-			JsonObject item = netlist.createNestedObject();
-			item[F("id")] = (int)networks[i].getHashId();
-			item[F("ssid")] = networks[i].ssid;
-			item[F("signal")] = networks[i].rssi;
-			item[F("encryption")] = networks[i].getAuthorizationMethodName();
-			//limit to max 25 networks
-			if(i >= 25)
-				break;
-		}
+	if(!checkHeap(response)) {
+		return;
 	}
 	setCorsHeaders(response);
-	sendApiResponse(response, stream.release());
+	response.setHeader(F("accept"), F("GET, POST, OPTIONS"));
+	response.code = HTTP_STATUS_OK;
+	response.setContentType(MIME_JSON);
+	response.sendString(payload);
 
 }
 
@@ -1289,26 +1648,10 @@ void ApplicationWebserver::onScanNetworks(HttpRequest& request, HttpResponse& re
  */
 void ApplicationWebserver::onConnect(HttpRequest& request, HttpResponse& response)
 {
-	debug_i("onConnect");
+	debug_i(ANSI_COLOR_BLUE "onConnect" ANSI_COLOR_RESET);
     if(!preflightRequest(request, response, {HttpMethod::POST, HttpMethod::GET})) return;
 
-    /*
-	if(!checkHeap(response)) {
-		return;
-	}
-	debug_i("onConnect request.method: %i", request.method);
-	if(request.method == HttpMethod::OPTIONS) {
-		setCorsHeaders(response);
-		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
-		return;
-	}
-	
-	if(!authenticated(request, response)) {
-		return;
-	}
-    */
-
-	debug_i("passed checks");
+	debug_i(ANSI_COLOR_BLUE "passed checks" ANSI_COLOR_RESET);
 #ifdef ARCH_ESP8266
 	if(app.ota.isProccessing()) {
 		sendApiCode(response, API_CODES::API_UPDATE_IN_PROGRESS);
@@ -1316,24 +1659,12 @@ void ApplicationWebserver::onConnect(HttpRequest& request, HttpResponse& respons
 	}
 #endif
 
-    /*
-	if(request.method != HttpMethod::POST && request.method != HttpMethod::GET) {
-		debug_i("not HTTP POST or GET");
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not HTTP POST or GET"));
-		return;
-	}
-    */
-
 	if(request.method == HttpMethod::POST) {
-		String body = request.getBody();
-		debug_i("is POST");
-		if(body == NULL) {
-			sendApiCode(response, API_CODES::API_BAD_REQUEST, F("could not get HTTP body"));
+		debug_i(ANSI_COLOR_BLUE "is POST" ANSI_COLOR_RESET);
+		DynamicJsonDocument doc(256);
+		if(!parseJsonBody(request, response, doc, F("could not get HTTP body"))) {
 			return;
 		}
-		// ConfigDB - CONFIG_MAX_LENGTH was no longer defined, what's the right size here?
-		StaticJsonDocument<512> doc;
-		Json::deserialize(doc, body);
 		String ssid;
 		String password;
 		if(Json::getValue(doc[F("ssid")], ssid)) {
@@ -1349,6 +1680,10 @@ void ApplicationWebserver::onConnect(HttpRequest& request, HttpResponse& respons
 		}
 	} else {
 		auto stream = std::make_unique<JsonObjectStream>();
+		if(!stream) {
+			sendApiCode(response, API_CODES::API_BAD_REQUEST, F("low memory"));
+			return;
+		}
 		JsonObject json = stream->getRoot();
 
 		CONNECTION_STATUS status = app.network.get_con_status();
@@ -1357,7 +1692,7 @@ void ApplicationWebserver::onConnect(HttpRequest& request, HttpResponse& respons
 			json[F("error")] = app.network.get_con_err_msg();
 		} else if(status == CONNECTION_STATUS::CONNECTED) {
 			// return connected
-			debug_i("wifi connected, checking if dhcp enabled");
+			debug_i(ANSI_COLOR_BLUE "wifi connected, checking if dhcp enabled" ANSI_COLOR_RESET);
 			AppConfig::Network network(*app.cfg);
 
 			if(network.connection.getDhcp()) {
@@ -1398,49 +1733,26 @@ void ApplicationWebserver::onSystemReq(HttpRequest& request, HttpResponse& respo
 	}
 #endif
 */
-	bool error = false;
-	String body = request.getBody();
-	if(body == NULL) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("could not get HTTP body"));
+	if(!app.api) {
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("api not initialized"));
 		return;
-	} else {
-		debug_i("ApplicationWebserver::onSystemReq: %s", body.c_str());
-		// ConfigDB - CONFIG_MAX_LENGTH was no longer defined, what's the right size here?
-		StaticJsonDocument<512> doc;
-		Json::deserialize(doc, body);
-
-		String cmd = doc[F("cmd")].as<const char*>();
-		if(cmd) {
-			if(cmd.equals(F("debug"))) {
-				bool enable;
-				if(Json::getValue(doc[F("enable")], enable)) {
-					Serial.systemDebugOutput(enable);
-				} else {
-					error = true;
-				}
-
-			} else if(cmd.equals(F("restart"))) {
-				bool clearOta = false;
-				Json::getValue(doc[F("clearOTA")], clearOta);
-				String restartCmd = clearOta ? F("clear_ota_restart") : F("restart");
-				if(!app.delayedCMD(restartCmd, 1500)) {
-					error = true;
-				}
-
-			} else if(!app.delayedCMD(cmd, 1500)) {
-				error = true;
-			}
-
-		} else {
-			error = true;
-		}
 	}
+
+	DynamicJsonDocument doc(128);
+	if(!parseJsonBody(request, response, doc, F("could not get HTTP body"))) {
+		return;
+	}
+
+	debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::onSystemReq" ANSI_COLOR_RESET);
+	String errorMsg;
+	const bool ok = app.api->dispatchCommand(F("system"), doc.as<JsonObject>(), errorMsg, false);
+
 	setCorsHeaders(response);
 
-	if(!error) {
+	if(ok) {
 		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 	} else {
-		sendApiCode(response, API_CODES::API_MISSING_PARAM);
+		sendApiCode(response, API_CODES::API_MISSING_PARAM, errorMsg);
 	}
 }
 
@@ -1470,7 +1782,7 @@ void ApplicationWebserver::onUpdate(HttpRequest& request, HttpResponse& response
 		// probably a CORS request
 		setCorsHeaders(response);
 		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
-		debug_i("/update HttpMethod::OPTIONS Request, sent API_SUCCSSS");
+		debug_i(ANSI_COLOR_BLUE "/update HttpMethod::OPTIONS Request, sent API_SUCCSSS" ANSI_COLOR_RESET);
 		return;
 	}
 	if(request.method != HttpMethod::POST && request.method != HttpMethod::GET) {
@@ -1484,25 +1796,19 @@ void ApplicationWebserver::onUpdate(HttpRequest& request, HttpResponse& response
 			return;
 		}
 
-		String body = request.getBody();
-		if(body == NULL) {
-			sendApiCode(response, API_CODES::API_BAD_REQUEST, F("could not parse HTTP body"));
+		DynamicJsonDocument doc(512);
+		if(!parseJsonBody(request, response, doc, F("could not parse HTTP body"))) {
 			return;
 		}
-
-		debug_i("body: %s", body.c_str());
-		// ConfigDB - CONFIG_MAX_LENGTH was no longer defined, what's the right size here?
-		StaticJsonDocument<512> doc;
-		Json::deserialize(doc, body);
 		String romurl;
 		Json::getValue(doc[F("rom")][F("url")], romurl);
 
 		//String spiffsurl;
 		//Json::getValue(doc[F("spiffs")][F("url")],spiffsurl);
 
-		debug_i("starting update process with \n    romurl: %s", romurl.c_str());
+		debug_i(ANSI_COLOR_BLUE "starting update process with \n    romurl: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, romurl.c_str());
 		if(romurl == "") {
-			debug_i("missing rom url");
+			debug_i(ANSI_COLOR_BLUE "missing rom url" ANSI_COLOR_RESET);
 			sendApiCode(response, API_CODES::API_MISSING_PARAM);
 		} else {
 			app.ota.start(romurl);
@@ -1512,6 +1818,10 @@ void ApplicationWebserver::onUpdate(HttpRequest& request, HttpResponse& response
 		return;
 	}
 	auto stream = std::make_unique<JsonObjectStream>();
+	if(!stream) {
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("low memory"));
+		return;
+	}
 	JsonObject json = stream->getRoot();
 	json[F("status")] = int(app.ota.getStatus());
 	sendApiResponse(response, stream.release());
@@ -1546,6 +1856,11 @@ void ApplicationWebserver::onPing(HttpRequest& request, HttpResponse& response)
 	}
     */
 	auto stream = std::make_unique<JsonObjectStream>();
+	if(!stream) {
+		response.code = HTTP_STATUS_BAD_REQUEST;
+		response.sendString(F("{\"error\":\"low memory\"}"));
+		return;
+	}
 	JsonObject json = stream->getRoot();
 	json[F("ping")] = "pong";
 	sendApiResponse(response, stream.release());
@@ -1565,11 +1880,18 @@ void ApplicationWebserver::onStop(HttpRequest& request, HttpResponse& response)
 	}
     */
 
+	DynamicJsonDocument doc(256);
+	if(!parseJsonBody(request, response, doc, F("could not get HTTP body"))) {
+		return;
+	}
+
 	String msg;
-	if(app.jsonproc.onStop(request.getBody(), msg, true)) {
+	const bool ok = app.api->dispatchCommand(F("stop"), doc.as<JsonObject>(), msg, true);
+
+	if(ok) {
 		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 	} else {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST);
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, msg);
 	}
 }
 
@@ -1577,12 +1899,18 @@ void ApplicationWebserver::onSkip(HttpRequest& request, HttpResponse& response)
 {
     if(!preflightRequest(request, response, {HttpMethod::POST})) return;
     
+	DynamicJsonDocument doc(256);
+	if(!parseJsonBody(request, response, doc, F("could not get HTTP body"))) {
+		return;
+	}
 
 	String msg;
-	if(app.jsonproc.onSkip(request.getBody(), msg)) {
+	const bool ok = app.api->dispatchCommand(F("skip"), doc.as<JsonObject>(), msg, true);
+
+	if(ok) {
 		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 	} else {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST);
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, msg);
 	}
 }
 
@@ -1590,11 +1918,18 @@ void ApplicationWebserver::onPause(HttpRequest& request, HttpResponse& response)
 {
     if(!preflightRequest(request, response, {HttpMethod::POST})) return;
     
+	DynamicJsonDocument doc(256);
+	if(!parseJsonBody(request, response, doc, F("could not get HTTP body"))) {
+		return;
+	}
+
 	String msg;
-	if(app.jsonproc.onPause(request.getBody(), msg, true)) {
+	const bool ok = app.api->dispatchCommand(F("pause"), doc.as<JsonObject>(), msg, true);
+
+	if(ok) {
 		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 	} else {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST);
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, msg);
 	}
 }
 
@@ -1602,11 +1937,18 @@ void ApplicationWebserver::onContinue(HttpRequest& request, HttpResponse& respon
 {
     if(!preflightRequest(request, response, {HttpMethod::POST})) return;
     
+	DynamicJsonDocument doc(256);
+	if(!parseJsonBody(request, response, doc, F("could not get HTTP body"))) {
+		return;
+	}
+
 	String msg;
-	if(app.jsonproc.onContinue(request.getBody(), msg)) {
+	const bool ok = app.api->dispatchCommand(F("continue"), doc.as<JsonObject>(), msg, true);
+
+	if(ok) {
 		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 	} else {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST);
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, msg);
 	}
 }
 
@@ -1614,11 +1956,18 @@ void ApplicationWebserver::onBlink(HttpRequest& request, HttpResponse& response)
 {
     if(!preflightRequest(request, response, {HttpMethod::POST})) return;
 
+	DynamicJsonDocument doc(256);
+	if(!parseJsonBody(request, response, doc, F("could not get HTTP body"))) {
+		return;
+	}
+
 	String msg;
-	if(app.jsonproc.onBlink(request.getBody(), msg)) {
+	const bool ok = app.api->dispatchCommand(F("blink"), doc.as<JsonObject>(), msg, true);
+
+	if(ok) {
 		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 	} else {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST);
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, msg);
 	}
 }
 
@@ -1626,11 +1975,18 @@ void ApplicationWebserver::onToggle(HttpRequest& request, HttpResponse& response
 {
     if(!preflightRequest(request, response, {HttpMethod::POST})) return;
     
+	DynamicJsonDocument doc(256);
+	if(!parseJsonBody(request, response, doc, F("could not get HTTP body"))) {
+		return;
+	}
+
 	String msg;
-	if(app.jsonproc.onToggle(request.getBody(), msg)) {
+	const bool ok = app.api->dispatchCommand(F("toggle"), doc.as<JsonObject>(), msg, true);
+
+	if(ok) {
 		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 	} else {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST);
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, msg);
 	}
 }
 
@@ -1641,8 +1997,8 @@ void ApplicationWebserver::onHosts(HttpRequest& request, HttpResponse& response)
 
     if(!app.controllers) {
         setCorsHeaders(response);
-		debug_i("Controllers not initialized");
-        sendApiCode(response, API_CODES::API_BAD_REQUEST, F("Controllers not initialized"));
+		debug_i(ANSI_COLOR_BLUE "Controllers not initialized" ANSI_COLOR_RESET);
+		DynamicJsonDocument doc(256);
         return;
     }
 
@@ -1661,6 +2017,10 @@ void ApplicationWebserver::onHosts(HttpRequest& request, HttpResponse& response)
 
     // Use the JsonStream for automatic streaming
     auto stream = app.controllers->createJsonStream(filter, false); // Compact format for HTTP
+	if(!stream) {
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("low memory"));
+		return;
+	}
     response.sendDataStream(stream.release(), MIME_JSON);
 
 //todo 
@@ -1675,24 +2035,28 @@ void ApplicationWebserver::onData(HttpRequest& request, HttpResponse& response){
 		response.setContentType(F("application/json"));
 
 		auto dataStream = app.data->createExportStream(ConfigDB::Json::format);
+		if(!dataStream) {
+			sendApiCode(response, API_CODES::API_BAD_REQUEST, F("low memory"));
+			return;
+		}
 		response.sendDataStream(dataStream.release(), MIME_JSON);
 
 	} else if (request.method==HttpMethod::POST){
 
 		auto bodyStream = request.getBodyStream();
 		if(bodyStream) {
-			debug_i("received Data bodyStream");
+			debug_i(ANSI_COLOR_BLUE "received Data bodyStream" ANSI_COLOR_RESET);
 			ConfigDB::Status status = app.data->importFromStream(ConfigDB::Json::format, *bodyStream);
 			String statusMsg = status.toString();
 			if(status){
-				debug_i("successfully updated app-data");
+				debug_i(ANSI_COLOR_BLUE "successfully updated app-data" ANSI_COLOR_RESET);
 				sendApiCode(response, API_CODES::API_SUCCESS, statusMsg);
 			}else{
-				debug_i("could not update app-data");
+				debug_i(ANSI_COLOR_BLUE "could not update app-data" ANSI_COLOR_RESET);
 				sendApiCode(response, API_CODES::API_BAD_REQUEST, statusMsg);
 			}
 		}else{
-			debug_i("could not get bodyStream");
+			debug_i(ANSI_COLOR_BLUE "could not get bodyStream" ANSI_COLOR_RESET);
 			sendApiCode(response, API_CODES::API_BAD_REQUEST, F("could not get bodyStream"));
 		}
 	}
@@ -1704,17 +2068,20 @@ void ApplicationWebserver::onSetOn(HttpRequest &request, HttpResponse &response)
     if(!preflightRequest(request, response, {HttpMethod::POST}, 4000)) return;
     
 
-	debug_i("onSetOn");
-		
-	String body = request.getBody();
-	StaticJsonDocument<512> doc;
-	DeserializationError err = deserializeJson(doc, body);
-	if (err) {
-		sendApiCode(response, API_BAD_REQUEST, F("Invalid JSON"));
+	debug_i(ANSI_COLOR_BLUE "onSetOn" ANSI_COLOR_RESET);
+
+	if(!app.api) {
+		sendApiCode(response, API_BAD_REQUEST, F("api not initialized"));
 		return;
 	}
+
+	DynamicJsonDocument doc(256);
+	if(!parseJsonBody(request, response, doc, F("could not get HTTP body"))) {
+		return;
+	}
+
 	String msg;
-		if (app.jsonproc.onSetOn(doc.as<JsonObject>(), msg, true)) {
+	if(app.api->dispatchCommand(F("setOn"), doc.as<JsonObject>(), msg, true)) {
 		sendApiCode(response, API_SUCCESS, F("SetOn OK"));
 	} else {
 		sendApiCode(response, API_BAD_REQUEST, msg);
@@ -1724,17 +2091,20 @@ void ApplicationWebserver::onSetOn(HttpRequest &request, HttpResponse &response)
 void ApplicationWebserver::onSetOff(HttpRequest &request, HttpResponse &response) {
     if(!preflightRequest(request, response, {HttpMethod::POST}, 4000)) return;
     
-	debug_i("onSetOff");
+	debug_i(ANSI_COLOR_BLUE "onSetOff" ANSI_COLOR_RESET);
 
-	String body = request.getBody();
-	StaticJsonDocument<512> doc;
-	DeserializationError err = deserializeJson(doc, body);
-	if (err) {
-		sendApiCode(response, API_BAD_REQUEST, F("Invalid JSON"));
+	if(!app.api) {
+		sendApiCode(response, API_BAD_REQUEST, F("api not initialized"));
 		return;
 	}
+
+	DynamicJsonDocument doc(256);
+	if(!parseJsonBody(request, response, doc, F("could not get HTTP body"))) {
+		return;
+	}
+
 	String msg;
-		if (app.jsonproc.onSetOff(doc.as<JsonObject>(), msg, true)) {
+	if(app.api->dispatchCommand(F("setOff"), doc.as<JsonObject>(), msg, true)) {
 		sendApiCode(response, API_SUCCESS, F("SetOff OK"));
 	} else {
 		sendApiCode(response, API_BAD_REQUEST, msg);
@@ -1744,5 +2114,5 @@ void ApplicationWebserver::onSetOff(HttpRequest &request, HttpResponse &response
 void ApplicationWebserver::setCorsHeaders(HttpResponse& response)
 {
 	response.setAllowCrossDomainOrigin("*");
-	response.setHeader(F("Access-Control-Allow-Headers"), F("Content-Type, Cache-Control"));
+	response.setHeader(F("Access-Control-Allow-Headers"), F("Content-Type, Cache-Control, Authorization"));
 }

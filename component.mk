@@ -8,12 +8,11 @@ ifeq ($(SMING_ARCH), Esp32)
     COMPONENT_DEPENDS += Esp32HardwarePwm
 endif
 
-# Set default number of jobs to twice the number of available processors
-#NUM_JOBS := $(shell echo $(($(nproc) * 2)))
+# Set default number of jobs to number of available processors +2
 NUM_JOBS := $(shell echo $(($(nproc) + 2)))
 MAKEFLAGS += -j$(NUM_JOBS)
 
-HWCONFIG :=two_roms_two_lfs_$(SMING_ARCH)
+HWCONFIG :=Lightinator_$(SMING_ARCH)
 #HWCONFIG:=debug_Esp32
 
 #### rBoot options ####
@@ -65,7 +64,8 @@ else ifeq ($(SMING_ARCH), Esp32)
     $(info COM_PORT is $(COM_PORT)@$(COM_SPEED) for $(SMING_ARCH))
 endif
 
-CUSTOM_TARGETS += check_versions
+#CUSTOM_TARGETS += check_versions api-schema-rebuild
+CUSTOM_TARGETS += check_versions 
 
 #### GIT VERSION Information #####
 ifdef GITHUB_RUN_NUMBER
@@ -89,11 +89,42 @@ GIT_DATE = $(firstword $(shell git --no-pager show --date=short --format="%ad" -
 SMING_GITVERSION =	$(shell git -C $(SMING_HOME)/.. describe --abbrev=4 --dirty --always --tags)"-["$(shell git -C $(SMING_HOME)/.. rev-parse --abbrev-ref HEAD)"]"
 WEBAPP_VERSION = $(shell cat $(PROJECT_DIR)/webapp/VERSION)
 USER_CFLAGS = -DGITVERSION=\"$(GIT_VERSION)\" -DGITDATE=\"$(GIT_DATE)\" -DWEBAPP_VERSION=\"$(WEBAPP_VERSION)\" -DSMING_GITVERSION=\"$(SMING_GITVERSION)\" -DMQTT_USER=\"$(MQTT_USER)\" -DMQTT_PASS=\"$(MQTT_PASS)\"
+# For ENABLE_GDB=1 sessions, control whether the target halts inside
+# gdbstub_init() on boot. Default 0 (device runs freely). The VS Code debug
+# tasks override this to 1 so cppdbg attaches to a halted, silent target,
+# which avoids app serial output corrupting the GDB remote protocol on connect.
+GDBSTUB_BREAK_ON_INIT ?= 0
+USER_CFLAGS += -DGDBSTUB_BREAK_ON_INIT=$(GDBSTUB_BREAK_ON_INIT)
 # Keep format-string type checking strict even when global WERROR is disabled in CI.
-# Use COMPONENT_CFLAGS so this only applies to our app sources, not Sming sub-components like esp-open-lwip.
-COMPONENT_CFLAGS += -Wformat -Werror=format -Werror=format-security
-COMPONENT_CXXFLAGS += -Wformat -Werror=format -Werror=format-security
-COMPONENT_CPPFLAGS += -DCONFIG_ESP_CONSOLE_USB_CDC=1
+USER_CFLAGS += -Wformat -Werror=format
+USER_CXXFLAGS += -Wformat -Werror=format
+# Opt-in per-function stack-frame analysis: `make ... STACK_USAGE=1` emits a .su
+# file next to every object (GCC -fstack-usage). Inert for normal builds.
+ifdef STACK_USAGE
+USER_CFLAGS += -fstack-usage
+USER_CXXFLAGS += -fstack-usage
+endif
+
+# Esp8266 propagates USER_CFLAGS into external lwIP sources, where older GCC
+# toolchains can reject -Werror=format-security even with -Wformat enabled.
+
+CUSTOM_LWIP_OPTS += -DLWIP_IPV6=0 \
+	       -DLWIP_IGMP=1 \
+	       -DLWIP_DNS=1 \
+	       -DLWIP_DHCP=1 \
+	       -DMIN_TCP_MSS=512 \
+	       -DPBUF_POOL_SIZE=8 \
+	       -DMEMP_NUM_UDP_PCB=2 \
+	       -DMEMP_NUM_TCP_PCB=5 \
+	       -DMEM_LIBC_MALLOC=0 \
+               -DMEMP_MEM_MALLOC=0 
+	       
+		
+ifneq ($(SMING_ARCH), Esp8266)
+USER_CFLAGS += -Werror=format-security
+USER_CXXFLAGS += -Werror=format-security
+endif
+COMPONENT_CPPFLAGS += -DCONFIG_ESP_CONSOLE_USB_CDC=1 
 
 
 #ifdef MDNS_DEBUG
@@ -108,6 +139,13 @@ $(info using SMING $(SMING_GITVERSION))
 EXTRA_LDFLAGS := $(call Wrap,user_pre_init)
 USER_CFLAGS += -DPARTITION_TABLE_OFFSET=$(PARTITION_TABLE_OFFSET)
 
+# Host emulator only: allow each running instance to present a distinct chip
+# identity (mDNS hostname/TXT id, MQTT client id, swarm self-dedup, default
+# device name) via the LI_CHIP_ID environment variable. See app/host_identity.cpp.
+ifeq ($(SMING_ARCH), Host)
+    EXTRA_LDFLAGS += $(call Wrap,system_get_chip_id)
+endif
+
 .PHONY: check_versions
 check_versions:
 ifndef GIT_VERSION
@@ -121,3 +159,42 @@ endif
 ifndef WEBAPP_VERSION
 	$(error can not find webapp/VERSION file - please ensure the source code is complete)
 endif
+
+#.PHONY: api-schema-rebuild
+#api-schema-rebuild:
+#	$(Q) node $(PROJECT_DIR)/tools/generate-api-schemas.mjs
+
+# Keep browser/OpenAPI projections synchronized whenever ConfigDB C++ is rebuilt.
+# configdb-rebuild: api-schema-rebuild
+
+# ---------------------------------------------------------------------------
+# Static stack-risk report
+# ---------------------------------------------------------------------------
+# `make stackreport` (re)builds the app with GCC -fstack-usage (via the
+# STACK_USAGE toggle above) and prints a ranked per-function stack-frame risk
+# report using tools/su_report.py. Because USER_CFLAGS changes when STACK_USAGE
+# flips, the app sources are recompiled so fresh .su files are emitted.
+# Override the number of rows with STACK_REPORT_TOP=<n>.
+#
+# The stack budget used for the risk bands is the per-target user-task stack:
+#   Esp8266 -> 4096 (CONT_STACKSIZE), Esp32 -> 8192, Host -> large.
+STACK_REPORT_TOP ?= 40
+ifeq ($(SMING_ARCH),Esp8266)
+    STACK_REPORT_BYTES ?= 4096
+else ifeq ($(SMING_ARCH),Esp32)
+    STACK_REPORT_BYTES ?= 8192
+else
+    STACK_REPORT_BYTES ?= 8192
+endif
+
+.PHONY: stackreport
+stackreport:
+	@echo "=== building $(SMING_ARCH) with -fstack-usage ==="
+ifeq ($(SMING_ARCH),Esp8266)
+	+$(Q) $(MAKE) --no-print-directory buildmap
+endif
+	+$(Q) $(MAKE) --no-print-directory STACK_USAGE=1
+	@echo
+	$(Q) python3 $(PROJECT_DIR)/tools/su_report.py \
+		$(PROJECT_DIR)/out/$(SMING_ARCH) $(STACK_REPORT_TOP) $(STACK_REPORT_BYTES)
+

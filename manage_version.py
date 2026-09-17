@@ -3,10 +3,11 @@ import os
 import sys
 import re
 import shutil
+import base64
 import requests
 from urllib.parse import urlparse
 
-def update_latest_symlink(data, base_dir='download'):
+def update_latest_symlink(data, base_dir='download/firmware'):
     """
     For each branch (develop, testing, main), create or update a symlink (or copy) in download/latest-<branch>/app_merged.bin
     pointing to the latest single_image/app_merged.bin for that branch.
@@ -24,7 +25,12 @@ def update_latest_symlink(data, base_dir='download'):
         # Extract the local path to app_merged.bin
         parsed = urlparse(url)
         rel_path = parsed.path.lstrip('/')
-        src_path = os.path.join(base_dir, rel_path) if not rel_path.startswith(base_dir) else rel_path
+        if rel_path.startswith(base_dir.rstrip('/') + '/'):
+            src_path = rel_path
+        elif rel_path.startswith('download/'):
+            src_path = rel_path
+        else:
+            src_path = os.path.join(base_dir, rel_path)
         # Target symlink directory
         link_dir = os.path.join(base_dir, f'latest-{branch}')
         os.makedirs(link_dir, exist_ok=True)
@@ -83,11 +89,8 @@ def prime_json(file_path):
     return data
 
 def extract_build_number(version_string):
-    """Extract build number from version string like 'V5.0-123-branch'"""
-    match = re.search(r'V\d+\.\d+-(\d+)', version_string)
-    if match:
-        return int(match.group(1))
-    return 0  # Default to 0 if no build number found
+    """Extract prerelease/build number from old and new version strings."""
+    return parse_version_components(version_string)[3]
 
 def get_version_limit(branch):
     """Get maximum number of versions to keep based on branch"""
@@ -106,7 +109,29 @@ def extract_directory_from_url(url):
     directory = os.path.dirname(path)
     return directory
 
-def add_or_update_entry(data, soc, type_, branch, fw_version, url):
+def parse_version_components(version_string):
+    """Parse old and new firmware version formats into sortable components."""
+    normalized = version_string.strip().lstrip('Vv')
+    if not normalized:
+        return (0, 0, 0, 0)
+
+    segments = normalized.split('-')
+    base_parts = segments[0].split('.')
+
+    try:
+        major = int(base_parts[0]) if len(base_parts) > 0 else 0
+        minor = int(base_parts[1]) if len(base_parts) > 1 else 0
+        patch = int(base_parts[2]) if len(base_parts) > 2 else 0
+    except ValueError:
+        return (0, 0, 0, 0)
+
+    prerelease = 0
+    if len(segments) > 1 and segments[1].isdigit():
+        prerelease = int(segments[1])
+
+    return (major, minor, patch, prerelease)
+
+def add_or_update_entry(data, soc, type_, branch, fw_version, url, comment=''):
     # Make sure history array exists
     if "history" not in data:
         data["history"] = []
@@ -119,6 +144,7 @@ def add_or_update_entry(data, soc, type_, branch, fw_version, url):
     soc = soc.strip().lower()
     type_ = type_.strip().lower()
     branch = branch.strip().lower()
+    comment = comment or ''
     
     # First check if entry already exists and update it if it does
     entry_exists = False
@@ -141,6 +167,8 @@ def add_or_update_entry(data, soc, type_, branch, fw_version, url):
             original_soc = entry['soc']
             original_type = entry['type']
             original_branch = entry['branch']
+            existing_comment = entry.get('comment', '')
+            updated_comment = comment if comment else existing_comment
             
             if entry['fw_version'] == fw_version:
                 # Update existing entry with same version - no history change
@@ -151,6 +179,7 @@ def add_or_update_entry(data, soc, type_, branch, fw_version, url):
                     "branch": original_branch,
                     "fw_version": fw_version,
                     "version":fw_version,
+                    "comment": updated_comment,
                     # Add version key for backward compatibility
                     "files": {
                         "rom": {
@@ -172,6 +201,7 @@ def add_or_update_entry(data, soc, type_, branch, fw_version, url):
                     "branch": original_branch,
                     "fw_version": fw_version,
                     "version":fw_version,
+                    "comment": comment,
                     "files": {
                         "rom": {
                             "url": url
@@ -191,6 +221,7 @@ def add_or_update_entry(data, soc, type_, branch, fw_version, url):
             "branch": branch,
             "fw_version": fw_version,
             "version":fw_version,
+            "comment": comment,
             "files": {
                 "rom": {
                     "url": url
@@ -345,21 +376,9 @@ def list_entries(data, soc=None, type_=None, branch=None, include_history=False,
     return filtered_entries
 
 def extract_complete_version_number(version_string):
-    """Extract a sortable number from version string like 'V5.0-123-branch'"""
-    # Extract major.minor version
-    major_minor_match = re.search(r'V(\d+)\.(\d+)', version_string)
-    if not major_minor_match:
-        return 0  # Default for invalid format
-    
-    major = int(major_minor_match.group(1))
-    minor = int(major_minor_match.group(2))
-    
-    # Extract build number
-    build_match = re.search(r'V\d+\.\d+-(\d+)', version_string)
-    build = int(build_match.group(1)) if build_match else 0
-    
-    # Combine as major*10000 + minor*1000 + build
-    return major * 10000 + minor * 1000 + build
+    """Extract a sortable number from old and new firmware version strings."""
+    major, minor, patch, prerelease = parse_version_components(version_string)
+    return major * 1000000000 + minor * 1000000 + patch * 1000 + prerelease
 
 def cull_history(data, dry_run=False):
     """Limit the number of historical versions based on branch limits"""
@@ -455,6 +474,68 @@ def cull_history(data, dry_run=False):
     
     return data
 
+def add_or_update_webapp_entry(data, branch, version, files=None, comment='', webapp_type='debug', min_firmware=''):
+    """Add or update a webapp entry in version.json."""
+    if "webapp" not in data:
+        data["webapp"] = []
+    if "webapp_history" not in data:
+        data["webapp_history"] = []
+    files = files or []
+    branch = branch.strip().lower()
+    webapp_type = webapp_type.strip().lower() if webapp_type else 'debug'
+    if webapp_type not in ('debug', 'release'):
+        print(f"Invalid webapp type '{webapp_type}', defaulting to 'debug'")
+        webapp_type = 'debug'
+    min_firmware = min_firmware.strip()
+    comment = comment or ''
+
+    for i, entry in enumerate(data["webapp"]):
+        if entry["branch"].strip().lower() == branch:
+            if entry["version"] == version:
+                data["webapp"][i] = {
+                    "version": version,
+                    "type": webapp_type,
+                    "branch": entry["branch"],
+                    "min_firmware": min_firmware,
+                    "files": files,
+                    "comment": comment if comment else entry.get("comment", "")
+                }
+                print(f"Updated webapp entry for {branch} version {version} (same version, metadata/files updated)")
+            else:
+                print(f"Moving webapp {branch}: {entry['version']} to history")
+                data["webapp_history"].append(dict(entry))
+                data["webapp"][i] = {
+                    "version": version,
+                    "type": webapp_type,
+                    "branch": branch,
+                    "min_firmware": min_firmware,
+                    "files": files,
+                    "comment": comment
+                }
+                print(f"Added new webapp entry for {branch} version {version}")
+            return data
+
+    data["webapp"].append({
+        "version": version,
+        "type": webapp_type,
+        "branch": branch,
+        "min_firmware": min_firmware,
+        "files": files,
+        "comment": comment
+    })
+    print(f"Added new webapp entry for {branch} version {version}")
+    return data
+
+
+def list_webapp_entries(data, branch=None):
+    """List webapp entries, optionally filtered by branch."""
+    entries = data.get("webapp", [])
+    if branch:
+        branch = branch.strip().lower()
+        entries = [e for e in entries if e["branch"].strip().lower() == branch]
+    return entries
+
+
 def main():
     if len(sys.argv) < 3:
         print("Usage: script.py <json_file_or_url> [add|delete|list|cull] [arguments]")
@@ -473,14 +554,27 @@ def main():
 
     if action == 'add':
         if len(sys.argv) < 8:
-            print("Usage: script.py <json_file> add <soc> <type> <branch> <fw_version> <url>")
+            print("Usage: script.py <json_file> add <soc> <type> <branch> <fw_version> <url> [--comment-b64 <base64>]")
             return
         soc = sys.argv[3]
         type_ = sys.argv[4]
         branch = sys.argv[5]
         fw_version = sys.argv[6]
         url = sys.argv[7]
-        data = add_or_update_entry(data, soc, type_, branch, fw_version, url)
+        comment = ''
+        args = sys.argv[8:]
+        idx = 0
+        while idx < len(args):
+            if args[idx] == '--comment-b64' and idx + 1 < len(args):
+                try:
+                    comment = base64.b64decode(args[idx + 1]).decode('utf-8')
+                except Exception as exc:
+                    print(f"Error decoding --comment-b64: {exc}")
+                    return
+                idx += 2
+            else:
+                idx += 1
+        data = add_or_update_entry(data, soc, type_, branch, fw_version, url, comment)
         save_json(data, file_path_or_url)
         update_latest_symlink(data)
         print(f"Entry added/updated for {soc}/{type_}/{branch} version {fw_version}.")
@@ -544,7 +638,59 @@ def main():
             print(f"{history_marker}{entry['soc']}/{entry['type']}/{entry['branch']}: {entry['fw_version']}{url_status} - {entry['files']['rom']['url']}")
         return
 
-    print("Invalid action. Use add, delete, list, or cull.")
+    if action == 'add-webapp':
+        if len(sys.argv) < 5:
+            print("Usage: script.py <json_file> add-webapp <branch> <version> [--files-json-b64 <base64>] [--comment-b64 <base64>] [--type <debug|release>] [--min-firmware <semver>]")
+            return
+        branch = sys.argv[3]
+        version = sys.argv[4]
+        files = []
+        comment = ''
+        webapp_type = 'debug'
+        min_firmware = ''
+        args = sys.argv[5:]
+        idx = 0
+        while idx < len(args):
+            if args[idx] == '--files-json-b64' and idx + 1 < len(args):
+                try:
+                    files = json.loads(base64.b64decode(args[idx + 1]).decode('utf-8'))
+                except Exception as exc:
+                    print(f"Error decoding --files-json-b64: {exc}")
+                    return
+                idx += 2
+            elif args[idx] == '--comment-b64' and idx + 1 < len(args):
+                try:
+                    comment = base64.b64decode(args[idx + 1]).decode('utf-8')
+                except Exception as exc:
+                    print(f"Error decoding --comment-b64: {exc}")
+                    return
+                idx += 2
+            elif args[idx] == '--type' and idx + 1 < len(args):
+                webapp_type = args[idx + 1]
+                idx += 2
+            elif args[idx] == '--min-firmware' and idx + 1 < len(args):
+                min_firmware = args[idx + 1]
+                idx += 2
+            else:
+                idx += 1
+        data = add_or_update_webapp_entry(data, branch, version, files, comment, webapp_type, min_firmware)
+        save_json(data, file_path_or_url)
+        print(f"Webapp entry added/updated for {branch} version {version}.")
+        return
+
+    if action == 'list-webapp':
+        branch = sys.argv[3] if len(sys.argv) > 3 else None
+        entries = list_webapp_entries(data, branch)
+        print(f"Found {len(entries)} webapp entries:")
+        for entry in sorted(entries, key=lambda e: e['branch']):
+            files_count = len(entry.get("files", []))
+            entry_type = entry.get("type", "unknown")
+            min_fw = entry.get("min_firmware", "")
+            min_fw_text = f" min_firmware={min_fw}" if min_fw else ""
+            print(f"  {entry['branch']}: {entry['version']} type={entry_type}{min_fw_text} ({files_count} files)")
+        return
+
+    print("Invalid action. Use add, delete, list, cull, add-webapp, or list-webapp.")
 
 if __name__ == "__main__":
     main()

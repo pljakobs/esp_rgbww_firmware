@@ -35,7 +35,7 @@ namespace JSON
 
         bool startElement(const Element& element) override
         {
-            debug_i("startElement: %s", element.key);
+            debug_i(ANSI_COLOR_BLUE "startElement: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, element.key);
             if (F("version") == element.key)                {
                 version = static_cast<uint8_t>(std::stoi(element.value));
                 gotVersion = true;
