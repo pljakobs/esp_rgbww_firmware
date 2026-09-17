@@ -78,13 +78,14 @@ void TelemetryClient::stop() {
 	// Replace the MqttClient instance so the next connect() gets a fresh TCP PCB.
 	// MqttClient::close() is inaccessible (protected base), so we recreate instead.
 	auto* oldClient = mqtt;
+	mqtt = nullptr;
+	delete oldClient;
 	auto* newClient = new (std::nothrow) MqttClient();
 	if(!newClient) {
 		debug_e("Telemetry MQTT client allocation failed during stop/recreate");
 		return;
 	}
 	mqtt = newClient;
-	delete oldClient;
 }
 
 void TelemetryClient::connect(const char* telemetryURL, const char* telemetryUser, const char* telemetryPass) {
