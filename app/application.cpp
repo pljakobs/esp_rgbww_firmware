@@ -37,6 +37,10 @@
 #if defined(ESP8266)
   #include <osapi.h>
 #endif
+#if ARCH_HOST
+#include <malloc_count.h>
+#define HOST_FREE_TARGET 12000
+#endif
 
 #ifdef RSYSLOG
 #ifndef SMING_RELEASE
@@ -309,9 +313,9 @@ void onReady()
 	//      tracked free heap previously never moved.
 	static uint8_t* heapHog = nullptr;
 	auto free = system_get_free_heap_size();
-	if (free>20000){
-		size_t take = free - 24000;
-		debug_i(ANSI_COLOR_BLUE "onReady: free heap %d, allocating %d bytes to squeeze heap to ~20k" ANSI_COLOR_RESET, free, (int)take);
+	if (free>HOST_FREE_TARGET){
+		size_t take = free - HOST_FREE_TARGET;
+		debug_i(ANSI_COLOR_BLUE "onReady: free heap %d, allocating %d bytes to squeeze heap to ~%i" ANSI_COLOR_RESET, free, (int)take, HOST_FREE_TARGET);
 		heapHog = static_cast<uint8_t*>(malloc(take));
 		asm volatile("" : : "g"(heapHog) : "memory"); // don't let the allocation be optimised away
 		if (heapHog) {
@@ -360,8 +364,14 @@ void init(){
 	#ifdef UART_ID_SERIAL_USB_JTAG 
         //Serial.setPort(UART_ID_SERIAL_USB_JTAG);
     #endif
-
-    Serial.begin(SERIAL_BAUD_RATE);
+/*
+	#if ARCH_HOST
+		MallocCount::setAllocLimit(30*1024);
+		MallocCount::setLogThreshold(4*1024);
+		MallocCount::enableLogging(true);
+	#endif
+*/
+	Serial.begin(SERIAL_BAUD_RATE);
     
 	Serial.systemDebugOutput(true);
     
@@ -447,7 +457,7 @@ void Application::sendTelemetry()
 			auto telemetry = update.toTelemetryParams();
 			telemetry.setId(system_get_chip_id());
 			telemetry.setTime(time(nullptr));
-			telemetry.setUptime(+_uptimeSeconds * 60);
+			telemetry.setUptime(+_uptimeSeconds);
 			telemetry.setIp(WifiStation.getIP().toString());
 			telemetry.setFreeHeap(freeHeap);
 			telemetry.setMinHeapRuntime(_minimumHeapUptime);
