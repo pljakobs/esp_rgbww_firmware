@@ -23,12 +23,11 @@
 #include <RGBWWCtrl.h>
 #include <arduinojson.h>
 #include <SimpleTimer.h>
-#include <new>
 
 
 TelemetryClient::TelemetryClient() {
 	snprintf(_chipId, TELEMETRY_CHIPID_MAX_SIZE, "%u", system_get_chip_id());
-	mqtt = new (std::nothrow) MqttClient();
+	mqtt = new MqttClient();
 	if(!mqtt) {
 		debug_e("Telemetry MQTT client allocation failed during init");
 	}
@@ -80,7 +79,7 @@ void TelemetryClient::stop() {
 	auto* oldClient = mqtt;
 	mqtt = nullptr;
 	delete oldClient;
-	auto* newClient = new (std::nothrow) MqttClient();
+	auto* newClient = new MqttClient();
 	if(!newClient) {
 		debug_e("Telemetry MQTT client allocation failed during stop/recreate");
 		return;
@@ -91,7 +90,7 @@ void TelemetryClient::stop() {
 void TelemetryClient::connect(const char* telemetryURL, const char* telemetryUser, const char* telemetryPass) {
 	// Connect to public MQTT server (example: test.mosquitto.org)
 	if(!mqtt) {
-		auto* newClient = new (std::nothrow) MqttClient();
+		auto* newClient = new MqttClient();
 		if(!newClient) {
 			debug_e("Telemetry MQTT client allocation failed before connect");
 			return;
