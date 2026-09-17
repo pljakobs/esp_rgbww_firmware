@@ -21,7 +21,6 @@
  *
  */
 
-
 #include <RGBWWCtrl.h>
 #include <Ota/Upgrader.h>
 #include <RGBWWLed/RGBWWLed.h>
