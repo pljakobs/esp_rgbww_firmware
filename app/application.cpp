@@ -38,7 +38,7 @@
 #endif
 #if ARCH_HOST
 #include <malloc_count.h>
-#define HOST_FREE_TARGET 12000
+#define HOST_FREE_TARGET 14000
 #endif
 
 #ifdef RSYSLOG

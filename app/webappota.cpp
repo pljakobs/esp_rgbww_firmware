@@ -135,7 +135,12 @@ void WebappOta::checkForUpdate(bool ignoreEnabled)
 {
     debug_i(ANSI_COLOR_BLUE "WebappOta::checkForUpdate - ignoreEnabled=" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, ignoreEnabled);
     
-    static constexpr size_t MIN_UPDATE_HEAP = 15000;
+    #ifdef ARCH_HOST
+        static constexpr size_t MIN_UPDATE_HEAP = 10000;
+    #else
+        static constexpr size_t MIN_UPDATE_HEAP = 15000;
+    #endif
+
     if (app.getFreeHeapSize() < MIN_UPDATE_HEAP) {
         debug_w(ANSI_COLOR_YELLOW "WebappOta::checkForUpdate - low heap (" ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW " bytes), backing off 5s" ANSI_COLOR_RESET, app.getFreeHeapSize());
         
