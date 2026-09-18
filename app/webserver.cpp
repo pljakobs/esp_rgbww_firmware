@@ -463,32 +463,39 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 /*
 *	send a websocket broadcast
 */
-void ICACHE_FLASH_ATTR ApplicationWebserver::wsSendBroadcast(const char* buffer, size_t length)
+void ApplicationWebserver::wsSendBroadcast(const char* buffer, size_t length)
 {
     for (size_t i = 0; i < webSockets.size(); ++i) {
         if (webSockets[i] != nullptr) {
             webSockets[i]->send(buffer, length, WS_FRAME_TEXT); 
-            // Or webSockets[i]->broadcast(...), depending on your WS library's API
         }
     }
 }
 
-void ICACHE_FLASH_ATTR ApplicationWebserver::wsSendRuntimeInfo(const char* buffer, size_t length)
+void ApplicationWebserver::wsSendRuntimeInfo(const char* buffer, size_t length)
 {
-	if(webSockets.isEmpty() || buffer == nullptr || length == 0) {
-		return;
-	}
+    if(webSockets.isEmpty() || buffer == nullptr || length == 0) {
+        return;
+    }
 
-	for(unsigned i = 0; i < webSockets.size(); i++) {
-		WebsocketConnection* socket = webSockets[i];
-		if(socket == nullptr) {
-			continue;
-		}
-		WsAuthState* wsAuth = static_cast<WsAuthState*>(socket->getUserData());
-		if(wsAuth != nullptr && wsAuth->runtimeInfoSubscribed) {
-			socket->sendString(String(buffer, length));
-		}
-	}
+    for(unsigned i = 0; i < webSockets.size(); i++) {
+        WebsocketConnection* socket = webSockets[i];
+        if(socket == nullptr) {
+            continue;
+        }
+
+        // 1. Verify WebSocket state is active
+        if(socket->getState() != eWSCS_Open) {
+            continue;
+        }
+
+        WsAuthState* wsAuth = static_cast<WsAuthState*>(socket->getUserData());
+        if(wsAuth != nullptr && wsAuth->runtimeInfoSubscribed) {
+            // Send directly without creating an intermediate String object
+			debug_i(ANSI_COLOR_GREEN "wsSendRuntimeInfo: sending runtime info to websocket" ANSI_COLOR_RESET);
+            socket->send(buffer, length, WS_FRAME_TEXT);
+        }
+    }
 }
 
 unsigned ApplicationWebserver::getHttpActiveConnections() const

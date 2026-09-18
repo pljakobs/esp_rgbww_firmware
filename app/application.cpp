@@ -36,10 +36,7 @@
 #if defined(ESP8266)
   #include <osapi.h>
 #endif
-#if ARCH_HOST
-#include <malloc_count.h>
-#define HOST_FREE_TARGET 14000
-#endif
+
 
 #ifdef RSYSLOG
 #ifndef SMING_RELEASE
@@ -157,10 +154,7 @@ extern "C" void __wrap_user_pre_init(void)
 //         + excvaddr(4) + depc(4) + stackBase(4) + stackCount(4)
 //         + stackWords[53](212) = 256 bytes exactly
 // Output format is compatible with Sming decode-stacktrace.py.
-#define CRASH_RTC_SLOT         68 // Moved from 64 to avoid rBoot collision
-#define CRASH_RTC_MAGIC 0xDEADC0DEu
-#define CRASH_RTC_MAGIC_OVERFLOW 0xBAD57AC0u
-#define CRASH_STACK_WORDS 50
+
 
 struct CrashDump {
 	uint32_t magic;
@@ -228,17 +222,7 @@ extern "C" void custom_crash_callback(struct rst_info* ri, uint32_t stack, uint3
 //    ROMs don't ping-pong forever (the device then just keeps rebooting in place
 //    until it is power-cycled, re-flashed, or OTA'd to a known-good build).
 //
-// Override any of the numbers from component.mk via -D... if desired.
-#ifndef CRASHLOOP_THRESHOLD
-#define CRASHLOOP_THRESHOLD 5
-#endif
-#ifndef CRASHLOOP_HEALTHY_MS
-#define CRASHLOOP_HEALTHY_MS 60000
-#endif
-#ifndef CRASHLOOP_MAX_SWITCHES
-#define CRASHLOOP_MAX_SWITCHES 2
-#endif
-#define CRASHLOOP_MAGIC 0xC1A5107Du
+
 
 struct CrashLoopGuard {
 	uint32_t magic;
@@ -249,7 +233,6 @@ struct CrashLoopGuard {
 #if defined(ARCH_ESP8266)
 // RTC user memory blocks: the crash dump uses 64-127 and rboot uses 64, so the
 // upper half (128-191) of the 512-byte user area is free for the guard.
-#define CRASHLOOP_RTC_SLOT 128
 static CrashLoopGuard loadCrashGuard()
 {
 	CrashLoopGuard g{};
@@ -297,6 +280,17 @@ size_t debugStreamOutputCallback(const char* buffer, unsigned int length)
 }
 #endif
 
+// Prevent the compiler from inlining so the symbol remains in the binary
+extern "C" __attribute__((noinline)) void allocateHeapHog(size_t take) {
+    static uint8_t* heapHog = nullptr;
+    heapHog = static_cast<uint8_t*>(malloc(take));
+    asm volatile("" : : "g"(heapHog) : "memory");
+    if (heapHog) {
+        memset(heapHog, 0xA5, take);
+        asm volatile("" : : : "memory");
+    }
+}
+
 void onReady()
 {
 	#ifdef ARCH_HOST
@@ -316,11 +310,7 @@ void onReady()
 		size_t take = free - HOST_FREE_TARGET;
 		debug_i(ANSI_COLOR_BLUE "onReady: free heap %d, allocating %d bytes to squeeze heap to ~%i" ANSI_COLOR_RESET, free, (int)take, HOST_FREE_TARGET);
 		heapHog = static_cast<uint8_t*>(malloc(take));
-		asm volatile("" : : "g"(heapHog) : "memory"); // don't let the allocation be optimised away
-		if (heapHog) {
-			memset(heapHog, 0xA5, take); // non-zero so it isn't turned back into an elidable calloc
-			asm volatile("" : : : "memory");
-		}
+		allocateHeapHog(take);
 		debug_i(ANSI_COLOR_BLUE "onReady: heapHog allocated %d bytes, free heap now %d" ANSI_COLOR_RESET, (int)take, system_get_free_heap_size());
 	}
 	#endif
@@ -440,6 +430,7 @@ void Application::checkRam()
 		} else {
 			debug_e(ANSI_COLOR_RED "checkRam: runtime info render failed, skipping tick" ANSI_COLOR_RESET);
 		}
+	
 	}
 }
 	
@@ -560,7 +551,7 @@ void Application::init()
 
 	//initialize timers
 	_uptimetimer.initializeMs(1000, TimerDelegate(&Application::uptimeCounter, this)).start();
-	_checkRamTimer.initializeMs(5000, TimerDelegate(&Application::checkRam, this)).start();
+	_checkRamTimer.initializeMs(10000, TimerDelegate(&Application::checkRam, this)).start();
 	_sendTelemetryTimer.initializeMs(60000, TimerDelegate(&Application::sendTelemetry, this)).start();
 
 	// Once we've stayed up this long without crashing, declare the running ROM

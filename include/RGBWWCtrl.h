@@ -99,6 +99,64 @@
 // Debugging
 #define DEBUG_APP 1
 
+/*------------------------------------------------
+|
+| WebappOTA Constants
+|
+------------------------------------------------*/
+
+#ifdef ARCH_HOST
+    #define WEBAPP_OTA_MIN_UPDATE_HEAP 8000
+#else
+    #define WEBAPP_OTA_MIN_UPDATE_HEAP 15000
+#endif
+
+/*------------------------------------------------
+|
+| Crashloop recovery Constants
+|
+| Override any of the numbers from component.mk via -D... if desired.
+|
+------------------------------------------------*/
+
+#ifndef CRASHLOOP_THRESHOLD
+#define CRASHLOOP_THRESHOLD 5
+#endif
+#ifndef CRASHLOOP_HEALTHY_MS
+#define CRASHLOOP_HEALTHY_MS 60000
+#endif
+#ifndef CRASHLOOP_MAX_SWITCHES
+#define CRASHLOOP_MAX_SWITCHES 2
+#endif
+#define CRASHLOOP_MAGIC 0xC1A5107Du
+
+#define CRASHLOOP_RTC_SLOT 128
+
+/*------------------------------------------------
+|
+| crash reporting 
+|
+------------------------------------------------*/
+
+#define CRASH_RTC_SLOT         68 // Moved from 64 to avoid rBoot collision
+#define CRASH_RTC_MAGIC 0xDEADC0DEu
+#define CRASH_RTC_MAGIC_OVERFLOW 0xBAD57AC0u
+#define CRASH_STACK_WORDS 50
+
+
+/*------------------------------------------------
+|
+| Host specific debugging
+|
+------------------------------------------------*/
+
+#if ARCH_HOST
+#include <malloc_count.h>
+#define HOST_FREE_TARGET 15000
+#endif
+
+
+
 //includes
 #include <RGBWWLed/RGBWWLed.h>
 #if defined(ARCH_ESP8266) || defined(ESP32)
