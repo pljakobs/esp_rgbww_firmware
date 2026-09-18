@@ -70,6 +70,9 @@ fi
 cleanup() {
   echo -e "\n[+] Tearing down network interface and NAT routing tables..."
   
+  # Trigger a heap leak check on any active Valgrind instances
+  vgdb leak_check 2>/dev/null || true
+  
   # Remove the added iptables rules (if an interface was detected)
   if [[ -n "${EXT_IF:-}" ]]; then
     sudo iptables -t nat -D POSTROUTING -o "$EXT_IF" -j MASQUERADE 2>/dev/null || true

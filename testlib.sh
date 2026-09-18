@@ -144,6 +144,8 @@ tl_launch() {
     massif)
       echo "[+] Massif output: $diag_dir/massif.out.<pid>  (view with ms_print)"
       valgrind --tool=massif \
+	       --threshold=0.05 \
+	       --ignore-fn=allocateHeapHog \
                --stacks=yes \
                --massif-out-file="$diag_dir/massif.out.%p" \
                --detailed-freq=1 \
