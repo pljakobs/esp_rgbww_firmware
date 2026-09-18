@@ -456,7 +456,7 @@ void Application::sendTelemetry()
 			auto telemetry = update.toTelemetryParams();
 			telemetry.setId(system_get_chip_id());
 			telemetry.setTime(time(nullptr));
-			telemetry.setUptime(+_uptimeSeconds);
+			telemetry.setUptime(_uptimeSeconds);
 			telemetry.setIp(WifiStation.getIP().toString());
 			telemetry.setFreeHeap(freeHeap);
 			telemetry.setMinHeapRuntime(_minimumHeapUptime);
