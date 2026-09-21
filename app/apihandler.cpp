@@ -46,73 +46,102 @@ enum class DataMethodId : uint8_t {
 
 CommandMethodId getCommandMethodId(const char* method)
 {
-    if (method == nullptr || method[0] == '\0') {
-        return CommandMethodId::Unknown;
-    }
+	if (method == nullptr || method[0] == '\0') {
+		return CommandMethodId::Unknown;
+	}
 
-    struct CommandMapping {
-        String name;
-        CommandMethodId id;
-    };
+	struct CommandMapping {
+		PGM_P name;
+		CommandMethodId id;
+	};
+
+	static const char s_color[] PROGMEM = "color";
+	static const char s_stop[] PROGMEM = "stop";
+	static const char s_skip[] PROGMEM = "skip";
+	static const char s_pause[] PROGMEM = "pause";
+	static const char s_continue[] PROGMEM = "continue";
+	static const char s_blink[] PROGMEM = "blink";
+	static const char s_toggle[] PROGMEM = "toggle";
+	static const char s_direct[] PROGMEM = "direct";
+	static const char s_setOn[] PROGMEM = "setOn";
+	static const char s_on[] PROGMEM = "on";
+	static const char s_setOff[] PROGMEM = "setOff";
+	static const char s_off[] PROGMEM = "off";
+	static const char s_scan[] PROGMEM = "scan_networks";
+	static const char s_system[] PROGMEM = "system";
+	static const char s_webapp[] PROGMEM = "webapp_check";
 
 	static const CommandMapping commands[] PROGMEM = {
-        { F("color"),         CommandMethodId::Color },
-        { F("stop"),          CommandMethodId::Stop },
-        { F("skip"),          CommandMethodId::Skip },
-        { F("pause"),         CommandMethodId::Pause },
-        { F("continue"),      CommandMethodId::Continue },
-        { F("blink"),         CommandMethodId::Blink },
-        { F("toggle"),        CommandMethodId::Toggle },
-        { F("direct"),        CommandMethodId::Direct },
-        { F("setOn"),         CommandMethodId::SetOn },
-        { F("on"),            CommandMethodId::SetOn },
-        { F("setOff"),        CommandMethodId::SetOff },
-        { F("off"),           CommandMethodId::SetOff },
-        { F("scan_networks"), CommandMethodId::ScanNetworks },
-        { F("system"),        CommandMethodId::System },
-        { F("webapp_check"),  CommandMethodId::WebappCheck },
-    };
+		{ s_color,    CommandMethodId::Color },
+		{ s_stop,     CommandMethodId::Stop },
+		{ s_skip,     CommandMethodId::Skip },
+		{ s_pause,    CommandMethodId::Pause },
+		{ s_continue, CommandMethodId::Continue },
+		{ s_blink,    CommandMethodId::Blink },
+		{ s_toggle,   CommandMethodId::Toggle },
+		{ s_direct,   CommandMethodId::Direct },
+		{ s_setOn,    CommandMethodId::SetOn },
+		{ s_on,       CommandMethodId::SetOn },
+		{ s_setOff,   CommandMethodId::SetOff },
+		{ s_off,      CommandMethodId::SetOff },
+		{ s_scan,     CommandMethodId::ScanNetworks },
+		{ s_system,   CommandMethodId::System },
+		{ s_webapp,   CommandMethodId::WebappCheck },
+	};
 
-    for (const auto& cmd : commands) {
-        if (cmd.name == method) {
-            return cmd.id;
-        }
-    }
+	for (size_t i = 0; i < ARRAY_SIZE(commands); ++i) {
+		PGM_P pName = reinterpret_cast<PGM_P>(pgm_read_ptr(&commands[i].name));
+		if (strcmp_P(method, pName) == 0) {
+			return static_cast<CommandMethodId>(pgm_read_byte(&commands[i].id));
+		}
+	}
 
-    return CommandMethodId::Unknown;
+	return CommandMethodId::Unknown;
 }
 
 DataMethodId getDataMethodId(const char* method)
 {
-    if (method == nullptr || method[0] == '\0') {
-        return DataMethodId::Unknown;
-    }
+	if (method == nullptr || method[0] == '\0') {
+		return DataMethodId::Unknown;
+	}
 
-    struct DataMapping {
-        String name;
-        DataMethodId id;
-    };
+	struct DataMapping {
+		PGM_P name;
+		DataMethodId id;
+	};
+
+	static const char s_info[] PROGMEM = "info";
+	static const char s_getInfo[] PROGMEM = "getInfo";
+	static const char s_color[] PROGMEM = "color";
+	static const char s_getColor[] PROGMEM = "getColor";
+	static const char s_networks[] PROGMEM = "networks";
+	static const char s_getNetworks[] PROGMEM = "getNetworks";
+	static const char s_hosts[] PROGMEM = "hosts";
+	static const char s_getHosts[] PROGMEM = "getHosts";
+	static const char s_config[] PROGMEM = "config";
+	static const char s_getConfig[] PROGMEM = "getConfig";
 
 	static const DataMapping methods[] PROGMEM = {
-        { F("info"),        DataMethodId::Info },
-        { F("getInfo"),     DataMethodId::Info },
-        { F("color"),       DataMethodId::Color },
-        { F("getColor"),    DataMethodId::Color },
-        { F("networks"),    DataMethodId::Networks },
-        { F("getNetworks"), DataMethodId::Networks },
-        { F("hosts"),       DataMethodId::Hosts },
-        { F("getHosts"),    DataMethodId::Hosts },
-        { F("config"),      DataMethodId::Config },
-        { F("getConfig"),   DataMethodId::Config },
-    };
+		{ s_info,        DataMethodId::Info },
+		{ s_getInfo,     DataMethodId::Info },
+		{ s_color,       DataMethodId::Color },
+		{ s_getColor,    DataMethodId::Color },
+		{ s_networks,    DataMethodId::Networks },
+		{ s_getNetworks, DataMethodId::Networks },
+		{ s_hosts,       DataMethodId::Hosts },
+		{ s_getHosts,    DataMethodId::Hosts },
+		{ s_config,      DataMethodId::Config },
+		{ s_getConfig,   DataMethodId::Config },
+	};
 
-    for (const auto& item : methods) {
-        if (item.name == method) {
-            return item.id;
-        }
-    }
+	for (size_t i = 0; i < ARRAY_SIZE(methods); ++i) {
+		PGM_P pName = reinterpret_cast<PGM_P>(pgm_read_ptr(&methods[i].name));
+		if (strcmp_P(method, pName) == 0) {
+			return static_cast<DataMethodId>(pgm_read_byte(&methods[i].id));
+		}
+	}
 
-    return DataMethodId::Unknown;
+	return DataMethodId::Unknown;
 }
 
 bool isPrintableSsid(const String& str)
