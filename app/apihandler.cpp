@@ -46,76 +46,73 @@ enum class DataMethodId : uint8_t {
 
 CommandMethodId getCommandMethodId(const char* method)
 {
-	if(method == nullptr || method[0] == '\0') {
-		return CommandMethodId::Unknown;
-	}
+    if (method == nullptr || method[0] == '\0') {
+        return CommandMethodId::Unknown;
+    }
 
-	if(std::strcmp(method, "color") == 0) {
-		return CommandMethodId::Color;
-	}
-	if(std::strcmp(method, "stop") == 0) {
-		return CommandMethodId::Stop;
-	}
-	if(std::strcmp(method, "skip") == 0) {
-		return CommandMethodId::Skip;
-	}
-	if(std::strcmp(method, "pause") == 0) {
-		return CommandMethodId::Pause;
-	}
-	if(std::strcmp(method, "continue") == 0) {
-		return CommandMethodId::Continue;
-	}
-	if(std::strcmp(method, "blink") == 0) {
-		return CommandMethodId::Blink;
-	}
-	if(std::strcmp(method, "toggle") == 0) {
-		return CommandMethodId::Toggle;
-	}
-	if(std::strcmp(method, "direct") == 0) {
-		return CommandMethodId::Direct;
-	}
-	if(std::strcmp(method, "setOn") == 0 || std::strcmp(method, "on") == 0) {
-		return CommandMethodId::SetOn;
-	}
-	if(std::strcmp(method, "setOff") == 0 || std::strcmp(method, "off") == 0) {
-		return CommandMethodId::SetOff;
-	}
-	if(std::strcmp(method, "scan_networks") == 0) {
-		return CommandMethodId::ScanNetworks;
-	}
-	if(std::strcmp(method, "system") == 0) {
-		return CommandMethodId::System;
-	}
-	if(std::strcmp(method, "webapp_check") == 0) {
-		return CommandMethodId::WebappCheck;
-	}
+    struct CommandMapping {
+        String name;
+        CommandMethodId id;
+    };
 
-	return CommandMethodId::Unknown;
+	static const CommandMapping commands[] PROGMEM = {
+        { F("color"),         CommandMethodId::Color },
+        { F("stop"),          CommandMethodId::Stop },
+        { F("skip"),          CommandMethodId::Skip },
+        { F("pause"),         CommandMethodId::Pause },
+        { F("continue"),      CommandMethodId::Continue },
+        { F("blink"),         CommandMethodId::Blink },
+        { F("toggle"),        CommandMethodId::Toggle },
+        { F("direct"),        CommandMethodId::Direct },
+        { F("setOn"),         CommandMethodId::SetOn },
+        { F("on"),            CommandMethodId::SetOn },
+        { F("setOff"),        CommandMethodId::SetOff },
+        { F("off"),           CommandMethodId::SetOff },
+        { F("scan_networks"), CommandMethodId::ScanNetworks },
+        { F("system"),        CommandMethodId::System },
+        { F("webapp_check"),  CommandMethodId::WebappCheck },
+    };
+
+    for (const auto& cmd : commands) {
+        if (cmd.name == method) {
+            return cmd.id;
+        }
+    }
+
+    return CommandMethodId::Unknown;
 }
 
 DataMethodId getDataMethodId(const char* method)
 {
-	if(method == nullptr || method[0] == '\0') {
-		return DataMethodId::Unknown;
-	}
+    if (method == nullptr || method[0] == '\0') {
+        return DataMethodId::Unknown;
+    }
 
-	if(std::strcmp(method, "info") == 0 || std::strcmp(method, "getInfo") == 0) {
-		return DataMethodId::Info;
-	}
-	if(std::strcmp(method, "color") == 0 || std::strcmp(method, "getColor") == 0) {
-		return DataMethodId::Color;
-	}
-	if(std::strcmp(method, "networks") == 0 || std::strcmp(method, "getNetworks") == 0) {
-		return DataMethodId::Networks;
-	}
-	if(std::strcmp(method, "hosts") == 0 || std::strcmp(method, "getHosts") == 0) {
-		return DataMethodId::Hosts;
-	}
-	if(std::strcmp(method, "config") == 0 || std::strcmp(method, "getConfig") == 0) {
-		return DataMethodId::Config;
-	}
+    struct DataMapping {
+        String name;
+        DataMethodId id;
+    };
 
-	return DataMethodId::Unknown;
+	static const DataMapping methods[] PROGMEM = {
+        { F("info"),        DataMethodId::Info },
+        { F("getInfo"),     DataMethodId::Info },
+        { F("color"),       DataMethodId::Color },
+        { F("getColor"),    DataMethodId::Color },
+        { F("networks"),    DataMethodId::Networks },
+        { F("getNetworks"), DataMethodId::Networks },
+        { F("hosts"),       DataMethodId::Hosts },
+        { F("getHosts"),    DataMethodId::Hosts },
+        { F("config"),      DataMethodId::Config },
+        { F("getConfig"),   DataMethodId::Config },
+    };
+
+    for (const auto& item : methods) {
+        if (item.name == method) {
+            return item.id;
+        }
+    }
+
+    return DataMethodId::Unknown;
 }
 
 bool isPrintableSsid(const String& str)
