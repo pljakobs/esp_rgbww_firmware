@@ -381,7 +381,8 @@ void AppWIFI::_STAGotIP(IpAddress ip, IpAddress mask, IpAddress gateway)
     // Static SimpleTimer avoids dynamic memory allocation during the boot sequence.
     static Timer otaDelayTimer;
     otaDelayTimer.initializeMs(10000, TimerDelegate([]() {
-        app.webappOta.checkForUpdate();
+		debug_i(ANSI_COLOR_BLUE "AppWIFI::onReady - checking for webapp OTA update" ANSI_COLOR_RESET);
+        app.webappOta.checkForUpdate(true); // Force check for update immediately and unconditionally
  	   })).startOnce();
 	}
 
