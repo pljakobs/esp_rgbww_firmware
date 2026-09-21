@@ -13,4 +13,12 @@
    fun:malloc
    ...
    fun:AppWIFI::AppWIFI()
+},
+{
+   ignore_heap_hog_allocation
+   Memcheck:Leak
+   match-leak-kinds: reachable,possible
+   fun:malloc
+   ...
+   fun:*onReady*
 }
