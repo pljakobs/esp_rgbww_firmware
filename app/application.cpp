@@ -280,6 +280,8 @@ size_t debugStreamOutputCallback(const char* buffer, unsigned int length)
 }
 #endif
 
+
+#ifdef ARCH_HOST
 // Prevent the compiler from inlining so the symbol remains in the binary
 extern "C" __attribute__((noinline)) void allocateHeapHog(size_t take) {
     static uint8_t* heapHog = nullptr;
@@ -290,6 +292,7 @@ extern "C" __attribute__((noinline)) void allocateHeapHog(size_t take) {
         asm volatile("" : : : "memory");
     }
 }
+#endif
 
 void onReady()
 {
