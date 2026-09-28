@@ -45,11 +45,6 @@
 #include <ArduinoJson.h>
 #include <vector>
 
-
-#define FS_MIN_FREE_SPACE 358400UL  // informational: a full webapp bundle is ~350KB
-#define FS_EMERGENCY_FREE_SPACE 102400UL  // below this free space, force-clear staging/ to recover from a stuck, full filesystem
-#define FS_DOWNLOAD_MARGIN 32768UL  // extra headroom (bytes) required on top of the reported bundle size to allow for filesystem overhead
-
 class WebappOta
 {
 public:
