@@ -116,6 +116,29 @@
 #define FS_DOWNLOAD_MARGIN 32768UL  // extra headroom (bytes) required on top of the reported bundle size to allow for filesystem overhead
 
 /*------------------------------------------------
+| crash handling
+|
+| the Esp8266 has 512 bytes of memory 
+| that is user available and not wiped at boot. 
+| we will use half of this to store crash information.
+| 
+| The memory is organized in 64-byte blocks
+| there are two things that are being stored 
+| in nvram:
+| 1. Crash information
+| 2. Crashloop recovery data
+|
+| Crash information (stack dump etc)
+| starting block:  0x68 
+| length:          60 slots (240 bytes)
+| magic word:      0xDEADC0DEu
+|                  0xBAD57AC0u
+| Crash Loop information (crash loop counter)
+| starting block: 0x64 
+| length:         8 bytes
+| magic word:     0xC1A5107Du
+------------------------------------------------*/
+/*------------------------------------------------
 |
 | Crashloop recovery Constants
 |
@@ -145,6 +168,7 @@
 #define CRASH_RTC_SLOT         68 // Moved from 64 to avoid rBoot collision
 #define CRASH_RTC_MAGIC 0xDEADC0DEu
 #define CRASH_RTC_MAGIC_OVERFLOW 0xBAD57AC0u
+#define CRASH_METADATA_WORDS 10
 #define CRASH_STACK_WORDS 50
 
 

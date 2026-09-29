@@ -166,7 +166,7 @@ struct CrashDump {
 	uint32_t stackCount;
 	uint32_t stackWords[CRASH_STACK_WORDS];
 };
-static_assert(sizeof(CrashDump) == 240, "CrashDump must fit safely between slot 68 and 127");
+static_assert(sizeof(CrashDump) == (CRASH_STACK_WORDS + CRASH_METADATA_WORDS) * sizeof(uint32_t), "CrashDump must fit safely into the defined memory range");
 
 static CrashDump g_crashDump;
 static bool g_crashDumpValid = false;
