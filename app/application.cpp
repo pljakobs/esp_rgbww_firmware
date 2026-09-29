@@ -1032,8 +1032,8 @@ void Application::reportCrashDump()
             debug_w(ANSI_COLOR_YELLOW "pc=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " sp=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " excvaddr=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_RESET,
                     g_crashDump.epc1, g_crashDump.stackBase, g_crashDump.excvaddr);
             
-            debug_w(ANSI_COLOR_YELLOW "epc2=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " epc3=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " exccause=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW " depc=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " reason=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_RESET,
-                    g_crashDump.epc2, g_crashDump.epc3, g_crashDump.exccause, g_crashDump.depc, g_crashDump.reason);
+            debug_w(ANSI_COLOR_YELLOW "epc1=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW  " epc2=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " epc3=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " exccause=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW " depc=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " reason=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_RESET,
+                    g_crashDump.epc1, g_crashDump.epc2, g_crashDump.epc3, g_crashDump.exccause, g_crashDump.depc, g_crashDump.reason);
             
             debug_e(ANSI_COLOR_RED "Stack dump skipped to prevent secondary execution fault." ANSI_COLOR_RESET);
         } else {
