@@ -184,11 +184,6 @@ private:
     std::vector<VisibleController> visibleControllers;
     uint8_t lastWebappControllerIndex=0;
     
-    static const char s_alias[] ;
-    static const char s_controller[] ;
-    static const char s_wallpanel[] ;
-    static const char s_unknown[] ;
-
     // Helper methods
     size_t findVisibleControllerIndex(unsigned int id);
     ControllerInfo findById(unsigned int id);
@@ -196,6 +191,4 @@ private:
     ControllerInfo findByIpAddress(const String& ipAddress);
     ControllerInfo findByHostname(const char* hostname);
     ControllerInfo findByHostname(const String& hostname);
-
-
 };

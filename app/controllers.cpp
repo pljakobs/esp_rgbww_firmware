@@ -26,11 +26,6 @@
 
 extern Application app;
 
-const char Controllers::s_alias[] PROGMEM = "ALIAS";
-const char Controllers::s_controller[] PROGMEM = "CONTROLLER";
-const char Controllers::s_wallpanel[] PROGMEM = "WALLPANEL";
-const char Controllers::s_unknown[] PROGMEM = "UNKNOWN";
-
 Controllers::HostType Controllers::hostTypeFromString(const String& type)
 {
     if(type.equalsIgnoreCase(F("ALIAS")) || type.equalsIgnoreCase(F("leader")) || type.equalsIgnoreCase(F("group"))) {
@@ -49,13 +44,13 @@ const char* Controllers::hostTypeToString(HostType type)
 {
     switch(type) {
     case HOST_TYPE_ALIAS:
-        return s_alias;
+        return "ALIAS";
     case HOST_TYPE_CONTROLLER:
-        return s_controller;
+        return "CONTROLLER";
     case HOST_TYPE_WALLPANEL:
-        return s_wallpanel;
+        return "WALLPANEL";
     default:
-        return s_unknown;
+        return "UNKNOWN";
     }
 }
 
