@@ -18,6 +18,26 @@
 #include <RGBWWCtrl.h>
 #include <Data/Stream/MemoryDataStream.h>
 
+namespace
+{
+// Flips `flag` back off on scope exit, regardless of which return statement is taken.
+class ScopedFlag
+{
+public:
+	explicit ScopedFlag(bool& flag) : flag(flag)
+	{
+		flag = true;
+	}
+	~ScopedFlag()
+	{
+		flag = false;
+	}
+
+private:
+	bool& flag;
+};
+} // namespace
+
 RpcCodec::RpcCodec() : _db(F("jsonrpc"))
 {
 	// Protocol messages are transient. Store::commit() re-checks the dirty flag
@@ -27,6 +47,12 @@ RpcCodec::RpcCodec() : _db(F("jsonrpc"))
 
 bool RpcCodec::render(const Message& msg, const ConfigDB::Object& body, String& out)
 {
+	if(_rendering) {
+		debug_e(ANSI_COLOR_RED "RpcCodec::render: re-entrant call while another message is serializing - dropping to avoid corrupting the shared jsonrpc store" ANSI_COLOR_RESET);
+		return false;
+	}
+	ScopedFlag guard(_rendering);
+
 	MemoryDataStream mem;
 	if(!JsonRPC::exportMessage(msg, body, mem)) {
 		return false;
@@ -37,6 +63,12 @@ bool RpcCodec::render(const Message& msg, const ConfigDB::Object& body, String& 
 
 bool RpcCodec::renderPayload(const ConfigDB::Object& body, String& out)
 {
+	if(_rendering) {
+		debug_e(ANSI_COLOR_RED "RpcCodec::renderPayload: re-entrant call while another message is serializing - dropping to avoid corrupting the shared jsonrpc store" ANSI_COLOR_RESET);
+		return false;
+	}
+	ScopedFlag guard(_rendering);
+
 	if(!body) {
 		return false;
 	}

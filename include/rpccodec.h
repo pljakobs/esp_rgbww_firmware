@@ -57,6 +57,10 @@ public:
 
 private:
 	Jsonrpc _db;
+	// Guards the synchronous store-read in render()/renderPayload(); catches a
+	// callback re-entering the codec mid-serialize (e.g. from a logging hook or
+	// event callback), not the field-population window before it.
+	bool _rendering = false;
 };
 
 RpcCodec& rpcCodec();
