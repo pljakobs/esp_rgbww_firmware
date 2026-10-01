@@ -45,6 +45,13 @@
             ]
         },
         {
+            "type": "object",
+            "title": "hosts",
+            "oneOf": [
+                { "$ref": "params/$defs/hosts-params" }
+            ]
+        },
+        {
             "$ref": "params/$defs/ha-state-color-temp",
             "title": "ha_state_color_temp"
         },

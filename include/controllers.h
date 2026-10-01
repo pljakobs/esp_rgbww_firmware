@@ -76,54 +76,6 @@ public:
         bool operator!=(const Iterator& other) const;
     };
 
-    class JsonPrinter {
-    private:
-        Print* p;
-        Controllers& manager;
-        size_t currentIndex;
-        size_t totalCount;
-        bool pretty;
-        bool inObject;
-        bool inArray;
-        bool done;
-        JsonFilter filter;
-        size_t printedCount;
-        
-        size_t printIndent(size_t level);
-        size_t printString(const char* str);
-        size_t printProperty(const char* name, const String& value, bool isLast = false, size_t indentLevel = 0);
-        size_t printProperty(const char* name, const char* value, bool isLast = false, size_t indentLevel = 2);
-        size_t printProperty(const char* name, int value, bool isLast = false, size_t indentLevel = 2);
-        size_t printProperty(const char* name, bool value, bool isLast = false, size_t indentLevel = 2);
-        size_t newline();
-        bool shouldIncludeController(const Controllers::ControllerInfo& info);
-        
-    public:
-        JsonPrinter(Print& printer, Controllers& mgr, JsonFilter filterType = VALID_ONLY, bool prettyPrint = false);
-        size_t operator()();
-        bool isDone() const { return done; }
-        
-        // Add these public methods for JsonStream to use:
-        Print* getPrint() const { return p; }
-        void setPrint(Print* newPrint) { p = newPrint; }
-        
-        friend class JsonStream; // Keep friend access
-    };
-
-    // JsonStream class nested inside Controllers
-    class JsonStream : public IDataSourceStream {
-    private:
-        JsonPrinter printer;
-        String buffer;
-        size_t bufferPos;
-        bool streamDone;
-
-    public:
-        JsonStream(JsonPrinter&& p);
-        uint16_t readMemoryBlock(char* data, int bufSize) override;
-        bool isFinished() override;
-    };
-
     // Constructor/Destructor
     Controllers();
     ~Controllers();
@@ -174,9 +126,8 @@ public:
     Iterator begin();
     Iterator end();
     
-    // JSON output methods
-    JsonPrinter printJson(Print& printer, JsonFilter filter = VALID_ONLY, bool pretty = false);
-    std::unique_ptr<JsonStream> createJsonStream(JsonFilter filter = VALID_ONLY, bool pretty = false);
+    // JSON output: renders the hosts list via the ConfigDB-generated jsonrpc "hosts" schema (see jsonrpc.cfgdb / params.cfgdb).
+    std::unique_ptr<IDataSourceStream> createJsonStream(JsonFilter filter = VALID_ONLY, bool pretty = false);
 
 private:
     static const size_t INVALID_INDEX = SIZE_MAX;
@@ -191,4 +142,5 @@ private:
     ControllerInfo findByIpAddress(const String& ipAddress);
     ControllerInfo findByHostname(const char* hostname);
     ControllerInfo findByHostname(const String& hostname);
+    static bool shouldIncludeController(JsonFilter filter, const ControllerInfo& info);
 };

@@ -23,6 +23,7 @@
 #include <RGBWWCtrl.h>
 #include <controllers.h>
 #include <application.h>
+#include <Data/Stream/MemoryDataStream.h>
 
 extern Application app;
 
@@ -477,37 +478,21 @@ Controllers::ControllerInfo Controllers::findByHostname(const String& hostname) 
 }
 
 // JSON output methods
-Controllers::JsonPrinter Controllers::printJson(Print& printer, JsonFilter filter, bool pretty) {
-    return JsonPrinter(printer, *this, filter, pretty);
-}
-
-// JsonPrinter implementation
-Controllers::JsonPrinter::JsonPrinter(Print& printer, Controllers& mgr, JsonFilter filterType, bool prettyPrint)
-    : p(&printer), manager(mgr), currentIndex(0), totalCount(0), pretty(prettyPrint), 
-      inObject(false), inArray(false), done(false), filter(filterType), printedCount(0) {
-    
-    // Count total controllers
-    AppData::Root::Controllers controllers(*app.data);
-    for (auto it = controllers.begin(); it != controllers.end(); ++it) {
-        totalCount++;
-    }
-}
-
-bool Controllers::JsonPrinter::shouldIncludeController(const Controllers::ControllerInfo& info) {
+bool Controllers::shouldIncludeController(JsonFilter filter, const Controllers::ControllerInfo& info) {
     bool result;
     switch (filter) {
         case ALL_ENTRIES:
-            result= true;
+            result = true;
             break;
 
         case VALID_ONLY:
-            result= info.id != 0 && 
-                   strlen(info.hostname) > 0 && 
+            result = info.id != 0 &&
+                   strlen(info.hostname) > 0 &&
                    strlen(info.ipAddress) > 0;
             break;
 
         case VISIBLE_ONLY:
-            result = info.state == ONLINE;
+            result = info.state == ONLINE || info.state == LOCALHOST;
             break;
 
         default:
@@ -518,296 +503,86 @@ bool Controllers::JsonPrinter::shouldIncludeController(const Controllers::Contro
     return result;
 }
 
-size_t Controllers::JsonPrinter::operator()() {
-    if (!p || done) {
-        return 0;
-    }
+std::unique_ptr<IDataSourceStream> Controllers::createJsonStream(JsonFilter filter, bool pretty) {
+    (void)pretty; // ConfigDB-rendered JSON is always compact.
 
-    size_t n = 0;
+    auto& codec = rpcCodec();
+    Jsonrpc::Root root(codec.db());
+    const unsigned int localId = (unsigned int)system_get_chip_id();
+    bool foundLocal = false;
 
-    // Start of JSON object
-    if (currentIndex == 0 && !inObject) {
-        n += p->print('{');
-        if (pretty) n += p->print('\n');
-        n += printIndent(1);
-        n += printString("hosts");
-        n += p->print(pretty ? ": [" : ":[");
-        if (pretty) n += p->print('\n');
-        inObject = true;
-        inArray = true;
-        return n;
-    }
+    if(auto update = root.update()) {
+        auto hostsParams = update.toHosts().toHostsParams();
 
-    // Process controllers from ConfigDB
-    while (currentIndex < totalCount) {
         AppData::Root::Controllers controllers(*app.data);
-        size_t index = 0;
-        Controllers::ControllerInfo info;
-        bool found = false;
-        for (auto it = controllers.begin(); it != controllers.end(); ++it, ++index) {
-            if (index == currentIndex) {
-                auto& configItem = *it;
-                info.id = configItem.getId().toInt();
-                strncpy(info.hostname, configItem.getName().c_str(), CONTROLLER_HOSTNAME_MAX_SIZE);
-                strncpy(info.ipAddress, configItem.getIpAddress().c_str(), CONTROLLER_IP_MAX_SIZE);
-                info.state = OFFLINE;
-                info.ttl = 0;
-                info.hostType = HOST_TYPE_UNKNOWN;
-                // Check if controller is visible (online)
-                size_t visibleIndex = manager.findVisibleControllerIndex(info.id);
-                if (visibleIndex != INVALID_INDEX) {
-                    info.ttl = manager.visibleControllers[visibleIndex].ttl;
-                    info.hostType = manager.visibleControllers[visibleIndex].hostType;
-                    if (manager.visibleControllers[visibleIndex].state == LOCALHOST) {
-                        info.state = LOCALHOST;
-                    } else {
-                        info.state = (info.ttl > 0) ? ONLINE : OFFLINE;
-                    }
-                } else if (strlen(info.hostname) == 0 || strlen(info.ipAddress) == 0) {
-                    info.state = INCOMPLETE;
-                } else {
-                    info.state = OFFLINE;
-                }
-                found = true;
-                break;
+        for(auto configItem : controllers) {
+            ControllerInfo info;
+            info.id = configItem.getId().toInt();
+            strncpy(info.hostname, configItem.getName().c_str(), CONTROLLER_HOSTNAME_MAX_SIZE);
+            strncpy(info.ipAddress, configItem.getIpAddress().c_str(), CONTROLLER_IP_MAX_SIZE);
+            info.state = OFFLINE;
+            info.ttl = 0;
+            info.hostType = HOST_TYPE_UNKNOWN;
+
+            size_t visibleIndex = findVisibleControllerIndex(info.id);
+            if(visibleIndex != INVALID_INDEX) {
+                info.ttl = visibleControllers[visibleIndex].ttl;
+                info.hostType = visibleControllers[visibleIndex].hostType;
+                info.state = (visibleControllers[visibleIndex].state == LOCALHOST) ? LOCALHOST :
+                             ((info.ttl > 0) ? ONLINE : OFFLINE);
+            } else if(strlen(info.hostname) == 0 || strlen(info.ipAddress) == 0) {
+                info.state = INCOMPLETE;
             }
-        }
-        currentIndex++;
-        if (!found || !shouldIncludeController(info)) {
-            continue; // Skip this controller, try next
-        }
-        // Add comma separator if needed
-        if (printedCount > 0) {
-            n += p->print(',');
-            if (pretty) n += p->print('\n');
-        }
-        // Ensure local controller always reports state LOCALHOST
-        if (info.id == (unsigned int)system_get_chip_id()) {
-            info.state = LOCALHOST;
-        }
-        // Print controller object
-        n += printIndent(2);
-        n += p->print('{');
-        n += printProperty("id", (int)info.id, false, 3);
-        n += printProperty("hostname", info.hostname, false, 3);
-        n += printProperty("ip_address", info.ipAddress, false, 3);
-        n += printProperty("host_type", hostTypeToString(info.hostType), false, 3);
-        n += printProperty("visible", (info.state == ONLINE || info.state == LOCALHOST), false, 3);
-        n += printProperty("state", (int)info.state, true, 3);
-        n += p->print('}');
-        printedCount++;
-        return n; // Return after printing one controller
-    }
 
-    // After all config controllers, ensure local controller is present in output
-    if (currentIndex == totalCount) {
-        unsigned int localId = (unsigned int)system_get_chip_id();
-        bool foundLocal = false;
-        AppData::Root::Controllers controllers(*app.data);
-        for (auto it = controllers.begin(); it != controllers.end(); ++it) {
-            if ((*it).getId().toInt() == localId) {
+            if(info.id == localId) {
                 foundLocal = true;
-                break;
+                info.state = LOCALHOST;
+            }
+
+            if(!shouldIncludeController(filter, info)) {
+                continue;
+            }
+
+            auto item = hostsParams.hosts.addItem();
+            item.setId(info.id);
+            item.setHostname(info.hostname);
+            item.setIpAddress(info.ipAddress);
+            item.setHostType(hostTypeToString(info.hostType));
+            item.setVisible(info.state == ONLINE || info.state == LOCALHOST);
+            item.setState((int)info.state);
+        }
+
+        if(!foundLocal) {
+            ControllerInfo info;
+            info.id = localId;
+            info.state = LOCALHOST;
+            String localHostname = WifiStation.getHostname();
+            String localIp = WifiStation.getIP().toString();
+            strncpy(info.hostname, localHostname.c_str(), CONTROLLER_HOSTNAME_MAX_SIZE);
+            strncpy(info.ipAddress, localIp.c_str(), CONTROLLER_IP_MAX_SIZE);
+
+            if(shouldIncludeController(filter, info)) {
+                auto item = hostsParams.hosts.addItem();
+                item.setId(localId);
+                item.setHostname(localHostname);
+                item.setIpAddress(localIp);
+                item.setHostType(hostTypeToString(HOST_TYPE_CONTROLLER));
+                item.setVisible(true);
+                item.setState((int)LOCALHOST);
             }
         }
-        if (!foundLocal) {
-            // Add comma separator if needed
-            if (printedCount > 0) {
-                n += p->print(',');
-                if (pretty) n += p->print('\n');
-            }
-            n += printIndent(2);
-            n += p->print('{');
-            n += printProperty("id", (int)localId, false, 3);
-            // Avoid temporary String allocations — use const char* directly
-            
-            n += printProperty("hostname", WifiStation.getHostname(), false, 3);
-            n += printProperty("ip_address", WifiStation.getIP().toString(), false, 3);
-            n += printProperty("host_type", hostTypeToString(HOST_TYPE_CONTROLLER), false, 3);
-            n += printProperty("visible", true, false, 3);
-            n += printProperty("state", (int)LOCALHOST, true, 3);
-            n += p->print('}');
-            printedCount++;
-        }
-        currentIndex++;
-        return n;
     }
 
-    // End of JSON structure
-    if (inArray && !done) {
-        if (pretty) {
-            n += p->print('\n');
-            n += printIndent(1);
-        }
-        n += p->print("]}");
-        done = true;
-        return n;
+    String json;
+    if(!codec.renderPayload(root.asHosts().asHostsParams(), json)) {
+        return nullptr;
     }
 
-    return 0;
-}
-
-size_t Controllers::JsonPrinter::printIndent(size_t level) {
-    if (!pretty) return 0;
-    size_t n = 0;
-    for (size_t i = 0; i < level * 2; i++) {
-        n += p->print(' ');
-    }
-    return n;
-}
-
-size_t Controllers::JsonPrinter::printString(const char* str) {
-    if (str == nullptr) {
-        return p->print("\"\"");
-    }
-
-    size_t n = 0;
-    n += p->print('"');
-    
-    // Escape special characters
-    while (*str != '\0') {
-        char c = *str++;
-        switch (c) {
-            case '"':  n += p->print("\\\""); break;
-            case '\\': n += p->print("\\\\"); break;
-            case '\n': n += p->print("\\n");  break;
-            case '\r': n += p->print("\\r");  break;
-            case '\t': n += p->print("\\t");  break;
-            default:   n += p->print(c);      break;
-        }
-    }
-    n += p->print('"');
-    return n;
-}
-
-size_t Controllers::JsonPrinter::printProperty(const char* name, const String& value, bool isLast, size_t indentLevel) {
-    return printProperty(name, value.c_str(), isLast, indentLevel);
-}
-
-size_t Controllers::JsonPrinter::printProperty(const char* name, const char* value, bool isLast, size_t indentLevel) {
-    size_t n = 0;
-    if (pretty) {
-        n += p->print('\n');
-        n += printIndent(indentLevel);
-    }
-    n += printString(name);
-    n += p->print(pretty ? ": " : ":");
-    n += printString(value);
-    if (!isLast) {
-        n += p->print(',');
-    }
-    return n;
-}
-
-size_t Controllers::JsonPrinter::printProperty(const char* name, int value, bool isLast, size_t indentLevel) {
-    size_t n = 0;
-    if (pretty) {
-        n += p->print('\n');
-        n += printIndent(indentLevel);
-    }
-    n += printString(name);
-    n += p->print(pretty ? ": " : ":");
-    n += p->print(value);
-    if (!isLast) {
-        n += p->print(',');
-    }
-    return n;
-}
-
-size_t Controllers::JsonPrinter::printProperty(const char* name, bool value, bool isLast, size_t indentLevel) {
-    size_t n = 0;
-    if (pretty) {
-        n += p->print('\n');
-        n += printIndent(indentLevel);
-    }
-    n += printString(name);
-    n += p->print(pretty ? ": " : ":");
-    n += p->print(value ? F("true") : F("false"));
-    if (!isLast) {
-        n += p->print(',');
-    }
-    return n;
-}
-
-size_t Controllers::JsonPrinter::newline() {
-    if (pretty) {
-        return p->print('\n');
-    }
-    return 0;
-}
-
-Controllers::JsonStream::JsonStream(Controllers::JsonPrinter&& p) 
-    : printer(std::move(p)), bufferPos(0), streamDone(false) {
-}
-
-uint16_t Controllers::JsonStream::readMemoryBlock(char* data, int bufSize) {
-    if (streamDone) {
-        return 0;
-    }
-
-    // Fill buffer if needed
-    while (bufferPos >= buffer.length() && !printer.isDone()) {
-        buffer = "";  // Clear the buffer
-        bufferPos = 0;
-        
-        // Capture next chunk from printer
-        class StringCapture : public Print {
-        private:
-            String& str;
-        public:
-            StringCapture(String& s) : str(s) {}
-            size_t write(uint8_t c) override { str += (char)c; return 1; }
-            size_t write(const uint8_t* buf, size_t size) override {
-                for (size_t i = 0; i < size; i++) str += (char)buf[i];
-                return size;
-            }
-        };
-        
-        StringCapture capture(buffer);
-        Print* oldPrint = printer.getPrint();  // Use the public getter
-        printer.setPrint(&capture);            // Use the public setter
-        printer(); // Single call generates next chunk
-        printer.setPrint(oldPrint);            // Restore original print target
-    }
-
-    if (bufferPos >= buffer.length() && printer.isDone()) {
-        streamDone = true;
-        return 0;
-    }
-
-    // Copy from buffer to output
-    size_t available = buffer.length() - bufferPos;
-    size_t copySize = std::min((size_t)bufSize, available);
-    
-    // Ensure we don't exceed uint16_t range
-    if (copySize > UINT16_MAX) {
-        copySize = UINT16_MAX;
-    }
-    
-    if (copySize > 0) {
-        memcpy(data, buffer.c_str() + bufferPos, copySize);
-        bufferPos += copySize;
-    }
-
-    return (uint16_t)copySize;
-}
-
-bool Controllers::JsonStream::isFinished() {
-    return streamDone;
-}
-
-std::unique_ptr<Controllers::JsonStream> Controllers::createJsonStream(JsonFilter filter, bool pretty) {
-    class DummyPrint : public Print {
-    public:
-        size_t write(uint8_t) override { return 1; }
-    };
-    
-    static DummyPrint dummyPrint;
-    auto printer = printJson(dummyPrint, filter, pretty);
-    return std::make_unique<JsonStream>(std::move(printer));
+    return std::make_unique<MemoryDataStream>(std::move(json));
 }
 
 IpAddress Controllers::getNextCompatibleWebappController() {
+
     if (visibleControllers.empty()) {
         return IpAddress(255, 255, 255, 255);
     }

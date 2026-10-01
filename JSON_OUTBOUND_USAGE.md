@@ -27,6 +27,70 @@ self-buffering mode (usable directly as an `IDataSourceStream`).
 
 ---
 
+## Migration status (updated 2026-10-01)
+
+The inventory below predates the switch to ConfigDB-generated types
+([jsonrpc.cfgdb](jsonrpc.cfgdb) / [params.cfgdb](params.cfgdb) /
+[value-types.cfgdb](value-types.cfgdb)) as the outbound JSON codec
+(`rpcCodec()` / `Jsonrpc::Root`, see [rpccodec.h](include/rpccodec.h)). Most of
+the ✅ and ❌ items have since moved off ArduinoJson for *generation*; the
+tables below are kept as historical record but are no longer accurate for the
+items marked done here.
+
+**Migrated to ConfigDB (`rpcCodec()`/`Jsonrpc::Root`):**
+
+- `Api::renderData()` ([apihandler.cpp](app/apihandler.cpp#L302)) replaces
+  the old `handleColor()`/`handleNetworks()`/`handleInfo()` producers.
+- `Api::handleHosts()` ([apihandler.cpp](app/apihandler.cpp#L470)) now
+  delegates to `Controllers::createJsonStream()`
+  ([controllers.cpp](app/controllers.cpp)), rebuilt on the new `hosts`
+  schema member instead of the hand-rolled `JsonPrinter`/`JsonStream`.
+- `Api::handleConfig()` ([apihandler.cpp](app/apihandler.cpp#L491)) streams
+  straight from `app.cfg->createExportStream()` (was never ArduinoJson).
+- `Application::wsBroadcast(cmd, message)` /
+  `wsBroadcast(cmd, params)` ([application.cpp](app/application.cpp#L1300)),
+  `checkRam()`, `sendTelemetry()` — all build via `Jsonrpc::Root` instead of
+  `JsonRpcMessage`.
+- `EventServer::publishCurrentState()` / `publishClockSlaveStatus()` /
+  `publishKeepAlive()` / `publishTransitionFinished()`
+  ([eventserver.cpp](app/eventserver.cpp)) — no `JsonRpcMessage` references
+  remain in this file.
+- `MqttClient::publishTransitionFinished()`, `publishCommand()`,
+  `publishHADiscovery()`, `publishChannelConfig()`, `publishHAState()`,
+  `publishChannelState()` ([mqtt.cpp](app/mqtt.cpp)) — all via `rpcCodec()`.
+  `publishCurrentRaw()` / `publishCurrentHsv()` (L295/328) are **not** yet
+  migrated and still build a `StaticJsonDocument<200>`.
+- `AppWIFI::broadcastWifiStatus()` ([networking.cpp](app/networking.cpp#L477))
+  — via `rpcCodec()`.
+- `ApplicationWebserver::wsMessage()` parse-error / invalid-id replies
+  ([webserver.cpp](app/webserver.cpp)) — via `rpcCodec()`/`root.asRpcError()`.
+- `onInfo()`, `onNetworks()`, `onConfig()`, `onHosts()`, `onData()`
+  ([webserver.cpp](app/webserver.cpp)) — call the ConfigDB-backed
+  `renderData()` / `createJsonStream()` / `createExportStream()` and just
+  `sendString()`/`sendDataStream()` the result; no `JsonObjectStream` involved.
+- The outbound `JsonRpcMessage` class itself
+  ([jsonrpcmessage.h](include/jsonrpcmessage.h)) has no remaining callers for
+  sending (only `JsonRpcMessageIn`, used for inbound parsing, is still used) —
+  it is effectively dead code pending removal.
+
+**Still ArduinoJson-based (not yet migrated):**
+
+- `ApplicationWebserver::onConnect()` GET branch, `onPing()`, `onUpdate()`,
+  `sendApiCode()`/`sendApiResponse()`, `wsConnected()` (initial webapp-OTA
+  push), `onIndex()` webapp-version check — all still build via
+  `JsonObjectStream`/`DynamicJsonDocument` ([webserver.cpp](app/webserver.cpp)).
+- `MqttClient::publishCurrentRaw()` / `publishCurrentHsv()`
+  ([mqtt.cpp](app/mqtt.cpp#L295)).
+- `mdnsHandler::sendWsUpdate()` ([mdnsHandler.cpp](app/mdnsHandler.cpp#L516))
+  — still `serializeJsonPretty()` on a caller-supplied `JsonObject`.
+- `ApplicationOTA::saveStatus()` ([otaupdate.cpp](app/otaupdate.cpp)) — out of
+  scope anyway (persisted to flash, never transmitted).
+- Command dispatch handlers (`onStop`, `onSkip`, `onSystemReq`, etc.) still
+  parse inbound bodies with `DynamicJsonDocument`/`deserializeJson`, which is
+  expected and out of this document's scope (inbound, not outbound).
+
+---
+
 ## ✅ Drop-in replacements (String target)
 
 These build a `Static/DynamicJsonDocument` **only** to `Json::serialize()` into a

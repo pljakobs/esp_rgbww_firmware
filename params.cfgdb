@@ -306,6 +306,29 @@
       },
       "additionalProperties": false
     },
+    "host-item": {
+      "type": "object",
+      "properties": {
+        "id": { "$ref": "value-types/$defs/non-negative-integer" },
+        "hostname": { "$ref": "value-types/$defs/string-value" },
+        "ip_address": { "$ref": "value-types/$defs/string-value" },
+        "host_type": { "$ref": "value-types/$defs/string-value" },
+        "visible": { "$ref": "value-types/$defs/boolean-value" },
+        "state": { "$ref": "value-types/$defs/integer-value" }
+      },
+      "additionalProperties": false
+    },
+    "hosts-list": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/host-item" }
+    },
+    "hosts-params": {
+      "type": "object",
+      "properties": {
+        "hosts": { "$ref": "#/$defs/hosts-list" }
+      },
+      "additionalProperties": false
+    },
     "ha-state-color-temp": {
       "type": "object",
       "properties": {
