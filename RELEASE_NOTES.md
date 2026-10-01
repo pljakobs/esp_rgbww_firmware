@@ -1,5 +1,52 @@
 # Release Notes
 
+## 2026-10-01
+
+Firmware development since April focused on a schema-driven API, safer webapp
+updates, reliability, and constrained-memory operation.
+
+### Firmware
+
+#### API and JSON
+
+- Migrated outbound API and event JSON generation to ConfigDB-generated schemas
+	and the shared `RpcCodec` across HTTP, WebSocket, TCP event, and MQTT paths;
+	`/hosts` output now uses the same ConfigDB-backed approach (`343a28b`,
+	`c93b722`, `a01135f`, `81ce2a9`).
+- Added sparse v2 `/info` responses, LittleFS usage metrics, and per-WebSocket
+	`runtime_info` subscriptions (`3f56750`, `f58ef55`, `bc419c6`).
+- Migrated HTTP `/color` and animation command bodies to stream-based ConfigDB
+	import. WebSocket and MQTT inbound parsing remain on their existing paths
+	(`65fdfaa`, `b2ea8a9`).
+
+#### Webapp OTA and storage
+
+- Added background webapp update checks and LittleFS staging, with status/check
+	endpoints, staging cleanup, space validation, and recovery from interrupted
+	updates (`701c44e`, `6132bfe`, `9324712`, `2d79fee`).
+- Moved webapp settings into a dedicated ConfigDB store and migrate existing
+	settings during boot (`d7561a8`, `1706957`).
+
+#### Reliability and resource use
+
+- Added shared-password API authentication with a WebSocket challenge-response
+	flow (`9e1368e`).
+- Added crash-loop detection and rollback to the alternate firmware ROM, and
+	expanded crash reporting (`3b61e20`, `a151c20`).
+- Hardened HTTP parsing and response paths for low-memory devices, reduced
+	stack/heap pressure, and reduced event-server allocation churn
+	(`76e0ba2`, `3b77e7a`, `e9eda58`, `be0cb96`).
+- Added a Host emulator path and smoke/swarm test harnesses that exercise more
+	of the device networking and filesystem behavior (`fbf63ab`, `0e70487`,
+	`77ea1c3`).
+- Removed the webapp-version mDNS compatibility metadata and cross-controller
+	HTTP 307 redirect behavior (`8acc36f`).
+
+#### Documentation
+
+- Updated the firmware README and added a component/bring-up architecture guide
+	(`8c17a4d`).
+
 ## 2026-04-05
 
 This release covers OTA hardening, crash reporting, heap tracking, extensive Lightinator Log Service development, and webapp compatibility and CI fixes. Work spans commits from 2026-04-04 and 2026-04-05 across all three repositories.
