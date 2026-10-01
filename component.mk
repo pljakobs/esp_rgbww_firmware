@@ -1,11 +1,16 @@
 COMPONENT_SEARCH_DIRS := $(PROJECT_DIR)/Components
-COMPONENT_DEPENDS += MDNS RGBWWLed LittleFS ConfigDB ArduinoJson6 OtaNetwork
+COMPONENT_DEPENDS += MDNS RGBWWLed LittleFS ConfigDB ArduinoJson6 OtaNetwork 
+
+
 ifndef SMING_RELEASE
 COMPONENT_DEPENDS += HuffmanCodec
 endif
 
 ifeq ($(SMING_ARCH), Esp32)
     COMPONENT_DEPENDS += Esp32HardwarePwm
+endif
+ifdef ARCH_HOST
+    COMPONENT_DEPENDS += malloc_count
 endif
 
 # Set default number of jobs to number of available processors +2

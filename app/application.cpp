@@ -36,6 +36,9 @@
 #if defined(ESP8266)
   #include <osapi.h>
 #endif
+#if ARCH_HOST
+	#include <malloc_count.h>
+#endif
 
 
 #ifdef RSYSLOG
@@ -292,6 +295,7 @@ extern "C" __attribute__((noinline)) void allocateHeapHog(size_t take) {
         asm volatile("" : : : "memory");
     }
 }
+
 #endif
 
 void onReady()
@@ -307,6 +311,7 @@ void onReady()
 	//   2. memset with a NON-zero value; memset-to-zero right after malloc gets
 	//      folded into calloc and then dropped as a dead store, which is why the
 	//      tracked free heap previously never moved.
+	/*
 	static uint8_t* heapHog = nullptr;
 	auto free = system_get_free_heap_size();
 	if (free>HOST_FREE_TARGET){
@@ -316,6 +321,13 @@ void onReady()
 		allocateHeapHog(take);
 		debug_i(ANSI_COLOR_BLUE "onReady: heapHog allocated %d bytes, free heap now %d" ANSI_COLOR_RESET, (int)take, system_get_free_heap_size());
 	}
+	*/
+	//use MallocCount to limit heap usage on the host (needs c0911d21a31b43b21ec35c6210fdabbb5b2c10c9)
+	//MallocCount::enableLogging(true);
+	debug_i(ANSI_COLOR_YELLOW "onReady: setting malloc limit to %i bytes" ANSI_COLOR_RESET, HOST_FREE_TARGET);
+	debug_i(ANSI_COLOR_YELLOW "onReady: free heap before malloc limit: %d" ANSI_COLOR_RESET, system_get_free_heap_size());
+	MallocCount::setAllocLimit(HOST_FREE_TARGET);
+	debug_i(ANSI_COLOR_YELLOW "onReady: free heap after malloc limit: %d" ANSI_COLOR_RESET, system_get_free_heap_size());
 	#endif
 	//System.setCpuFrequencye(CF_160MHz);
 	debug_i(ANSI_COLOR_BLUE "getting reset info from rtc" ANSI_COLOR_RESET);
