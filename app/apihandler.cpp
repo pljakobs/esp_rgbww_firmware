@@ -275,6 +275,24 @@ bool Api::dispatchCommand(const String& method, const String& params, String& er
 	return dispatchCommand(method.c_str(), doc.as<JsonObject>(), errorMsg, relay);
 }
 
+bool Api::dispatchColorFromStream(Stream& body, String& errorMsg, bool relay)
+{
+	auto& codec = rpcCodec();
+	Jsonrpc::Root root(codec.db());
+	if(auto update = root.update()) {
+		auto fields = update.toCommandRequestFields();
+		auto status = fields.importFromStream(ConfigDB::Json::format, body);
+		if(!status) {
+			errorMsg = F("Invalid JSON: ") + status.toString();
+			return false;
+		}
+		return app.jsonproc.onColor(fields, errorMsg, relay);
+	}
+
+	errorMsg = F("internal error");
+	return false;
+}
+
 
 
 bool Api::dispatchJsonRpc(const String& json, String& errorMsg, bool relay)

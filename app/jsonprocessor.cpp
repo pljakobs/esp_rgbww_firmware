@@ -442,6 +442,15 @@ bool JsonProcessor::onSingleColorCommand(JsonObject root, String& errorMsg)
 {
 	RequestParameters params;
 	parseRequestParams(root, params);
+	return runColorCommand(params, errorMsg);
+}
+
+/**
+ * @brief Shared post-parse execution core for a single color command, used by both the
+ * JsonObject-backed onSingleColorCommand() and the ConfigDB-backed onColor() overload below.
+ */
+bool JsonProcessor::runColorCommand(RequestParameters& params, String& errorMsg)
+{
 	if(params.checkParams(errorMsg) != 0) {
 		debug_i(ANSI_COLOR_BLUE "checkParams failed:" ANSI_COLOR_RESET,errorMsg.c_str());
 		return false;
@@ -452,7 +461,7 @@ bool JsonProcessor::onSingleColorCommand(JsonObject root, String& errorMsg)
 		if(!params.hasHsvFrom) {
 			if(params.cmd == F("fade")) {
 				queueOk = app.rgbwwctrl.fadeHSV(params.hsv, params.ramp, params.direction, params.queue, params.requeue,
-												params.name);
+											params.name);
 			} else {
 				queueOk =
 					app.rgbwwctrl.setHSV(params.hsv, params.ramp.value, params.queue, params.requeue, params.name);
@@ -481,6 +490,33 @@ bool JsonProcessor::onSingleColorCommand(JsonObject root, String& errorMsg)
 		errorMsg = F("Queue full");
 	}
 	return queueOk;
+}
+
+/**
+ * @brief ConfigDB-backed counterpart of onColor()/onSingleColorCommand(). No "cmds" batch array
+ * support (command-request-fields has no such member) - single command only.
+ *
+ * @param root The already-imported command-request-fields accessor.
+ * @param msg A reference to a string variable to store the error message, if any.
+ * @param relay A boolean indicating whether to relay the command to other controllers.
+ * @return Returns true if the command is executed successfully, false otherwise.
+ */
+bool JsonProcessor::onColor(Jsonrpc::CommandRequestFieldsUpdater root, String& msg, bool relay)
+{
+	RequestParameters params;
+	parseRequestParams(root, params);
+	const bool result = runColorCommand(params, msg);
+
+	if(relay) {
+		// TODO(inbound-json-migration): relay still needs a JsonObject (Application::onCommandRelay()/
+		// AppMqttClient::publishCommand() aren't migrated yet). This is a no-op unless multi-controller
+		// command-sync is enabled (AppConfig::Sync::getCmdMasterEnabled()); when it is, this currently
+		// relays an empty command rather than the real one - tracked as follow-up work for Phase B.
+		StaticJsonDocument<16> doc;
+		app.onCommandRelay(F("color"), doc.as<JsonObject>());
+	}
+
+	return result;
 }
 
 /**
@@ -638,6 +674,151 @@ void JsonProcessor::parseRequestParams(JsonObject root, RequestParameters& param
 			} else if(strcmp(str, "cw") == 0) {
 				params.channels.add(CtrlChannel::ColdWhite);
 			}
+		}
+	}
+}
+
+/**
+ * @brief ConfigDB-backed counterpart of parseRequestParams(JsonObject, ...).
+ *
+ * The raw/hsv component fields are string-value typed in the schema (see
+ * command-request-fields in params.cfgdb) specifically so they can carry
+ * AbsOrRelValue's absolute/relative/percentage token forms; an empty/null
+ * String means the field was absent (same meaning as JsonObject's isNull()).
+ *
+ * @param root The already-imported command-request-fields accessor.
+ * @param params The RequestParameters object to be populated.
+ */
+void JsonProcessor::parseRequestParams(Jsonrpc::CommandRequestFieldsUpdater root, RequestParameters& params)
+{
+	auto parseField = [](const String& value, Optional<AbsOrRelValue>& target,
+						  AbsOrRelValue::Type type = AbsOrRelValue::Type::Percent) {
+		if(value.length() > 0) {
+			target = AbsOrRelValue(value.c_str(), type);
+		}
+	};
+
+	String hsvH = root.hsv.getH();
+	String hsvS = root.hsv.getS();
+	String hsvV = root.hsv.getV();
+	String hsvCt = root.hsv.getCt();
+	if(hsvH.length() > 0 || hsvS.length() > 0 || hsvV.length() > 0 || hsvCt.length() > 0) {
+		params.mode = RequestParameters::Mode::Hsv;
+		parseField(hsvH, params.hsv.h, AbsOrRelValue::Type::Hue);
+		parseField(hsvS, params.hsv.s);
+		parseField(hsvV, params.hsv.v);
+		parseField(hsvCt, params.hsv.ct, AbsOrRelValue::Type::Ct);
+
+		String fromH = root.hsv.from.getH();
+		String fromS = root.hsv.from.getS();
+		String fromV = root.hsv.from.getV();
+		String fromCt = root.hsv.from.getCt();
+		if(fromH.length() > 0 || fromS.length() > 0 || fromV.length() > 0 || fromCt.length() > 0) {
+			params.hasHsvFrom = true;
+			parseField(fromH, params.hsvFrom.h, AbsOrRelValue::Type::Hue);
+			parseField(fromS, params.hsvFrom.s);
+			parseField(fromV, params.hsvFrom.v);
+			parseField(fromCt, params.hsvFrom.ct, AbsOrRelValue::Type::Ct);
+		}
+	} else {
+		String rawR = root.raw.getR();
+		String rawG = root.raw.getG();
+		String rawB = root.raw.getB();
+		String rawWw = root.raw.getWw();
+		String rawCw = root.raw.getCw();
+		if(rawR.length() > 0 || rawG.length() > 0 || rawB.length() > 0 || rawWw.length() > 0 || rawCw.length() > 0) {
+			params.mode = RequestParameters::Mode::Raw;
+			parseField(rawR, params.raw.r, AbsOrRelValue::Type::Raw);
+			parseField(rawG, params.raw.g, AbsOrRelValue::Type::Raw);
+			parseField(rawB, params.raw.b, AbsOrRelValue::Type::Raw);
+			parseField(rawWw, params.raw.ww, AbsOrRelValue::Type::Raw);
+			parseField(rawCw, params.raw.cw, AbsOrRelValue::Type::Raw);
+
+			String fromR = root.raw.from.getR();
+			String fromG = root.raw.from.getG();
+			String fromB = root.raw.from.getB();
+			String fromWw = root.raw.from.getWw();
+			String fromCw = root.raw.from.getCw();
+			if(fromR.length() > 0 || fromG.length() > 0 || fromB.length() > 0 || fromWw.length() > 0 ||
+			   fromCw.length() > 0) {
+				params.hasRawFrom = true;
+				parseField(fromR, params.rawFrom.r, AbsOrRelValue::Type::Raw);
+				parseField(fromG, params.rawFrom.g, AbsOrRelValue::Type::Raw);
+				parseField(fromB, params.rawFrom.b, AbsOrRelValue::Type::Raw);
+				parseField(fromWw, params.rawFrom.ww, AbsOrRelValue::Type::Raw);
+				parseField(fromCw, params.rawFrom.cw, AbsOrRelValue::Type::Raw);
+			}
+		}
+	}
+
+	// NOTE: unlike the JsonObject version, "t"/"s" presence can't be distinguished from an
+	// explicit 0 once imported (ConfigDB's non-negative-integer getters always return a
+	// definite uint32_t, defaulting to 0 when absent). An explicit "s":0 is therefore treated
+	// the same as "s" being absent (stays Time-mode) instead of flipping to Speed-mode and then
+	// failing checkParams()'s "Speed cannot be 0!" check - a narrow, documented behavior
+	// difference for a nonsensical input (zero speed) that was rejected either way.
+	uint32_t t = root.getT();
+	if(t != 0) {
+		params.ramp.value = t;
+		params.ramp.type = RampTimeOrSpeed::Type::Time;
+	}
+	uint32_t s = root.getS();
+	if(s != 0) {
+		params.ramp.value = s;
+		params.ramp.type = RampTimeOrSpeed::Type::Speed;
+	}
+
+	params.requeue = root.getR();
+
+	// "d" schema default is 1 (see params.cfgdb), matching RequestParameters' own default,
+	// so this can read unconditionally without an absent-vs-explicit-0 ambiguity.
+	params.direction = int32_t(root.getD());
+
+	String name = root.getName();
+	if(name.length() > 0) {
+		params.name = name;
+	}
+
+	String cmd = root.getCmd();
+	if(cmd.length() > 0) {
+		params.cmd = cmd;
+	}
+
+	String q = root.getQ();
+	if(q.length() > 0) {
+		if(q == "back")
+			params.queue = QueuePolicy::Back;
+		else if(q == "front")
+			params.queue = QueuePolicy::Front;
+		else if(q == "front_reset")
+			params.queue = QueuePolicy::FrontReset;
+		else if(q == "single")
+			params.queue = QueuePolicy::Single;
+		else {
+			params.queue = QueuePolicy::Invalid;
+		}
+	}
+
+	for(auto channel : root.channels) {
+		String str = channel;
+		if(str == "h") {
+			params.channels.add(CtrlChannel::Hue);
+		} else if(str == "s") {
+			params.channels.add(CtrlChannel::Sat);
+		} else if(str == "v") {
+			params.channels.add(CtrlChannel::Val);
+		} else if(str == "ct") {
+			params.channels.add(CtrlChannel::ColorTemp);
+		} else if(str == "r") {
+			params.channels.add(CtrlChannel::Red);
+		} else if(str == "g") {
+			params.channels.add(CtrlChannel::Green);
+		} else if(str == "b") {
+			params.channels.add(CtrlChannel::Blue);
+		} else if(str == "ww") {
+			params.channels.add(CtrlChannel::WarmWhite);
+		} else if(str == "cw") {
+			params.channels.add(CtrlChannel::ColdWhite);
 		}
 	}
 }

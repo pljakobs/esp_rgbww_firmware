@@ -34,6 +34,10 @@ public:
 	bool renderData(const String& method, const JsonObject& params, String& out);
 	bool renderData(const String& method, const JsonObject& params, String& out, int requestId);
 
+	// ConfigDB-backed counterpart of dispatchCommand("color", ...) for HTTP body streams
+	// (see CONFIGDB_JSON_INBOUND_PLAN.md Phase A/B). Single command only, no "cmds" batch array.
+	bool dispatchColorFromStream(Stream& body, String& errorMsg, bool relay = true);
+
 private:
 	bool handleHosts(const JsonObject& params, std::unique_ptr<IDataSourceStream>& out, String& errorMsg);
 	bool handleConfig(const JsonObject& params, std::unique_ptr<IDataSourceStream>& out, String& errorMsg);

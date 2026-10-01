@@ -381,6 +381,116 @@ throwaway test:
 
 ---
 
+## Phase A implementation attempt — StringPool growth regression (2026-10-01)
+
+Partial Phase A code was written (`parseRequestParams(Jsonrpc::CommandRequestFieldsUpdater, ...)`
+in jsonprocessor.cpp, an HTTP stream entry point in apihandler.cpp/webserver.cpp)
+and exercised against the real pytest suite (`tests/rgbww_test.py` /
+`tests/host_smoke_api_test.py`, run via `.github/scripts/host_ci_smoke_test.sh`
+on Host). This surfaced a real, confirmed architectural problem that blocks
+shipping the current design as-is.
+
+### Observed symptom
+
+- `test_simple_fade` (first color POST in the run) passed.
+- Every subsequent test failed, with HTTP responses degrading in this order
+  as the run progressed: `200 OK` → `429 TOO_MANY_REQUESTS` (with
+  `Retry-After` headers, scaled by how far free heap was below the floor) →
+  outright connection failures / status `0`.
+- This is the firmware's own built-in low-heap rate limiter
+  (`ApplicationWebserver::checkHeap()` / `MINIMUM_HEAP`, `app.checkHeap()`)
+  doing exactly what it's designed to do: shed load once free heap drops
+  below a floor. It tripped because free heap was *genuinely, monotonically
+  shrinking* across the run, not because of test pacing or Valgrind overhead
+  (both were ruled out explicitly during debugging).
+
+### Root cause (confirmed from ConfigDB library source, not inferred)
+
+1. `ConfigDB/Pool.h`'s `StringPool` class doc comment, verbatim:
+   > "We store all string data in a single buffer... **Strings are appended
+   > but never removed.**"
+2. `Store::parseString()` (`src/Store.cpp`) only takes this
+   append-into-StringPool path for `PropertyType::String` properties
+   (`stringPool.findOrAdd(...)`); numeric/bool properties instead overwrite a
+   fixed-size struct field in place, with no growth.
+3. The Phase A schema design (see above) made `command-request-fields`'s
+   `hsv`/`raw` leaf fields (`h`/`s`/`v`/`ct`/`r`/`g`/`b`/`ww`/`cw`, +`from`)
+   `string-value`-typed **specifically** so they could carry `AbsOrRelValue`'s
+   `+N`/`-N`/`N%` token forms — this was the right call for correctness (a
+   numeric schema type can't represent "relative vs. absolute", confirmed
+   earlier in the same spike), but it means every distinct value gets
+   permanently interned into the StringPool of the **same process-lifetime
+   `rpcCodec()` singleton already used for all outbound rendering**.
+4. Outbound never hit this because rendered strings there (status codes,
+   enum names, SSID/IP that rarely change) have low cardinality — repeated
+   calls mostly hit the `findOrAdd()` dedup path, not `add()`. Inbound color
+   commands are the opposite: `rgbww_set()`/`set_hue_fade()` in the test
+   suite send a different hue/sat/val/ramp-time *string* on practically every
+   call, by design (that's the entire point of testing fades/ramps). Each
+   call therefore adds new, never-reused entries, forever, for the lifetime
+   of the process.
+
+This is a genuine, confirmed heap leak under the current design — not a
+hypothesis — directly caused by routing high-cardinality, ever-changing
+numeric-as-string command input through ConfigDB's property-level string
+interning on a long-lived, never-recreated store.
+
+### Two mistaken fix attempts (both reverted)
+
+1. **Constructing a fresh `Jsonrpc` instance per request to reclaim its
+   StringPool on destruction.** Not attempted in code, but considered and
+   rejected: `Database`'s constructor pattern plus the existing
+   `onCommit`/`clearDirty()` persistence-avoidance trick suggested stores may
+   be opened/associated with a real file path lazily, so repeated
+   construct-destroy per request risked either filesystem I/O per request or
+   undermining the one-shared-store assumption the `RpcCodec` re-entrancy
+   guard depends on. Not verified safe; not pursued.
+2. **Calling `ConfigDB::Store::clear()` from the `onCommit` callback**, gated
+   behind a custom `_flushPending` flag and a `flushStore()` helper that
+   forced an extra commit cycle after each `render()`/`renderPayload()` call,
+   specifically to reclaim the StringPool (`Store::clear()` does call
+   `stringPool.clear()`, confirmed in `src/Store.cpp` — this part was
+   technically correct). **This was still the wrong fix**: fetching the
+   actual upstream docs
+   ([mikee47/ConfigDB, `feature/json-rpc` branch, README.rst "Commit
+   Callbacks" section](https://github.com/mikee47/ConfigDB/tree/feature/json-rpc))
+   shows the *only* documented/supported call inside a commit callback is
+   `clearDirty()` — there is no documented pattern for also calling
+   `Store::clear()` there, and doing so is not something the commit-callback
+   mechanism was designed for. Reverted back to the plain, documented form:
+   ```cpp
+   Jsonrpc::Root::onCommit(_db, [](Jsonrpc::RootUpdater root) { root.clearDirty(); });
+   ```
+   `RpcCodec::render()`/`renderPayload()` are back to their pre-spike form
+   (no `flushStore()` calls). This means **the StringPool growth is currently
+   unmitigated again** — reverting the wrong fix did not reintroduce a
+   different bug, but it does mean Phase A cannot proceed with the schema as
+   currently designed without a real fix.
+
+### Leading candidate fix (not yet implemented — pending decision)
+
+Keep `cmd`/`t`/`s`/`r`/`d`/`name`/`q`/`channels` on ConfigDB import (genuinely
+low-cardinality; repeated values dedupe via `findOrAdd`). Pull `hsv`/`raw`/`from`
+*out* of the ConfigDB-imported schema entirely and parse just that small
+nested sub-object with a scoped, stack-local `StaticJsonDocument` (reverting
+only that leaf back to ArduinoJson, bounded/non-leaking by construction since
+it's destroyed at the end of each request). Requires the HTTP body to be
+available as a re-parseable buffered `String` (not just a one-shot stream) so
+the small sub-object can be sliced out and parsed a second time — a bounded,
+small-and-known-size parse, not the `DynamicJsonDocument`-per-whole-body
+pattern this migration is trying to eliminate.
+
+This generalizes to every other command/color endpoint already identified in
+Step 1 (`onSetOn`/`onSetOff`/`onBlink`/MQTT color-sync) — all share the same
+`hsv`/`raw` shape, so the fix is made once and reused, not once per endpoint.
+
+**Not yet decided/implemented.** Needs a decision on whether this
+ConfigDB-for-structure / ArduinoJson-for-high-churn-leaf-values split is
+acceptable as a standing exception to "no ArduinoJson", given it's now backed
+by a confirmed, reproducible failure mode rather than a style preference.
+
+---
+
 ## Open questions / risks (remaining)
 
 - **Error message fidelity** — `FormatError` → existing `errorMsg` string
@@ -393,3 +503,11 @@ throwaway test:
   but is low value relative to effort since it's a third-party, not our own,
   contract).
 
+On Home Assistant, I'm now leaning to an integration module on the home assistant side (see ~/devel/Lightinator_HA_module) that leverages the json-rpc apis provided via http/mqtt/websocket - but minimal discoverability and basic compatibility should be maintained and possibly extended using the Home Assistant mqtt scheme.
+Alternatively, we can look for other, possibly more suitable home assistant integrations
+The scope of integration to target would be:
+- discoverability
+- basic operation as hsv light
+    - additionally surfacing the transitions as stored in app-data 
+    - additionally surfacing groups as stored in app-data
+    - additionally surfacing scenes as stored in app-data

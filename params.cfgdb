@@ -100,7 +100,7 @@
         "t": { "$ref": "value-types/$defs/non-negative-integer" },
         "s": { "$ref": "value-types/$defs/non-negative-integer" },
         "r": { "$ref": "value-types/$defs/boolean-value" },
-        "d": { "$ref": "value-types/$defs/non-negative-integer" },
+        "d": { "type": "integer", "minimum": 0, "maximum": 1, "default": 1 },
         "name": { "$ref": "value-types/$defs/string-value" },
         "q": { "$ref": "value-types/$defs/string-value" },
         "channels": { "$ref": "#/$defs/channel-list" }

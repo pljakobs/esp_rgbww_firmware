@@ -1,5 +1,6 @@
 #include <ArduinoJson.h>
 #include <IFS/FileSystem.h>
+#include <Data/Stream/MemoryDataStream.h>
 
 /**
  * @file
@@ -1495,15 +1496,21 @@ void ApplicationWebserver::onColorGet(HttpRequest& request, HttpResponse& respon
 void ApplicationWebserver::onColorPost(HttpRequest& request, HttpResponse& response)
 {
 	debug_i(ANSI_COLOR_BLUE "onColorPost" ANSI_COLOR_RESET);
-	_colorPostDoc.clear();
-	if(!parseJsonBody(request, response, _colorPostDoc, F("no body"))) {
-		return;
-	}
 
-	debug_i(ANSI_COLOR_BLUE "received color update" ANSI_COLOR_RESET);
 	String msg;
-	debug_i(ANSI_COLOR_BLUE "dispatching color update" ANSI_COLOR_RESET);
-	const bool ok = app.api->dispatchCommand(F("color"), _colorPostDoc.as<JsonObject>(), msg, true);
+	bool ok;
+	auto bodyStream = request.getBodyStream();
+	if(bodyStream != nullptr) {
+		ok = app.api->dispatchColorFromStream(*bodyStream, msg, true);
+	} else {
+		String body = request.getBody();
+		if(body.length() == 0) {
+			sendApiCode(response, API_CODES::API_BAD_REQUEST, F("no body"));
+			return;
+		}
+		MemoryDataStream mem(std::move(body));
+		ok = app.api->dispatchColorFromStream(mem, msg, true);
+	}
 
 	if(!ok) {
 		debug_i(ANSI_COLOR_BLUE "received color update with message " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, msg.c_str());

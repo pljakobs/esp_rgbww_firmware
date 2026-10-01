@@ -18,6 +18,7 @@
 #pragma once
 
 #include <RGBWWLed/RGBWWLedColor.h>
+#include <rpccodec.h>
 
 
 /**
@@ -69,6 +70,9 @@ public:
 
     bool onColor(const String& json, String& msg, bool relay = true);
     bool onColor(JsonObject root, String& msg, bool relay = true);
+    // ConfigDB-backed counterpart (see CONFIGDB_JSON_INBOUND_PLAN.md Phase A).
+    // Single-command only - no "cmds" batch array support (command-request-fields has no such member).
+    bool onColor(Jsonrpc::CommandRequestFieldsUpdater root, String& msg, bool relay = true);
 
     bool onStop(const String& json, String& msg, bool relay = true);
     bool onStop(JsonObject root, String& msg, bool relay = true);
@@ -100,7 +104,13 @@ public:
     bool onJsonRpc(const String& json);
 
     void parseRequestParams(JsonObject root, RequestParameters& params);
+    // ConfigDB-backed counterpart of parseRequestParams (see CONFIGDB_JSON_INBOUND_PLAN.md Phase A).
+    void parseRequestParams(Jsonrpc::CommandRequestFieldsUpdater root, RequestParameters& params);
     void addChannelStatesToCmd(JsonObject root, const RGBWWLed::ChannelList& channels);
 
     bool onSingleColorCommand(JsonObject root, String& errorMsg);
+
+private:
+    // Shared post-parse execution core for onSingleColorCommand()/onColor(), transport-agnostic.
+    bool runColorCommand(RequestParameters& params, String& errorMsg);
 };
