@@ -368,13 +368,6 @@ void init(){
 	#ifdef UART_ID_SERIAL_USB_JTAG 
         //Serial.setPort(UART_ID_SERIAL_USB_JTAG);
     #endif
-/*
-	#if ARCH_HOST
-		MallocCount::setAllocLimit(30*1024);
-		MallocCount::setLogThreshold(4*1024);
-		MallocCount::enableLogging(true);
-	#endif
-*/
 	Serial.begin(SERIAL_BAUD_RATE);
     
 	Serial.systemDebugOutput(true);
@@ -537,6 +530,43 @@ bool Application::checkHeap( uint32_t minHeap)
 	return true;
 }
 
+namespace
+{
+/*
+ * webapp used to live in the root app-config store; it is now its own store.
+ * ConfigDB resets a whole store to defaults on any unknown key, so the old
+ * section must be moved out of _root.json before the database first loads it.
+ */
+void migrateWebappStore()
+{
+	const String rootPath = F(configDB_PATH "/_root.json");
+	String content = fileGetContent(rootPath);
+	if(content.indexOf(F("\"webapp\"")) < 0) {
+		return;
+	}
+
+	DynamicJsonDocument doc(content.length() * 2);
+	if(deserializeJson(doc, content)) {
+		debug_e(ANSI_COLOR_RED "migrateWebappStore: cannot parse %s, leaving it to ConfigDB" ANSI_COLOR_RESET, rootPath.c_str());
+		return;
+	}
+	content = nullptr;
+
+	JsonVariant webapp = doc[F("webapp")];
+	if(webapp.is<JsonObject>()) {
+		String webappJson;
+		serializeJson(webapp, webappJson);
+		fileSetContent(F(configDB_PATH "/webapp.json"), webappJson);
+	}
+
+	doc.remove(F("webapp"));
+	String rootJson;
+	serializeJson(doc, rootJson);
+	fileSetContent(rootPath, rootJson);
+	debug_i(ANSI_COLOR_BLUE "migrateWebappStore: moved webapp section to its own store" ANSI_COLOR_RESET);
+}
+} // namespace
+
 void Application::init()
 {
 	debug_i(ANSI_COLOR_BLUE "ESP RGBWW Controller Version " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "\r\n" ANSI_COLOR_RESET, fw_git_version);
@@ -621,6 +651,7 @@ debug_i(ANSI_COLOR_BLUE "Application::init - running partition " ANSI_COLOR_CYAN
 	(void)getFreeHeapSize(); // sample heap after fs mount + OTA check
 
 	// initialize config and data
+	migrateWebappStore();
 	cfg =  std::make_unique<AppConfig>(configDB_PATH);
 	data = std::make_unique<AppData>(dataDB_PATH);
 	api = std::make_unique<Api>();
