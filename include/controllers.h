@@ -27,6 +27,12 @@
 #define CONTROLLER_HOSTNAME_MAX_SIZE 64
 #define CONTROLLER_IP_MAX_SIZE 16
 
+// String::toInt() saturates at INT_MAX, but chip IDs can use the full 32 bits
+inline uint32_t parseControllerId(const String& id)
+{
+    return strtoul(id.c_str(), nullptr, 10);
+}
+
 class Controllers {
 public:
     enum HostType {

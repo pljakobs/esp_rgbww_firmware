@@ -384,7 +384,7 @@ bool mdnsHandler::processHostnameARecord(mDNS::Message& message, mDNS::Answer* a
 
         // Case-insensitive comparison
         if (strcasecmp(hostname, storedName.c_str()) == 0) {
-            controllerId = (*it).getId().toInt();
+            controllerId = parseControllerId((*it).getId());
 #ifdef DEBUG_MDNS
             debug_i(ANSI_COLOR_BLUE "Found matching controller ID: " ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, controllerId);
 #endif

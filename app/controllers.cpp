@@ -147,7 +147,7 @@ void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char*
     if (auto controllersUpdate = controllers.update()) {
         // Find the specific controller to update (must iterate)
         for (auto controllerItem : controllersUpdate) {
-            if (controllerItem.getId().toInt() == id) {
+            if (parseControllerId(controllerItem.getId()) == id) {
                 foundInConfig = true;
                 #ifdef DEBUG_MDNS
                 debug_i(ANSI_COLOR_BLUE "Hostname " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " already in list" ANSI_COLOR_RESET, hostname);
@@ -271,7 +271,7 @@ uint32_t Controllers::getHighestId() {
     uint32_t highest = 0;
     AppData::Root::Controllers controllers(*app.data);
     for (auto& controller : controllers) {
-        uint32_t id = controller.getId().toInt();
+        uint32_t id = parseControllerId(controller.getId());
         if (id > highest) {
             highest = id;
         }
@@ -364,7 +364,7 @@ Controllers::ControllerInfo Controllers::Iterator::operator*() {
         if (index == currentIndex) {
             auto& configItem = *it;
             Controllers::ControllerInfo info;
-            info.id = configItem.getId().toInt();
+            info.id = parseControllerId(configItem.getId());
             strncpy(info.hostname, configItem.getName().c_str(), CONTROLLER_HOSTNAME_MAX_SIZE);
             strncpy(info.ipAddress, configItem.getIpAddress().c_str(), CONTROLLER_IP_MAX_SIZE);
             info.state = OFFLINE;
@@ -423,7 +423,7 @@ size_t Controllers::findVisibleControllerIndex(unsigned int id) {
 Controllers::ControllerInfo Controllers::findById(unsigned int id) {
     AppData::Root::Controllers controllers(*app.data);
     for (auto& controller : controllers) {
-        if (controller.getId().toInt() == id) {
+        if (parseControllerId(controller.getId()) == id) {
             ControllerInfo info;
             info.id = id;
             strncpy(info.hostname, controller.getName().c_str(), CONTROLLER_HOSTNAME_MAX_SIZE);
@@ -453,7 +453,7 @@ Controllers::ControllerInfo Controllers::findByIpAddress(const char* ipAddress) 
     AppData::Root::Controllers controllers(*app.data);
     for (auto& controller : controllers) {
         if (strcmp(controller.getIpAddress().c_str(), ipAddress) == 0) {
-            return findById(controller.getId().toInt());
+            return findById(parseControllerId(controller.getId()));
         }
     }
     return ControllerInfo(); // NOT_FOUND
@@ -467,7 +467,7 @@ Controllers::ControllerInfo Controllers::findByHostname(const char* hostname) {
     AppData::Root::Controllers controllers(*app.data);
     for (auto& controller : controllers) {
         if (strcmp(controller.getName().c_str(), hostname) == 0) {
-            return findById(controller.getId().toInt());
+            return findById(parseControllerId(controller.getId()));
         }
     }
     return ControllerInfo(); // NOT_FOUND
@@ -517,7 +517,7 @@ std::unique_ptr<IDataSourceStream> Controllers::createJsonStream(JsonFilter filt
         AppData::Root::Controllers controllers(*app.data);
         for(auto configItem : controllers) {
             ControllerInfo info;
-            info.id = configItem.getId().toInt();
+            info.id = parseControllerId(configItem.getId());
             strncpy(info.hostname, configItem.getName().c_str(), CONTROLLER_HOSTNAME_MAX_SIZE);
             strncpy(info.ipAddress, configItem.getIpAddress().c_str(), CONTROLLER_IP_MAX_SIZE);
             info.state = OFFLINE;
