@@ -1,6 +1,7 @@
 #include <apihandler.h>
 
 #include <application.h>
+#include <Data/Stream/MemoryDataStream.h>
 #include <cstring>
 
 // Stringify an integer macro so it can be embedded in a compile-time JSON literal.
@@ -275,22 +276,116 @@ bool Api::dispatchCommand(const String& method, const String& params, String& er
 	return dispatchCommand(method.c_str(), doc.as<JsonObject>(), errorMsg, relay);
 }
 
-bool Api::dispatchColorFromStream(Stream& body, String& errorMsg, bool relay)
+bool Api::dispatchCommandFromStream(const String& method, Stream& body, String& errorMsg, bool relay)
 {
-	auto& codec = rpcCodec();
-	Jsonrpc::Root root(codec.db());
-	if(auto update = root.update()) {
-		auto fields = update.toCommandRequestFields();
-		auto status = fields.importFromStream(ConfigDB::Json::format, body);
-		if(!status) {
-			errorMsg = F("Invalid JSON: ") + status.toString();
-			return false;
-		}
-		return app.jsonproc.onColor(fields, errorMsg, relay);
+	const auto id = getCommandMethodId(method.c_str());
+	const char* relayName;
+	switch(id) {
+	case CommandMethodId::Color:
+		relayName = "color";
+		break;
+	case CommandMethodId::Stop:
+		relayName = "stop";
+		break;
+	case CommandMethodId::Skip:
+		relayName = "skip";
+		break;
+	case CommandMethodId::Pause:
+		relayName = "pause";
+		break;
+	case CommandMethodId::Continue:
+		relayName = "continue";
+		break;
+	case CommandMethodId::Blink:
+		relayName = "blink";
+		break;
+	case CommandMethodId::Toggle:
+		relayName = "toggle";
+		break;
+	case CommandMethodId::Direct:
+		relayName = "direct";
+		break;
+	case CommandMethodId::SetOn:
+	case CommandMethodId::SetOff:
+		relayName = nullptr;
+		break;
+	default:
+		errorMsg = F("method not implemented: ");
+		errorMsg += method;
+		return false;
 	}
 
-	errorMsg = F("internal error");
-	return false;
+	// MQTT command relay still publishes from a JsonObject (Phase D), so keep the raw body only when it will be used
+	String relayJson;
+	MemoryDataStream buffered;
+	Stream* source = &body;
+	if(relay && relayName != nullptr) {
+		AppConfig::Sync sync(*app.cfg);
+		if(sync.getCmdMasterEnabled()) {
+			relayJson = body.readString(1024);
+			buffered.write(reinterpret_cast<const uint8_t*>(relayJson.c_str()), relayJson.length());
+			source = &buffered;
+		}
+	}
+
+	auto& jp = app.jsonproc;
+	JsonProcessor::RequestParameters params;
+	if(id == CommandMethodId::Blink) {
+		params.ramp.value = 500;
+	}
+	std::vector<JsonProcessor::RequestParameters> batch;
+	if(!jp.parseRequest(*source, params, (id == CommandMethodId::Color) ? &batch : nullptr, errorMsg)) {
+		return false;
+	}
+
+	bool ok = true;
+	switch(id) {
+	case CommandMethodId::Color:
+		ok = jp.runColor(params, batch, errorMsg);
+		break;
+	case CommandMethodId::Stop:
+		jp.runStop(params, errorMsg);
+		break;
+	case CommandMethodId::Skip:
+		jp.runSkip(params, errorMsg);
+		break;
+	case CommandMethodId::Pause:
+		jp.runPause(params, errorMsg);
+		break;
+	case CommandMethodId::Continue:
+		jp.runContinue(params);
+		break;
+	case CommandMethodId::Blink:
+		jp.runBlink(params);
+		break;
+	case CommandMethodId::Toggle:
+		jp.runToggle();
+		break;
+	case CommandMethodId::Direct:
+		jp.runDirect(params, errorMsg);
+		break;
+	case CommandMethodId::SetOn:
+		jp.runSetOn(params);
+		break;
+	case CommandMethodId::SetOff:
+		jp.runSetOff(params);
+		break;
+	default:
+		break;
+	}
+
+	if(relayJson.length() > 0) {
+		DynamicJsonDocument doc(512);
+		if(!deserializeJson(doc, relayJson)) {
+			auto root = doc.as<JsonObject>();
+			if(id == CommandMethodId::Stop || id == CommandMethodId::Skip || id == CommandMethodId::Pause) {
+				jp.addChannelStatesToCmd(root, params.channels);
+			}
+			app.onCommandRelay(relayName, root);
+		}
+	}
+
+	return ok;
 }
 
 

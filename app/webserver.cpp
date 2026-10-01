@@ -705,6 +705,27 @@ void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, c
 	response.sendString(payload);
 }
 
+bool ApplicationWebserver::dispatchBodyCommand(HttpRequest& request, const String& method, String& msg)
+{
+	if(!app.api) {
+		msg = F("api not initialized");
+		return false;
+	}
+
+	auto bodyStream = request.getBodyStream();
+	if(bodyStream != nullptr) {
+		return app.api->dispatchCommandFromStream(method, *bodyStream, msg, true);
+	}
+
+	String body = request.getBody();
+	if(body.length() == 0) {
+		msg = F("could not get HTTP body");
+		return false;
+	}
+	MemoryDataStream mem(std::move(body));
+	return app.api->dispatchCommandFromStream(method, mem, msg, true);
+}
+
 bool ApplicationWebserver::parseJsonBody(HttpRequest& request, HttpResponse& response, JsonDocument& doc,
 											 const String& noBodyMessage)
 {
@@ -1498,19 +1519,7 @@ void ApplicationWebserver::onColorPost(HttpRequest& request, HttpResponse& respo
 	debug_i(ANSI_COLOR_BLUE "onColorPost" ANSI_COLOR_RESET);
 
 	String msg;
-	bool ok;
-	auto bodyStream = request.getBodyStream();
-	if(bodyStream != nullptr) {
-		ok = app.api->dispatchColorFromStream(*bodyStream, msg, true);
-	} else {
-		String body = request.getBody();
-		if(body.length() == 0) {
-			sendApiCode(response, API_CODES::API_BAD_REQUEST, F("no body"));
-			return;
-		}
-		MemoryDataStream mem(std::move(body));
-		ok = app.api->dispatchColorFromStream(mem, msg, true);
-	}
+	const bool ok = dispatchBodyCommand(request, F("color"), msg);
 
 	if(!ok) {
 		debug_i(ANSI_COLOR_BLUE "received color update with message " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, msg.c_str());
@@ -1898,13 +1907,8 @@ void ApplicationWebserver::onStop(HttpRequest& request, HttpResponse& response)
 	}
     */
 
-	DynamicJsonDocument doc(256);
-	if(!parseJsonBody(request, response, doc, F("could not get HTTP body"))) {
-		return;
-	}
-
 	String msg;
-	const bool ok = app.api->dispatchCommand(F("stop"), doc.as<JsonObject>(), msg, true);
+	const bool ok = dispatchBodyCommand(request, F("stop"), msg);
 
 	if(ok) {
 		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
@@ -1917,13 +1921,8 @@ void ApplicationWebserver::onSkip(HttpRequest& request, HttpResponse& response)
 {
     if(!preflightRequest(request, response, {HttpMethod::POST})) return;
     
-	DynamicJsonDocument doc(256);
-	if(!parseJsonBody(request, response, doc, F("could not get HTTP body"))) {
-		return;
-	}
-
 	String msg;
-	const bool ok = app.api->dispatchCommand(F("skip"), doc.as<JsonObject>(), msg, true);
+	const bool ok = dispatchBodyCommand(request, F("skip"), msg);
 
 	if(ok) {
 		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
@@ -1936,13 +1935,8 @@ void ApplicationWebserver::onPause(HttpRequest& request, HttpResponse& response)
 {
     if(!preflightRequest(request, response, {HttpMethod::POST})) return;
     
-	DynamicJsonDocument doc(256);
-	if(!parseJsonBody(request, response, doc, F("could not get HTTP body"))) {
-		return;
-	}
-
 	String msg;
-	const bool ok = app.api->dispatchCommand(F("pause"), doc.as<JsonObject>(), msg, true);
+	const bool ok = dispatchBodyCommand(request, F("pause"), msg);
 
 	if(ok) {
 		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
@@ -1955,13 +1949,8 @@ void ApplicationWebserver::onContinue(HttpRequest& request, HttpResponse& respon
 {
     if(!preflightRequest(request, response, {HttpMethod::POST})) return;
     
-	DynamicJsonDocument doc(256);
-	if(!parseJsonBody(request, response, doc, F("could not get HTTP body"))) {
-		return;
-	}
-
 	String msg;
-	const bool ok = app.api->dispatchCommand(F("continue"), doc.as<JsonObject>(), msg, true);
+	const bool ok = dispatchBodyCommand(request, F("continue"), msg);
 
 	if(ok) {
 		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
@@ -1974,13 +1963,8 @@ void ApplicationWebserver::onBlink(HttpRequest& request, HttpResponse& response)
 {
     if(!preflightRequest(request, response, {HttpMethod::POST})) return;
 
-	DynamicJsonDocument doc(256);
-	if(!parseJsonBody(request, response, doc, F("could not get HTTP body"))) {
-		return;
-	}
-
 	String msg;
-	const bool ok = app.api->dispatchCommand(F("blink"), doc.as<JsonObject>(), msg, true);
+	const bool ok = dispatchBodyCommand(request, F("blink"), msg);
 
 	if(ok) {
 		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
@@ -1993,13 +1977,8 @@ void ApplicationWebserver::onToggle(HttpRequest& request, HttpResponse& response
 {
     if(!preflightRequest(request, response, {HttpMethod::POST})) return;
     
-	DynamicJsonDocument doc(256);
-	if(!parseJsonBody(request, response, doc, F("could not get HTTP body"))) {
-		return;
-	}
-
 	String msg;
-	const bool ok = app.api->dispatchCommand(F("toggle"), doc.as<JsonObject>(), msg, true);
+	const bool ok = dispatchBodyCommand(request, F("toggle"), msg);
 
 	if(ok) {
 		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
@@ -2093,13 +2072,8 @@ void ApplicationWebserver::onSetOn(HttpRequest &request, HttpResponse &response)
 		return;
 	}
 
-	DynamicJsonDocument doc(256);
-	if(!parseJsonBody(request, response, doc, F("could not get HTTP body"))) {
-		return;
-	}
-
 	String msg;
-	if(app.api->dispatchCommand(F("setOn"), doc.as<JsonObject>(), msg, true)) {
+	if(dispatchBodyCommand(request, F("setOn"), msg)) {
 		sendApiCode(response, API_SUCCESS, F("SetOn OK"));
 	} else {
 		sendApiCode(response, API_BAD_REQUEST, msg);
@@ -2116,13 +2090,8 @@ void ApplicationWebserver::onSetOff(HttpRequest &request, HttpResponse &response
 		return;
 	}
 
-	DynamicJsonDocument doc(256);
-	if(!parseJsonBody(request, response, doc, F("could not get HTTP body"))) {
-		return;
-	}
-
 	String msg;
-	if(app.api->dispatchCommand(F("setOff"), doc.as<JsonObject>(), msg, true)) {
+	if(dispatchBodyCommand(request, F("setOff"), msg)) {
 		sendApiCode(response, API_SUCCESS, F("SetOff OK"));
 	} else {
 		sendApiCode(response, API_BAD_REQUEST, msg);

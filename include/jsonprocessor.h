@@ -19,6 +19,7 @@
 
 #include <RGBWWLed/RGBWWLedColor.h>
 #include <rpccodec.h>
+#include <vector>
 
 
 /**
@@ -68,49 +69,44 @@ public:
         int checkParams(String& errorMsg) const;
     };
 
-    bool onColor(const String& json, String& msg, bool relay = true);
     bool onColor(JsonObject root, String& msg, bool relay = true);
-    // ConfigDB-backed counterpart (see CONFIGDB_JSON_INBOUND_PLAN.md Phase A).
-    // Single-command only - no "cmds" batch array support (command-request-fields has no such member).
-    bool onColor(Jsonrpc::CommandRequestFieldsUpdater root, String& msg, bool relay = true);
-
-    bool onStop(const String& json, String& msg, bool relay = true);
     bool onStop(JsonObject root, String& msg, bool relay = true);
-
-    bool onSkip(const String& json, String& msg, bool relay = true);
     bool onSkip(JsonObject root, String& msg, bool relay = true);
-
-    bool onPause(const String& json, String& msg, bool relay = true);
-    bool onPause(JsonObject json, String& msg, bool relay = true);
-
-    bool onContinue(const String& json, String& msg, bool relay = true);
+    bool onPause(JsonObject root, String& msg, bool relay = true);
     bool onContinue(JsonObject root, String& msg, bool relay = true);
-
-    bool onBlink(const String& json, String& msg, bool relay = true);
     bool onBlink(JsonObject root, String& msg, bool relay = true);
-
-    // SetOn/SetOff API
-    bool onSetOn(const String& json, String& msg, bool relay = true);
     bool onSetOn(JsonObject root, String& msg, bool relay = true);
-    bool onSetOff(const String& json, String& msg, bool relay = true);
     bool onSetOff(JsonObject root, String& msg, bool relay = true);
-
-    bool onToggle(const String& json, String& msg, bool relay = true);
     bool onToggle(JsonObject root, String& msg, bool relay = true);
-
-    bool onDirect(const String& json, String& msg, bool relay);
     bool onDirect(JsonObject root, String& msg, bool relay);
 
     bool onJsonRpc(const String& json);
 
     void parseRequestParams(JsonObject root, RequestParameters& params);
-    // ConfigDB-backed counterpart of parseRequestParams (see CONFIGDB_JSON_INBOUND_PLAN.md Phase A).
-    void parseRequestParams(Jsonrpc::CommandRequestFieldsUpdater root, RequestParameters& params);
+
+    /**
+     * @brief Import a command body into the transient jsonrpc store and convert it to RequestParameters.
+     * @param batch If non-null, receives one entry per "cmds" item
+     * @note The store is released before returning, so callers can execute commands
+     * (which may render through rpcCodec()) without clobbering it.
+     */
+    bool parseRequest(Stream& body, RequestParameters& params, std::vector<RequestParameters>* batch,
+                      String& errorMsg);
+
     void addChannelStatesToCmd(JsonObject root, const RGBWWLed::ChannelList& channels);
 
-    bool onSingleColorCommand(JsonObject root, String& errorMsg);
+    // Transport-agnostic command execution, shared by the JsonObject and ConfigDB paths
+    bool runColor(RequestParameters& params, std::vector<RequestParameters>& batch, String& errorMsg);
+    void runStop(const RequestParameters& params, String& msg);
+    void runSkip(const RequestParameters& params, String& msg);
+    void runPause(const RequestParameters& params, String& msg);
+    void runContinue(const RequestParameters& params);
+    void runBlink(const RequestParameters& params);
+    void runToggle();
+    void runDirect(const RequestParameters& params, String& msg);
+    void runSetOn(const RequestParameters& params);
+    void runSetOff(RequestParameters& params);
 
 private:
-    // Shared post-parse execution core for onSingleColorCommand()/onColor(), transport-agnostic.
     bool runColorCommand(RequestParameters& params, String& errorMsg);
 };

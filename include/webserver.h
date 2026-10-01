@@ -115,9 +115,6 @@ private:
     unsigned long _infoV2CacheTime = 0;
     static constexpr unsigned long INFO_CACHE_MS = 1000;
 
-    // Reused for /color POST to avoid per-request stack/heap churn on ESP8266.
-    StaticJsonDocument<256> _colorPostDoc;
-
     WebsocketResource* wsResource = nullptr;
     WebsocketList webSockets;
 
@@ -171,6 +168,7 @@ private:
     void sendApiCode(HttpResponse &response, API_CODES code, const __FlashStringHelper* msg);
     bool parseJsonBody(HttpRequest& request, HttpResponse& response, JsonDocument& doc,
                        const String& noBodyMessage);
+    bool dispatchBodyCommand(HttpRequest& request, const String& method, String& msg);
 
     //void onUpload(HttpRequest &request, HttpResponse &response);
     bool checkHeap(HttpResponse &response);

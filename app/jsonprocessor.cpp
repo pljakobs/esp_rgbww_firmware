@@ -65,28 +65,6 @@ bool parseAbsOrRelValue(const JsonVariantConst& source, Optional<AbsOrRelValue>&
 }
 }
 /**
- * @brief Processes the color JSON data.
- *
- * This function deserializes the JSON data and calls the overloaded onColor function
- * with the deserialized JsonObject.
- *
- * @param json The JSON data to be processed.
- * @param msg The output message.
- * @param relay A flag indicating whether to relay the message.
- * @return True if the processing is successful, false otherwise.
- */
-bool JsonProcessor::onColor(const String& json, String& msg, bool relay)
-{
-	debug_e(ANSI_COLOR_RED "JsonProcessor::onColor: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED "" ANSI_COLOR_RESET, json.c_str());
-	DynamicJsonDocument doc(400);
-	if(!Json::deserialize(doc, json)) {
-		msg = F("malformed json");
-		return false;
-	}
-	return onColor(doc.as<JsonObject>(), msg, relay);
-}
-
-/**
  * @brief Processes the color command from a JSON object.
  * 
  * This function is responsible for processing the color command from a JSON object.
@@ -99,43 +77,19 @@ bool JsonProcessor::onColor(const String& json, String& msg, bool relay)
  */
 bool JsonProcessor::onColor(JsonObject root, String& msg, bool relay)
 {
-	bool result = false;
-	if(!app.checkHeap(MIN_HEAP_FREE)) {
-		debug_i(ANSI_COLOR_BLUE "out of memory in processing onColor" ANSI_COLOR_RESET);
-		msg = F("out of memory in processing onColor");
-		return false;
-	}
+	RequestParameters params;
+	std::vector<RequestParameters> batch;
 	auto cmds = root[F("cmds")].as<JsonArray>();
-	if(!cmds.isNull()) {
-		String errors;  // Accumulate directly without Vector
-		// multi command post (needs testing)
-		debug_i(ANSI_COLOR_BLUE "  multi command post" ANSI_COLOR_RESET);
-		for(unsigned i = 0; i < cmds.size(); ++i) {
-			debug_i(ANSI_COLOR_BLUE "command " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE ": " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, i, cmds[i].as<String>().c_str());
-			String errorMsg;
-			if(!onSingleColorCommand(cmds[i], errorMsg)) {
-				// Build error message directly without Vector copy
-				if(errors.length() > 0) errors += "|";
-				errors.concat(i);
-				errors += ": ";
-				errors += errorMsg;
-				result = false;
-			}
-		}
-
-		if(!errors.length())
-			result = true;
-		else {
-			result = false;
-			debug_i(ANSI_COLOR_BLUE "  multi command post, " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, errors.c_str());
-		}
+	if(cmds.isNull()) {
+		parseRequestParams(root, params);
 	} else {
-		debug_i(ANSI_COLOR_BLUE "  single command post " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, msg.c_str());
-		if(onSingleColorCommand(root, msg))
-			result = true;
-		else
-			result = false;
+		for(JsonObject item : cmds) {
+			batch.emplace_back();
+			parseRequestParams(item, batch.back());
+		}
 	}
+
+	const bool result = runColor(params, batch, msg);
 
 	if(relay)
 		app.onCommandRelay(F("color"), root);
@@ -144,25 +98,39 @@ bool JsonProcessor::onColor(JsonObject root, String& msg, bool relay)
 }
 
 /**
- * @brief Handles the "onStop" event for the JsonProcessor class.
- * 
- * This function deserializes the given JSON string into a StaticJsonDocument object
- * and calls the overloaded onStop function with the deserialized JsonObject, a message string,
- * and a boolean flag indicating whether to use the relay.
- * 
- * @param json The JSON string to be deserialized.
- * @param msg The output message string.
- * @param relay Flag indicating whether to use the relay.
- * @return True if the onStop function is successfully called, false otherwise.
+ * @brief Executes a single color command, or each entry of a "cmds" batch if non-empty.
  */
-bool JsonProcessor::onStop(const String& json, String& msg, bool relay)
+bool JsonProcessor::runColor(RequestParameters& params, std::vector<RequestParameters>& batch, String& errorMsg)
 {
-	DynamicJsonDocument doc(256);
-	if(!Json::deserialize(doc, json)) {
-		msg = F("malformed json");
+	if(!app.checkHeap(MIN_HEAP_FREE)) {
+		debug_i(ANSI_COLOR_BLUE "out of memory in processing onColor" ANSI_COLOR_RESET);
+		errorMsg = F("out of memory in processing onColor");
 		return false;
 	}
-	return onStop(doc.as<JsonObject>(), msg, relay);
+
+	if(batch.empty()) {
+		return runColorCommand(params, errorMsg);
+	}
+
+	debug_i(ANSI_COLOR_BLUE "  multi command post" ANSI_COLOR_RESET);
+	String errors;
+	for(unsigned i = 0; i < batch.size(); ++i) {
+		String itemError;
+		if(!runColorCommand(batch[i], itemError)) {
+			if(errors.length() > 0)
+				errors += '|';
+			errors.concat(i);
+			errors += ": ";
+			errors += itemError;
+		}
+	}
+
+	if(errors.length() == 0) {
+		return true;
+	}
+	debug_i(ANSI_COLOR_BLUE "  multi command post, " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, errors.c_str());
+	errorMsg = errors;
+	return false;
 }
 
 /**
@@ -178,11 +146,8 @@ bool JsonProcessor::onStop(const String& json, String& msg, bool relay)
 bool JsonProcessor::onStop(JsonObject root, String& msg, bool relay)
 {
 	RequestParameters params;
-	JsonProcessor::parseRequestParams(root, params);
-	app.rgbwwctrl.clearAnimationQueue(params.channels);
-	app.rgbwwctrl.skipAnimation(params.channels);
-
-	onDirect(root, msg, false);
+	parseRequestParams(root, params);
+	runStop(params, msg);
 
 	if(relay) {
 		addChannelStatesToCmd(root, params.channels);
@@ -190,27 +155,6 @@ bool JsonProcessor::onStop(JsonObject root, String& msg, bool relay)
 	}
 
 	return true;
-}
-
-/**
- * @brief Skips the animation and performs additional actions based on the provided parameters.
- *
- * This function deserializes the given JSON string into a StaticJsonDocument object and then calls the overloaded
- * onSkip function with the deserialized JsonObject, a message string, and a relay flag.
- *
- * @param json The JSON string to be skipped.
- * @param msg The message string to be passed to the onSkip function.
- * @param relay The relay flag to be passed to the onSkip function.
- * @return True if the onSkip function is successfully called, false otherwise.
- */
-bool JsonProcessor::onSkip(const String& json, String& msg, bool relay)
-{
-	DynamicJsonDocument doc(256);
-	if(!Json::deserialize(doc, json)) {
-		msg = F("malformed json");
-		return false;
-	}
-	return onSkip(doc.as<JsonObject>(), msg, relay);
 }
 
 /**
@@ -229,10 +173,8 @@ bool JsonProcessor::onSkip(const String& json, String& msg, bool relay)
 bool JsonProcessor::onSkip(JsonObject root, String& msg, bool relay)
 {
 	RequestParameters params;
-	JsonProcessor::parseRequestParams(root, params);
-	app.rgbwwctrl.skipAnimation(params.channels);
-
-	onDirect(root, msg, false);
+	parseRequestParams(root, params);
+	runSkip(params, msg);
 
 	if(relay) {
 		addChannelStatesToCmd(root, params.channels);
@@ -240,27 +182,6 @@ bool JsonProcessor::onSkip(JsonObject root, String& msg, bool relay)
 	}
 
 	return true;
-}
-
-/**
- * @brief Pauses the animation and performs additional actions based on the provided parameters.
- *
- * This function deserializes the given JSON string into a StaticJsonDocument,
- * and then calls the onPause function with the deserialized JsonObject.
- *
- * @param json The JSON string to be deserialized.
- * @param msg The output message.
- * @param relay The relay flag.
- * @return True if the onPause function is successfully called, false otherwise.
- */
-bool JsonProcessor::onPause(const String& json, String& msg, bool relay)
-{
-	DynamicJsonDocument doc(256);
-	if(!Json::deserialize(doc, json)) {
-		msg = F("malformed json");
-		return false;
-	}
-	return onPause(doc.as<JsonObject>(), msg, relay);
 }
 
 /**
@@ -280,11 +201,8 @@ bool JsonProcessor::onPause(const String& json, String& msg, bool relay)
 bool JsonProcessor::onPause(JsonObject root, String& msg, bool relay)
 {
 	RequestParameters params;
-	JsonProcessor::parseRequestParams(root, params);
-
-	app.rgbwwctrl.pauseAnimation(params.channels);
-
-	onDirect(root, msg, false);
+	parseRequestParams(root, params);
+	runPause(params, msg);
 
 	if(relay) {
 		addChannelStatesToCmd(root, params.channels);
@@ -292,27 +210,6 @@ bool JsonProcessor::onPause(JsonObject root, String& msg, bool relay)
 	}
 
 	return true;
-}
-
-/**
- * @brief Continues the animation and relays the command if specified.
- * 
- * This function deserializes the JSON data using the StaticJsonDocument class
- * and calls the overloaded onContinue function with the deserialized JsonObject.
- * 
- * @param json The JSON data to be processed.
- * @param msg Output parameter to store any error message.
- * @param relay Flag indicating whether to relay the data or not.
- * @return True if the operation is successful, false otherwise.
- */
-bool JsonProcessor::onContinue(const String& json, String& msg, bool relay)
-{
-	DynamicJsonDocument doc(256);
-	if(!Json::deserialize(doc, json)) {
-		msg = F("malformed json");
-		return false;
-	}
-	return onContinue(doc.as<JsonObject>(), msg, relay);
 }
 
 /**
@@ -329,35 +226,13 @@ bool JsonProcessor::onContinue(const String& json, String& msg, bool relay)
 bool JsonProcessor::onContinue(JsonObject root, String& msg, bool relay)
 {
 	RequestParameters params;
-	JsonProcessor::parseRequestParams(root, params);
-	app.rgbwwctrl.continueAnimation(params.channels);
+	parseRequestParams(root, params);
+	runContinue(params);
 
 	if(relay)
 		app.onCommandRelay(F("continue"), root);
 
 	return true;
-}
-
-/**
- * @brief Handles the "blink" command in the JSON payload.
- * 
- * This function deserializes the JSON data into a StaticJsonDocument,
- * and then calls the overloaded onBlink function with the deserialized
- * JsonObject, message string, and relay flag.
- * 
- * @param json The JSON data to process.
- * @param msg The output message string.
- * @param relay The relay flag.
- * @return True if the blink command was processed successfully, false otherwise.
- */
-bool JsonProcessor::onBlink(const String& json, String& msg, bool relay)
-{
-	DynamicJsonDocument doc(256);
-	if(!Json::deserialize(doc, json)) {
-		msg = F("malformed json");
-		return false;
-	}
-	return onBlink(doc.as<JsonObject>(), msg, relay);
 }
 
 /**
@@ -377,35 +252,13 @@ bool JsonProcessor::onBlink(JsonObject root, String& msg, bool relay)
 	RequestParameters params;
 	params.ramp.value = 500; //default
 
-	JsonProcessor::parseRequestParams(root, params);
-
-	app.rgbwwctrl.blink(params.channels, params.ramp.value, params.queue, params.requeue, params.name);
+	parseRequestParams(root, params);
+	runBlink(params);
 
 	if(relay)
 		app.onCommandRelay(F("blink"), root);
 
 	return true;
-}
-
-/**
- * @brief Toggles the RGBWW control and sends a command relay if specified.
- *
- * This function deserializes the JSON data and calls the overloaded onToggle function
- * with the deserialized JsonObject, message string, and relay flag.
- *
- * @param json The JSON data to be processed.
- * @param msg The output message string.
- * @param relay The relay flag.
- * @return True if the toggle operation is successful, false otherwise.
- */
-bool JsonProcessor::onToggle(const String& json, String& msg, bool relay)
-{
-	DynamicJsonDocument doc(256);
-	if(!Json::deserialize(doc, json)) {
-		msg = F("malformed json");
-		return false;
-	}
-	return onToggle(doc.as<JsonObject>(), msg, relay);
 }
 
 /**
@@ -418,7 +271,7 @@ bool JsonProcessor::onToggle(const String& json, String& msg, bool relay)
  */
 bool JsonProcessor::onToggle(JsonObject root, String& msg, bool relay)
 {
-	app.rgbwwctrl.toggle();
+	runToggle();
 
 	if(relay)
 		app.onCommandRelay(F("toggle"), root);
@@ -426,28 +279,42 @@ bool JsonProcessor::onToggle(JsonObject root, String& msg, bool relay)
 	return true;
 }
 
-/**
- * @brief Handles a single color command from a JSON object.
- * 
- * This function parses the request parameters from the JSON object and performs the corresponding action
- * based on the parameters. It supports both HSV and RAW color modes. If the parameters are valid and the
- * action is successfully executed, it returns true. Otherwise, it returns false and sets the errorMsg
- * parameter with an appropriate error message.
- * 
- * @param root The JSON object containing the command parameters.
- * @param errorMsg A reference to a string variable to store the error message, if any.
- * @return Returns true if the command is executed successfully, false otherwise.
- */
-bool JsonProcessor::onSingleColorCommand(JsonObject root, String& errorMsg)
+void JsonProcessor::runStop(const RequestParameters& params, String& msg)
 {
-	RequestParameters params;
-	parseRequestParams(root, params);
-	return runColorCommand(params, errorMsg);
+	app.rgbwwctrl.clearAnimationQueue(params.channels);
+	app.rgbwwctrl.skipAnimation(params.channels);
+	runDirect(params, msg);
+}
+
+void JsonProcessor::runSkip(const RequestParameters& params, String& msg)
+{
+	app.rgbwwctrl.skipAnimation(params.channels);
+	runDirect(params, msg);
+}
+
+void JsonProcessor::runPause(const RequestParameters& params, String& msg)
+{
+	app.rgbwwctrl.pauseAnimation(params.channels);
+	runDirect(params, msg);
+}
+
+void JsonProcessor::runContinue(const RequestParameters& params)
+{
+	app.rgbwwctrl.continueAnimation(params.channels);
+}
+
+void JsonProcessor::runBlink(const RequestParameters& params)
+{
+	app.rgbwwctrl.blink(params.channels, params.ramp.value, params.queue, params.requeue, params.name);
+}
+
+void JsonProcessor::runToggle()
+{
+	app.rgbwwctrl.toggle();
 }
 
 /**
- * @brief Shared post-parse execution core for a single color command, used by both the
- * JsonObject-backed onSingleColorCommand() and the ConfigDB-backed onColor() overload below.
+ * @brief Shared post-parse execution core for a single color command.
  */
 bool JsonProcessor::runColorCommand(RequestParameters& params, String& errorMsg)
 {
@@ -492,55 +359,6 @@ bool JsonProcessor::runColorCommand(RequestParameters& params, String& errorMsg)
 	return queueOk;
 }
 
-/**
- * @brief ConfigDB-backed counterpart of onColor()/onSingleColorCommand(). No "cmds" batch array
- * support (command-request-fields has no such member) - single command only.
- *
- * @param root The already-imported command-request-fields accessor.
- * @param msg A reference to a string variable to store the error message, if any.
- * @param relay A boolean indicating whether to relay the command to other controllers.
- * @return Returns true if the command is executed successfully, false otherwise.
- */
-bool JsonProcessor::onColor(Jsonrpc::CommandRequestFieldsUpdater root, String& msg, bool relay)
-{
-	RequestParameters params;
-	parseRequestParams(root, params);
-	const bool result = runColorCommand(params, msg);
-
-	if(relay) {
-		// TODO(inbound-json-migration): relay still needs a JsonObject (Application::onCommandRelay()/
-		// AppMqttClient::publishCommand() aren't migrated yet). This is a no-op unless multi-controller
-		// command-sync is enabled (AppConfig::Sync::getCmdMasterEnabled()); when it is, this currently
-		// relays an empty command rather than the real one - tracked as follow-up work for Phase B.
-		StaticJsonDocument<16> doc;
-		app.onCommandRelay(F("color"), doc.as<JsonObject>());
-	}
-
-	return result;
-}
-
-/**
- * @brief Handles a direct JSON command.
- *
- * This function processes a direct JSON command and performs the corresponding action based on the provided parameters.
- * 
- * This function deserializes the given JSON string into a JSON document and calls the overloaded
- * `onDirect` function with the deserialized JSON object.
- *
- * @param json The JSON string to be processed.
- * @param msg Output parameter to store any error message.
- * @param relay Flag indicating whether to relay the message.
- * @return True if the processing is successful, false otherwise.
- */
-bool JsonProcessor::onDirect(const String& json, String& msg, bool relay)
-{
-	DynamicJsonDocument doc(256);
-	if(!Json::deserialize(doc, json)) {
-		msg = F("malformed json");
-		return false;
-	}
-	return onDirect(doc.as<JsonObject>(), msg, relay);
-}
 
 /**
  * @brief Handles a direct JSON command.
@@ -555,8 +373,17 @@ bool JsonProcessor::onDirect(const String& json, String& msg, bool relay)
 bool JsonProcessor::onDirect(JsonObject root, String& msg, bool relay)
 {
 	RequestParameters params;
-	JsonProcessor::parseRequestParams(root, params);
+	parseRequestParams(root, params);
+	runDirect(params, msg);
 
+	if(relay)
+		app.onCommandRelay(F("direct"), root);
+
+	return true;
+}
+
+void JsonProcessor::runDirect(const RequestParameters& params, String& msg)
+{
 	if(params.mode == RequestParameters::Mode::Hsv) {
 		app.rgbwwctrl.colorDirectHSV(params.hsv);
 	} else if(params.mode == RequestParameters::Mode::Raw) {
@@ -564,11 +391,6 @@ bool JsonProcessor::onDirect(JsonObject root, String& msg, bool relay)
 	} else {
 		msg = F("No color object!");
 	}
-
-	if(relay)
-		app.onCommandRelay(F("direct"), root);
-
-	return true;
 }
 
 /**
@@ -679,18 +501,15 @@ void JsonProcessor::parseRequestParams(JsonObject root, RequestParameters& param
 }
 
 /**
- * @brief ConfigDB-backed counterpart of parseRequestParams(JsonObject, ...).
+ * @brief Converts imported command-request fields (or a "cmds" item) to RequestParameters.
  *
  * The raw/hsv component fields are string-value typed in the schema (see
- * command-request-fields in params.cfgdb) specifically so they can carry
- * AbsOrRelValue's absolute/relative/percentage token forms; an empty/null
- * String means the field was absent (same meaning as JsonObject's isNull()).
- *
- * @param root The already-imported command-request-fields accessor.
- * @param params The RequestParameters object to be populated.
+ * command-request-item in params.cfgdb) so they can carry AbsOrRelValue's
+ * absolute/relative/percentage token forms; an empty String means the field was absent.
  */
-void JsonProcessor::parseRequestParams(Jsonrpc::CommandRequestFieldsUpdater root, RequestParameters& params)
+template <typename Fields> void parseCommandRequestFields(Fields root, JsonProcessor::RequestParameters& params)
 {
+	using RequestParameters = JsonProcessor::RequestParameters;
 	auto parseField = [](const String& value, Optional<AbsOrRelValue>& target,
 						  AbsOrRelValue::Type type = AbsOrRelValue::Type::Percent) {
 		if(value.length() > 0) {
@@ -821,6 +640,37 @@ void JsonProcessor::parseRequestParams(Jsonrpc::CommandRequestFieldsUpdater root
 			params.channels.add(CtrlChannel::ColdWhite);
 		}
 	}
+}
+
+bool JsonProcessor::parseRequest(Stream& body, RequestParameters& params, std::vector<RequestParameters>* batch,
+								 String& errorMsg)
+{
+	Jsonrpc::Root root(rpcCodec().db());
+	auto update = root.update();
+	if(!update) {
+		errorMsg = F("internal error");
+		return false;
+	}
+
+	auto fields = update.toCommandRequestFields();
+	auto status = fields.importFromStream(ConfigDB::Json::format, body);
+	if(!status) {
+		// Unknown keys were silently ignored by the ArduinoJson parser; keep accepting them
+		if(status.error != ConfigDB::Error::FormatError || status.code.formatError != ConfigDB::FormatError::NotInSchema) {
+			errorMsg = F("Invalid JSON: ") + status.toString();
+			return false;
+		}
+		debug_w(ANSI_COLOR_YELLOW "JsonProcessor::parseRequest: ignoring unknown field(s)" ANSI_COLOR_RESET);
+	}
+
+	parseCommandRequestFields(fields, params);
+	if(batch != nullptr) {
+		for(unsigned i = 0; i < fields.cmds.getItemCount(); ++i) {
+			batch->emplace_back();
+			parseCommandRequestFields(fields.cmds[i], batch->back());
+		}
+	}
+	return true;
 }
 
 /**
@@ -957,20 +807,15 @@ void JsonProcessor::addChannelStatesToCmd(JsonObject root, const RGBWWLed::Chann
 	}
 }
 
-bool JsonProcessor::onSetOn(const String& json, String& msg, bool relay)
-{
-	DynamicJsonDocument doc(512);
-	if(!Json::deserialize(doc, json)) {
-		msg = F("malformed json");
-		return false;
-	}
-	return onSetOn(doc.as<JsonObject>(), msg, relay);
-}
-
 bool JsonProcessor::onSetOn(JsonObject root, String& msg, bool relay) {
 	RequestParameters params;
 	parseRequestParams(root, params);
+	runSetOn(params);
+	return true;
+}
 
+void JsonProcessor::runSetOn(const RequestParameters& params)
+{
 	app.rgbwwctrl.setOn(
 		params.channels,
 		params.direction,
@@ -979,24 +824,17 @@ bool JsonProcessor::onSetOn(JsonObject root, String& msg, bool relay) {
 		params.requeue,
 		params.name
 	);
-	// Optionally relay or set msg
-	return true;
-}
-
-bool JsonProcessor::onSetOff(const String& json, String& msg, bool relay)
-{
-	DynamicJsonDocument doc(512);
-	if(!Json::deserialize(doc, json)) {
-		msg = F("malformed json");
-		return false;
-	}
-	return onSetOff(doc.as<JsonObject>(), msg, relay);
 }
 
 bool JsonProcessor::onSetOff(JsonObject root, String& msg, bool relay) {
 	RequestParameters params;
 	parseRequestParams(root, params);
+	runSetOff(params);
+	return true;
+}
 
+void JsonProcessor::runSetOff(RequestParameters& params)
+{
 	// If no color specified and mode is HSV, use current HSV but set v=0
 	bool hasColor = params.mode == RequestParameters::Mode::Hsv &&
 		(params.hsv.h.hasValue() || params.hsv.s.hasValue() || params.hsv.v.hasValue() || params.hsv.ct.hasValue());
@@ -1016,6 +854,4 @@ bool JsonProcessor::onSetOff(JsonObject root, String& msg, bool relay) {
 		params.requeue,
 		params.name
 	);
-	// Optionally relay or set msg
-	return true;
 }

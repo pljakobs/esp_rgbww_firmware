@@ -90,9 +90,8 @@
       },
       "additionalProperties": false
     },
-    "command-request-fields": {
+    "command-request-item": {
       "type": "object",
-      "$comment": "Inbound counterpart of command-fields (see CONFIGDB_JSON_INBOUND_PLAN.md Phase A) - kept as a separate schema member so the existing outbound command-fields/raw/hsv numeric typing (used for MQTT relay) is untouched.",
       "properties": {
         "cmd": { "$ref": "value-types/$defs/string-value" },
         "raw": { "$ref": "#/$defs/raw-input" },
@@ -106,6 +105,28 @@
         "channels": { "$ref": "#/$defs/channel-list" }
       },
       "additionalProperties": false
+    },
+    "command-request-fields": {
+      "type": "object",
+      "$comment": "Inbound counterpart of command-fields (see CONFIGDB_JSON_INBOUND_PLAN.md Phase A) - kept as a separate schema member so the existing outbound command-fields/raw/hsv numeric typing (used for MQTT relay) is untouched. Same properties as command-request-item plus the 'cmds' batch array.",
+      "properties": {
+        "cmd": { "$ref": "value-types/$defs/string-value" },
+        "raw": { "$ref": "#/$defs/raw-input" },
+        "hsv": { "$ref": "#/$defs/hsv-input" },
+        "t": { "$ref": "value-types/$defs/non-negative-integer" },
+        "s": { "$ref": "value-types/$defs/non-negative-integer" },
+        "r": { "$ref": "value-types/$defs/boolean-value" },
+        "d": { "type": "integer", "minimum": 0, "maximum": 1, "default": 1 },
+        "name": { "$ref": "value-types/$defs/string-value" },
+        "q": { "$ref": "value-types/$defs/string-value" },
+        "channels": { "$ref": "#/$defs/channel-list" },
+        "cmds": { "$ref": "#/$defs/command-request-list" }
+      },
+      "additionalProperties": false
+    },
+    "command-request-list": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/command-request-item" }
     },
     "connection-info": {
       "type": "object",
