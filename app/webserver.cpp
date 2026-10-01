@@ -779,7 +779,7 @@ void ApplicationWebserver::onFile(HttpRequest& request, HttpResponse& response)
 {
 	debug_i(ANSI_COLOR_BLUE "http onFile" ANSI_COLOR_RESET);
 	// LittleFS file serving buffers through lwIP — require more free heap than API calls.
-	if(!preflightRequest(request, response,true, {HttpMethod::GET, HttpMethod::HEAD}, 8000)) return;
+	if(!preflightRequest(request, response, {HttpMethod::GET, HttpMethod::HEAD}, 8000)) return;
 
 #ifdef ARCH_ESP8266
 	if(app.ota.isProccessing()) {
@@ -1020,7 +1020,7 @@ bool ApplicationWebserver::checkHeap(HttpResponse& response, uint32_t minHeap)
  * @param minHeap Optional minimum heap required (default 0 loops back to _minimumHeap)
  * @return true if request is valid and should proceed. false if response handled (e.g. error or options)
  */
-bool ApplicationWebserver::preflightRequest(HttpRequest& request, HttpResponse& response, bool canRedirect, std::initializer_list<HttpMethod> allowedMethods,  uint32_t minHeap)
+bool ApplicationWebserver::preflightRequest(HttpRequest& request, HttpResponse& response, std::initializer_list<HttpMethod> allowedMethods,  uint32_t minHeap)
 {
 	debug_i(ANSI_COLOR_BLUE "preflightRequest: %d %s" ANSI_COLOR_RESET, (int)request.method, request.uri.Path.c_str());
 	const HttpMethod reqMethod = request.method;
@@ -1029,40 +1029,6 @@ bool ApplicationWebserver::preflightRequest(HttpRequest& request, HttpResponse& 
     // 1. Heap Check
 	if (!checkHeap(response, minHeap)) {
     	setCorsHeaders(response);
-		/*
-		if (canRedirect) {
-			auto filename = request.uri.Path;
-			
-			int dotIndex = filename.lastIndexOf('.');
-			bool isJavaScript = false;
-
-			if (dotIndex != -1 && dotIndex < (int)filename.length() - 1) {
-				// Point directly into the existing string buffer instead of allocating a new String object
-				const char* extPtr = filename.c_str() + dotIndex + 1;
-				
-				// Handle case-insensitivity using strcasecmp_P to protect against .JS uppercase variants
-				if (strcasecmp_P(extPtr, PSTR("js")) == 0) {
-					isJavaScript = true;
-				}
-				
-				debug_i(ANSI_COLOR_BLUE "Request for %s with extension %s failed heap check" ANSI_COLOR_RESET, filename.c_str(), extPtr);
-			} else {
-				debug_i(ANSI_COLOR_BLUE "Request for %s (no extension) failed heap check" ANSI_COLOR_RESET, filename.c_str());
-			}
-
-			// Only redirect if it is NOT a JavaScript asset
-			if (!isJavaScript) {
-				response.code = HTTP_STATUS_TEMPORARY_REDIRECT;
-				
-				// Building location header
-				String Location = F("http://") + app.controllers->getNextCompatibleWebappController().toString() + request.uri.Path;
-				response.headers[HTTP_HEADER_LOCATION] = Location;
-				
-				debug_i(ANSI_COLOR_RED "Not enough heap free, redirecting request to %s. Free heap: " ANSI_COLOR_CYAN "%u" ANSI_COLOR_RED " bytes" ANSI_COLOR_RESET, Location.c_str(), app.getFreeHeapSize());
-				return false;
-			} 
-		} else {
-		*/
 		response.code = HTTP_STATUS_TOO_MANY_REQUESTS;
 			
 			// Smart backoff: scale based on how far we are below threshold
@@ -1086,7 +1052,6 @@ bool ApplicationWebserver::preflightRequest(HttpRequest& request, HttpResponse& 
 			response.setHeader(F("Retry-After"), retryAfterHeader);
 			debug_e(ANSI_COLOR_RED "Not enough heap free, rejecting request. Free heap: " ANSI_COLOR_CYAN "%u" ANSI_COLOR_RED " bytes" ANSI_COLOR_RESET, app.getFreeHeapSize());
 			return false;
-		//}
 	}
 
 	debug_i(ANSI_COLOR_BLUE "heap check passed, checking OPTIONS..." ANSI_COLOR_RESET);

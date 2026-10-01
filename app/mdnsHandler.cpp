@@ -35,24 +35,6 @@ extern Application app;
 // No global pointer needed — swarm state is managed via the
 // ledControllerSwarmService member of mdnsHandler directly.
 
-String LEDControllerSwarmService::getWebappVersion() {
-    #ifdef DEBUG_MDNS
-    debug_i(ANSI_COLOR_YELLOW "[mDNS] LEDControllerSwarmService" ANSI_COLOR_BLUE "Getting webapp version for mDNS TXT records" ANSI_COLOR_RESET);
-    #endif
-    if (_webVersion.length() > 0) {
-        #ifdef DEBUG_MDNS
-        debug_i(ANSI_COLOR_YELLOW "[mDNS] LEDControllerSwarmService" ANSI_COLOR_BLUE "Using cached webapp version: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, _webVersion.c_str());
-        #endif
-        return _webVersion;
-    } else {
-        AppConfig::Webapp webapp(*app.cfg);
-        _webVersion = webapp.getInstalledVersion();
-        #ifdef DEBUG_MDNS
-        debug_i(ANSI_COLOR_YELLOW "[mDNS] LEDControllerSwarmService" ANSI_COLOR_BLUE "Fetched webapp version from config: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, _webVersion.c_str());
-        #endif
-        return _webVersion;
-    }
-}
 mdnsHandler::mdnsHandler() {
     // Initialize with default values
     _currentMdnsTimerInterval = _mdnsTimerInterval;
@@ -340,10 +322,8 @@ bool mdnsHandler::processSwarmServiceResponse(mDNS::Message& message)
 #ifdef DEBUG_MDNS
             debug_i(ANSI_COLOR_BLUE "Hostname " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ", type: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, info.hostName, hostnameType.c_str());
 #endif
-            // todo: add webapVersion to controler database
-            String webappVersion = txt[F("webapp")];
             const Controllers::HostType hostType = Controllers::hostTypeFromString(hostnameType);
-            app.controllers->addOrUpdate(info.ID, info.hostName, info.ipAddr.toString(), webappVersion, info.ttl, hostType);
+            app.controllers->addOrUpdate(info.ID, info.hostName, info.ipAddr.toString(), info.ttl, hostType);
         }
         return true;
     } else {
@@ -394,7 +374,7 @@ bool mdnsHandler::processHostnameARecord(mDNS::Message& message, mDNS::Answer* a
 
     // Only process if we found the controller ID
     if (controllerId > 0) {
-        app.controllers->addOrUpdate(controllerId, hostname,"", ipAddress, ttl);
+        app.controllers->addOrUpdate(controllerId, hostname, ipAddress, ttl);
         return true;
     }
 
@@ -442,7 +422,6 @@ bool mdnsHandler::processHostnameResponse(mDNS::Message& message, const char* ho
             mDNS::Resource::TXT txt(*txt_answer);
             controllerId = txt["id"].toInt();
             controllerType = txt["type"];
-            const char* webappVersion = txt["webapp"].c_str();
 #ifdef DEBUG_MDNS
             debug_i(ANSI_COLOR_BLUE "Found controller ID: " ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE ", type: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, controllerId, controllerType.c_str());
 #endif
@@ -452,7 +431,7 @@ bool mdnsHandler::processHostnameResponse(mDNS::Message& message, const char* ho
                 if (hostType == Controllers::HOST_TYPE_UNKNOWN) {
                     hostType = Controllers::hostTypeFromString(controllerType);
                 }
-                app.controllers->addOrUpdate(controllerId, hostname, ipAddress, webappVersion, ttl, hostType);
+                app.controllers->addOrUpdate(controllerId, hostname, ipAddress, ttl, hostType);
                 return true;
             }
         }
@@ -834,15 +813,4 @@ void mdnsHandler::relinquishGroupLeadership(const char* groupId)
 #ifdef DEBUG_MDNS
     debug_i(ANSI_COLOR_BLUE "This controller is no longer leader for group: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, groupName);
 #endif
-}
-
-void mdnsHandler::setWebVersion(const String& v) {
-    ledControllerSwarmService.setWebVersion(v);
-    
-    // Trigger an announcement on the primary responder so network peers 
-    // update their cached TXT records immediately without service re-init.
-if (primaryResponder) {
-        primaryResponder->removeService(ledControllerAPIService);
-        primaryResponder->addService(ledControllerAPIService);
-    }
 }

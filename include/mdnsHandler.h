@@ -212,8 +212,6 @@ private:
  */
 class LEDControllerSwarmService : public mDNS::Service {
 public:
-    void setWebVersion(const String& webVersion) { _webVersion = webVersion; }
-    
     void setInstance(const String& instance) { _instance = instance; }
     void setLeader(bool isLeader)             { _isLeader = isLeader; }
 
@@ -229,16 +227,12 @@ public:
         txt.add(F("type=CONTROLLER"));
         txt.add(F("host_type=CONTROLLER"));
         txt.add(_isLeader ? F("isLeader=1") : F("isLeader=0"));
-        txt.add(F("webapp=") + getWebappVersion());
         debug_i("[mDNS] API Service TXT records: %s", txt.toString().c_str());
     }
 
 private:
-    String getWebappVersion();
-
     String _instance;
     bool _isLeader = false;
-    String _webVersion;
 };
 
 
@@ -348,15 +342,6 @@ public:
      * @param enable true to become leader, false to relinquish leadership
      */
     void checkGroupLeadership();
-
-    /**
-     * @brief Set the web version for the API service
-     * @param v The web version string
-     * 
-     * sets the web version for the API service, which is included in the mDNS TXT records.
-     * this is so that other controllers can find compatible sources for the webapp
-     */
-    void setWebVersion(const String& v);
 
 
 private:

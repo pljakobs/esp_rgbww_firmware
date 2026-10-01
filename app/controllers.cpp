@@ -97,9 +97,9 @@ Controllers::~Controllers() {
 }
 
 // Core methods
-void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char* ipAddress, const char* webAppVersion,  int ttl, HostType hostType) {
+void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char* ipAddress, int ttl, HostType hostType) {
     #ifdef DEBUG_MDNS
-        debug_i(ANSI_COLOR_BLUE "Controllers::addOrUpdate id=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE ", hostname=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ", ip=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ", webAppVersion=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ", ttl=" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, id, hostname, ipAddress, webAppVersion, ttl);
+        debug_i(ANSI_COLOR_BLUE "Controllers::addOrUpdate id=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE ", hostname=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ", ip=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ", ttl=" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, id, hostname, ipAddress, ttl);
     #endif
     if(hostname == nullptr || hostname[0] == '\0' || ipAddress == nullptr || ipAddress[0] == '\0') {
         debug_w(ANSI_COLOR_YELLOW "Empty hostname or IP address provided, skipping addOrUpdate" ANSI_COLOR_RESET);
@@ -115,14 +115,6 @@ void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char*
             visibleControllers[index].hostType = hostType;
         }
         visibleControllers[index].state = (ttl > 0) ? ONLINE : OFFLINE;
-        {
-            AppConfig::Webapp webapp(*app.cfg);
-            if(webapp.getInstalledVersion() != nullptr && strlen(webAppVersion) > 0 && strcmp(webAppVersion, webapp.getInstalledVersion().c_str()) == 0) {
-                visibleControllers[index].webAppCompatible = true;
-            } else {
-                visibleControllers[index].webAppCompatible = false;
-            }
-        }
     } else {
         // Add new visible controller
         VisibleController newController;
@@ -130,14 +122,6 @@ void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char*
         newController.ttl = ttl;
         newController.hostType = hostType;
         newController.state = (ttl > 0) ? ONLINE : OFFLINE;
-        {
-            AppConfig::Webapp webapp(*app.cfg);
-            if(webapp.getInstalledVersion() != nullptr && strlen(webAppVersion) > 0 && strcmp(webAppVersion, webapp.getInstalledVersion().c_str()) == 0) {
-                newController.webAppCompatible = true;
-            } else {
-                newController.webAppCompatible = false;
-            }
-        }
         visibleControllers.push_back(newController);
     }
 
@@ -187,8 +171,8 @@ void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char*
     }
 }
 
-void Controllers::addOrUpdate(unsigned int id, const String& hostname, const String& ipAddress, const String& webAppVersion, int ttl, HostType hostType) {
-    addOrUpdate(id, hostname.c_str(), ipAddress.c_str(), webAppVersion.c_str(), ttl, hostType);
+void Controllers::addOrUpdate(unsigned int id, const String& hostname, const String& ipAddress, int ttl, HostType hostType) {
+    addOrUpdate(id, hostname.c_str(), ipAddress.c_str(), ttl, hostType);
 }
 
 void Controllers::removeExpired(int elapsedSeconds) {
@@ -580,29 +564,3 @@ std::unique_ptr<IDataSourceStream> Controllers::createJsonStream(JsonFilter filt
 
     return std::make_unique<MemoryDataStream>(std::move(json));
 }
-
-IpAddress Controllers::getNextCompatibleWebappController() {
-
-    if (visibleControllers.empty()) {
-        return IpAddress(255, 255, 255, 255);
-    }
-
-    size_t numControllers = visibleControllers.size();
-    
-    // We loop at most 'numControllers' times to check everyone once
-    for (size_t i = 0; i < numControllers; ++i) {
-        // Calculate the next index to inspect, wrapping around to 0 if we hit the end
-        size_t currentIndex = (lastWebappControllerIndex + i) % numControllers;
-        const auto& controller = visibleControllers[currentIndex];
-
-        if (controller.webAppCompatible ) {
-            // Store the next starting position for the subsequent call
-            lastWebappControllerIndex = (currentIndex + 1) % numControllers;
-            debug_i( "Found compatible webapp controller with ID: %u, IP: %s" , controller.id, getIpAddress(controller.id));
-            return IpAddress(getIpAddress(controller.id));
-        }
-    }
-
-    return IpAddress(255, 255, 255, 255); // Return empty if no online, compatible controllers exist
-}
-    

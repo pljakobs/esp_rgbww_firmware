@@ -64,7 +64,6 @@ public:
         int ttl;
         HostType hostType = HOST_TYPE_UNKNOWN;
         ControllerState state;
-        bool webAppCompatible = false;
     };
 
     class Iterator {
@@ -87,15 +86,9 @@ public:
     ~Controllers();
 
     // Core methods
-    void addOrUpdate(unsigned int id, const char* hostname, const char* ipAddress, const char* webAppVersion, int ttl, HostType hostType = HOST_TYPE_UNKNOWN);
-    void addOrUpdate(unsigned int id, const String& hostname, const String& ipAddress, const String& webAppVersion, int ttl, HostType hostType = HOST_TYPE_UNKNOWN);
+    void addOrUpdate(unsigned int id, const char* hostname, const char* ipAddress, int ttl, HostType hostType = HOST_TYPE_UNKNOWN);
+    void addOrUpdate(unsigned int id, const String& hostname, const String& ipAddress, int ttl, HostType hostType = HOST_TYPE_UNKNOWN);
     void removeExpired(int elapsedSeconds);
-    void clearWebappCompatibility() {
-        for (auto& controller : visibleControllers) {
-            controller.webAppCompatible = false;
-        }
-    }
-    IpAddress getNextCompatibleWebappController();
 
     static HostType hostTypeFromString(const String& type);
     static const char* hostTypeToString(HostType type);
@@ -139,7 +132,6 @@ private:
     static const size_t INVALID_INDEX = SIZE_MAX;
     
     std::vector<VisibleController> visibleControllers;
-    uint8_t lastWebappControllerIndex=0;
     
     // Helper methods
     size_t findVisibleControllerIndex(unsigned int id);
