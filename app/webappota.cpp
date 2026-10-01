@@ -127,7 +127,7 @@ String WebappOta::extractBranch(const String& firmwareVersion)
 
 bool WebappOta::wasInterrupted() const
 {
-    AppConfig::Root::Webapp webapp(*app.cfg);
+    AppConfig::Webapp webapp(*app.cfg);
     return webapp.getInProgress();
 }
 
@@ -185,7 +185,7 @@ void WebappOta::checkForUpdate(bool ignoreEnabled)
         return;
     }
 
-    AppConfig::Root::Webapp webapp(*app.cfg);
+    AppConfig::Webapp webapp(*app.cfg);
     if(!ignoreEnabled && !webapp.getEnabled()) {
         debug_i(ANSI_COLOR_BLUE "WebappOta::checkForUpdate - disabled in config" ANSI_COLOR_RESET);
         return;
@@ -228,7 +228,7 @@ void WebappOta::queryApi(const String& branch, const String& firmwareVersion, co
 {
     setState(State::QUERYING_API);
     broadcastStatus();
-    _files.clear();
+    _pendingFileIndices.clear();
     _fileIndex = 0;
 
     String url = apiBaseUrl + F("/webapp/latest?branch=") + branch
@@ -283,16 +283,23 @@ int WebappOta::onApiResponse(HttpConnection& client, bool successful)
     | object, then read through generated accessors.
     */
     MemoryDataStream input(std::move(body));
-    AppConfig::Root config(*app.cfg);
-    auto update = config.update();
-    auto current = update.webapp.current;
-    ConfigDB::Status importStatus = current.importFromStream(ConfigDB::Json::format, input);
+    ConfigDB::Status importStatus;
+    {
+        AppConfig::Webapp webapp(*app.cfg);
+        if(auto update = webapp.update()) {
+            importStatus = update.current.importFromStream(ConfigDB::Json::format, input);
+        } else {
+            importStatus = ConfigDB::Status{ConfigDB::Error::UpdateConflict};
+        }
+    }
     if(!importStatus) {
         debug_e(ANSI_COLOR_RED "WebappOta::onApiResponse - ConfigDB import error: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED "" ANSI_COLOR_RESET, importStatus.toString().c_str());
         failAttempt(kStatusApiError);
         return 0;
     }
 
+    AppConfig::Webapp webapp(*app.cfg);
+    auto current = webapp.current;
     _pendingVersion = current.getVersion();
     if(_pendingVersion.length() == 0) {
         debug_e(ANSI_COLOR_RED "WebappOta::onApiResponse - missing 'version' field" ANSI_COLOR_RESET);
@@ -301,14 +308,11 @@ int WebappOta::onApiResponse(HttpConnection& client, bool successful)
     }
 
     // Compare against installed version
-    {
-        AppConfig::Root::Webapp webapp(*app.cfg);
-        if(webapp.getInstalledVersion() == _pendingVersion) {
-            debug_i(ANSI_COLOR_BLUE "WebappOta::onApiResponse - already up to date (" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ")" ANSI_COLOR_RESET, _pendingVersion.c_str());
-            setState(State::IDLE);
-            saveState(_pendingVersion, webapp.getInstalledMd5(), kStatusNoUpdate);
-            return 0;
-        }
+    if(webapp.getInstalledVersion() == _pendingVersion) {
+        debug_i(ANSI_COLOR_BLUE "WebappOta::onApiResponse - already up to date (" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ")" ANSI_COLOR_RESET, _pendingVersion.c_str());
+        setState(State::IDLE);
+        saveState(_pendingVersion, webapp.getInstalledMd5(), kStatusNoUpdate);
+        return 0;
     }
 
     // Populate file list
@@ -318,8 +322,7 @@ int WebappOta::onApiResponse(HttpConnection& client, bool successful)
         return 0;
     }
 
-    String base = current.getBasepath();
-    if(base.length() == 0) {
+    if(current.getBasepath().length() == 0) {
         debug_e(ANSI_COLOR_RED "WebappOta::onApiResponse - missing basepath in response" ANSI_COLOR_RESET);
         failAttempt(kStatusApiError);
         return 0;
@@ -327,19 +330,11 @@ int WebappOta::onApiResponse(HttpConnection& client, bool successful)
 
     for(unsigned i = 0; i < current.files.getItemCount(); ++i) {
         auto file = current.files[i];
-        String filename = file.getFilename();
-        String md5 = file.getMd5();
-        if(filename.length() == 0 || md5.length() == 0) {
+        if(file.getFilename().length() == 0 || file.getMd5().length() == 0) {
             debug_e(ANSI_COLOR_RED "WebappOta::onApiResponse - file entry missing filename/md5, skipping version" ANSI_COLOR_RESET);
             failAttempt(kStatusApiError);
             return 0;
         }
-        FileEntry entry;
-        entry.path        = filename;
-        entry.expectedMd5 = md5;
-        entry.url         = base + filename;
-        entry.size        = file.getSize();
-        _files.push_back(entry);
     }
 
     // Optional size hints from the API: a top-level "total_size" and/or a per-file
@@ -348,32 +343,32 @@ int WebappOta::onApiResponse(HttpConnection& client, bool successful)
     // check is skipped (backward compatible).
     size_t bundleTotalSize = current.getTotalSize();
     if(bundleTotalSize == 0) {
-        for(const auto& f : _files) {
-            bundleTotalSize += f.size;
+        for(unsigned i = 0; i < current.files.getItemCount(); ++i) {
+            bundleTotalSize += current.files[i].getSize();
         }
     }
 
-    debug_i(ANSI_COLOR_BLUE "WebappOta::onApiResponse - will download " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " files for version " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET,
-            (int)_files.size(), _pendingVersion.c_str());
-
-    _totalFiles = (unsigned)_files.size();
+    _totalFiles = current.files.getItemCount();
+    debug_i(ANSI_COLOR_BLUE "WebappOta::onApiResponse - will download " ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE " files for version " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET,
+            _totalFiles, _pendingVersion.c_str());
 
     // Resume support: if staging already has a correctly-verified file from a
-    // previous (interrupted) download attempt, skip re-downloading it.
-    {
-        std::vector<FileEntry> pending;
-        for(auto& f : _files) {
-            String sp = stagingPath(f.path);
-            if(fileExist(sp) && verifyFileMd5(sp, f.expectedMd5)) {
-                debug_i(ANSI_COLOR_BLUE "WebappOta::onApiResponse - resume: skipping already-verified " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, f.path.c_str());
-            } else {
-                pending.push_back(std::move(f));
-            }
+    // previous (interrupted) download attempt, skip re-downloading it. Only the
+    // index is kept - the file's own data stays in ConfigDB.
+    _pendingFileIndices.clear();
+    _pendingFileIndices.reserve(_totalFiles);
+    for(unsigned i = 0; i < current.files.getItemCount(); ++i) {
+        auto file = current.files[i];
+        String filename = file.getFilename();
+        String sp = stagingPath(filename);
+        if(fileExist(sp) && verifyFileMd5(sp, file.getMd5())) {
+            debug_i(ANSI_COLOR_BLUE "WebappOta::onApiResponse - resume: skipping already-verified " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, filename.c_str());
+        } else {
+            _pendingFileIndices.push_back((uint16_t)i);
         }
-        _files = std::move(pending);
     }
 
-    if(_files.empty()) {
+    if(_pendingFileIndices.empty()) {
         // All files already staged and verified — go straight to activation.
         debug_i(ANSI_COLOR_BLUE "WebappOta::onApiResponse - all files already staged, activating" ANSI_COLOR_RESET);
         setState(State::ACTIVATING);
@@ -385,7 +380,7 @@ int WebappOta::onApiResponse(HttpConnection& client, bool successful)
     }
 
     debug_i(ANSI_COLOR_BLUE "WebappOta::onApiResponse - " ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE " files to download (" ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE " already staged)" ANSI_COLOR_RESET,
-            (unsigned)_files.size(), _totalFiles - (unsigned)_files.size());
+            (unsigned)_pendingFileIndices.size(), _totalFiles - (unsigned)_pendingFileIndices.size());
 
     // Verify the whole bundle can fit before we purge the currently-active
     // webapp.  We compare against the total volume size (not free space) because
@@ -408,11 +403,8 @@ int WebappOta::onApiResponse(HttpConnection& client, bool successful)
     }
 
     // Mark download as in-progress in persistent config so a reboot can resume.
-    {
-        AppConfig::Root root(*app.cfg);
-        if(auto update = root.update()) {
-            update.webapp.setInProgress(true);
-        }
+    if(auto update = webapp.update()) {
+        update.setInProgress(true);
     }
 
     // (b) A different version is available: free the old webapp assets NOW so the
@@ -439,7 +431,7 @@ int WebappOta::onApiResponse(HttpConnection& client, bool successful)
 
 void WebappOta::startNextDownload()
 {
-    if(_fileIndex >= (unsigned)_files.size()) {
+    if(_fileIndex >= (unsigned)_pendingFileIndices.size()) {
         // All files downloaded; move to activation
         setState(State::ACTIVATING);
         broadcastStatus();
@@ -463,8 +455,11 @@ void WebappOta::startNextDownload()
         return;
     }
 
-    const FileEntry& entry = _files[_fileIndex];
-    String destPath = stagingPath(entry.path);
+    AppConfig::Webapp webapp(*app.cfg);
+    auto current = webapp.current;
+    auto file = current.files[_pendingFileIndices[_fileIndex]];
+    String filename = file.getFilename();
+    String destPath = stagingPath(filename);
 
     if(!ensureParentDir(destPath)) {
         debug_e(ANSI_COLOR_RED "WebappOta::startNextDownload - makedirs failed for " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED "" ANSI_COLOR_RESET, destPath.c_str());
@@ -472,11 +467,12 @@ void WebappOta::startNextDownload()
         return;
     }
 
+    String url = current.getBasepath() + filename;
     debug_i(ANSI_COLOR_BLUE "WebappOta::startNextDownload - [" ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE "/" ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE "] " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " → " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET,
-            _fileIndex + 1, (unsigned)_files.size(), entry.url.c_str(), destPath.c_str());
+            _fileIndex + 1, (unsigned)_pendingFileIndices.size(), url.c_str(), destPath.c_str());
     broadcastStatus();
 
-    if(!_httpClient.downloadFile(entry.url, destPath,
+    if(!_httpClient.downloadFile(url, destPath,
             RequestCompletedDelegate(&WebappOta::onFileDownloaded, this))) {
         debug_e(ANSI_COLOR_RED "WebappOta::startNextDownload - failed to queue download" ANSI_COLOR_RESET);
         failAttempt(kStatusDownloadError);
@@ -489,8 +485,9 @@ int WebappOta::onFileDownloaded(HttpConnection& client, bool successful)
     int code = response ? (int)response->code : 0;
 
     if(!successful || (code != 200 && code != 0)) {
-        const FileEntry& entry = _files[_fileIndex];
-        String destPath = stagingPath(entry.path);
+        AppConfig::Webapp webapp(*app.cfg);
+        String filename = webapp.current.files[_pendingFileIndices[_fileIndex]].getFilename();
+        String destPath = stagingPath(filename);
         debug_e(ANSI_COLOR_RED "WebappOta::onFileDownloaded - HTTP " ANSI_COLOR_CYAN "%d" ANSI_COLOR_RED " for " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED "" ANSI_COLOR_RESET, code, destPath.c_str());
         failAttempt(kStatusDownloadError);
         return 0;
@@ -510,17 +507,18 @@ int WebappOta::onFileDownloaded(HttpConnection& client, bool successful)
 
 void WebappOta::verifyAndContinue()
 {
-    const FileEntry& entry = _files[_fileIndex];
-    String destPath = stagingPath(entry.path);
+    AppConfig::Webapp webapp(*app.cfg);
+    auto file = webapp.current.files[_pendingFileIndices[_fileIndex]];
+    String destPath = stagingPath(file.getFilename());
 
-    if(!verifyFileMd5(destPath, entry.expectedMd5)) {
+    if(!verifyFileMd5(destPath, file.getMd5())) {
         debug_e(ANSI_COLOR_RED "WebappOta::verifyAndContinue - MD5 mismatch for " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED "" ANSI_COLOR_RESET, destPath.c_str());
         failAttempt(kStatusMd5Error);
         return;
     }
 
     debug_i(ANSI_COLOR_BLUE "WebappOta::verifyAndContinue - [" ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE "/" ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE "] OK: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET,
-            _fileIndex + 1, (unsigned)_files.size(), destPath.c_str());
+            _fileIndex + 1, (unsigned)_pendingFileIndices.size(), destPath.c_str());
 
     ++_fileIndex;
     broadcastStatus();
@@ -749,10 +747,11 @@ bool WebappOta::activateStaging()
     // Cleanup empty staging directories
     cleanupStaging();
 
-    // Use the last file's MD5 as the overall bundle fingerprint for now
+    // Use the last downloaded file's MD5 as the overall bundle fingerprint for now
     String bundleMd5;
-    if(_files.size() > 0) {
-        bundleMd5 = _files[_files.size() - 1].expectedMd5;
+    if(!_pendingFileIndices.empty()) {
+        AppConfig::Webapp webapp(*app.cfg);
+        bundleMd5 = webapp.current.files[_pendingFileIndices.back()].getMd5();
     }
 
     setState(State::IDLE);
@@ -785,20 +784,20 @@ void WebappOta::saveState(const String& version, const String& md5, const char* 
         status = "";
     }
 
-    AppConfig::Root root(*app.cfg);
-    if(auto update = root.update()) {
+    AppConfig::Webapp webapp(*app.cfg);
+    if(auto update = webapp.update()) {
         if(version.length() > 0) {
-            update.webapp.setInstalledVersion(version);
+            update.setInstalledVersion(version);
         }
         if(md5.length() > 0) {
-            update.webapp.setInstalledMd5(md5);
+            update.setInstalledMd5(md5);
         }
-        update.webapp.setLastCheckStatus(status);
+        update.setLastCheckStatus(status);
         // Clear in_progress whenever we reach a terminal state.
         // It is set to true by checkForUpdate() when a download begins.
                     if(strcmp(status, kStatusOk) == 0 || strcmp(status, kStatusNoUpdate) == 0 || strcmp(status, kStatusApiError) == 0 ||
                             strcmp(status, kStatusDownloadError) == 0 || strcmp(status, kStatusMd5Error) == 0 || strcmp(status, kStatusActivationError) == 0) {
-            update.webapp.setInProgress(false);
+            update.setInProgress(false);
         }
     }
     debug_d("WebappOta::saveState - version=%s md5=%s status=%s",
@@ -896,21 +895,22 @@ void WebappOta::fillStatusJson(JsonObject& obj) const
     };
     obj[F("state")] = stateNames[static_cast<int>(_state)];
     // "file" = number of files fully processed (skipped + downloaded so far)
-    unsigned done = (_totalFiles > (unsigned)_files.size())
-                    ? _totalFiles - (unsigned)_files.size()
+    unsigned done = (_totalFiles > (unsigned)_pendingFileIndices.size())
+                    ? _totalFiles - (unsigned)_pendingFileIndices.size()
                     : 0;
     obj[F("file")]  = (int)(done + _fileIndex);
-    obj[F("total")] = (int)(_totalFiles > 0 ? _totalFiles : _files.size());
+    obj[F("total")] = (int)(_totalFiles > 0 ? _totalFiles : _pendingFileIndices.size());
 
-    if(_state == State::DOWNLOADING && _fileIndex < (unsigned)_files.size()) {
-        obj[F("file_path")] = _files[_fileIndex].path;
+    if(_state == State::DOWNLOADING && _fileIndex < (unsigned)_pendingFileIndices.size()) {
+        AppConfig::Webapp webapp(*app.cfg);
+        obj[F("file_path")] = webapp.current.files[_pendingFileIndices[_fileIndex]].getFilename();
     }
     if(_pendingVersion.length() > 0) {
         obj[F("version")] = _pendingVersion;
     }
 
     // Read persisted fields from ConfigDB
-    AppConfig::Root::Webapp webapp(*app.cfg);
+    AppConfig::Webapp webapp(*app.cfg);
     obj[F("last_status")] = webapp.getLastCheckStatus();
     obj[F("in_progress")] = webapp.getInProgress();
 }

@@ -116,7 +116,7 @@ void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char*
         }
         visibleControllers[index].state = (ttl > 0) ? ONLINE : OFFLINE;
         {
-            AppConfig::Root::Webapp webapp(*app.cfg);
+            AppConfig::Webapp webapp(*app.cfg);
             if(webapp.getInstalledVersion() != nullptr && strlen(webAppVersion) > 0 && strcmp(webAppVersion, webapp.getInstalledVersion().c_str()) == 0) {
                 visibleControllers[index].webAppCompatible = true;
             } else {
@@ -131,7 +131,7 @@ void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char*
         newController.hostType = hostType;
         newController.state = (ttl > 0) ? ONLINE : OFFLINE;
         {
-            AppConfig::Root::Webapp webapp(*app.cfg);
+            AppConfig::Webapp webapp(*app.cfg);
             if(webapp.getInstalledVersion() != nullptr && strlen(webAppVersion) > 0 && strcmp(webAppVersion, webapp.getInstalledVersion().c_str()) == 0) {
                 newController.webAppCompatible = true;
             } else {

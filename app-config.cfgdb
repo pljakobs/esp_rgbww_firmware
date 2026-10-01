@@ -63,6 +63,7 @@
     },
     "webapp":{
       "type":"object",
+      "store":true,
       "properties":{
         "enabled":{
           "type":"boolean",

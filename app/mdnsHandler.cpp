@@ -45,7 +45,7 @@ String LEDControllerSwarmService::getWebappVersion() {
         #endif
         return _webVersion;
     } else {
-        AppConfig::Root::Webapp webapp(*app.cfg);
+        AppConfig::Webapp webapp(*app.cfg);
         _webVersion = webapp.getInstalledVersion();
         #ifdef DEBUG_MDNS
         debug_i(ANSI_COLOR_YELLOW "[mDNS] LEDControllerSwarmService" ANSI_COLOR_BLUE "Fetched webapp version from config: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, _webVersion.c_str());

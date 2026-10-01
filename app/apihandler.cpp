@@ -329,7 +329,7 @@ bool Api::renderData(const String& method, const JsonObject& params, String& out
 			value.app.setGitVersion(fw_git_version);
 			value.app.setBuildType(BUILD_TYPE);
 			value.app.setGitDate(fw_git_date);
-			AppConfig::Root::Webapp webappCfg(*app.cfg);
+			AppConfig::Webapp webappCfg(*app.cfg);
 			String installedVer = webappCfg.getInstalledVersion();
 			value.app.setWebappVersion(installedVer.length() > 0 ? installedVer : String(WEBAPP_VERSION));
 			value.sming.setVersion(SMING_VERSION);

@@ -22,7 +22,7 @@
  * Flow:
  *   checkForUpdate()
  *     → queryApi()               (HTTP GET /api/webapp/latest?branch=…&firmware_version=…)
- *     → onApiResponse()          (parse JSON; compare versions; populate _files)
+ *     → onApiResponse()          (import response into ConfigDB; compare versions; compute pending indices)
  *     → startNextDownload()      (per file: makedirs, HttpClient::downloadFile)
  *     → onFileDownloaded()       (verify MD5; advance index or activate)
  *     → activateStaging()        (move files from staging/ to root, update ConfigDB)
@@ -31,7 +31,7 @@
  *   staging/<path>  — downloaded, verified files awaiting activation
  *   <path>          — active webapp files served by the webserver
  *
- * ConfigDB state (AppConfig::Root::Webapp):
+ * ConfigDB state (AppConfig::Webapp, own store "webapp.json"):
  *   enabled            — master switch; checkForUpdate() is a no-op when false
  *   api_base_url       — e.g. "https://lightinator.de/api"
  *   installed_version  — persisted after successful activation
@@ -97,13 +97,6 @@ private:
     // heap by concurrent browser polling on ESP8266.
     void setState(State newState);
 
-    struct FileEntry {
-        String path;        ///< relative path, e.g. "assets/index.js.gz"
-        String expectedMd5; ///< lowercase hex MD5 from API response
-        String url;         ///< absolute download URL
-        size_t size{0};     ///< file size in bytes from API (0 if not provided)
-    };
-
     // --- API query ---
     void queryApi(const String& branch, const String& firmwareVersion, const String& apiBaseUrl);
     int onApiResponse(HttpConnection& client, bool successful);
@@ -139,7 +132,10 @@ private:
     // --- State ---
     State _state{State::IDLE};
     String _pendingVersion;
-    std::vector<FileEntry> _files;
+    // Indices into the persisted AppConfig::Webapp::Current::files array
+    // (see app-config.cfgdb) that still need downloading - not a copy of the
+    // file list itself, which already lives in ConfigDB.
+    std::vector<uint16_t> _pendingFileIndices;
     unsigned _fileIndex{0};
     unsigned _totalFiles{0};  ///< total files in this version (including already-verified ones)
     bool _resumingInterrupted{false};
