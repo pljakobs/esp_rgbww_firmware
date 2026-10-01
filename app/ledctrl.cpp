@@ -309,8 +309,12 @@ void APPLedCtrl::publishToEventServer()
  */
 void APPLedCtrl::publishToMqtt()
 {
-	AppConfig::Network network(*app.cfg);
-	if(network.mqtt.getEnabled()) {
+	bool mqttEnabled;
+	{
+		AppConfig::Network network(*app.cfg);
+		mqttEnabled = network.mqtt.getEnabled();
+	}
+	if(mqttEnabled) {
 		if(colorMaster) {
 			switch(_mode) {
 			case ColorMode::Hsv:

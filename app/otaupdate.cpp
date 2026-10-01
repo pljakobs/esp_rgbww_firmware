@@ -171,11 +171,17 @@
 
 void ApplicationOTA::broadcastOtaStatus(int step, const String& message)
 {
-	DynamicJsonDocument doc(128);
-	JsonObject params = doc.to<JsonObject>();
-	params[F("status")] = step;
-	params[F("message")] = message;
-	app.wsBroadcast(F("ota_status"), params);
+	auto& codec = rpcCodec();
+	Jsonrpc::Root root(codec.db());
+	if(auto update = root.update()) {
+		auto status = update.toOtaStatus();
+		status.setStatus(step);
+		status.setMessage(message);
+	}
+	String jsonStr;
+	if(codec.render({0, JsonRPC::Message::Kind::notification, F("ota_status")}, root.asOtaStatus(), jsonStr)) {
+		app.wsBroadcast(jsonStr);
+	}
 }
 
 void ApplicationOTA::start(String romurl)

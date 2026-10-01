@@ -55,6 +55,17 @@
       },
       "additionalProperties": false
     },
+    "connect-result": {
+      "type": "object",
+      "properties": {
+        "status": { "$ref": "value-types/$defs/integer-value" },
+        "error": { "$ref": "value-types/$defs/string-value" },
+        "ip": { "$ref": "value-types/$defs/string-value" },
+        "dhcp": { "$ref": "value-types/$defs/string-value" },
+        "ssid": { "$ref": "value-types/$defs/string-value" }
+      },
+      "additionalProperties": false
+    },
     "component-error": {
       "type": "object",
       "properties": {

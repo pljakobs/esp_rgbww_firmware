@@ -52,6 +52,13 @@
             ]
         },
         {
+            "type": "object",
+            "title": "connect",
+            "oneOf": [
+                { "$ref": "params/$defs/connect-result" }
+            ]
+        },
+        {
             "$ref": "params/$defs/ha-state-color-temp",
             "title": "ha_state_color_temp"
         },

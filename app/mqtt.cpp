@@ -292,21 +292,23 @@ void AppMqttClient::publishCurrentRaw(const ChannelOutput& raw)
 
 	debug_d("ApplicationMQTTClient::publishCurrentRaw\n");
 
-	DynamicJsonDocument doc(200);
-	JsonObject root = doc.to<JsonObject>();
-	JsonObject rawJson = root.createNestedObject(F("raw"));
-	rawJson[F("r")] = raw.r;
-	rawJson[F("g")] = raw.g;
-	rawJson[F("b")] = raw.b;
-	rawJson[F("cw")] = raw.cw;
-	rawJson[F("ww")] = raw.ww;
+	auto& codec = rpcCodec();
+	Jsonrpc::Root root(codec.db());
+	if(auto update = root.update()) {
+		auto command = update.toCommandFields();
+		command.setCmd(F("solid"));
+		command.setT(0);
+		command.raw.setR(raw.r);
+		command.raw.setG(raw.g);
+		command.raw.setB(raw.b);
+		command.raw.setCw(raw.cw);
+		command.raw.setWw(raw.ww);
+	}
+	String jsonMsg;
+	if(codec.renderPayload(root.asCommandFields(), jsonMsg)) {
+		publish(buildTopic(F("color")), jsonMsg, true);
+	}
 
-	root[F("t")] = 0;
-    root[F("cmd")] = F("solid");
-
-	String jsonMsg = Json::serialize(root);
-	publish(buildTopic(F("color")), jsonMsg, true);
-	
 	// Also publish to Home Assistant
 	if (_haEnabled) {
 		publishHAState(raw, nullptr);
@@ -325,20 +327,22 @@ void AppMqttClient::publishCurrentHsv(const HSVCT& color)
 	int ct;
 	color.asRadian(h, s, v, ct);
 
-	DynamicJsonDocument doc(200);
-	JsonObject root = doc.to<JsonObject>();
-	JsonObject hsv = root.createNestedObject(F("hsv"));
-	hsv[F("h")] = h;
-	hsv[F("s")] = s;
-	hsv[F("v")] = v;
-	hsv[F("ct")] = ct;
+	auto& codec = rpcCodec();
+	Jsonrpc::Root root(codec.db());
+	if(auto update = root.update()) {
+		auto command = update.toCommandFields();
+		command.setCmd(F("solid"));
+		command.setT(0);
+		command.hsv.setH(h);
+		command.hsv.setS(s);
+		command.hsv.setV(v);
+		command.hsv.setCt(ct);
+	}
+	String jsonMsg;
+	if(codec.renderPayload(root.asCommandFields(), jsonMsg)) {
+		publish(buildTopic(F("color")), jsonMsg, true);
+	}
 
-	root[F("t")] = 0;
-    root[F("cmd")] = F("solid");
-
-	String jsonMsg = Json::serialize(root);
-	publish(buildTopic(F("color")), jsonMsg, true);
-	
 	// Also publish to Home Assistant
 	if (_haEnabled) {
 		publishHAState(app.rgbwwctrl.getCurrentOutput(), &color);
@@ -508,15 +512,17 @@ void AppMqttClient::publishTransitionFinished(const String& name, bool requeued)
 }
 
 void AppMqttClient::initHomeAssistant() {
-    AppConfig::Network network(*app.cfg);
-    _haEnabled = network.mqtt.homeassistant.getEnable();
-    debug_i(ANSI_COLOR_BLUE "intialize Home Assistant topics" ANSI_COLOR_RESET);
-    if (!_haEnabled) {
-        return;
+    {
+        AppConfig::Network network(*app.cfg);
+        _haEnabled = network.mqtt.homeassistant.getEnable();
+        debug_i(ANSI_COLOR_BLUE "intialize Home Assistant topics" ANSI_COLOR_RESET);
+        if (!_haEnabled) {
+            return;
+        }
+
+        _haDiscoveryPrefix = network.mqtt.homeassistant.getDiscoveryPrefix();
+        _haNodeId = network.mqtt.homeassistant.getNodeId();
     }
-    
-    _haDiscoveryPrefix = network.mqtt.homeassistant.getDiscoveryPrefix();
-    _haNodeId = network.mqtt.homeassistant.getNodeId();
     debug_i(ANSI_COLOR_BLUE "HA::discoveryPrefix: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET,_haDiscoveryPrefix.c_str());
 	debug_i(ANSI_COLOR_BLUE "HA::NodeId: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, _haNodeId.c_str());
     
@@ -554,10 +560,13 @@ void AppMqttClient::publishHomeAssistantConfig() {
     if (!_haEnabled || _haConfigPublished) {
         return;
     }
-    
-    AppConfig::General general(*app.cfg);
-    String deviceName = general.getDeviceName();
-    
+
+    String deviceName;
+    {
+        AppConfig::General general(*app.cfg);
+        deviceName = general.getDeviceName();
+    }
+
     // Clean device name for use in MQTT topics (trim spaces and replace with underscores)
     String cleanDeviceName = deviceName;
     cleanDeviceName.trim();
@@ -634,10 +643,13 @@ void AppMqttClient::publishHomeAssistantConfig() {
 
 void AppMqttClient::publishChannelConfig(const String& channelName) {
     if (!_haEnabled || !mqtt) return;
-    
-    AppConfig::General general(*app.cfg);
-    String deviceName = general.getDeviceName();
-    
+
+    String deviceName;
+    {
+        AppConfig::General general(*app.cfg);
+        deviceName = general.getDeviceName();
+    }
+
     // Topic: homeassistant/light/node_id/channel_name/config
     String configTopic = _haDiscoveryPrefix + F("/light/") + _haNodeId + F("/") + channelName + F("/config");
     

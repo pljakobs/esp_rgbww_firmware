@@ -1686,32 +1686,42 @@ void ApplicationWebserver::onConnect(HttpRequest& request, HttpResponse& respons
 			return;
 		}
 	} else {
-		auto stream = std::make_unique<JsonObjectStream>();
-		if(!stream) {
+		auto& codec = rpcCodec();
+		Jsonrpc::Root root(codec.db());
+		if(auto update = root.update()) {
+			auto result = update.toConnect().toConnectResult();
+			CONNECTION_STATUS status = app.network.get_con_status();
+			result.setStatus(int(status));
+			if(status == CONNECTION_STATUS::ERROR) {
+				result.setError(app.network.get_con_err_msg());
+			} else if(status == CONNECTION_STATUS::CONNECTED) {
+				// return connected
+				debug_i(ANSI_COLOR_BLUE "wifi connected, checking if dhcp enabled" ANSI_COLOR_RESET);
+				AppConfig::Network network(*app.cfg);
+
+				if(network.connection.getDhcp()) {
+					result.setIp(WifiStation.getIP().toString());
+				} else {
+					result.setIp(network.connection.getIp());
+				}
+				result.setDhcp(network.connection.getDhcp() ? F("True") : F("False"));
+				result.setSsid(WifiStation.getSSID());
+			}
+		}
+
+		String payload;
+		if(!codec.renderPayload(root.asConnect().asConnectResult(), payload)) {
 			sendApiCode(response, API_CODES::API_BAD_REQUEST, F("low memory"));
 			return;
 		}
-		JsonObject json = stream->getRoot();
 
-		CONNECTION_STATUS status = app.network.get_con_status();
-		json[F("status")] = int(status);
-		if(status == CONNECTION_STATUS::ERROR) {
-			json[F("error")] = app.network.get_con_err_msg();
-		} else if(status == CONNECTION_STATUS::CONNECTED) {
-			// return connected
-			debug_i(ANSI_COLOR_BLUE "wifi connected, checking if dhcp enabled" ANSI_COLOR_RESET);
-			AppConfig::Network network(*app.cfg);
-
-			if(network.connection.getDhcp()) {
-				json[F("ip")] = WifiStation.getIP().toString();
-			} else {
-				String ip = network.connection.getIp();
-				json[F("ip")] = ip;
-			}
-			json[F("dhcp")] = network.connection.getDhcp() ? F("True") : F("False");
-			json[F("ssid")] = WifiStation.getSSID();
+		if(!checkHeap(response)) {
+			return;
 		}
-		sendApiResponse(response, stream.release());
+		setCorsHeaders(response);
+		response.setHeader(F("accept"), F("GET, POST, OPTIONS"));
+		response.setContentType(MIME_JSON);
+		response.sendString(payload);
 	}
 }
 
@@ -1824,14 +1834,19 @@ void ApplicationWebserver::onUpdate(HttpRequest& request, HttpResponse& response
 		}
 		return;
 	}
-	auto stream = std::make_unique<JsonObjectStream>();
-	if(!stream) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("low memory"));
+	// Single int field: no ConfigDB schema/ArduinoJson needed, build it in place.
+	String payload;
+	payload += F("{\"status\":");
+	payload += int(app.ota.getStatus());
+	payload += '}';
+
+	if(!checkHeap(response)) {
 		return;
 	}
-	JsonObject json = stream->getRoot();
-	json[F("status")] = int(app.ota.getStatus());
-	sendApiResponse(response, stream.release());
+	setCorsHeaders(response);
+	response.setHeader(F("accept"), F("GET, POST, OPTIONS"));
+	response.setContentType(MIME_JSON);
+	response.sendString(payload);
 
 #endif
 }
@@ -1853,24 +1868,13 @@ void ApplicationWebserver::onPing(HttpRequest& request, HttpResponse& response)
 {
     if(!preflightRequest(request, response, {HttpMethod::GET})) return;
 
-    /*
 	if(!checkHeap(response)) {
 		return;
 	}
-	if(request.method != HttpMethod::GET) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not HTTP GET"));
-		return;
-	}
-    */
-	auto stream = std::make_unique<JsonObjectStream>();
-	if(!stream) {
-		response.code = HTTP_STATUS_BAD_REQUEST;
-		response.sendString(F("{\"error\":\"low memory\"}"));
-		return;
-	}
-	JsonObject json = stream->getRoot();
-	json[F("ping")] = "pong";
-	sendApiResponse(response, stream.release());
+	setCorsHeaders(response);
+	response.setHeader(F("accept"), F("GET, POST, OPTIONS"));
+	response.setContentType(MIME_JSON);
+	response.sendString(F("{\"ping\":\"pong\"}"));
 }
 
 void ApplicationWebserver::onStop(HttpRequest& request, HttpResponse& response)
