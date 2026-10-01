@@ -319,10 +319,70 @@ that coverage cascade, rather than porting 20 call sites one at a time.
 
 ---
 
-## Open questions / risks (carry into Phase A spike)
+## Phase A spike — resolved (2026-10-01)
 
-- **Stale-field leakage** (see Step 2) — must be resolved before any handler
-  migrates, not discovered after.
+Both open questions below were settled by reading the actual ConfigDB library
+source (`/opt/sming/Sming/Libraries/ConfigDB`), not by guessing or a
+throwaway test:
+
+- **Stale-field leakage: resolved.** `Union::setTag()`
+  (`src/include/ConfigDB/Union.h`) is documented and implemented as "set the
+  current tag and reset content to object default", and the generated
+  `to<Item>(tag)` template (same file) always calls `setTag()` before
+  returning the Updater:
+  ```cpp
+  template <typename Item> Item to(Tag tag) {
+      setTag(tag);
+      return Item(*parent, typeinfo().getObject(tag), dataRef + propinfo().offset);
+  }
+  ```
+  So every `update.toXxx()` call — the same idiom already used throughout the
+  outbound migration — resets that member's storage to schema defaults first.
+  **Rule going forward: inbound import call sites must use `.toXxx()`, never
+  `.asXxx()`** (the latter doesn't reset; it's for continuing to populate an
+  already-selected tag or read-only access).
+- **`AbsOrRelValue`/schema-type mismatch: resolved, with a design decision.**
+  `WriteStream::setProperty()` (`src/Json/WriteStream.cpp`) passes the raw
+  JSON token text straight to `Property::setJsonValue()`
+  (`src/Property.cpp`) with no JSON-element-type-vs-schema-type gate for
+  scalar properties; `Store::parseString()` (`src/Store.cpp`) for a
+  `PropertyType::String` property just interns whatever token text it was
+  given. A `string-value`-typed field therefore accepts a bare number, a
+  `+N`/`-N` relative token, or a `N%` percentage token equally — exactly what
+  `parseAbsOrRelValue()` needs.
+
+  **However:** the existing outbound `raw`/`hsv` defs (used by
+  `command-fields`, already relied on by `AppMqttClient::publishCommand()`/
+  `publishCurrentRaw()`/`publishCurrentHsv()`) are numeric-typed
+  (`raw-value`/`hue-value`/etc.), and changing them to `string-value` would
+  break those already-shipped outbound setter calls
+  (`raw.setR(raw.r)` with a numeric `raw.r`, etc.). Rather than retyping a
+  schema member outbound code already depends on, **added a separate,
+  inbound-only schema member**: `command-request-fields` (+ `raw-input`,
+  `raw-input-base`, `hsv-input`, `hsv-input-base`, `channel-list` in
+  [params.cfgdb](params.cfgdb)), exposed at the jsonrpc root as
+  `command_request` ([jsonrpc.cfgdb](jsonrpc.cfgdb)), generating
+  `update.toCommandRequestFields()` / `root.asCommandRequestFields()`
+  (single-level, same pattern as the existing `command` member — verified in
+  `out/ConfigDB/jsonrpc.h`). Its `raw`/`hsv` component getters
+  (`getR()`/`getH()`/etc., verified in `out/ConfigDB/params.h`) return
+  `String`, exactly matching what `parseAbsOrRelValue()` needs once it's
+  changed to take a `String`/generated-accessor input instead of a
+  `JsonVariantConst`. `t`/`s`/`d` stay `uint32_t`, `r` stays `bool`,
+  `cmd`/`name`/`q` stay `String`, `channels` is a plain string array
+  (`ChannelListUpdater`/`ContainedChannelList : StringArrayTemplate`) — all
+  confirmed from the generated headers, not assumed.
+
+  This schema addition has been added and the project builds clean on Host
+  with it (verified, not just written). The next step is migrating
+  `JsonProcessor::parseRequestParams()` itself to populate `RequestParameters`
+  from a `CommandRequestFieldsUpdater`/`ContainedCommandRequestFields`
+  instead of a `JsonObject` — not yet done.
+
+---
+
+## Open questions / risks (remaining)
+
 - **Error message fidelity** — `FormatError` → existing `errorMsg` string
   mapping needs to cover every message current callers rely on (frontend may
   pattern-match on specific error text).
@@ -332,3 +392,4 @@ that coverage cascade, rather than porting 20 call sites one at a time.
   schema in `.cfgdb` (would remove the last ArduinoJson dependency entirely,
   but is low value relative to effort since it's a third-party, not our own,
   contract).
+

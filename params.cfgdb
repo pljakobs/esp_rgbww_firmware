@@ -41,6 +41,72 @@
       },
       "additionalProperties": false
     },
+    "channel-list": {
+      "type": "array",
+      "items": { "$ref": "value-types/$defs/string-value" }
+    },
+    "hsv-input-base": {
+      "type": "object",
+      "$comment": "Inbound-only: each field is a raw token (absolute number, '+N'/'-N' relative, or 'N%'), kept as a string so ConfigDB's schema typing doesn't reject the non-numeric forms. See JsonProcessor::parseAbsOrRelValue, which does the actual interpretation after import.",
+      "properties": {
+        "h": { "$ref": "value-types/$defs/string-value" },
+        "s": { "$ref": "value-types/$defs/string-value" },
+        "v": { "$ref": "value-types/$defs/string-value" },
+        "ct": { "$ref": "value-types/$defs/string-value" }
+      },
+      "additionalProperties": false
+    },
+    "hsv-input": {
+      "type": "object",
+      "properties": {
+        "h": { "$ref": "value-types/$defs/string-value" },
+        "s": { "$ref": "value-types/$defs/string-value" },
+        "v": { "$ref": "value-types/$defs/string-value" },
+        "ct": { "$ref": "value-types/$defs/string-value" },
+        "from": { "$ref": "#/$defs/hsv-input-base" }
+      },
+      "additionalProperties": false
+    },
+    "raw-input-base": {
+      "type": "object",
+      "properties": {
+        "r": { "$ref": "value-types/$defs/string-value" },
+        "g": { "$ref": "value-types/$defs/string-value" },
+        "b": { "$ref": "value-types/$defs/string-value" },
+        "ww": { "$ref": "value-types/$defs/string-value" },
+        "cw": { "$ref": "value-types/$defs/string-value" }
+      },
+      "additionalProperties": false
+    },
+    "raw-input": {
+      "type": "object",
+      "properties": {
+        "r": { "$ref": "value-types/$defs/string-value" },
+        "g": { "$ref": "value-types/$defs/string-value" },
+        "b": { "$ref": "value-types/$defs/string-value" },
+        "ww": { "$ref": "value-types/$defs/string-value" },
+        "cw": { "$ref": "value-types/$defs/string-value" },
+        "from": { "$ref": "#/$defs/raw-input-base" }
+      },
+      "additionalProperties": false
+    },
+    "command-request-fields": {
+      "type": "object",
+      "$comment": "Inbound counterpart of command-fields (see CONFIGDB_JSON_INBOUND_PLAN.md Phase A) - kept as a separate schema member so the existing outbound command-fields/raw/hsv numeric typing (used for MQTT relay) is untouched.",
+      "properties": {
+        "cmd": { "$ref": "value-types/$defs/string-value" },
+        "raw": { "$ref": "#/$defs/raw-input" },
+        "hsv": { "$ref": "#/$defs/hsv-input" },
+        "t": { "$ref": "value-types/$defs/non-negative-integer" },
+        "s": { "$ref": "value-types/$defs/non-negative-integer" },
+        "r": { "$ref": "value-types/$defs/boolean-value" },
+        "d": { "$ref": "value-types/$defs/non-negative-integer" },
+        "name": { "$ref": "value-types/$defs/string-value" },
+        "q": { "$ref": "value-types/$defs/string-value" },
+        "channels": { "$ref": "#/$defs/channel-list" }
+      },
+      "additionalProperties": false
+    },
     "connection-info": {
       "type": "object",
       "properties": {

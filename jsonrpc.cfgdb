@@ -16,6 +16,10 @@
             "title": "command"
         },
         {
+            "$ref": "params/$defs/command-request-fields",
+            "title": "command_request"
+        },
+        {
             "type": "object",
             "title": "info",
             "oneOf": [
