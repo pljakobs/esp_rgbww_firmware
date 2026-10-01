@@ -27,6 +27,7 @@ This is a fork of [Patrick Jahns' original firmware](https://github.com/patrickj
 15. [Building from Source](#building-from-source)
 16. [Integration: FHEM](#integration-fhem)
 17. [Contributing](#contributing)
+18. [Firmware Architecture](FIRMWARE_ARCHITECTURE.md)
 
 ---
 
@@ -307,12 +308,16 @@ Returns device identity and runtime state.
 
 Also available via WebSocket JSON-RPC methods `info` and `getInfo`.
 
-**Query parameter:** `?v=2` — returns the extended v2 format (recommended).
+**Query parameters:** `?v=2` selects the v2 format (recommended). V2 is sparse by
+default: it returns relatively stable device, filesystem, connection and
+configuration state. Add `&sparse=0` to include volatile runtime and debug
+counters as well. The uppercase aliases `V` and `S` are also accepted.
 
-**v2 response:**
+**Full v2 response excerpt (`/info?v=2&sparse=0`):**
 
 ```json
 {
+  "version": 2,
   "device": {
     "deviceid": 3221339823,
     "soc": "esp8266",
@@ -325,13 +330,23 @@ Also available via WebSocket JSON-RPC methods `info` and `getInfo`.
     "webapp_version": "1.2.3"
   },
   "sming": { "version": "5.1.0" },
+  "filesystem": {
+    "total_bytes": 1000000,
+    "free_bytes": 750000,
+    "used_bytes": 250000
+  },
   "runtime": {
     "uptime": 3600,
     "heap_free": 24576,
-    "minimumfreeHeapRuntime": 20000,
-    "minimumfreeHeap10min": 21000,
+    "minfreeHeapRuntime": 20000,
+    "minfreeHeap10min": 21000,
     "heapLowErrUptime": 0,
     "heapLowErr10min": 0
+  },
+  "debug": {
+    "http_active_connections": 1,
+    "websocket_connections": 1,
+    "eventserver_clients": 0
   },
   "rgbww": { "version": "2.0.0", "queuesize": 10 },
   "connection": {
@@ -378,8 +393,6 @@ Send a color command. See [Color Command Reference](#color-command-reference).
 ### `GET /config`
 
 Returns the full configuration as JSON. Suitable for backup and programmatic inspection.
-
-Also available via WebSocket JSON-RPC methods `config` and `getConfig`.
 
 ### `POST /config`
 
@@ -526,9 +539,18 @@ Returns known peer controllers registered in the data store.
 
 ---
 
-### `GET /update`
+### `GET /update` / `POST /update`
 
-Triggers a firmware OTA check and update from the configured update URL.
+`GET /update` returns the current firmware OTA status as `{"status":<integer>}`.
+`POST /update` starts a firmware update from the supplied ROM URL:
+
+```json
+{ "rom": { "url": "https://example.invalid/firmware.bin" } }
+```
+
+Webapp updates use separate endpoints. `POST /webapp_check` requests an update
+check; `GET /webapp_check` and `GET /webapp_status` return the current webapp
+update status.
 
 ---
 
@@ -767,7 +789,6 @@ The socket serves two roles:
 | `info`, `getInfo` | Read runtime/device information |
 | `color`, `getColor` | Read current color state |
 | `config`, `getConfig` | Read full configuration |
-| `hosts`, `getHosts` | Read known peer controllers |
 | `networks`, `getNetworks` | Read current Wi-Fi scan results |
 | `scan_networks` | Trigger asynchronous Wi-Fi scan |
 | `system` | Execute system command (`restart`, `debug`, etc.) |
@@ -781,6 +802,9 @@ The socket serves two roles:
 | `continue` | Resume paused queue |
 | `blink` | Trigger blink |
 | `direct` | Apply direct color change |
+| `runtime_info_subscribe`, `subscribe_runtime_info` | Subscribe this connection to runtime-info updates |
+| `runtime_info_unsubscribe`, `unsubscribe_runtime_info` | Stop runtime-info updates |
+| `webapp_check` | Request a webapp update check |
 | `authenticate` | Complete the challenge-response auth handshake (see [Security](#security)) |
 
 The `keep_alive` message is reserved for connection maintenance and is handled automatically by the webapp.
@@ -799,6 +823,10 @@ The controller also pushes the same events as the TCP event server:
 { "type": "transition_finished", "data": { "name": "my-fade", "requeued": false } }
 { "type": "notification", "data": "new SSID, MyNetwork" }
 ```
+
+After a connection subscribes with `runtime_info_subscribe`, it also receives
+`runtime_info` notifications containing current runtime counters. The
+subscription is per WebSocket connection.
 
 The webapp uses this connection both for live status updates and for request/response API traffic when available.
 
