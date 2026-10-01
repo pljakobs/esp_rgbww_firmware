@@ -131,10 +131,23 @@ def parse_version_components(version_string):
 
     return (major, minor, patch, prerelease)
 
+def merge_firmware_history(data):
+    """Migrate legacy history entries into the public firmware release list."""
+    merged = {}
+    for entry in data.get("history", []) + data.get("firmware", []):
+        key = (
+            entry["soc"].strip().lower(),
+            entry["type"].strip().lower(),
+            entry["branch"].strip().lower(),
+            entry["fw_version"],
+        )
+        merged[key] = entry
+    data["firmware"] = list(merged.values())
+    data["history"] = []
+    return data
+
 def add_or_update_entry(data, soc, type_, branch, fw_version, url, comment=''):
-    # Make sure history array exists
-    if "history" not in data:
-        data["history"] = []
+    merge_firmware_history(data)
     
     # Debug: Print the entry we're trying to add
     print(f"Adding/updating: {soc}/{type_}/{branch}: {fw_version}")
@@ -146,8 +159,6 @@ def add_or_update_entry(data, soc, type_, branch, fw_version, url, comment=''):
     branch = branch.strip().lower()
     comment = comment or ''
     
-    # First check if entry already exists and update it if it does
-    entry_exists = False
     for i, entry in enumerate(data['firmware']):
         # Normalize existing entry data for comparison
         entry_soc = entry['soc'].strip().lower()
@@ -159,62 +170,28 @@ def add_or_update_entry(data, soc, type_, branch, fw_version, url, comment=''):
         
         if (entry_soc == soc and
             entry_type == type_ and
-            entry_branch == branch):
-            # Found matching entry
+            entry_branch == branch and
+            entry['fw_version'] == fw_version):
             print(f"Match found: {entry['soc']}/{entry['type']}/{entry['branch']}")
-            
-            # Keep original case for the entry we're updating
-            original_soc = entry['soc']
-            original_type = entry['type']
-            original_branch = entry['branch']
             existing_comment = entry.get('comment', '')
             updated_comment = comment if comment else existing_comment
-            
-            if entry['fw_version'] == fw_version:
-                # Update existing entry with same version - no history change
-                print(f"Same version, just updating URL")
-                data['firmware'][i] = {
-                    "soc": original_soc,
-                    "type": original_type,
-                    "branch": original_branch,
-                    "fw_version": fw_version,
-                    "version":fw_version,
-                    "comment": updated_comment,
-                    # Add version key for backward compatibility
-                    "files": {
-                        "rom": {
-                            "url": url
-                        }
+            print("Same version, updating URL and metadata")
+            data['firmware'][i] = {
+                "soc": entry['soc'],
+                "type": entry['type'],
+                "branch": entry['branch'],
+                "fw_version": fw_version,
+                "version": fw_version,
+                "comment": updated_comment,
+                "files": {
+                    "rom": {
+                        "url": url
                     }
                 }
-            else:
-                # Same combination but different version - move to history
-                print(f"Moving {original_soc}/{original_type}/{original_branch}: {entry['fw_version']} to history")
-                # Create a copy to avoid reference is=sues
-                history_entry = dict(entry)
-                data['history'].append(history_entry)
-                
-                # Replace with new version
-                data['firmware'][i] = {
-                    "soc": original_soc,
-                    "type": original_type,
-                    "branch": original_branch,
-                    "fw_version": fw_version,
-                    "version":fw_version,
-                    "comment": comment,
-                    "files": {
-                        "rom": {
-                            "url": url
-                        }
-                    }
-                }
-            entry_exists = True
+            }
             break
-    
-    # If no matching soc/type/branch entry exists, add it
-    if not entry_exists:
+    else:
         print(f"No existing entry found, adding new one")
-        # Add the new entry
         new_entry = {
             "soc": soc,
             "type": type_,
@@ -381,96 +358,114 @@ def extract_complete_version_number(version_string):
     return major * 1000000000 + minor * 1000000 + patch * 1000 + prerelease
 
 def cull_history(data, dry_run=False):
-    """Limit the number of historical versions based on branch limits"""
-    if "history" not in data or not data["history"]:
-        print("No history entries to cull")
+    """Limit directly discoverable firmware versions based on branch limits."""
+    available_data = {
+        "firmware": list(data.get("firmware", [])),
+        "history": list(data.get("history", [])),
+    }
+    merge_firmware_history(available_data)
+    if not available_data["firmware"]:
+        print("No firmware entries to cull")
         return data
     
-    # Group entries by soc+type+branch
     grouped_entries = {}
-    for entry in data["history"]:
+    for entry in available_data["firmware"]:
         key = (entry["soc"], entry["type"], entry["branch"])
         if key not in grouped_entries:
             grouped_entries[key] = []
         grouped_entries[key].append(entry)
     
     # Print summary of entries by type before culling
-    print("\nHistory entries before culling:")
+    print("\nFirmware entries before culling:")
     for (soc, type_, branch), entries in sorted(grouped_entries.items()):
         print(f"  {soc}/{type_}/{branch}: {len(entries)} entries")
-    print(f"  Total: {len(data['history'])} entries")
+    print(f"  Total: {len(available_data['firmware'])} entries")
     
     entries_to_remove = []
-# ...existing code...
+    
+    branch_versions = {}
+    for entry in available_data["firmware"]:
+        branch = entry["branch"]
+        branch_versions.setdefault(branch, set()).add(entry["fw_version"])
 
-# Place this function after all imports, before main()
-    
-    # Process each group
-    for (soc, type_, branch), entries in grouped_entries.items():
-        # Sort by version (descending)
-        sorted_entries = sorted(entries, 
-                               key=lambda e: extract_complete_version_number(e["fw_version"]), 
-                               reverse=True)
-        
-        # Get limit for this branch
+    for branch, versions in branch_versions.items():
+        sorted_versions = sorted(
+            versions,
+            key=extract_complete_version_number,
+            reverse=True,
+        )
         limit = get_version_limit(branch)
-        
-        # Keep only the top N entries
-        if len(sorted_entries) > limit:
-            entries_to_keep = sorted_entries[:limit]
-            to_remove = sorted_entries[limit:]
-            
-            print(f"For {soc}/{type_}/{branch}: keeping {limit} entries, removing {len(to_remove)} entries")
-            
-            # Add entries to remove list
+        removed_versions = set(sorted_versions[limit:])
+        if removed_versions:
+            to_remove = [
+                entry for entry in available_data["firmware"]
+                if entry["branch"] == branch and entry["fw_version"] in removed_versions
+            ]
+            print(
+                f"For {branch}: keeping {limit} versions, "
+                f"removing {len(removed_versions)} versions ({len(to_remove)} entries)"
+            )
             entries_to_remove.extend(to_remove)
-            
+
             if dry_run:
-                for entry in to_remove:
-                    print(f"Would remove: {entry['soc']}/{entry['type']}/{entry['branch']}: {entry['fw_version']}")
+                for version in sorted(removed_versions, key=extract_complete_version_number):
+                    print(f"Would remove: {branch}: {version}")
     
-    if not entries_to_remove:
+    if not entries_to_remove and not data.get("history"):
         print("No entries need to be culled")
         return data
-    
+
     if not dry_run:
-        # Remove entries from history
+        retained_entries = [
+            entry for entry in available_data["firmware"]
+            if entry not in entries_to_remove
+        ]
+        retained_directories = set()
+        for entry in retained_entries:
+            directory = extract_directory_from_url(entry['files']['rom']['url'])
+            version_dir = os.path.dirname(os.path.dirname(os.path.join('.', directory.lstrip('/'))))
+            if version_dir not in ('', '.'):
+                retained_directories.add(version_dir)
+
+        directories_to_remove = set()
         for entry in entries_to_remove:
-            # Delete files if they exist
             try:
                 url = entry['files']['rom']['url']
                 directory = extract_directory_from_url(url)
                 local_dir = os.path.join('.', directory.lstrip('/'))
-                
-                # Get version directory (one level up from SOC/type)
                 version_dir = os.path.dirname(os.path.dirname(local_dir))
-                
-                print(f"Deleting directory: {version_dir}")
-                if os.path.exists(version_dir):
-                    shutil.rmtree(version_dir)
-                else:
-                    print(f"Directory not found: {version_dir}")
+                if version_dir not in ('', '.') and version_dir not in retained_directories:
+                    directories_to_remove.add(version_dir)
             except Exception as e:
                 print(f"Error deleting directory: {str(e)}")
-        
-        # Update history array to exclude removed entries
-        data["history"] = [entry for entry in data["history"] 
-                         if entry not in entries_to_remove]
-    
+
+        for version_dir in directories_to_remove:
+            print(f"Deleting directory: {version_dir}")
+            if os.path.exists(version_dir):
+                shutil.rmtree(version_dir)
+            else:
+                print(f"Directory not found: {version_dir}")
+
+        data["firmware"] = retained_entries
+        data["history"] = []
+
     # Print summary of entries by type after culling
     if not dry_run or entries_to_remove:
         # Re-group entries after culling
         new_grouped_entries = {}
-        for entry in data["history"]:
+        result_entries = data["firmware"] if not dry_run else available_data["firmware"]
+        for entry in result_entries:
+            if dry_run and entry in entries_to_remove:
+                continue
             key = (entry["soc"], entry["type"], entry["branch"])
             if key not in new_grouped_entries:
                 new_grouped_entries[key] = []
             new_grouped_entries[key].append(entry)
         
-        print("\nHistory entries after culling:")
+        print("\nFirmware entries after culling:")
         for (soc, type_, branch), entries in sorted(new_grouped_entries.items()):
             print(f"  {soc}/{type_}/{branch}: {len(entries)} entries")
-        print(f"  Total: {len(data['history'])} entries")
+        print(f"  Total: {sum(len(entries) for entries in new_grouped_entries.values())} entries")
     
     return data
 
