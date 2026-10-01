@@ -28,6 +28,9 @@
 TelemetryClient::TelemetryClient() {
 	snprintf(_chipId, TELEMETRY_CHIPID_MAX_SIZE, "%u", system_get_chip_id());
 	mqtt = new MqttClient();
+	if(!mqtt) {
+		debug_e("Telemetry MQTT client allocation failed during init");
+	}
 	snprintf(_id, TELEMETRY_ID_MAX_SIZE, "rgbww_%s", _chipId);
 	_lastReconnectAttempt = 0;
 	_reconnectPending = false;
@@ -70,12 +73,27 @@ void TelemetryClient::stop() {
 	_isRunning = false;
 	// Replace the MqttClient instance so the next connect() gets a fresh TCP PCB.
 	// MqttClient::close() is inaccessible (protected base), so we recreate instead.
-	delete mqtt;
-	mqtt = new MqttClient();
+	auto* oldClient = mqtt;
+	mqtt = nullptr;
+	delete oldClient;
+	auto* newClient = new MqttClient();
+	if(!newClient) {
+		debug_e("Telemetry MQTT client allocation failed during stop/recreate");
+		return;
+	}
+	mqtt = newClient;
 }
 
 void TelemetryClient::connect(const char* telemetryURL, const char* telemetryUser, const char* telemetryPass) {
 	// Connect to public MQTT server (example: test.mosquitto.org)
+	if(!mqtt) {
+		auto* newClient = new MqttClient();
+		if(!newClient) {
+			debug_e("Telemetry MQTT client allocation failed before connect");
+			return;
+		}
+		mqtt = newClient;
+	}
 
 	if(strlen(telemetryURL)>0 && strlen(telemetryUser)>0 && strlen(telemetryPass)>0){
 		// Build URL: mqtt://user:pass@server:port
