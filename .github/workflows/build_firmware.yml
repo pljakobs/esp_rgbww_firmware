@@ -8,9 +8,9 @@ env:
 
 on:
   push:
-    branches: [stable, testing, develop, experimental, experimental-externalUI]
+    branches: [stable, testing, develop, experimental]
   pull_request:
-    branches: [stable, testing, develop, experimental, experimental-externalUI]
+    branches: [stable, testing, develop, experimental]
   workflow_dispatch:
     inputs:
       branch:
@@ -23,7 +23,6 @@ on:
           - testing
           - develop
           - experimental
-          - experimental-externalUI
 
 jobs:
   # Single source of truth for supported SOCs.
@@ -49,9 +48,7 @@ jobs:
         id: get_branch
         run: |
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            # Use github.ref_name so the branch matches the ref the workflow was triggered on.
-            # inputs.branch has a default of 'develop' and would mismatch if --ref is used.
-            echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            echo "branch=${{ inputs.branch }}" >> $GITHUB_OUTPUT
           elif [ "${{ github.event_name }}" == "push" ]; then
             echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
           elif [ "${{ github.event_name }}" == "pull_request" ]; then
@@ -74,7 +71,7 @@ jobs:
             "stable")
               WEBAPP_BRANCH="stable"
               ;;
-            "experimental"|"experimental-externalUI")
+            "experimental")
               WEBAPP_BRANCH="experimental"
               ;;
             *)
@@ -430,9 +427,7 @@ jobs:
         id: get_branch
         run: |
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            # Use github.ref_name so the branch matches the ref the workflow was triggered on.
-            # inputs.branch has a default of 'develop' and would mismatch if --ref is used.
-            echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            echo "branch=${{ inputs.branch }}" >> $GITHUB_OUTPUT
           elif [ "${{ github.event_name }}" == "push" ]; then
             echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
           elif [ "${{ github.event_name }}" == "pull_request" ]; then
@@ -455,7 +450,7 @@ jobs:
             "stable")
               WEBAPP_BRANCH="stable"
               ;;
-            "experimental"|"experimental-externalUI")
+            "experimental")
               WEBAPP_BRANCH="experimental"
               ;;
             *)
@@ -811,6 +806,7 @@ jobs:
             develop)     WEBAPP_BASE="devel"   ;;
             testing)     WEBAPP_BASE="testing" ;;
             stable|main) WEBAPP_BASE="stable"  ;;
+            experimental) WEBAPP_BASE="experimental" ;;
             *)           WEBAPP_BASE="devel"   ;;
           esac
 
