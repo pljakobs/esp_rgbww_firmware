@@ -78,9 +78,11 @@ jobs:
         id: get_run
         run: |
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            # For manual dispatch, get the latest successful run
+            # For manual dispatch, get the latest successful firmware build
+            # for the selected branch, regardless of how that build started.
             latest_run_id=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-              "https://api.github.com/repos/pljakobs/esp_rgbww_firmware/actions/runs?status=success&event=workflow_dispatch&per_page=1" | jq -r '.workflow_runs[0].id // empty')
+              "https://api.github.com/repos/pljakobs/esp_rgbww_firmware/actions/workflows/build_firmware.yml/runs?branch=${{ github.event.inputs.branch }}&status=success&per_page=1" \
+              | jq -r '.workflow_runs[0].id // empty')
             
             if [ -z "$latest_run_id" ] || [ "$latest_run_id" == "null" ]; then
               echo "ERROR: No successful workflow runs found"
@@ -123,12 +125,7 @@ jobs:
       - name: Setup branch variables
         run: |
           source_branch="${{ needs.get-version.outputs.fw_branch }}"
-          
-          if [ "${{ github.event.workflow_run.workflow }}" == "firmwareBuild" ] && [ "${{ github.ref_name }}" != "$source_branch" ]; then
-            target_branch="${{ github.ref_name }}"
-          else
-            target_branch="$source_branch"
-          fi
+          target_branch="$source_branch"
           
           echo "Source branch (for artifact names): $source_branch"
           echo "Target branch (for deployment): $target_branch"
@@ -139,6 +136,7 @@ jobs:
           echo "target_branch=$target_branch" >> $GITHUB_ENV
           echo "version=${{ needs.get-version.outputs.fw_version }}" >> $GITHUB_ENV
           echo "supported_socs=${{ needs.get-version.outputs.supported_socs }}" >> $GITHUB_ENV
+          echo "deploy_run_key=${{ github.run_id }}-${{ github.run_attempt }}" >> $GITHUB_ENV
    
       # Checkout main repository to get manage_version.py
       - name: Checkout main repository
@@ -256,15 +254,16 @@ jobs:
           # Move download directory to staging
           mv download staging/
           
-          # Copy manage_version.py to staging to be uploaded
-          cp esp_firmware_repo/manage_version.py staging/
+          # Use run-specific names so concurrent publishes cannot overwrite
+          # files before they acquire the remote deployment lock.
+          cp esp_firmware_repo/manage_version.py "staging/manage_version-${{ env.deploy_run_key }}.py"
           
           # Create the remote script that will orchestrate the update on the server
           # This script handles:
           # 1. Updating version.json with the new files (using the uploaded manage_version.py)
           # 2. Culling old versions
           # 3. Setting permissions
-          cat > staging/remote_update.sh << 'EOF'
+          cat > "staging/remote_update-${{ env.deploy_run_key }}.sh" << 'EOF'
           #!/bin/bash
           set -e
           
@@ -274,13 +273,15 @@ jobs:
           VERSION="${{ env.version }}"
           DEPLOY_SERVER="${{ env.deploy_server }}"
           SUPPORTED_SOCS="${{ env.supported_socs }}"
+          MANAGE_SCRIPT="manage_version-${{ env.deploy_run_key }}.py"
+          REMOTE_SCRIPT="remote_update-${{ env.deploy_run_key }}.sh"
           
           cd "$DEPLOY_PATH"
           
           echo "Updating version.json on remote..."
           
           # Make the uploaded script executable
-          chmod +x manage_version.py
+          chmod +x "$MANAGE_SCRIPT"
           
           # Update version.json for each uploaded artifact
           IFS=',' read -ra soc_list <<< "$SUPPORTED_SOCS"
@@ -298,7 +299,7 @@ jobs:
               fi
               
               url="http://$DEPLOY_SERVER/download/$TARGET_BRANCH/$VERSION/$soc/$type/$bin_file"
-              python3 manage_version.py version.json add $soc $type $TARGET_BRANCH "$VERSION" "$url"
+              python3 "$MANAGE_SCRIPT" version.json add $soc $type $TARGET_BRANCH "$VERSION" "$url"
               
               # ELF and map are sibling files — URL predictable by replacing bin filename.
               echo "ELF deployed at: http://$DEPLOY_SERVER/download/$TARGET_BRANCH/$VERSION/$soc/$type/$elf_file"
@@ -334,7 +335,7 @@ jobs:
           done
 
           echo "Culling old versions..."
-          python3 manage_version.py version.json cull
+          python3 "$MANAGE_SCRIPT" version.json cull
           
           echo "Fixing permissions..."
           # Set ownership to deploy user:nginx group
@@ -342,13 +343,12 @@ jobs:
           # Ensure directories are 755 and files are 644
           find download -type d -exec chmod 755 {} \;
           find download -type f -exec chmod 644 {} \;
-          chmod +x manage_version.py
+          chmod +x "$MANAGE_SCRIPT"
           
-          # Self-destruct script
-          rm remote_update.sh
+          rm "$MANAGE_SCRIPT" "$REMOTE_SCRIPT"
           EOF
           
-          chmod +x staging/remote_update.sh
+          chmod +x "staging/remote_update-${{ env.deploy_run_key }}.sh"
           
           # 1b. Port Knocking
           # Explicitly allow the current runner's IP address
@@ -373,5 +373,6 @@ jobs:
           
           # 3. Execute the update logic on the remote server
           echo "Running remote update script..."
-          ssh -o StrictHostKeyChecking=no ${{ env.deploy_user }}@${{ env.deploy_server }} "bash ${{ env.deploy_path }}/remote_update.sh"
+          ssh -o StrictHostKeyChecking=no ${{ env.deploy_user }}@${{ env.deploy_server }} \
+            "flock /tmp/lightinator-firmware-deploy.lock bash ${{ env.deploy_path }}/remote_update-${{ env.deploy_run_key }}.sh"
 

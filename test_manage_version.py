@@ -89,6 +89,7 @@ def test_version_limit():
     assert get_version_limit('stable') == 4
     assert get_version_limit('testing') == 4
     assert get_version_limit('develop') == 10
+    assert get_version_limit('experimental') == 10
     assert get_version_limit('foobar') == 10
 
 def test_cull_history():
@@ -99,12 +100,21 @@ def test_cull_history():
         for i in range(12):
             v = f'V1.0-{100+i}'
             data = add_or_update_entry(data, 'esp32', 'release', 'develop', v, f'http://example.com/rom{i}.bin')
+            data = add_or_update_entry(data, 'esp8266', 'debug', 'develop', v, f'http://example.com/debug{i}.bin')
+        data['history'] = data['firmware'][:-1]
+        data['firmware'] = data['firmware'][-1:]
         save_json(data, json_path)
         # Cull history
         data = cull_history(data, dry_run=False)
         save_json(data, json_path)
         data = load_json(json_path)
-        entries = list_entries(data, 'esp32', 'release', 'develop', include_history=True)
-        # Should only keep 10 versions for develop
-        kept = [e for e in entries if not e.get('is_history', False)]
-        assert len(kept) <= 10
+        entries = list_entries(data, 'esp32', 'release', 'develop')
+        assert len(entries) == 10
+        assert {entry['fw_version'] for entry in entries} == {
+            f'V1.0-{build}' for build in range(102, 112)
+        }
+        debug_entries = list_entries(data, 'esp8266', 'debug', 'develop')
+        assert {entry['fw_version'] for entry in debug_entries} == {
+            f'V1.0-{build}' for build in range(102, 112)
+        }
+        assert data['history'] == []
