@@ -4,6 +4,26 @@
 
 The enhanced Host emulator smoke test suite (`host_ci_smoke_test.sh`) provides comprehensive validation of the API, WebSocket protocol, mDNS integration, and web interface. Results are automatically displayed in GitHub Actions workflows with detailed reporting.
 
+## Host Memory Validation
+
+Host builds explicitly disable firmware GDB. CI runs the complete API test file
+and the RGBWW behavior suite, with its existing timing-related exclusions.
+Remote log-service capture is disabled: Host diagnostics come from the emulator
+output and Valgrind, not the physical-device log service.
+
+CI requests `POST /system` with `{"cmd":"restart"}` after each test phase,
+allowing application service shutdown before collecting the final Memcheck log.
+A bounded wait falls back to process termination if the API is unavailable or
+shutdown stalls. Host-only cleanup detaches the logging callback and releases
+syslog buffers; real-device shutdown logging is unchanged.
+
+Known limitation: Host teardown can assert when `TcpConnection::close()` calls
+`tcp_poll()` on a listening PCB. Shutdown assertions and leak classifications
+from that aborted teardown are retained as diagnostic artifacts, but are not
+treated as device-runtime failures. Runtime memory-access errors and growth in
+the pre-shutdown snapshots still require investigation. A successful test run
+must not be described as a fully clean Memcheck exit when teardown aborted.
+
 ## Test Categories
 
 ### 1. **Basic Connectivity**
