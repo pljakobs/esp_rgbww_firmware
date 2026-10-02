@@ -58,6 +58,8 @@ tl_build() {
   make SMING_ARCH=Host flash \
        DISABLE_WERROR=1 \
        ENABLE_HOSTFS=0 \
+      ENABLE_GDB=0 \
+      ENABLE_GDB_CONSOLE=0 \
        ENABLE_SANITIZERS="$san" \
        COM_SPEED=115200
   mkdir -p "$(dirname "$marker")"
@@ -103,7 +105,6 @@ tl_launch() {
                --malloc-fill=0xAA \
                --free-fill=0xDD \
                --vgdb=yes \
-               --vgdb-error=0 \
                --log-file="$diag_dir/valgrind-memcheck.log" \
                "${supp_arg[@]}" \
                "$app_bin" "${app_args[@]}"

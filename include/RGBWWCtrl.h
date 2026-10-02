@@ -180,7 +180,7 @@
 
 #if ARCH_HOST
 #include <malloc_count.h>
-#define HOST_FREE_TARGET 34000
+#define HOST_FREE_TARGET 27000
 #endif
 
 
