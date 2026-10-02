@@ -21,6 +21,7 @@
  */
 #include <RGBWWCtrl.h>
 #include <Network/Mqtt/MqttBuffer.h>
+#include <BufferInputStream.h>
 #include <apihandler.h>
 
 AppMqttClient::AppMqttClient()
@@ -248,7 +249,8 @@ int AppMqttClient::onMessageReceived(MqttClient& client, mqtt_message_t* msg)
             }
         } else {
             String error;
-            if(!app.api->dispatchCommand(F("color"), message, error, false)) {
+            BufferInputStream input(message);
+			if(!app.api->dispatchCommandFromStream(F("color"), input, error, false)) {
                 debug_w(ANSI_COLOR_YELLOW "MQTT color failed: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_YELLOW "" ANSI_COLOR_RESET, error.c_str());
             }
         }
@@ -491,6 +493,11 @@ void AppMqttClient::publishCommand(const String& method, const JsonObject& param
     if(codec.render({0, JsonRPC::Message::Kind::notification, method}, root.asCommandFields(), msgStr)) {
         publish(buildTopic(F("command")), msgStr, false);
     }
+}
+
+void AppMqttClient::publishCommandJson(const String& rpcMessage)
+{
+    publish(buildTopic(F("command")), rpcMessage, false);
 }
 
 void AppMqttClient::publishTransitionFinished(const String& name, bool requeued)
@@ -803,12 +810,25 @@ void AppMqttClient::publishChannelState(const String& channelName, const Channel
 void AppMqttClient::handleChannelCommand(const String& channelName, const String& message) {
     debug_i(ANSI_COLOR_BLUE "HA: Processing channel command for '" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "': " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, channelName.c_str(), message.c_str());
     
-    // Parse JSON command
-    DynamicJsonDocument root(256);
-    auto error = deserializeJson(root, message);
-    if (error) {
-        debug_e(ANSI_COLOR_RED "HA: Failed to parse channel command JSON: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED "" ANSI_COLOR_RESET, error.c_str());
-        return;
+    String state;
+    String brightnessValue;
+    {
+        Jsonrpc::Root requestRoot(rpcCodec().db());
+        auto requestUpdate = requestRoot.update();
+        if(!requestUpdate) {
+            debug_e(ANSI_COLOR_RED "HA: Could not allocate ConfigDB request" ANSI_COLOR_RESET);
+            return;
+        }
+        auto command = requestUpdate.toHaChannelCommand();
+        BufferInputStream input(message);
+        const auto status = command.importFromStream(ConfigDB::Json::format, input);
+        if(!status && !(status.error == ConfigDB::Error::FormatError &&
+                        status.code.formatError == ConfigDB::FormatError::NotInSchema)) {
+            debug_e(ANSI_COLOR_RED "HA: Failed to parse channel command JSON: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED "" ANSI_COLOR_RESET, status.toString().c_str());
+            return;
+        }
+        state = command.getState();
+        brightnessValue = command.getBrightness();
     }
     
     // Get current raw values
@@ -817,8 +837,7 @@ void AppMqttClient::handleChannelCommand(const String& channelName, const String
             currentRaw.r, currentRaw.g, currentRaw.b, currentRaw.ww, currentRaw.cw);
     
     // Handle state command
-    if (root.containsKey(F("state"))) {
-        String state = root[F("state")].as<String>();
+    if (state.length() > 0) {
         debug_i(ANSI_COLOR_BLUE "HA: Channel state command: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, state.c_str());
         if (state == F("OFF")) {
             // Turn off this channel
@@ -842,8 +861,8 @@ void AppMqttClient::handleChannelCommand(const String& channelName, const String
     }
     
     // Handle brightness command (0-1023 scale as configured in discovery)
-    if (root.containsKey(F("brightness"))) {
-        int brightness = root[F("brightness")].as<int>();
+    if (brightnessValue.length() > 0) {
+        int brightness = brightnessValue.toInt();
         debug_i(ANSI_COLOR_BLUE "HA: Channel brightness command: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " (0-1023 scale)" ANSI_COLOR_RESET, brightness);
         
         // Clamp to valid range 0-1023
@@ -894,119 +913,115 @@ void AppMqttClient::handleHomeAssistantCommand(const String& message) {
     
     debug_i(ANSI_COLOR_BLUE "HA: Processing main light command: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, message.c_str());
     
-    DynamicJsonDocument doc(256);
-    if(doc.capacity() == 0) {
-        debug_e(ANSI_COLOR_RED "HA: command doc alloc failed" ANSI_COLOR_RESET);
-        return;
+    String state;
+    String brightnessValue;
+    String colorH;
+    String colorS;
+    String colorTempValue;
+    String transitionValue;
+    {
+        Jsonrpc::Root requestRoot(rpcCodec().db());
+        auto requestUpdate = requestRoot.update();
+        if(!requestUpdate) {
+            debug_e(ANSI_COLOR_RED "HA: Could not allocate ConfigDB request" ANSI_COLOR_RESET);
+            return;
+        }
+        auto command = requestUpdate.toHaCommand();
+        BufferInputStream input(message);
+        const auto status = command.importFromStream(ConfigDB::Json::format, input);
+        if(!status && !(status.error == ConfigDB::Error::FormatError &&
+                status.code.formatError == ConfigDB::FormatError::NotInSchema)) {
+            debug_e(ANSI_COLOR_RED "HA: Failed to parse command JSON: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED "" ANSI_COLOR_RESET, status.toString().c_str());
+            return;
+        }
+        state = command.getState();
+        brightnessValue = command.getBrightness();
+        colorH = command.color.getH();
+        colorS = command.color.getS();
+        colorTempValue = command.getColorTemp();
+        transitionValue = command.getTransition();
     }
-    DeserializationError parseError = deserializeJson(doc, message);
-    if (parseError) {
-        debug_e(ANSI_COLOR_RED "HA: Failed to parse command JSON: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED "" ANSI_COLOR_RESET, parseError.c_str());
-        return;
-    }
-    
-    String state = doc[F("state")];
+
     debug_i(ANSI_COLOR_BLUE "HA: Command state: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, state.c_str());
-    
-    // Create a JSON command that works with your existing system
-    DynamicJsonDocument cmdDoc(256);
-    if(cmdDoc.capacity() == 0) {
-        debug_e(ANSI_COLOR_RED "HA: command build doc alloc failed" ANSI_COLOR_RESET);
-        return;
-    }
-    JsonObject root = cmdDoc.to<JsonObject>();
-    JsonObject hsv = root.createNestedObject(F("hsv"));
-    
-    if (state == F("ON")) {
-        // Handle brightness
-        float brightness = 100.0f;  // Default to 100%
-        if (doc.containsKey(F("brightness"))) {
-            float brightness_raw = doc[F("brightness")].as<float>();
-            brightness = brightness_raw;  // Now using 0-100 scale directly
-            debug_i(ANSI_COLOR_BLUE "HA: Brightness from HA: " ANSI_COLOR_CYAN "%.1f" ANSI_COLOR_BLUE " (0-100 scale)" ANSI_COLOR_RESET, brightness);
-        }
-        
-        // Handle color
-        if (doc.containsKey(F("color"))) {
-            float h = doc[F("color")][F("h")];  // HA sends 0-360 degrees
-            float s = doc[F("color")][F("s")];  // HA sends 0-100 percent
-            
-            debug_i(ANSI_COLOR_BLUE "HA: Color from HA - H: " ANSI_COLOR_CYAN "%.1f" ANSI_COLOR_BLUE "°, S: " ANSI_COLOR_CYAN "%.1f" ANSI_COLOR_BLUE "" ANSI_COLOR_CYAN "%%" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, h, s);
-            
-            // LED controller expects H: 0-360°, S: 0-100%, V: 0-100%
-            hsv[F("h")] = h;                 // Keep as 0-360 degrees
-            hsv[F("s")] = s;                 // Keep as 0-100 percentage
-            hsv[F("v")] = brightness;        // Keep as 0-100 percentage
-            
-            debug_i(ANSI_COLOR_BLUE "HA: Converted to internal - H: " ANSI_COLOR_CYAN "%.1f" ANSI_COLOR_BLUE "°, S: " ANSI_COLOR_CYAN "%.1f" ANSI_COLOR_BLUE "" ANSI_COLOR_CYAN "%%" ANSI_COLOR_BLUE ", V: " ANSI_COLOR_CYAN "%.1f" ANSI_COLOR_BLUE "" ANSI_COLOR_CYAN "%%" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, 
-                    hsv[F("h")].as<float>(), hsv[F("s")].as<float>(), hsv[F("v")].as<float>());
-        } else if (doc.containsKey(F("color_temp"))) {
-            // HA sends color_temp in mireds; convert to firmware CT scale (0–100)
-            // min_mireds=153 (~6500K cool) → ct=0, max_mireds=370 (~2700K warm) → ct=100
-            int mireds = doc[F("color_temp")].as<int>();
-            int ct = (mireds - 153) * 100 / 217;
-            ct = (ct < 0) ? 0 : ((ct > 100) ? 100 : ct);
-            
-            debug_i(ANSI_COLOR_BLUE "HA: color_temp from HA: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " mireds → ct=" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, mireds, ct);
-            
-            // Keep current hue, desaturate for pure white at the requested temperature
-            HSVCT currentColor = app.rgbwwctrl.getCurrentColor();
-            float cur_h, cur_s, cur_v;
-            int cur_ct;
-            currentColor.asRadian(cur_h, cur_s, cur_v, cur_ct);
-            
-            hsv[F("h")] = cur_h;
-            hsv[F("s")] = 0.0f;      // Desaturate: pure white
-            hsv[F("v")] = brightness;
-            hsv[F("ct")] = ct;
-        } else {
-            // Just brightness change - keep current color
-            HSVCT currentColor = app.rgbwwctrl.getCurrentColor();
-            float cur_h, cur_s, cur_v;
-            int cur_ct;
-            currentColor.asRadian(cur_h, cur_s, cur_v, cur_ct);
-            
-            hsv[F("h")] = cur_h;             // Keep as 0-360 degrees
-            hsv[F("s")] = cur_s;             // Keep as 0-100 percentage  
-            hsv[F("v")] = brightness;        // Use brightness as 0-100 percentage
-            
-            debug_i(ANSI_COLOR_BLUE "HA: Brightness only change - keeping current color, new V: " ANSI_COLOR_CYAN "%.1f" ANSI_COLOR_BLUE "" ANSI_COLOR_CYAN "%%" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, brightness);
-        }
-    } else {
-        // Turn off - keep current color but set brightness to 0
-        HSVCT currentColor = app.rgbwwctrl.getCurrentColor();
-        float cur_h, cur_s, cur_v;
-        int cur_ct;
-        currentColor.asRadian(cur_h, cur_s, cur_v, cur_ct);
-        
-        hsv[F("h")] = cur_h;             // Keep as 0-360 degrees
-        hsv[F("s")] = cur_s;             // Keep as 0-100 percentage
-        hsv[F("v")] = 0;                 // Turn off (0%)
-        
-        debug_i(ANSI_COLOR_BLUE "HA: Turning OFF - keeping current color, setting V to 0" ANSI_COLOR_CYAN "%%" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET);
-    }
-    
-    root[F("cmd")] = F("fade");
-    
-    // Handle transition time (HA sends in seconds, we expect milliseconds)
-    int transition_ms = 500;  // Default 500ms
-    if (doc.containsKey(F("transition"))) {
-        transition_ms = doc[F("transition")].as<int>() * 1000;  // Convert seconds to milliseconds
-        debug_i(ANSI_COLOR_BLUE "HA: Transition time: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " ms" ANSI_COLOR_RESET, transition_ms);
-    }
-    root[F("t")] = transition_ms;
-    
-    String ledCommand = Json::serialize(root);
-    debug_i(ANSI_COLOR_BLUE "HA: Sending to LED controller: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, ledCommand.c_str());
 
     if(!app.api) {
         debug_w(ANSI_COLOR_YELLOW "HA command ignored: api not initialized" ANSI_COLOR_RESET);
         return;
     }
 
-    // Route through Api so command marshalling stays centralized while internals evolve.
-    String errorMsg;
-    if(!app.api->dispatchCommand(F("color"), root, errorMsg, false)) {
+    float brightness = 100.0f;
+    if(state == F("ON") && brightnessValue.length() > 0) {
+        brightness = brightnessValue.toFloat();
+        debug_i(ANSI_COLOR_BLUE "HA: Brightness from HA: " ANSI_COLOR_CYAN "%.1f" ANSI_COLOR_BLUE " (0-100 scale)" ANSI_COLOR_RESET, brightness);
+    } else if(state != F("ON")) {
+        brightness = 0;
+    }
+
+    float hue = 0;
+    float saturation = 0;
+    int colorTemperature = -1;
+    if(state == F("ON") && (colorH.length() > 0 || colorS.length() > 0)) {
+        hue = colorH.toFloat();
+        saturation = colorS.toFloat();
+        debug_i(ANSI_COLOR_BLUE "HA: Color from HA - H: " ANSI_COLOR_CYAN "%.1f" ANSI_COLOR_BLUE "°, S: " ANSI_COLOR_CYAN "%.1f" ANSI_COLOR_BLUE "%%" ANSI_COLOR_RESET, hue, saturation);
+    } else if(state == F("ON") && colorTempValue.length() > 0) {
+        const int mireds = colorTempValue.toInt();
+        colorTemperature = (mireds - 153) * 100 / 217;
+        colorTemperature = (colorTemperature < 0) ? 0 : ((colorTemperature > 100) ? 100 : colorTemperature);
+        HSVCT currentColor = app.rgbwwctrl.getCurrentColor();
+        float currentHue, currentSaturation, currentValue;
+        int currentTemperature;
+        currentColor.asRadian(currentHue, currentSaturation, currentValue, currentTemperature);
+        hue = currentHue;
+        debug_i(ANSI_COLOR_BLUE "HA: color_temp from HA: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " mireds -> ct=" ANSI_COLOR_CYAN "%d" ANSI_COLOR_RESET, mireds, colorTemperature);
+    } else if(state == F("ON")) {
+        HSVCT currentColor = app.rgbwwctrl.getCurrentColor();
+        float currentValue;
+        int currentTemperature;
+        currentColor.asRadian(hue, saturation, currentValue, currentTemperature);
+    } else {
+        HSVCT currentColor = app.rgbwwctrl.getCurrentColor();
+        float currentValue;
+        int currentTemperature;
+        currentColor.asRadian(hue, saturation, currentValue, currentTemperature);
+    }
+
+    int transitionMs = 500;
+    if(transitionValue.length() > 0) {
+        transitionMs = transitionValue.toInt() * 1000;
+        debug_i(ANSI_COLOR_BLUE "HA: Transition time: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " ms" ANSI_COLOR_RESET, transitionMs);
+    }
+
+	String ledCommand;
+    {
+        Jsonrpc::Root commandRoot(rpcCodec().db());
+        auto commandUpdate = commandRoot.update();
+        if(!commandUpdate) {
+            debug_e(ANSI_COLOR_RED "HA: Could not allocate ConfigDB command" ANSI_COLOR_RESET);
+            return;
+        }
+        auto command = commandUpdate.toCommandRequestFields();
+        command.setCmd(F("fade"));
+        command.setT(transitionMs);
+        command.hsv.setH(String(hue, 2));
+        command.hsv.setS(String(colorTemperature >= 0 ? 0.0f : saturation, 2));
+        command.hsv.setV(String(brightness, 2));
+        if(colorTemperature >= 0) {
+            command.hsv.setCt(String(colorTemperature));
+        }
+        MemoryDataStream commandStream;
+        ConfigDB::ExportOptions exportOptions;
+        exportOptions.asObject = false;
+        if(ConfigDB::Json::format.exportToStream(command, commandStream, exportOptions) == 0 ||
+           !commandStream.moveString(ledCommand)) {
+            debug_e(ANSI_COLOR_RED "HA: Could not encode ConfigDB command" ANSI_COLOR_RESET);
+            return;
+        }
+	}
+	debug_i(ANSI_COLOR_BLUE "HA: Sending to LED controller: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, ledCommand.c_str());
+	MemoryDataStream input{std::move(ledCommand)};
+	String errorMsg;
+	if(!app.api->dispatchCommandFromStream(F("color"), input, errorMsg, false)) {
         debug_e(ANSI_COLOR_RED "HA: LED controller error: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED "" ANSI_COLOR_RESET, errorMsg.c_str());
     } else {
         debug_i(ANSI_COLOR_BLUE "HA: LED controller command processed successfully" ANSI_COLOR_RESET);

@@ -1505,6 +1505,15 @@ void Application::onCommandRelay(const String& method, const JsonObject& params)
 		mqttclient.publishCommand(method, params);
 }
 
+void Application::onCommandRelay(const String& method, const String& rpcMessage)
+{
+	(void)method;
+	AppConfig::Sync sync(*cfg);
+	if(sync.getCmdMasterEnabled()) {
+		mqttclient.publishCommandJson(rpcMessage);
+	}
+}
+
 void Application::onButtonTogglePressed(int pin)
 {
 	/*

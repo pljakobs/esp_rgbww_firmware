@@ -24,6 +24,7 @@
 #define APP_WEBSERVER_H_
 
 #include <ArduinoJson.h>
+#include <ConfigDB/Object.h>
 #include <RGBWWLed/RGBWWLedColor.h>
 #include <Network/Http/Websocket/WebsocketResource.h>
 
@@ -114,6 +115,8 @@ private:
     unsigned long _infoV1CacheTime = 0;
     unsigned long _infoV2CacheTime = 0;
     static constexpr unsigned long INFO_CACHE_MS = 1000;
+    Timer _infoV1CacheTimer;
+    Timer _infoV2CacheTimer;
 
     WebsocketResource* wsResource = nullptr;
     WebsocketList webSockets;
@@ -166,8 +169,8 @@ private:
     void sendApiCode(HttpResponse &response, API_CODES code, const char* msg = nullptr);
     void sendApiCode(HttpResponse &response, API_CODES code, const String& msg);
     void sendApiCode(HttpResponse &response, API_CODES code, const __FlashStringHelper* msg);
-    bool parseJsonBody(HttpRequest& request, HttpResponse& response, JsonDocument& doc,
-                       const String& noBodyMessage);
+    bool importConfigBody(HttpRequest& request, HttpResponse& response, ConfigDB::Object& target,
+                          const String& noBodyMessage);
     bool dispatchBodyCommand(HttpRequest& request, const String& method, String& msg);
 
     //void onUpload(HttpRequest &request, HttpResponse &response);

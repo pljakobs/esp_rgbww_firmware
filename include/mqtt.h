@@ -40,6 +40,7 @@ public:
     void publishClockInterval(uint32_t curInterval);
     void publishClockSlaveOffset(int offset);
     void publishCommand(const String& method, const JsonObject& params);
+    void publishCommandJson(const String& rpcMessage);
     void publishTransitionFinished(const String& name, bool requeued);
 
     void initHomeAssistant();

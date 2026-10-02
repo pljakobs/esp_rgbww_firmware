@@ -124,6 +124,39 @@
       },
       "additionalProperties": false
     },
+    "ws-request-params": {
+      "type": "object",
+      "properties": {
+        "cmd": { "$ref": "value-types/$defs/string-value" },
+        "enable": { "$ref": "value-types/$defs/string-value" },
+        "clearOTA": { "$ref": "value-types/$defs/string-value" },
+        "raw": { "$ref": "#/$defs/raw-input" },
+        "hsv": { "$ref": "#/$defs/hsv-input" },
+        "t": { "$ref": "value-types/$defs/non-negative-integer" },
+        "s": { "$ref": "value-types/$defs/non-negative-integer" },
+        "r": { "$ref": "value-types/$defs/boolean-value" },
+        "d": { "type": "integer", "minimum": 0, "maximum": 1, "default": 1 },
+        "name": { "$ref": "value-types/$defs/string-value" },
+        "q": { "$ref": "value-types/$defs/string-value" },
+        "channels": { "$ref": "#/$defs/channel-list" },
+        "cmds": { "$ref": "#/$defs/command-request-list" },
+        "hash": { "$ref": "value-types/$defs/string-value" },
+        "sparse": { "$ref": "value-types/$defs/string-value" },
+        "all": { "$ref": "value-types/$defs/boolean-value" },
+        "debug": { "$ref": "value-types/$defs/boolean-value" }
+      },
+      "additionalProperties": false
+    },
+    "ws-request": {
+      "type": "object",
+      "properties": {
+        "jsonrpc": { "$ref": "value-types/$defs/string-value" },
+        "method": { "$ref": "value-types/$defs/string-value" },
+        "id": { "$ref": "value-types/$defs/string-value" },
+        "params": { "$ref": "#/$defs/ws-request-params" }
+      },
+      "additionalProperties": false
+    },
     "command-request-list": {
       "type": "array",
       "items": { "$ref": "#/$defs/command-request-item" }
@@ -150,6 +183,63 @@
         "ip": { "$ref": "value-types/$defs/string-value" },
         "dhcp": { "$ref": "value-types/$defs/string-value" },
         "ssid": { "$ref": "value-types/$defs/string-value" }
+      },
+      "additionalProperties": false
+    },
+    "system-request": {
+      "type": "object",
+      "properties": {
+        "cmd": { "$ref": "value-types/$defs/string-value" },
+        "enable": { "$ref": "value-types/$defs/string-value" },
+        "clearOTA": { "$ref": "value-types/$defs/string-value" }
+      },
+      "additionalProperties": false
+    },
+    "connect-request": {
+      "type": "object",
+      "properties": {
+        "ssid": { "$ref": "value-types/$defs/string-value" },
+        "password": { "$ref": "value-types/$defs/string-value" }
+      },
+      "additionalProperties": false
+    },
+    "update-artifact": {
+      "type": "object",
+      "properties": { "url": { "$ref": "value-types/$defs/string-value" } },
+      "additionalProperties": false
+    },
+    "update-request": {
+      "type": "object",
+      "properties": {
+        "rom": { "$ref": "#/$defs/update-artifact" },
+        "spiffs": { "$ref": "#/$defs/update-artifact" }
+      },
+      "additionalProperties": false
+    },
+    "ha-channel-command": {
+      "type": "object",
+      "properties": {
+        "state": { "$ref": "value-types/$defs/string-value" },
+        "brightness": { "$ref": "value-types/$defs/string-value" }
+      },
+      "additionalProperties": false
+    },
+    "ha-command-color": {
+      "type": "object",
+      "properties": {
+        "h": { "$ref": "value-types/$defs/string-value" },
+        "s": { "$ref": "value-types/$defs/string-value" }
+      },
+      "additionalProperties": false
+    },
+    "ha-command": {
+      "type": "object",
+      "properties": {
+        "state": { "$ref": "value-types/$defs/string-value" },
+        "brightness": { "$ref": "value-types/$defs/string-value" },
+        "color": { "$ref": "#/$defs/ha-command-color" },
+        "color_temp": { "$ref": "value-types/$defs/string-value" },
+        "transition": { "$ref": "value-types/$defs/string-value" }
       },
       "additionalProperties": false
     },

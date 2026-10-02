@@ -101,6 +101,24 @@ public:
         // is called from the GotIP callback, at which point the route actually exists.
     }
 
+    bool reconfigure(const String& host, uint16_t port, bool enabled)
+    {
+        if(_enabled) {
+            flush();
+        }
+        _enabled = false;
+        _host = host;
+        _port = port;
+        if(!enabled) {
+            return true;
+        }
+        if(_host.length() == 0 || !_udp.connect(IpAddress(_host), _port)) {
+            return false;
+        }
+        _enabled = true;
+        return true;
+    }
+
     /**
      * Replay all messages stored in the pre-network ring buffer through the normal
      * UDP syslog path and then free the buffer.  Must be called after the station

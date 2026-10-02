@@ -43,37 +43,3 @@ JsonObject JsonRpcMessage::getRoot()
 {
 	return _doc.as<JsonObject>();
 }
-
-////////////////////////////////////////
-
-JsonRpcMessageIn::JsonRpcMessageIn(const String& json)
-	:_doc(MAX_JSON_MESSAGE_LENGTH)
-{
-	DeserializationError err = deserializeJson(_doc, json);
-	if(err) {
-		_valid = false;
-		// Distinguish a too-small parse buffer from genuinely malformed input so
-		// callers can report the real cause instead of a generic error.
-		_error = (err == DeserializationError::NoMemory) ? F("message too large for parse buffer")
-														 : F("malformed json");
-		return;
-	}
-
-	_valid = true;
-}
-
-JsonObject JsonRpcMessageIn::getParams()
-{
-	return _doc[F("params")];
-}
-
-JsonObject JsonRpcMessageIn::getRoot()
-{
-	return _doc.as<JsonObject>();
-}
-
-const char* JsonRpcMessageIn::getMethod() const
-{
-	const char* method = _doc[F("method")] | "";
-	return method;
-}

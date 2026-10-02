@@ -32,20 +32,3 @@ private:
     DynamicJsonDocument _doc;
     JsonObject _pParams;
 };
-
-class JsonRpcMessageIn {
-public:
-    JsonRpcMessageIn(const String& json);
-    JsonObject getParams();
-
-    JsonObject getRoot();
-    const char* getMethod() const;
-    bool isValid() const { return _valid; }
-    const String& getError() const { return _error; }
-
-private:
-    DynamicJsonDocument _doc;
-    bool _valid{false};
-    String _error;
-};
-

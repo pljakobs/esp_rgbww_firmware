@@ -63,6 +63,30 @@
             ]
         },
         {
+            "$ref": "params/$defs/system-request",
+            "title": "system_request"
+        },
+        {
+            "$ref": "params/$defs/connect-request",
+            "title": "connect_request"
+        },
+        {
+            "$ref": "params/$defs/update-request",
+            "title": "update_request"
+        },
+        {
+            "$ref": "params/$defs/ha-channel-command",
+            "title": "ha_channel_command"
+        },
+        {
+            "$ref": "params/$defs/ha-command",
+            "title": "ha_command"
+        },
+        {
+            "$ref": "params/$defs/ws-request",
+            "title": "ws_request"
+        },
+        {
             "$ref": "params/$defs/ha-state-color-temp",
             "title": "ha_state_color_temp"
         },

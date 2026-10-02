@@ -25,6 +25,7 @@
  */
 
 #include <RGBWWCtrl.h>
+#include <BufferInputStream.h>
 #include <apihandler.h>
 #include <Data/WebHelpers/base64.h>
 #include <Crypto/Sha2.h>
@@ -238,14 +239,18 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 {
     debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::wsMessage: " ANSI_COLOR_GREEN " %s" ANSI_COLOR_RESET, message.c_str());
 
-    // Size the parse buffer from the incoming message so large payloads don't
-    // overflow a fixed capacity. Heap-allocated to keep it off the small stack.
-    const size_t requestCapacity = std::max<size_t>(1024, message.length() * 2);
-    DynamicJsonDocument requestDoc(requestCapacity);
+	BufferInputStream requestStream(message);
+	String methodName;
+	String paramsJson;
+	String authHash;
+	int requestId = 0;
+	bool sparse = true;
+	bool paramsEmpty = true;
 	String errorMsg;
 	int errorCode = 0;
 
-    if(!Json::deserialize(requestDoc, message)) {
+	if(!app.api || !app.api->parseJsonRpcRequest(requestStream, methodName, paramsJson, requestId, authHash,
+												  sparse, paramsEmpty, errorMsg)) {
 		String parseErrorPayload;
 		auto& codec = rpcCodec();
 		Jsonrpc::Root root(codec.db());
@@ -260,43 +265,7 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
         return;
     }
 
-    JsonObject requestRoot = requestDoc.as<JsonObject>();
-	const char* method = requestRoot[F("method")] | "";
-    JsonVariant requestId = requestRoot[F("id")];
-	JsonObject params = requestRoot[F("params")];
-
-	// JSON-RPC 2.0 permits only a number, a string or null as the id. Reject
-	// anything else rather than echoing an illegal value back to the client.
-	if(!requestId.isNull() && !requestId.is<double>() && !requestId.is<const char*>()) {
-		String invalidIdPayload;
-		auto& codec = rpcCodec();
-		Jsonrpc::Root root(codec.db());
-		if(auto update = root.update()) {
-			auto error = update.toRpcError();
-			error.setCode(-32600);
-			error.setMessage(F("Invalid Request: id must be a string, a number or null"));
-		}
-		if(codec.render({0, JsonRPC::Message::Kind::error, method}, root.asRpcError(), invalidIdPayload)) {
-			socket.sendString(invalidIdPayload);
-		}
-		return;
-	}
-
-	auto parseTruthy = [](JsonVariantConst v, bool defaultValue) -> bool {
-		if(v.isNull()) {
-			return defaultValue;
-		}
-		if(v.is<bool>()) {
-			return v.as<bool>();
-		}
-		const char* txt = v.as<const char*>();
-		if(txt == nullptr || txt[0] == '\0') {
-			return defaultValue;
-		}
-		return !(std::strcmp(txt, "0") == 0 || std::strcmp(txt, "false") == 0 || std::strcmp(txt, "FALSE") == 0 ||
-				 std::strcmp(txt, "off") == 0 || std::strcmp(txt, "OFF") == 0 || std::strcmp(txt, "no") == 0 ||
-				 std::strcmp(txt, "NO") == 0);
-	};
+	const char* method = methodName.c_str();
 
 	debug_i(ANSI_COLOR_BLUE "Websocket message: method= " ANSI_COLOR_GREEN "%s" ANSI_COLOR_RESET, method);
 
@@ -327,7 +296,7 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 	const bool isAuthMethod = strcmp_P(method, PSTR("authenticate")) == 0;
 
 	if(isAuthMethod) {
-		const String clientHash = params[F("hash")] | "";
+		const String& clientHash = authHash;
 		if(!wsSecured) {
 			// Nothing to prove when security is disabled.
 			if(wsAuth) {
@@ -382,7 +351,7 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 		errorCode = -32603;
 		errorMsg = F("api not initialized");
     } else {
-		const bool isColorGetter = (strcmp_P(method, PSTR("color")) == 0) && (params.isNull() || params.size() == 0);
+		const bool isColorGetter = (strcmp_P(method, PSTR("color")) == 0) && paramsEmpty;
 		const bool isDataMethod = isColorGetter || (strcmp_P(method, PSTR("getColor")) == 0) || isInfoMethod ||
 						(strcmp_P(method, PSTR("networks")) == 0) || (strcmp_P(method, PSTR("getNetworks")) == 0);
 
@@ -392,7 +361,8 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 			dataIsInfo = isInfoMethod;
 		} else {
 			// Command: execute now (side effects + success/error), stream the envelope after.
-			if(app.api->dispatchCommand(method, params, errorMsg, false)) {
+			MemoryDataStream paramsStream(std::move(paramsJson));
+			if(app.api->dispatchCommandFromStream(methodName, paramsStream, errorMsg, false)) {
 				resultKind = RK_CommandSuccess;
 			} else {
 				const bool methodMissing = errorMsg.length() == 0 || errorMsg.indexOf(F("method not implemented")) >= 0;
@@ -410,9 +380,8 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 
 	// ---- Phase 2: stream the JSON-RPC envelope --------------------------
 	if(resultKind == RK_Data && errorMsg.length() == 0 && app.api != nullptr) {
-		const int requestIdValue = requestId.is<int>() ? requestId.as<int>() : 0;
 		String dataPayload;
-		if(app.api->renderData(method, params, dataPayload, requestIdValue)) {
+		if(app.api->renderData(methodName, sparse, dataPayload, requestId)) {
 			socket.sendString(dataPayload);
 			return;
 		}
@@ -431,13 +400,13 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 					error.setChallenge(challenge);
 				}
 			}
-			rendered = codec.render({requestId.is<int>() ? requestId.as<int>() : 0,
+			rendered = codec.render({requestId,
 				JsonRPC::Message::Kind::error, method}, root.asRpcError(), rpcPayload);
 		} else if(resultKind == RK_Authenticated) {
 			if(auto update = root.update()) {
 				update.toAuthenticateResult().setAuthenticated(true);
 			}
-			rendered = codec.render({requestId.is<int>() ? requestId.as<int>() : 0,
+			rendered = codec.render({requestId,
 				JsonRPC::Message::Kind::result, method}, root.asAuthenticateResult(), rpcPayload);
 		} else if(resultKind == RK_SubTrue || resultKind == RK_SubFalse) {
 			if(auto update = root.update()) {
@@ -445,13 +414,13 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 				subscription.setSubscribed(resultKind == RK_SubTrue);
 				subscription.setChannel(F("runtime_info"));
 			}
-			rendered = codec.render({requestId.is<int>() ? requestId.as<int>() : 0,
+			rendered = codec.render({requestId,
 				JsonRPC::Message::Kind::result, method}, root.asSubscriptionResult(), rpcPayload);
 		} else if(resultKind == RK_CommandSuccess) {
 			if(auto update = root.update()) {
 				update.toApiSuccess().setSuccess(true);
 			}
-			rendered = codec.render({requestId.is<int>() ? requestId.as<int>() : 0,
+			rendered = codec.render({requestId,
 				JsonRPC::Message::Kind::result, method}, root.asApiSuccess(), rpcPayload);
 		}
 		if(rendered) {
@@ -527,6 +496,12 @@ void ApplicationWebserver::start()
 void ApplicationWebserver::stop()
 {
 	_wsPingTimer.stop();
+	_infoV1CacheTimer.stop();
+	_infoV2CacheTimer.stop();
+	_infoV1Cache = nullptr;
+	_infoV2Cache = nullptr;
+	_infoV1CacheTime = 0;
+	_infoV2CacheTime = 0;
 	close();
 	_running = false;
 }
@@ -726,53 +701,42 @@ bool ApplicationWebserver::dispatchBodyCommand(HttpRequest& request, const Strin
 	return app.api->dispatchCommandFromStream(method, mem, msg, true);
 }
 
-bool ApplicationWebserver::parseJsonBody(HttpRequest& request, HttpResponse& response, JsonDocument& doc,
+bool ApplicationWebserver::importConfigBody(HttpRequest& request, HttpResponse& response, ConfigDB::Object& target,
 											 const String& noBodyMessage)
 {
-	debug_i(ANSI_COLOR_BLUE "parseJsonBody: begin" ANSI_COLOR_RESET);
-	DeserializationError err = DeserializationError::EmptyInput;
-	auto bodyStream = request.getBodyStream();
-	if(bodyStream != nullptr) {
-		debug_i(ANSI_COLOR_BLUE "parseJsonBody: deserializeJson(stream), freeHeap=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_RESET,
-				app.getFreeHeapSize());
-		err = deserializeJson(doc, *bodyStream);
-		debug_i(ANSI_COLOR_BLUE "parseJsonBody: deserializeJson(stream) done" ANSI_COLOR_RESET);
-	} else {
-		debug_i(ANSI_COLOR_BLUE "parseJsonBody: bodyStream unavailable, fallback to getBody" ANSI_COLOR_RESET);
-		String body = request.getBody();
-		debug_i(ANSI_COLOR_BLUE "parseJsonBody: body length=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE ", freeHeap=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_RESET,
-				(unsigned)body.length(), app.getFreeHeapSize());
-
-		if(body.length()) {
-			debug_i(ANSI_COLOR_BLUE "parseJsonBody: deserializeJson(buffer)" ANSI_COLOR_RESET);
-			err = deserializeJson(doc, body.c_str(), body.length());
-			debug_i(ANSI_COLOR_BLUE "parseJsonBody: deserializeJson(buffer) done" ANSI_COLOR_RESET);
-		} else {
-			const String& contentLength = request.headers[HTTP_HEADER_CONTENT_LENGTH];
-			const String& contentType = request.headers[HTTP_HEADER_CONTENT_TYPE];
-			if(contentLength.length() && contentLength.toInt() > 0) {
-				if(contentType.indexOf(F("application/json")) != 0) {
-					sendApiCode(response, API_CODES::API_BAD_REQUEST,
-							F("Invalid JSON: send Content-Type: application/json"));
-				} else {
-					sendApiCode(response, API_CODES::API_BAD_REQUEST, F("Invalid JSON: body unavailable"));
-				}
-			} else {
-				sendApiCode(response, API_CODES::API_BAD_REQUEST,
-						noBodyMessage.length() ? noBodyMessage.c_str() : (const char*)nullptr);
-			}
-			return false;
+	auto reportStatus = [&](const ConfigDB::Status& status) {
+		if(status || (status.error == ConfigDB::Error::FormatError &&
+					  status.code.formatError == ConfigDB::FormatError::NotInSchema)) {
+			return true;
 		}
-	}
-
-	if(err) {
-		char parseError[96];
-		snprintf(parseError, sizeof(parseError), "Invalid JSON: %s", err.c_str());
+		String parseError = F("Invalid JSON: ");
+		parseError += status.toString();
 		sendApiCode(response, API_CODES::API_BAD_REQUEST, parseError);
 		return false;
+	};
+	auto bodyStream = request.getBodyStream();
+	if(bodyStream != nullptr) {
+		return reportStatus(target.importFromStream(ConfigDB::Json::format, *bodyStream));
 	}
-
-	return true;
+	String body = request.getBody();
+	if(body.length() == 0) {
+		const String& contentLength = request.headers[HTTP_HEADER_CONTENT_LENGTH];
+		const String& contentType = request.headers[HTTP_HEADER_CONTENT_TYPE];
+		if(contentLength.length() && contentLength.toInt() > 0) {
+			if(contentType.indexOf(F("application/json")) != 0) {
+				sendApiCode(response, API_CODES::API_BAD_REQUEST,
+						F("Invalid JSON: send Content-Type: application/json"));
+			} else {
+				sendApiCode(response, API_CODES::API_BAD_REQUEST, F("Invalid JSON: body unavailable"));
+			}
+		} else {
+			sendApiCode(response, API_CODES::API_BAD_REQUEST,
+					noBodyMessage.length() ? noBodyMessage.c_str() : (const char*)nullptr);
+		}
+		return false;
+	}
+	MemoryDataStream buffered(std::move(body));
+	return reportStatus(target.importFromStream(ConfigDB::Json::format, buffered));
 }
 
 void ApplicationWebserver::onFile(HttpRequest& request, HttpResponse& response)
@@ -1323,20 +1287,13 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 			* syslog changes - those will be handled on the fly 
 			*
 			*/
-			if(oldSyslogHost!=newSyslogHost || oldSyslogPort!=newSyslogPort){
+			const bool syslogTargetChanged = oldSyslogHost != newSyslogHost || oldSyslogPort != newSyslogPort;
+			const bool syslogEnabledChanged = oldSyslogEnabled != newSyslogEnabled;
+			if(syslogTargetChanged || syslogEnabledChanged) {
 #ifndef SMING_RELEASE
-				app.udpSyslogStream.begin(newSyslogHost,newSyslogPort);
-#endif
-			}
-
-			/*
-			*
-			* syslog enable/disable changes - those will be handled on the fly 
-			*
-			*/
-			if(oldSyslogEnabled!=newSyslogEnabled){
-#ifndef SMING_RELEASE
-				app.udpSyslogStream.setStatus(newSyslogEnabled);
+				if(!app.udpSyslogStream.reconfigure(newSyslogHost, newSyslogPort, newSyslogEnabled)) {
+					debug_w(ANSI_COLOR_YELLOW "ApplicationWebserver::onConfig could not reconfigure UDP syslog target" ANSI_COLOR_RESET);
+				}
 #endif
 			}
 
@@ -1440,7 +1397,12 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response){
 
 	if(useSparseCache && !app.ota.isProccessing()) {
 		*cachePayload = payload;
-		*cacheTime = nowMs;
+		*cacheTime = millis();
+		Timer& cacheTimer = isV2 ? _infoV2CacheTimer : _infoV1CacheTimer;
+		cacheTimer.initializeMs(INFO_CACHE_MS, [cachePayload, cacheTime]() {
+			*cachePayload = nullptr;
+			*cacheTime = 0;
+		}).startOnce();
 	}
 
 	if(!checkHeap(response)) {
@@ -1649,14 +1611,23 @@ void ApplicationWebserver::onConnect(HttpRequest& request, HttpResponse& respons
 
 	if(request.method == HttpMethod::POST) {
 		debug_i(ANSI_COLOR_BLUE "is POST" ANSI_COLOR_RESET);
-		DynamicJsonDocument doc(256);
-		if(!parseJsonBody(request, response, doc, F("could not get HTTP body"))) {
-			return;
-		}
 		String ssid;
 		String password;
-		if(Json::getValue(doc[F("ssid")], ssid)) {
-			password = doc[F("password")].as<const char*>();
+		{
+			Jsonrpc::Root root(rpcCodec().db());
+			auto update = root.update();
+			if(!update) {
+				sendApiCode(response, API_CODES::API_BAD_REQUEST, F("low memory"));
+				return;
+			}
+			auto connectRequest = update.toConnectRequest();
+			if(!importConfigBody(request, response, connectRequest, F("could not get HTTP body"))) {
+				return;
+			}
+			ssid = connectRequest.getSsid();
+			password = connectRequest.getPassword();
+		}
+		if(ssid.length() > 0) {
 			debug_d("ssid %s - pass %s", ssid.c_str(), password.c_str());
 			app.network.connect(ssid, password, true);
 			sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
@@ -1736,14 +1707,29 @@ void ApplicationWebserver::onSystemReq(HttpRequest& request, HttpResponse& respo
 		return;
 	}
 
-	DynamicJsonDocument doc(128);
-	if(!parseJsonBody(request, response, doc, F("could not get HTTP body"))) {
-		return;
+	String cmd;
+	String enable;
+	String clearOta;
+	{
+		Jsonrpc::Root root(rpcCodec().db());
+		auto update = root.update();
+		if(!update) {
+			sendApiCode(response, API_CODES::API_BAD_REQUEST, F("low memory"));
+			return;
+		}
+		auto systemRequest = update.toSystemRequest();
+		if(!importConfigBody(request, response, systemRequest, F("could not get HTTP body"))) {
+			return;
+		}
+		cmd = systemRequest.getCmd();
+		enable = systemRequest.getEnable();
+		clearOta = systemRequest.getClearOTA();
 	}
 
 	debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::onSystemReq" ANSI_COLOR_RESET);
 	String errorMsg;
-	const bool ok = app.api->dispatchCommand(F("system"), doc.as<JsonObject>(), errorMsg, false);
+	const bool ok = cmd.length() > 0 ? app.api->dispatchSystemCommand(cmd, enable, clearOta, errorMsg) :
+											 (errorMsg = F("missing cmd"), false);
 
 	setCorsHeaders(response);
 
@@ -1794,12 +1780,20 @@ void ApplicationWebserver::onUpdate(HttpRequest& request, HttpResponse& response
 			return;
 		}
 
-		DynamicJsonDocument doc(512);
-		if(!parseJsonBody(request, response, doc, F("could not parse HTTP body"))) {
-			return;
-		}
 		String romurl;
-		Json::getValue(doc[F("rom")][F("url")], romurl);
+		{
+			Jsonrpc::Root root(rpcCodec().db());
+			auto update = root.update();
+			if(!update) {
+				sendApiCode(response, API_CODES::API_BAD_REQUEST, F("low memory"));
+				return;
+			}
+			auto updateRequest = update.toUpdateRequest();
+			if(!importConfigBody(request, response, updateRequest, F("could not parse HTTP body"))) {
+				return;
+			}
+			romurl = updateRequest.rom.getUrl();
+		}
 
 		//String spiffsurl;
 		//Json::getValue(doc[F("spiffs")][F("url")],spiffsurl);

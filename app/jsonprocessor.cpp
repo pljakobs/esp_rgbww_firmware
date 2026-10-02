@@ -741,25 +741,6 @@ bool JsonProcessor::onJsonRpc(const String& json)
 		return app.api->dispatchJsonRpc(json, errorMsg, false);
 	}
 
-	JsonRpcMessageIn rpc(json);
-	String msg;
-	const char* method = rpc.getMethod();
-	if(strcmp(method, "color") == 0) {
-		return onColor(rpc.getParams(), msg, false);
-	} else if(strcmp(method, "stop") == 0) {
-		return onStop(rpc.getParams(), msg, false);
-	} else if(strcmp(method, "blink") == 0) {
-		return onBlink(rpc.getParams(), msg, false);
-	} else if(strcmp(method, "skip") == 0) {
-		return onSkip(rpc.getParams(), msg, false);
-	} else if(strcmp(method, "pause") == 0) {
-		return onPause(rpc.getParams(), msg, false);
-	} else if(strcmp(method, "continue") == 0) {
-		return onContinue(rpc.getParams(), msg, false);
-	} else if(strcmp(method, "direct") == 0) {
-		return onDirect(rpc.getParams(), msg, false);
-	}
-
 	return false;
 }
 

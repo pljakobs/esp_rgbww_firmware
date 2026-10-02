@@ -86,6 +86,7 @@ public:
     void switchRom();
 
     void onCommandRelay(const String& method, const JsonObject& json);
+    void onCommandRelay(const String& method, const String& rpcMessage);
     //void onWifiConnected(const String& ssid);
     
     void onButtonTogglePressed(int pin);

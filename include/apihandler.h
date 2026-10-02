@@ -29,10 +29,13 @@ public:
 
 	bool dispatchCommand(const String& method, const JsonObject& params, String& errorMsg, bool relay = true);
 	bool dispatchCommand(const char* method, const JsonObject& params, String& errorMsg, bool relay = true);
-	bool dispatchCommand(const String& method, const String& params, String& errorMsg, bool relay = true);
+	bool dispatchSystemCommand(const String& cmd, const String& enable, const String& clearOta, String& errorMsg);
 	bool dispatchJsonRpc(const String& json, String& errorMsg, bool relay = false);
+	bool parseJsonRpcRequest(Stream& input, String& method, String& params, int& requestId, String& authHash,
+							 bool& sparse, bool& paramsEmpty, String& errorMsg);
 	bool renderData(const String& method, const JsonObject& params, String& out);
 	bool renderData(const String& method, const JsonObject& params, String& out, int requestId);
+	bool renderData(const String& method, bool sparse, String& out, int requestId);
 
 	// ConfigDB-backed command dispatch for HTTP request bodies (see CONFIGDB_JSON_INBOUND_PLAN.md Phase B)
 	bool dispatchCommandFromStream(const String& method, Stream& body, String& errorMsg, bool relay = true);

@@ -1,6 +1,7 @@
 #include <apihandler.h>
 
 #include <application.h>
+#include <BufferInputStream.h>
 #include <Data/Stream/MemoryDataStream.h>
 #include <cstring>
 
@@ -199,40 +200,9 @@ bool Api::dispatchCommand(const char* method, const JsonObject& params, String& 
 			errorMsg = F("missing cmd");
 			return false;
 		}
-
-		if(cmd.equals(F("debug"))) {
-			bool enable = false;
-			if(!Json::getValue(params[F("enable")], enable)) {
-				errorMsg = F("missing enable");
-				return false;
-			}
-			Serial.systemDebugOutput(enable);
-			return true;
-		}
-
-		if(cmd.equals(F("restart"))) {
-			bool clearOta = false;
-			Json::getValue(params[F("clearOTA")], clearOta);
-			if(clearOta) {
-				if(!app.delayedCMD(F("clear_ota_restart"), 1500)) {
-					errorMsg = F("system command failed");
-					return false;
-				}
-			} else {
-				if(!app.delayedCMD(F("restart"), 1500)) {
-					errorMsg = F("system command failed");
-					return false;
-				}
-			}
-			return true;
-		}
-
-		if(!app.delayedCMD(cmd, 1500)) {
-			errorMsg = F("system command failed");
-			return false;
-		}
-
-		return true;
+		String enable = params[F("enable")] | "";
+		String clearOta = params[F("clearOTA")] | "";
+		return dispatchSystemCommand(cmd, enable, clearOta, errorMsg);
 	}
 	case CommandMethodId::WebappCheck:
 		if(!app.webappOta.isActive()) {
@@ -250,30 +220,33 @@ bool Api::dispatchCommand(const char* method, const JsonObject& params, String& 
 	return false;
 }
 
-bool Api::dispatchCommand(const String& method, const String& params, String& errorMsg, bool relay)
+bool Api::dispatchSystemCommand(const String& cmd, const String& enable, const String& clearOta, String& errorMsg)
 {
-	debug_i(ANSI_COLOR_BLUE "Api::dispatchCommand(str): method=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ", params=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, method.c_str(), params.c_str());
-	const auto methodId = getCommandMethodId(method.c_str());
-	if(methodId == CommandMethodId::Unknown) {
-		errorMsg = F("method not implemented: ");
-		errorMsg.concat(method.c_str());
-		return false;
-	}
-
-	DynamicJsonDocument doc(512);
-	DeserializationError err = deserializeJson(doc, params);
-	if(err) {
-		if(err == DeserializationError::NoMemory) {
-			errorMsg = F("params too large for parse buffer");
-			debug_e(ANSI_COLOR_RED "Api::dispatchCommand: params exceeded %u byte buffer" ANSI_COLOR_RESET,
-					(unsigned)doc.capacity());
-		} else {
-			errorMsg = F("malformed json");
+	auto parseBoolean = [](const String& value) {
+		return value == F("1") || value.equalsIgnoreCase(F("true")) || value.equalsIgnoreCase(F("on")) ||
+			   value.equalsIgnoreCase(F("yes"));
+	};
+	if(cmd.equals(F("debug"))) {
+		if(enable.length() == 0) {
+			errorMsg = F("missing enable");
+			return false;
 		}
+		Serial.systemDebugOutput(parseBoolean(enable));
+		return true;
+	}
+	if(cmd.equals(F("restart"))) {
+		const String restartCommand = parseBoolean(clearOta) ? String(F("clear_ota_restart")) : String(F("restart"));
+		if(!app.delayedCMD(restartCommand, 1500)) {
+			errorMsg = F("system command failed");
+			return false;
+		}
+		return true;
+	}
+	if(!app.delayedCMD(cmd, 1500)) {
+		errorMsg = F("system command failed");
 		return false;
 	}
-
-	return dispatchCommand(method.c_str(), doc.as<JsonObject>(), errorMsg, relay);
+	return true;
 }
 
 bool Api::dispatchCommandFromStream(const String& method, Stream& body, String& errorMsg, bool relay)
@@ -307,6 +280,9 @@ bool Api::dispatchCommandFromStream(const String& method, Stream& body, String& 
 		break;
 	case CommandMethodId::SetOn:
 	case CommandMethodId::SetOff:
+	case CommandMethodId::ScanNetworks:
+	case CommandMethodId::System:
+	case CommandMethodId::WebappCheck:
 		relayName = nullptr;
 		break;
 	default:
@@ -314,8 +290,41 @@ bool Api::dispatchCommandFromStream(const String& method, Stream& body, String& 
 		errorMsg += method;
 		return false;
 	}
+	if(id == CommandMethodId::ScanNetworks) {
+		if(!app.network.isScanning()) {
+			app.network.scan(false);
+		}
+		return true;
+	}
+	if(id == CommandMethodId::WebappCheck) {
+		if(!app.webappOta.isActive()) {
+			app.webappOta.checkForUpdate(true);
+		}
+		return true;
+	}
+	if(id == CommandMethodId::System) {
+		Jsonrpc::Root root(rpcCodec().db());
+		auto update = root.update();
+		if(!update) {
+			errorMsg = F("internal error");
+			return false;
+		}
+		auto request = update.toSystemRequest();
+		const auto status = request.importFromStream(ConfigDB::Json::format, body);
+		if(!status && !(status.error == ConfigDB::Error::FormatError &&
+						status.code.formatError == ConfigDB::FormatError::NotInSchema)) {
+			errorMsg = F("malformed json");
+			return false;
+		}
+		const String cmd = request.getCmd();
+		if(cmd.length() == 0) {
+			errorMsg = F("missing cmd");
+			return false;
+		}
+		return dispatchSystemCommand(cmd, request.getEnable(), request.getClearOTA(), errorMsg);
+	}
 
-	// MQTT command relay still publishes from a JsonObject (Phase D), so keep the raw body only when it will be used
+	// Keep the original body only when a configured MQTT master will receive it.
 	String relayJson;
 	MemoryDataStream buffered;
 	Stream* source = &body;
@@ -375,13 +384,40 @@ bool Api::dispatchCommandFromStream(const String& method, Stream& body, String& 
 	}
 
 	if(relayJson.length() > 0) {
-		DynamicJsonDocument doc(512);
-		if(!deserializeJson(doc, relayJson)) {
-			auto root = doc.as<JsonObject>();
-			if(id == CommandMethodId::Stop || id == CommandMethodId::Skip || id == CommandMethodId::Pause) {
-				jp.addChannelStatesToCmd(root, params.channels);
+		Jsonrpc::Root relayRoot(rpcCodec().db());
+		if(auto relayUpdate = relayRoot.update()) {
+			auto request = relayUpdate.toWsRequest();
+			request.setJsonrpc(F("2.0"));
+			request.setMethod(relayName);
+			MemoryDataStream relayInput{std::move(relayJson)};
+			const auto relayStatus = request.params.importFromStream(ConfigDB::Json::format, relayInput);
+			if(relayStatus || (relayStatus.error == ConfigDB::Error::FormatError &&
+							   relayStatus.code.formatError == ConfigDB::FormatError::NotInSchema)) {
+				if(id == CommandMethodId::Stop || id == CommandMethodId::Skip || id == CommandMethodId::Pause) {
+					auto selected = [&params](CtrlChannel channel) {
+						return params.channels.count() == 0 || params.channels.contains(channel);
+					};
+					if(app.rgbwwctrl.getMode() == RGBWWLed::ColorMode::Hsv) {
+						const HSVCT& color = app.rgbwwctrl.getCurrentColor();
+						if(selected(CtrlChannel::Hue)) request.params.hsv.setH(String((float(color.h) / float(RGBWW_CALC_HUEWHEELMAX)) * 360.0f, 2));
+						if(selected(CtrlChannel::Sat)) request.params.hsv.setS(String((float(color.s) / float(RGBWW_CALC_MAXVAL)) * 100.0f, 2));
+						if(selected(CtrlChannel::Val)) request.params.hsv.setV(String((float(color.v) / float(RGBWW_CALC_MAXVAL)) * 100.0f, 2));
+						if(selected(CtrlChannel::ColorTemp)) request.params.hsv.setCt(String(color.ct));
+					} else {
+						const ChannelOutput& color = app.rgbwwctrl.getCurrentOutput();
+						if(selected(CtrlChannel::Red)) request.params.raw.setR(String(color.r));
+						if(selected(CtrlChannel::Green)) request.params.raw.setG(String(color.g));
+						if(selected(CtrlChannel::Blue)) request.params.raw.setB(String(color.b));
+						if(selected(CtrlChannel::WarmWhite)) request.params.raw.setWw(String(color.ww));
+						if(selected(CtrlChannel::ColdWhite)) request.params.raw.setCw(String(color.cw));
+					}
+				}
+				String rpcMessage;
+				auto& codec = rpcCodec();
+				if(codec.render({0, JsonRPC::Message::Kind::notification, relayName}, request.params, rpcMessage)) {
+					app.onCommandRelay(relayName, rpcMessage);
+				}
 			}
-			app.onCommandRelay(relayName, root);
 		}
 	}
 
@@ -392,19 +428,77 @@ bool Api::dispatchCommandFromStream(const String& method, Stream& body, String& 
 
 bool Api::dispatchJsonRpc(const String& json, String& errorMsg, bool relay)
 {
-	JsonRpcMessageIn rpc(json);
-	if(!rpc.isValid()) {
-		errorMsg = rpc.getError().length() ? rpc.getError() : String(F("malformed json"));
+	if(json.length() > 512) {
+		errorMsg = F("message too large for parse buffer");
 		return false;
 	}
-
-	const char* method = rpc.getMethod();
-	if(method == nullptr || method[0] == '\0') {
+	BufferInputStream input(json);
+	String method;
+	String params;
+	String authHash;
+	int requestId = 0;
+	bool sparse = true;
+	bool paramsEmpty = false;
+	if(!parseJsonRpcRequest(input, method, params, requestId, authHash, sparse, paramsEmpty, errorMsg)) {
+		return false;
+	}
+	if(method.length() == 0) {
 		errorMsg = F("missing method");
 		return false;
 	}
+	MemoryDataStream paramsStream(std::move(params));
+	return dispatchCommandFromStream(method, paramsStream, errorMsg, relay);
+}
 
-	return dispatchCommand(method, rpc.getParams(), errorMsg, relay);
+bool Api::parseJsonRpcRequest(Stream& input, String& method, String& params, int& requestId, String& authHash,
+							  bool& sparse, bool& paramsEmpty, String& errorMsg)
+{
+	auto& codec = rpcCodec();
+	Jsonrpc::Root root(codec.db());
+	auto update = root.update();
+	if(!update) {
+		errorMsg = F("internal error");
+		return false;
+	}
+	auto request = update.toWsRequest();
+	const ConfigDB::Status status = request.importFromStream(ConfigDB::Json::format, input);
+	if(!status && !(status.error == ConfigDB::Error::FormatError &&
+					status.code.formatError == ConfigDB::FormatError::NotInSchema)) {
+		errorMsg = F("malformed json");
+		return false;
+	}
+	if(!status) {
+		debug_w(ANSI_COLOR_YELLOW "Api::parseJsonRpcRequest: ignoring unknown request fields" ANSI_COLOR_RESET);
+	}
+	method = request.getMethod();
+	requestId = request.getId().toInt();
+	authHash = request.params.getHash();
+	const String sparseValue = request.params.getSparse();
+	sparse = sparseValue.length() == 0 ||
+		!(sparseValue == F("0") || sparseValue == F("false") || sparseValue == F("off"));
+	const auto fields = request.params;
+	paramsEmpty = fields.getCmd().length() == 0 && fields.getT() == 0 && fields.getS() == 0 && !fields.getR() &&
+			   fields.getD() == 1 && fields.getName().length() == 0 && fields.getQ().length() == 0 &&
+			   fields.getHash().length() == 0 && sparseValue.length() == 0 && !fields.getAll() && !fields.getDebug() &&
+			   fields.channels.getItemCount() == 0 && fields.cmds.getItemCount() == 0 &&
+			   fields.raw.getR().length() == 0 && fields.raw.getG().length() == 0 && fields.raw.getB().length() == 0 &&
+			   fields.raw.getWw().length() == 0 && fields.raw.getCw().length() == 0 &&
+			   fields.raw.from.getR().length() == 0 && fields.raw.from.getG().length() == 0 &&
+			   fields.raw.from.getB().length() == 0 && fields.raw.from.getWw().length() == 0 && fields.raw.from.getCw().length() == 0 &&
+			   fields.hsv.getH().length() == 0 && fields.hsv.getS().length() == 0 && fields.hsv.getV().length() == 0 &&
+			   fields.hsv.getCt().length() == 0 && fields.hsv.from.getH().length() == 0 &&
+			   fields.hsv.from.getS().length() == 0 && fields.hsv.from.getV().length() == 0 &&
+			   fields.hsv.from.getCt().length() == 0;
+
+	MemoryDataStream paramsStream;
+	ConfigDB::ExportOptions options;
+	options.asObject = false;
+	if(ConfigDB::Json::format.exportToStream(request.params, paramsStream, options) == 0 ||
+	   !paramsStream.moveString(params)) {
+		errorMsg = F("malformed json");
+		return false;
+	}
+	return true;
 }
 
 bool Api::renderData(const String& method, const JsonObject& params, String& out)
@@ -414,19 +508,23 @@ bool Api::renderData(const String& method, const JsonObject& params, String& out
 
 bool Api::renderData(const String& method, const JsonObject& params, String& out, int requestId)
 {
+	JsonVariantConst sparseParam = params[F("sparse")];
+	if(sparseParam.isNull()) {
+		sparseParam = params[F("S")];
+	}
+	const bool sparse = sparseParam.isNull() ? true :
+		(sparseParam.is<bool>() ? sparseParam.as<bool>() :
+		 !(sparseParam.as<String>() == F("0") || sparseParam.as<String>() == F("false") || sparseParam.as<String>() == F("off")));
+	return renderData(method, sparse, out, requestId);
+}
+
+bool Api::renderData(const String& method, bool sparse, String& out, int requestId)
+{
 	auto& codec = rpcCodec();
 	Jsonrpc::Root root(codec.db());
 	const auto dataMethodId = getDataMethodId(method.c_str());
 
 	if(dataMethodId == DataMethodId::Info) {
-		JsonVariantConst sparseParam = params[F("sparse")];
-		if(sparseParam.isNull()) {
-			sparseParam = params[F("S")];
-		}
-		const bool sparse = sparseParam.isNull() ? true :
-			(sparseParam.is<bool>() ? sparseParam.as<bool>() :
-			 !(sparseParam.as<String>() == F("0") || sparseParam.as<String>() == F("false") || sparseParam.as<String>() == F("off")));
-
 		if(auto update = root.update()) {
 			auto info = update.toInfo();
 		auto fillCommon = [&](auto& value) {
