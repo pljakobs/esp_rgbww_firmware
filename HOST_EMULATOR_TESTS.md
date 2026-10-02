@@ -64,7 +64,7 @@ must not be described as a fully clean Memcheck exit when teardown aborted.
 - **HTTP→WS Transparency**: Set via HTTP, read back via WebSocket
 - **WS→HTTP Transparency**: Set via WebSocket, read back via HTTP
 - **Validation**: Ensures state is consistent across transports
-- **Example**: 
+- **Example**:
   ```
   HTTP POST /color with {r:12, g:34, b:56, ww:78, cw:90}
   → Poll HTTP /color until state changes
@@ -73,14 +73,14 @@ must not be described as a fully clean Memcheck exit when teardown aborted.
   ```
 
 ### 5. **Error Handling**
-- **Malformed JSON (HTTP)**: 
+- **Malformed JSON (HTTP)**:
   - POST `/color` with invalid JSON
   - Expected: HTTP 400 + `{"error": "Invalid JSON"}`
-  
+
 - **Malformed JSON (WebSocket)**:
   - Send invalid JSON frame
   - Expected: `{"jsonrpc": "2.0", "id": <id>, "error": "..."}`
-  
+
 - **Missing Required Fields**:
   - WebSocket RPC without `method` field
   - Expected: Error response with request ID echoed
@@ -257,7 +257,7 @@ Validate event payload matches expected state
 
 ### Test Failure: "Timed out waiting for Host API readiness"
 **Cause**: Host emulator didn't start or crashed
-**Fix**: 
+**Fix**:
 1. Check `/dev/net/tun` exists: `ls -l /dev/net/tun`
 2. Verify TAP interface: `ip link show tap0`
 3. Review full log: `tail -n 200 out/host-ci/host-smoke.log`
