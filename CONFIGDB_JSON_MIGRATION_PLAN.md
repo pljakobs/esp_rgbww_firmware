@@ -1,5 +1,30 @@
 # ConfigDB JSON Handling Migration Plan
 
+## Current Status (2026-10-01)
+
+- **Outbound generation:** complete across HTTP, WebSocket, TCP event server,
+  and MQTT. See [JSON_OUTBOUND_USAGE.md](JSON_OUTBOUND_USAGE.md) for the actual
+  implementation inventory. The proposed standalone `JsonRpc::*` library and
+  workspace-pool API below were not implemented as originally sketched.
+- **Inbound command parsing:** HTTP `/color`, `/stop`, `/skip`, `/pause`,
+  `/continue`, `/blink`, `/toggle`, `/on`, and `/off` now use ConfigDB import
+  through `Api::dispatchCommandFromStream()`. See
+  [CONFIGDB_JSON_INBOUND_PLAN.md](CONFIGDB_JSON_INBOUND_PLAN.md) for current
+  details and remaining work.
+- **Still pending:** `/system`, `/connect`, and `/update` body parsing;
+  WebSocket JSON-RPC envelope import; MQTT command and Home Assistant payload
+  import; and the remaining query/configuration paths.
+- **Phase 0 conformance:** outbound events use ConfigDB JSON-RPC notifications
+  without an `id`, and WebSocket rejects object/array/boolean IDs. The WebSocket
+  transport sends native PING frames; however, the validator accepts any JSON
+  number (including fractional values), and the TCP event heartbeat still uses
+  `keep_alive`. Treat Phase 0 as partial, not complete.
+- **StringPool:** an earlier host-suite heap symptom was incorrectly attributed
+  to StringPool growth without a pool-specific measurement. ConfigDB can retain
+  distinct strings in a Store, but no runtime regression was demonstrated.
+  The inbound command path remains on ConfigDB; see the inbound plan's review
+  for the evidence and caveat.
+
 ## Goal
 
 Use ConfigDB-generated types as the single JSON contract for HTTP, WebSocket JSON-RPC, and MQTT. JSON is imported and exported through streams at transport boundaries. Application logic receives generated typed objects rather than `JsonObject`, `JsonDocument`, or serialized JSON strings.
@@ -25,14 +50,12 @@ Typed result --> generated response/payload updater --> ConfigDB ExportStream --
 
 Transport code owns framing, authentication, CORS, HTTP status codes, MQTT topics, and WebSocket connection state. ConfigDB owns JSON parsing, schema validation, typed storage, and serialization. `Api` owns command/query semantics and controller side effects.
 
-**Sequencing.** The migration runs *outbound first*: Phase 1 replaces JSON-RPC
-and JSON payload **generation** with ConfigDB across **all** transports (HTTP,
-WebSocket, TCP event server, MQTT) before any inbound parsing is touched.
-Generation is the half where ConfigDB export is already truly streaming, the wire
-format is fully under firmware control, and there are no borrowed-buffer lifetime
-constraints — so it validates the schema on the wire at low risk. Inbound
-migration follows in Phases 3–5. Phase 0 first corrects three JSON-RPC
-conformance defects that ConfigDB's generated envelope will not reproduce.
+**Original sequencing proposal.** This plan proposed Phase 1 outbound generation
+before inbound parsing, with Phase 0 conformance fixes first. In practice,
+outbound generation is complete and the HTTP command import work has also landed;
+the WebSocket and MQTT inbound migrations remain pending. Use the status above
+and the inbound plan as the current implementation record. The detailed phases
+below remain design guidance where not superseded by implemented code.
 
 ## Streaming Model and Transport Limits
 
@@ -537,11 +560,10 @@ The generated-client migration is complete when `api.js` and `websocket.js` cont
 
 ## Phase 0: Protocol Conformance Fixes
 
-Three defects in the current JSON-RPC implementation must be fixed **before**
-Phase 1, because ConfigDB's generated envelope is spec-conformant and will not
-reproduce them. They are corrected here as bugs in their own right, not worked
-around; each requires a coordinated firmware + webapp change and is therefore
-the one point in the migration where the wire format deliberately changes.
+This section records the original Phase 0 checklist. Its initial sequencing
+requirement (before Phase 1) is historical; Phase 1 has shipped. The current
+status of these conformance items is summarized above, and that status supersedes
+the original descriptions below.
 
 ### 0a. Notifications must not carry an `id`
 
@@ -599,8 +621,8 @@ before they are ported into [jsonrpc.cfgdb](jsonrpc.cfgdb).
 
 ## Phase 1: Outbound Generation (all transports)
 
-**Do outbound first, and do it everywhere at once.** Message *generation* is
-where ConfigDB is unambiguously ready today: export is genuinely streaming on
+**Original proposal: do outbound first, and do it everywhere at once.** Message
+*generation* is where ConfigDB is unambiguously ready today: export is genuinely streaming on
 every transport, the wire format is fully under our control, there is no
 borrowed-buffer lifetime problem, and no inbound parsing question has to be
 answered first. Inbound migration (Phases 3–5) then lands against a schema that
@@ -610,6 +632,13 @@ Detailed findings, blockers, per-call-site mapping and ordering for this phase
 are in
 [CONFIGDB_JSONRPC_MESSAGES_PLAN.md](CONFIGDB_JSONRPC_MESSAGES_PLAN.md).
 Summary:
+
+**Implementation status: complete.** All outbound sites are inventoried in
+[JSON_OUTBOUND_USAGE.md](JSON_OUTBOUND_USAGE.md). The implementation uses the
+existing `RpcCodec` render/payload helpers and generated `Jsonrpc::Root` types;
+the standalone `JsonRpc::*` library and workspace API proposed above were not
+created. The schema error body exposes an `error` property, and the networks
+response member is titled `networks`.
 
 ### 1a. Complete the schema triplet
 
@@ -654,10 +683,11 @@ The result producers `handleColor()`, `handleNetworks()` and `handleInfo()`
 `JsonWriter::ObjectScope&` to the generated params updater, and then serve both
 the HTTP and the framed renderings.
 
-**Exit criteria for Phase 1:**
+The following were original exit criteria, not a claim that each design detail
+was implemented literally:
 
-- `JsonRpcMessage` and its `DynamicJsonDocument(512)`
-  ([app/jsonrpcmessage.cpp](app/jsonrpcmessage.cpp)) are deleted.
+- Outbound generation no longer depends on `JsonRpcMessage`; the shared source
+  file remains because `JsonRpcMessageIn` still serves legacy inbound parsing.
 - `_colorDoc` and the per-publish `Static`/`DynamicJsonDocument` instances in
   [app/mqtt.cpp](app/mqtt.cpp) and [app/eventserver.cpp](app/eventserver.cpp)
   are gone.

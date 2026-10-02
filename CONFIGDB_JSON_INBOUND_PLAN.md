@@ -11,6 +11,30 @@ TCP event server and MQTT now builds its payload via `rpcCodec()` /
 See [JSON_OUTBOUND_USAGE.md](JSON_OUTBOUND_USAGE.md) for the full inventory and
 migration status of that half of the work.
 
+Inbound JSON migration is **complete for firmware-owned HTTP, WebSocket, and
+MQTT ingress**. HTTP command bodies use
+`Api::dispatchCommandFromStream()`; `/system`, `/connect`, and `/update` import
+their dedicated ConfigDB payload types. WebSocket and JSON-RPC MQTT messages
+import the generated `ws_request` envelope through `BufferInputStream`, and
+Home Assistant main-light and per-channel commands import their consumed foreign
+fields through dedicated ConfigDB types. No ArduinoJson deserializer remains on
+these request paths.
+
+The remaining `deserializeJson()` call in `app/application.cpp` reads locally
+stored webapp metadata; it is not an HTTP, WebSocket, or MQTT request parser.
+ArduinoJson remains a build dependency because other non-ingress code still
+uses its types. Home Assistant MQTT discovery/basic light compatibility remains
+available; surfacing stored transitions, groups, and scenes is a separate
+integration feature and is not part of this parsing migration.
+
+The earlier StringPool investigation did **not** establish a confirmed leak.
+ConfigDB's pool interns distinct strings for the lifetime of a Store, but the
+reported host-suite failures were not isolated to that pool and no pool-specific
+growth measurement or minimal reproduction was retained. Treat unbounded growth
+as an unverified risk, not a demonstrated regression or a blocker. Inbound
+HSV/raw and HA scalar tokens continue to import through ConfigDB; no ArduinoJson
+exception was added for them.
+
 This document covers the other half: **inbound** JSON — everything the firmware
 currently *parses* with ArduinoJson from an HTTP request body, a WebSocket
 frame, or an MQTT payload.
@@ -40,52 +64,52 @@ ingress is implemented).
 
 ## Step 1 — Inventory of current inbound JSON parsing
 
-All of the following use ArduinoJson (`deserializeJson`, `Json::deserialize`,
-`JsonObject`/`JsonDocument`) today. "Shape" is a rough complexity signal for
+The inventory below describes the remaining parsing and, for migrated command
+routes, the former ArduinoJson path. "Shape" is a rough complexity signal for
 sequencing in Step 3.
 
-### HTTP (`app/webserver.cpp`, POST bodies via `parseJsonBody()`)
+### HTTP (`app/webserver.cpp`, POST bodies via ConfigDB imports)
 
 | Handler | Route | Reads | Shape |
 |---|---|---|---|
-| `parseJsonBody()` | helper used by all POST handlers below | `deserializeJson()` from body stream or buffered `String` into a caller-supplied `JsonDocument` | infra, not a payload |
-| `onColorPost()` | `POST /color` | `hsv`/`raw` (+ optional `from`), `cmd`, `t`, `r`, `d`, `name`, `channels` | nested, optional variants |
-| `onConnect()` | `POST /connect` | `ssid`, `password` | 2 scalars |
-| `onUpdate()` | `POST /update` | `rom.url` (optional `spiffs.url`) | 1 nested object |
-| `onStop()` / `onSkip()` / `onPause()` / `onContinue()` | `POST /stop,/skip,/pause,/continue` | optional `channels` array | tiny/array |
-| `onBlink()` | `POST /blink` | `hsv`/`raw`, ramp time | nested |
-| `onToggle()` | `POST /toggle` | none (empty body OK) | empty |
-| `onSetOn()` / `onSetOff()` | `POST /on,/off` | `hsv`/`raw` (+ optional `from`), `channels`, ramp | nested, optional variants |
-| `onSystemReq()` | `POST /system` | `cmd`, `enable`, `clearOTA` | 3 scalars |
+| `dispatchBodyCommand()` | helper used by command routes | ConfigDB import from request body stream (buffered fallback where needed) | implemented |
+| `importConfigBody()` | helper used by `/system`, `/connect`, `/update` | ConfigDB import from request body stream or buffered `String` | implemented |
+| `onColorPost()` | `POST /color` | `hsv`/`raw` (+ optional `from`), `cmd`, `t`, `r`, `d`, `name`, `channels` | ConfigDB migrated |
+| `onConnect()` | `POST /connect` | `ssid`, `password` | ConfigDB migrated |
+| `onUpdate()` | `POST /update` | `rom.url` (optional `spiffs.url`) | ConfigDB migrated |
+| `onStop()` / `onSkip()` / `onPause()` / `onContinue()` | `POST /stop,/skip,/pause,/continue` | optional `channels` array | ConfigDB migrated |
+| `onBlink()` | `POST /blink` | `hsv`/`raw`, ramp time | ConfigDB migrated |
+| `onToggle()` | `POST /toggle` | none (empty body OK) | ConfigDB migrated |
+| `onSetOn()` / `onSetOff()` | `POST /on,/off` | `hsv`/`raw` (+ optional `from`), `channels`, ramp | ConfigDB migrated |
+| `onSystemReq()` | `POST /system` | `cmd`, `enable`, `clearOTA` | ConfigDB migrated |
 
 ### WebSocket (`app/webserver.cpp` `wsMessage()`)
 
-One entry point parses the full JSON-RPC 2.0 envelope (`jsonrpc`/`method`/`id`/`params`)
-with `Json::deserialize()`, then routes `params` (a live `JsonObject`) to either
-`Api::dispatchCommand()` or `Api::renderData()` depending on method. This is the
-single highest-value/highest-risk site: one parse feeds every WS-originated
-command and query.
+`wsMessage()` imports the JSON-RPC 2.0 envelope (`jsonrpc`/`method`/`id`/`params`)
+through the generated `ws_request` schema using a non-owning `BufferInputStream`.
+Typed metadata drives authentication/query handling; command params are exported
+from the typed object and passed to the ConfigDB command importer.
 
 ### MQTT (`app/mqtt.cpp`)
 
 | Handler | Trigger | Reads | Shape |
 |---|---|---|---|
-| `onMessageReceived()` | any subscribed topic | routes by topic to JSON-RPC sync (`dispatchJsonRpc`), color sync (`dispatchCommand("color", String)`), or HA handlers below | dispatch only |
-| `handleChannelCommand()` | HA per-channel `.../<channel>/set` | `state`, `brightness` | 2 scalars |
-| `handleHomeAssistantCommand()` | HA main light `.../light/set` | `state`, `brightness`, `color`, `color_temp`, `transition`; **re-encodes** into our own `hsv`/`cmd`/`t` shape and re-dispatches | nested, **foreign schema** (Home Assistant's, not ours) |
+| `onMessageReceived()` | any subscribed topic | routes by topic to ConfigDB JSON-RPC sync, color sync, or HA handlers below | ConfigDB dispatch |
+| `handleChannelCommand()` | HA per-channel `.../<channel>/set` | `state`, `brightness` | ConfigDB migrated |
+| `handleHomeAssistantCommand()` | HA main light `.../light/set` | `state`, `brightness`, `color`, `color_temp`, `transition`; translates to command-request schema and dispatches through ConfigDB | ConfigDB foreign-schema adapter |
 
 ### Shared dispatch chain (`app/apihandler.cpp`, `app/jsonrpcmessage.cpp`, `app/jsonprocessor.cpp`)
 
 - `Api::dispatchCommand(const String&, const JsonObject&, ...)` — the real
   dispatcher; switches on method name, calls one of `app.jsonproc.on*()`.
 - `Api::dispatchCommand(const char*, const JsonObject&, ...)` — thin overload.
-- `Api::dispatchCommand(const String& method, const String& params, ...)` —
-  parses `params` with a throwaway `DynamicJsonDocument(512)`, then calls the
-  `JsonObject` overload. Used by MQTT's color-sync path.
-- `Api::dispatchJsonRpc(const String& json, ...)` — wraps a full JSON-RPC
-  string in `JsonRpcMessageIn`, then dispatches.
-- `JsonRpcMessageIn` ([jsonrpcmessage.h](include/jsonrpcmessage.h)) — owns a
-  `DynamicJsonDocument(MAX_JSON_MESSAGE_LENGTH)`, exposes `getMethod()`/`getParams()`.
+- `Api::dispatchCommandFromStream()` imports each command into the generated
+  `command_request` member and passes copied `RequestParameters` to the shared
+  command execution methods.
+- `Api::dispatchJsonRpc()` and `Api::parseJsonRpcRequest()` import the full
+  envelope into `ws_request`; MQTT JSON-RPC retains the former 512-byte limit.
+- `JsonRpcMessageIn` and the raw-string `dispatchCommand()` parser overload have
+  been removed.
 - `JsonProcessor` ([jsonprocessor.h](include/jsonprocessor.h)) — one
   `on<Method>(JsonObject root, ...)` per command (`onColor`, `onStop`, `onSkip`,
   `onPause`, `onContinue`, `onBlink`, `onSetOn`, `onSetOff`, `onToggle`,
@@ -94,8 +118,8 @@ command and query.
   and acting on `app.rgbwwctrl`/`app.network`/etc. This is where almost all of
   the real per-field validation logic lives today.
 
-**Total: ~20 inbound parse sites**, all funneling through `Api::dispatchCommand()`
-→ `JsonProcessor::on*()` for anything that mutates state.
+All firmware-owned HTTP, WebSocket, and MQTT ingress now enters ConfigDB-backed
+import paths. ArduinoJson parsing that remains is outside those request paths.
 
 ---
 
@@ -260,62 +284,38 @@ MQTT payload buffer -----------> wrap in non-owning Stream adapter -> importFrom
   single request is always import → dispatch → render → done, never
   interleaved with another message, so one shared store and one shared guard
   is sufficient; no workspace pool needed at current concurrency.
-- **Home Assistant MQTT payloads are a declared exception.** `handleHomeAssistantCommand()`
-  parses *Home Assistant's* wire schema, not ours — it's foreign and out of
-  our `.cfgdb` control. Plan: keep a minimal ArduinoJson parse step just for
-  the HA fields, then feed our own command shape through the same
-  ConfigDB-import path as everything else, rather than trying to model HA's
-  schema in `.cfgdb` too. Full ArduinoJson removal here is not a goal.
+- **Home Assistant MQTT payloads use a foreign wire schema.** `handleHomeAssistantCommand()`
+  currently parses HA fields and re-encodes them into our command shape. During
+  Phase D, first try a small dedicated ConfigDB schema for the HA fields we
+  consume, then send the translated command through the normal ConfigDB import
+  path. Keep ArduinoJson here only if the extra schema/import work proves
+  disproportionate or technically blocked; minimizing its use remains the goal.
 
 ---
 
 ## Step 3 — Phased rollout
 
-Sequenced to centralize first — migrate the two chokepoints once, then let
-that coverage cascade, rather than porting 20 call sites one at a time.
+All migration phases are complete:
 
-1. **Phase A — spike, then centralize `parseRequestParams()` + the dispatch table.**
-   - Spike: verify the partial-update/stale-field question above against the
-     actual generated code, and settle the `AbsOrRelValue`/schema-type
-     question, both against a small throwaway test.
-   - Migrate `JsonProcessor::parseRequestParams()` to read from a generated
-     ConfigDB accessor instead of `JsonObject`. This alone covers `onStop`,
-     `onSkip`, `onPause`, `onContinue`, `onBlink`, `onDirect`, and
-     `onSingleColorCommand`/`onColor`.
-   - Extend `apihandler.cpp`'s `CommandMethodId`/`getCommandMethodId()` table
-     with the matching `params.cfgdb` schema member per method.
-   - Delete the 9 duplicated `(const String& json, ...)` overloads in
-     `JsonProcessor` once callers route through the migrated
-     object-accepting overload.
-
-2. **Phase B — new HTTP stream entry point.** Add
-   `Api::dispatchCommandFromStream(method, Stream&, errorMsg, relay)` and
-   point every POST handler in `webserver.cpp` (`onColorPost`, `onStop`,
-   `onSkip`, `onPause`, `onContinue`, `onBlink`, `onToggle`, `onSetOn`,
-   `onSetOff`, `onSystemReq`) at it, replacing their individual
-   `parseJsonBody()` + `JsonObject` construction. `onConnect()`'s POST branch
-   and `onUpdate()`'s `rom.url` body can reuse the same entry point once their
-   schema members exist (a sibling of `connect-result`, and a small
-   `rom`/`spiffs` def respectively).
-
-3. **Phase C — WebSocket JSON-RPC envelope.** Add the inbound request-envelope
-   schema member to [jsonrpc.cfgdb](jsonrpc.cfgdb); replace `wsMessage()`'s
-   `Json::deserialize()` + `JsonRpcMessageIn`-equivalent parsing with a single
-   `importFromStream()` over the `BufferInputStream` adapter; dispatch off the
-   generated union tag. Retire `JsonRpcMessageIn` once `dispatchJsonRpc()` no
-   longer needs it.
-
-4. **Phase D — MQTT command/sync + Home Assistant.** `onMessageReceived()`'s
-   remaining paths and `handleChannelCommand()`; apply the declared HA
-   exception above to `handleHomeAssistantCommand()`.
-
-5. **Phase E — cleanup.** Delete the
-   `dispatchCommand(String, String, ...)` parse-then-dispatch overload, and
-   `parseJsonBody()`'s `DynamicJsonDocument` form (replace with a
-   `Status`-returning ConfigDB-import version) once nothing references them.
-   Update [JSON_OUTBOUND_USAGE.md](JSON_OUTBOUND_USAGE.md)'s sibling inbound
-   inventory (or merge this document's Step 1 table into it) to reflect
-   final state.
+1. **Phase A — command import.** The `command_request` schema keeps inbound
+   absolute/relative/percentage color tokens as strings while preserving the
+   numeric outbound command schema. Every import selects its union member via
+   `toXxx()` to reset fields to schema defaults before reading a new request.
+2. **Phase B — HTTP.** Command routes use `dispatchCommandFromStream()`;
+   `/system`, `/connect`, and `/update` use their own ConfigDB request members
+   through `importConfigBody()`. The ArduinoJson `parseJsonBody()` helper is
+   removed.
+3. **Phase C — WebSocket.** `ws_request` models the envelope and its consumed
+   params. `wsMessage()` parses with `BufferInputStream`; `JsonRpcMessageIn` is
+   retired. MQTT JSON-RPC uses the same parser and retains its 512-byte limit.
+4. **Phase D — MQTT and Home Assistant.** MQTT color sync, HA channel commands,
+   and HA main-light commands all import through ConfigDB. The HA adapter
+   translates its consumed fields into the normal `command_request` shape.
+5. **Phase E — cleanup and audit.** The raw-string command parser and
+   `JsonRpcMessageIn` are removed. A source audit finds no ArduinoJson
+   deserializer in HTTP, WebSocket, or MQTT ingress. ArduinoJson remains a
+   dependency for uses outside this migration, including parsing locally stored
+   webapp metadata.
 
 ---
 
@@ -381,16 +381,15 @@ throwaway test:
 
 ---
 
-## Phase A implementation attempt — StringPool growth regression (2026-10-01)
+## Phase A/B implementation and StringPool review (2026-10-01)
 
-Partial Phase A code was written (`parseRequestParams(Jsonrpc::CommandRequestFieldsUpdater, ...)`
-in jsonprocessor.cpp, an HTTP stream entry point in apihandler.cpp/webserver.cpp)
-and exercised against the real pytest suite (`tests/rgbww_test.py` /
-`tests/host_smoke_api_test.py`, run via `.github/scripts/host_ci_smoke_test.sh`
-on Host). This surfaced a real, confirmed architectural problem that blocks
-shipping the current design as-is.
+The Phase A/B command path is implemented as described in the Status section.
+During an earlier host-suite run, declining free heap and subsequent
+rate-limited or failed requests were observed. The run did not identify the
+responsible allocation site, and the observed symptom alone did not establish
+a ConfigDB or StringPool regression.
 
-### Observed symptom
+### Historical host-suite symptom (cause undetermined)
 
 - `test_simple_fade` (first color POST in the run) passed.
 - Every subsequent test failed, with HTTP responses degrading in this order
@@ -400,11 +399,10 @@ shipping the current design as-is.
 - This is the firmware's own built-in low-heap rate limiter
   (`ApplicationWebserver::checkHeap()` / `MINIMUM_HEAP`, `app.checkHeap()`)
   doing exactly what it's designed to do: shed load once free heap drops
-  below a floor. It tripped because free heap was *genuinely, monotonically
-  shrinking* across the run, not because of test pacing or Valgrind overhead
-  (both were ruled out explicitly during debugging).
+  below a floor. Free heap declined during this run, but that alone did not
+  identify the allocation source or rule out other causes.
 
-### Root cause (confirmed from ConfigDB library source, not inferred)
+### StringPool behavior (not proof of a runtime leak)
 
 1. `ConfigDB/Pool.h`'s `StringPool` class doc comment, verbatim:
    > "We store all string data in a single buffer... **Strings are appended
@@ -413,29 +411,24 @@ shipping the current design as-is.
    append-into-StringPool path for `PropertyType::String` properties
    (`stringPool.findOrAdd(...)`); numeric/bool properties instead overwrite a
    fixed-size struct field in place, with no growth.
-3. The Phase A schema design (see above) made `command-request-fields`'s
-   `hsv`/`raw` leaf fields (`h`/`s`/`v`/`ct`/`r`/`g`/`b`/`ww`/`cw`, +`from`)
-   `string-value`-typed **specifically** so they could carry `AbsOrRelValue`'s
-   `+N`/`-N`/`N%` token forms — this was the right call for correctness (a
-   numeric schema type can't represent "relative vs. absolute", confirmed
-   earlier in the same spike), but it means every distinct value gets
-   permanently interned into the StringPool of the **same process-lifetime
-   `rpcCodec()` singleton already used for all outbound rendering**.
-4. Outbound never hit this because rendered strings there (status codes,
-   enum names, SSID/IP that rarely change) have low cardinality — repeated
-   calls mostly hit the `findOrAdd()` dedup path, not `add()`. Inbound color
-   commands are the opposite: `rgbww_set()`/`set_hue_fade()` in the test
-   suite send a different hue/sat/val/ramp-time *string* on practically every
-   call, by design (that's the entire point of testing fades/ramps). Each
-   call therefore adds new, never-reused entries, forever, for the lifetime
-   of the process.
+3. The Phase A schema design made the `hsv`/`raw` leaf fields string-typed so
+  they can carry `AbsOrRelValue`'s `+N`/`-N`/`N%` token forms. `Store::parseString()`
+  can intern new values into the long-lived `rpcCodec()` Store; this establishes
+  a possible growth mechanism, not that the mechanism caused the observed test
+  failure.
+4. The earlier hypothesis assumed the color tests generated enough unique
+  values to produce meaningful pool growth. Neither the unique-value count nor
+  resulting StringPool allocation was measured.
 
-This is a genuine, confirmed heap leak under the current design — not a
-hypothesis — directly caused by routing high-cardinality, ever-changing
-numeric-as-string command input through ConfigDB's property-level string
-interning on a long-lived, never-recreated store.
+The ConfigDB source confirms that distinct strings can accumulate in a
+long-lived Store. That is a possible growth mechanism, but it does not prove
+that it caused the host-suite symptom or that the current workload experiences
+problematic growth. No StringPool-specific allocation trace or minimal
+reproduction was retained. There was no demonstrated StringPool regression;
+keep this as an unverified measurement question, not a confirmed leak or a
+shipping blocker.
 
-### Two mistaken fix attempts (both reverted)
+### Rejected workarounds considered during investigation
 
 1. **Constructing a fresh `Jsonrpc` instance per request to reclaim its
    StringPool on destruction.** Not attempted in code, but considered and
@@ -461,47 +454,36 @@ interning on a long-lived, never-recreated store.
    ```cpp
    Jsonrpc::Root::onCommit(_db, [](Jsonrpc::RootUpdater root) { root.clearDirty(); });
    ```
-   `RpcCodec::render()`/`renderPayload()` are back to their pre-spike form
-   (no `flushStore()` calls). This means **the StringPool growth is currently
-   unmitigated again** — reverting the wrong fix did not reintroduce a
-   different bug, but it does mean Phase A cannot proceed with the schema as
-   currently designed without a real fix.
+    `RpcCodec::render()`/`renderPayload()` are back to their pre-spike form
+    (no `flushStore()` calls). These experiments do not establish a need to
+    clear the pool; the current implementation does not add a pool-clearing
+    workaround.
 
-### Leading candidate fix (not yet implemented — pending decision)
+### ArduinoJson leaf-parser workaround (withdrawn)
 
-Keep `cmd`/`t`/`s`/`r`/`d`/`name`/`q`/`channels` on ConfigDB import (genuinely
-low-cardinality; repeated values dedupe via `findOrAdd`). Pull `hsv`/`raw`/`from`
-*out* of the ConfigDB-imported schema entirely and parse just that small
-nested sub-object with a scoped, stack-local `StaticJsonDocument` (reverting
-only that leaf back to ArduinoJson, bounded/non-leaking by construction since
-it's destroyed at the end of each request). Requires the HTTP body to be
-available as a re-parseable buffered `String` (not just a one-shot stream) so
-the small sub-object can be sliced out and parsed a second time — a bounded,
-small-and-known-size parse, not the `DynamicJsonDocument`-per-whole-body
-pattern this migration is trying to eliminate.
+This was a proposed workaround, not an implemented change. It assumed the
+StringPool diagnosis was established; that assumption was not supported. The
+current implementation continues to import HSV/raw fields through ConfigDB.
 
-This generalizes to every other command/color endpoint already identified in
-Step 1 (`onSetOn`/`onSetOff`/`onBlink`/MQTT color-sync) — all share the same
-`hsv`/`raw` shape, so the fix is made once and reused, not once per endpoint.
-
-**Not yet decided/implemented.** Needs a decision on whether this
-ConfigDB-for-structure / ArduinoJson-for-high-churn-leaf-values split is
-acceptable as a standing exception to "no ArduinoJson", given it's now backed
-by a confirmed, reproducible failure mode rather than a style preference.
+The proposal was to leave low-cardinality fields in ConfigDB and parse `hsv`/
+`raw`/`from` with a scoped `StaticJsonDocument`. It was not adopted because the
+suspected cause was unverified. The current implementation imports these fields
+through ConfigDB. Revisit the proposal only if repeatable measurements isolate
+problematic growth to these imports.
 
 ---
 
-## Open questions / risks (remaining)
+## Validation And Remaining Risks
 
-- **Error message fidelity** — `FormatError` → existing `errorMsg` string
-  mapping needs to cover every message current callers rely on (frontend may
-  pattern-match on specific error text).
-- **Size-limit parity** with `JsonRpcMessageIn`'s current `MAX_JSON_MESSAGE_LENGTH`
-  behavior.
-- **HA schema exception** — confirm there's no appetite to also model HA's
-  schema in `.cfgdb` (would remove the last ArduinoJson dependency entirely,
-  but is low value relative to effort since it's a third-party, not our own,
-  contract).
+- Host and ESP8266 firmware builds pass with the generated ConfigDB schemas and
+  all migrated handlers.
+- `testnet.sh none` could not be run in this environment: the script requires
+  privileged TAP/NAT setup, and `tap0` is absent. Running the Host binary on
+  loopback is not a substitute because Sming's TAP backend rejects `lo`.
+- Runtime/API behavior, including frontend error-text matching, still needs the
+  Host smoke suite on a machine where `testnet.sh` can create its TAP interface.
+- StringPool growth remains an unmeasured risk described above, not a confirmed
+  leak or a blocker.
 
 On Home Assistant, I'm now leaning to an integration module on the home assistant side (see ~/devel/Lightinator_HA_module) that leverages the json-rpc apis provided via http/mqtt/websocket - but minimal discoverability and basic compatibility should be maintained and possibly extended using the Home Assistant mqtt scheme.
 Alternatively, we can look for other, possibly more suitable home assistant integrations
