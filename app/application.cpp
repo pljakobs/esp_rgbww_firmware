@@ -929,6 +929,12 @@ void Application::stopServices()
 	_checkRamTimer.stop();
 	_resetPinTimer.stop();
 
+#if defined(ARCH_HOST) && !defined(SMING_RELEASE) && defined(RSYSLOG)
+	m_setPuts(nullptr);
+	udpSyslogStream.end();
+	debugStream.end();
+#endif
+
 	rgbwwctrl.stop();
 	eventserver.stop();
 	webserver.stop();

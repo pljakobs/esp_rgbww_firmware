@@ -40,8 +40,18 @@ public:
 
     ~MultiOutputStream() 
     {
-        
+#ifdef ARCH_HOST
+        m_setPuts(nullptr);
+        end();
+#endif
     }
+
+#ifdef ARCH_HOST
+    void end()
+    {
+        std::vector<Stream*>().swap(unbufferedStreams);
+    }
+#endif
 
     void addStream(Stream* stream, bool buffered = false)
     {

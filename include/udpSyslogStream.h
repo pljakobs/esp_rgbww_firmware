@@ -158,9 +158,24 @@ public:
 
     void end()
     {
+    #ifdef ARCH_HOST
+        _drainTimer.stop();
+    #endif
         flush();
         _enabled = false;
         _udp.close();
+    #ifdef ARCH_HOST
+        _encoder.reset();
+        _preNetBuf.reset();
+        _ringMem.reset();
+        _buf[0] = nullptr;
+        _buf[1] = nullptr;
+        _host = nullptr;
+        _hostname = nullptr;
+        _tag = nullptr;
+        _draining = false;
+        _ready = true;
+    #endif
     }
 
 private:
