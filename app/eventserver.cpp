@@ -42,10 +42,10 @@ EventServer::~EventServer()
 void EventServer::start(ApplicationWebserver& webServer)
 {
 	this->webServer = &webServer;
-	debug_i(ANSI_COLOR_BLUE "Starting event server with webserver referal\n" ANSI_COLOR_RESET);
+	cdebug_i(EVENTSERVER, "EventServer::start: " ANSI_COLOR_BLUE "Starting event server with webserver referal\n" ANSI_COLOR_RESET);
 	setTimeOut(_connectionTimeout);
 	if(not listen(_tcpPort)) {
-		debug_e(ANSI_COLOR_RED "EventServer failed to open listening port!" ANSI_COLOR_RESET);
+		cdebug_e(EVENTSERVER, "EventServer::start: " ANSI_COLOR_RED "EventServer failed to open listening port!" ANSI_COLOR_RESET);
 	}
 
 	auto fnc = TimerDelegate(&EventServer::publishKeepAlive, this);
@@ -88,7 +88,7 @@ void EventServer::stop()
 void EventServer::onClient(TcpClient* client)
 {
 	TcpServer::onClient(client);
-	debug_d("Client connected from: %s\n", client->getRemoteIp().toString().c_str());
+	cdebug_d(EVENTSERVER, "EventServer::onClient: " "Client connected from: %s\n", client->getRemoteIp().toString().c_str());
 }
 
 /**
@@ -103,7 +103,7 @@ void EventServer::onClient(TcpClient* client)
 void EventServer::onClientComplete(TcpClient& client, bool succesfull)
 {
 	TcpServer::onClientComplete(client, succesfull);
-	debug_d("Client removed: %x\n", &client);
+	cdebug_d(EVENTSERVER, "EventServer::onClientComplete: " "Client removed: %x\n", &client);
 }
 
 /**
@@ -128,7 +128,7 @@ void EventServer::publishCurrentState(const ChannelOutput& raw, const HSVCT* pHs
 		return;
 	unsigned long currentTime = millis();
 	if(currentTime - _lastEventTime < _minEventInterval) {
-		debug_d("eventserver, dropping currentState event\n");
+		cdebug_d(EVENTSERVER, "EventServer::publishCurrentState: " "eventserver, dropping currentState event\n");
 		return; // Silently discard this event
 	}
 	_lastRaw = raw;
@@ -162,7 +162,7 @@ void EventServer::publishCurrentState(const ChannelOutput& raw, const HSVCT* pHs
 		}
 	}
 
-	debug_d("EventServer::publishCurrentColor\n");
+	cdebug_d(EVENTSERVER, "EventServer::publishCurrentState: " "EventServer::publishCurrentColor\n");
 
 	String payload;
 	if(codec.render({0, JsonRPC::Message::Kind::notification, F("color_event")}, root.asColor(), payload)) {
@@ -180,7 +180,7 @@ void EventServer::publishCurrentState(const ChannelOutput& raw, const HSVCT* pHs
  */
 void EventServer::publishClockSlaveStatus(int offset, uint32_t interval)
 {
-	debug_d("EventServer::publishClockSlaveStatus: offset: %d | interval :%d\n", offset, interval);
+	cdebug_d(EVENTSERVER, "EventServer::publishClockSlaveStatus: " "offset: %d | interval :%d\n", offset, interval);
 
 	auto& codec = rpcCodec();
 	Jsonrpc::Root root(codec.db());
@@ -205,7 +205,7 @@ void EventServer::publishClockSlaveStatus(int offset, uint32_t interval)
  */
 void EventServer::publishKeepAlive()
 {
-	debug_d("EventServer::publishKeepAlive\n");
+	cdebug_d(EVENTSERVER, "EventServer::publishKeepAlive: " "EventServer::publishKeepAlive\n");
 
 	auto& codec = rpcCodec();
 	Jsonrpc::Root root(codec.db());
@@ -229,7 +229,7 @@ void EventServer::publishKeepAlive()
  */
 void EventServer::publishTransitionFinished(const String& name, bool requeued)
 {
-	debug_d("EventServer::publishTransitionComplete: %s\n", name.c_str());
+	cdebug_d(EVENTSERVER, "EventServer::publishTransitionFinished: " "%s\n", name.c_str());
 
 	auto& codec = rpcCodec();
 	Jsonrpc::Root root(codec.db());
@@ -269,7 +269,7 @@ void EventServer::publishTransitionFinished(const String& name, bool requeued)
  */
 void EventServer::sendPayload(const String& payload, bool broadcastWs)
 {
-	debug_d("EventServer::sendPayload: %s\n", payload.c_str());
+	cdebug_d(EVENTSERVER, "EventServer::sendPayload: " "%s\n", payload.c_str());
 
 	for(unsigned i = 0; i < connections.size(); ++i) {
 		auto pClient = reinterpret_cast<TcpClient*>(connections[i]);

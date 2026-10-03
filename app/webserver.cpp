@@ -125,7 +125,7 @@ void ApplicationWebserver::setMaxActiveConnections(uint16_t n)
 	if(_serverSettings.maxActiveConnections == n) {
 		return;
 	}
-	debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::setMaxActiveConnections " ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE " -> " ANSI_COLOR_CYAN "%u" ANSI_COLOR_RESET,
+	cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::setMaxActiveConnections: " ANSI_COLOR_BLUE "ApplicationWebserver::setMaxActiveConnections " ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE " -> " ANSI_COLOR_CYAN "%u" ANSI_COLOR_RESET,
 			_serverSettings.maxActiveConnections, n);
 	_serverSettings.maxActiveConnections = n;
 	// configure() reassigns the live limit read by TcpServer::onAccept; it only
@@ -201,14 +201,14 @@ void ApplicationWebserver::init()
 
 void ApplicationWebserver::wsConnected(WebsocketConnection& socket)
 {
-    debug_i(ANSI_COLOR_BLUE "===>wsConnected" ANSI_COLOR_RESET);
+    cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::wsConnected: " ANSI_COLOR_BLUE "===>wsConnected" ANSI_COLOR_RESET);
     
     // Prevent memory leaks if userData was previously set
     delete static_cast<WsAuthState*>(socket.getUserData());
     socket.setUserData(new WsAuthState());
     
     webSockets.addElement(&socket);
-    debug_i(ANSI_COLOR_BLUE "===>nr of websockets: " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, webSockets.size());
+    cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::wsConnected: " ANSI_COLOR_BLUE "===>nr of websockets: " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, webSockets.size());
 
     // Send single-allocation JSON payload directly
     if (app.webappOta.isActive()) {
@@ -226,18 +226,18 @@ void ApplicationWebserver::wsConnected(WebsocketConnection& socket)
 
 void ApplicationWebserver::wsDisconnected(WebsocketConnection& socket)
 {
-    debug_i(ANSI_COLOR_BLUE "<===wsDisconnected" ANSI_COLOR_RESET);
+    cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::wsDisconnected: " ANSI_COLOR_BLUE "<===wsDisconnected" ANSI_COLOR_RESET);
     
     delete static_cast<WsAuthState*>(socket.getUserData());
     socket.setUserData(nullptr);
     
     webSockets.removeElement(&socket);
-    debug_i(ANSI_COLOR_BLUE "===>nr of websockets: " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, webSockets.size());
+    cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::wsDisconnected: " ANSI_COLOR_BLUE "===>nr of websockets: " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, webSockets.size());
 }
 
 void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& message)
 {
-    debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::wsMessage: " ANSI_COLOR_GREEN " %s" ANSI_COLOR_RESET, message.c_str());
+    cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::wsMessage: " ANSI_COLOR_BLUE "" ANSI_COLOR_GREEN " %s" ANSI_COLOR_RESET, message.c_str());
 
 	BufferInputStream requestStream(message);
 	String methodName;
@@ -267,7 +267,7 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 
 	const char* method = methodName.c_str();
 
-	debug_i(ANSI_COLOR_BLUE "Websocket message: method= " ANSI_COLOR_GREEN "%s" ANSI_COLOR_RESET, method);
+	cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::wsMessage: " ANSI_COLOR_BLUE "Websocket message: method= " ANSI_COLOR_GREEN "%s" ANSI_COLOR_RESET, method);
 
 	// Determine target buffer capacity based on the specific method requested
 	size_t responseCapacity = 512; // Default for simple getters/commands
@@ -462,7 +462,7 @@ void ApplicationWebserver::wsSendRuntimeInfo(const char* buffer, size_t length)
         WsAuthState* wsAuth = static_cast<WsAuthState*>(socket->getUserData());
         if(wsAuth != nullptr && wsAuth->runtimeInfoSubscribed) {
             // Send directly without creating an intermediate String object
-			debug_i(ANSI_COLOR_GREEN "wsSendRuntimeInfo: sending runtime info to websocket" ANSI_COLOR_RESET);
+			cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::wsSendRuntimeInfo: " ANSI_COLOR_GREEN "sending runtime info to websocket" ANSI_COLOR_RESET);
             socket->send(buffer, length, WS_FRAME_TEXT);
         }
     }
@@ -527,21 +527,21 @@ void ApplicationWebserver::ensureSecurityCache()
 bool ICACHE_FLASH_ATTR ApplicationWebserver::authenticateExec(HttpRequest& request, HttpResponse& response)
 {
 	{
-		debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::authenticated - checking general context" ANSI_COLOR_RESET);
+		cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::authenticateExec: " ANSI_COLOR_BLUE "checking general context" ANSI_COLOR_RESET);
 		ensureSecurityCache();
 		if(_apiSecuredCache == 0)
 			return true;
 	} // end AppConfig general context
 
-	debug_d("ApplicationWebserver::authenticated - checking...");
+	cdebug_d(APPLICATIONWEBSERVER, "ApplicationWebserver::authenticateExec: " "checking...");
 
 	String userPass = request.getHeader(F("Authorization"));
 	if(userPass == String::nullstr) {
-		debug_d("ApplicationWebserver::authenticated - No auth header");
+		cdebug_d(APPLICATIONWEBSERVER, "ApplicationWebserver::authenticateExec: " "No auth header");
 		return false; // header missing
 	}
 
-	debug_d("ApplicationWebserver::authenticated Auth header: %s", userPass.c_str());
+	cdebug_d(APPLICATIONWEBSERVER, "ApplicationWebserver::authenticateExec: " "ApplicationWebserver::authenticated Auth header: %s", userPass.c_str());
 
 	// header in form of: "Basic MTIzNDU2OmFiY2RlZmc="so the 6 is to get to beginning of 64 encoded string
 	userPass = userPass.substring(6); //cut "Basic " from start
@@ -549,7 +549,7 @@ bool ICACHE_FLASH_ATTR ApplicationWebserver::authenticateExec(HttpRequest& reque
 		return false;
 	}
 
-	debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::authenticated - getting password" ANSI_COLOR_RESET);
+	cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::authenticateExec: " ANSI_COLOR_BLUE "getting password" ANSI_COLOR_RESET);
 	userPass = base64_decode(userPass);
 	if(userPass.endsWith(_apiPasswordCache)) {
 		return true;
@@ -741,7 +741,7 @@ bool ApplicationWebserver::importConfigBody(HttpRequest& request, HttpResponse& 
 
 void ApplicationWebserver::onFile(HttpRequest& request, HttpResponse& response)
 {
-	debug_i(ANSI_COLOR_BLUE "http onFile" ANSI_COLOR_RESET);
+	cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onFile: " ANSI_COLOR_BLUE "http onFile" ANSI_COLOR_RESET);
 	// LittleFS file serving buffers through lwIP — require more free heap than API calls.
 	if(!preflightRequest(request, response, {HttpMethod::GET, HttpMethod::HEAD}, 8000)) return;
 
@@ -760,7 +760,7 @@ void ApplicationWebserver::onFile(HttpRequest& request, HttpResponse& response)
 #endif
 
 	String fileName = request.uri.Path;
-	debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::onFile with uri path=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET,fileName.c_str());
+	cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onFile: " ANSI_COLOR_BLUE "ApplicationWebserver::onFile with uri path=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET,fileName.c_str());
 	if(fileName[0] == '/')
 		fileName = fileName.substring(1);
 	if(fileName[0] == '.') {
@@ -769,17 +769,17 @@ void ApplicationWebserver::onFile(HttpRequest& request, HttpResponse& response)
 	}
 
 	String compressed = fileName + ".gz";
-	debug_i(ANSI_COLOR_BLUE "searching file name " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, compressed.c_str());
+	cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onFile: " ANSI_COLOR_BLUE "searching file name " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, compressed.c_str());
 	auto v = fileMap[compressed];
 	if(v) {
-		debug_i(ANSI_COLOR_BLUE "found" ANSI_COLOR_RESET);
+		cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onFile: " ANSI_COLOR_BLUE "found" ANSI_COLOR_RESET);
 		response.headers[HTTP_HEADER_CONTENT_ENCODING] = _F("gzip");
 	} else {
-		debug_i(ANSI_COLOR_GREEN "searching file name %s" ANSI_COLOR_RESET, fileName.c_str());
+		cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onFile: " ANSI_COLOR_GREEN "searching file name %s" ANSI_COLOR_RESET, fileName.c_str());
 		v = fileMap[fileName];
 		if(!v) {
 			// file not found in fileMap, check if it exists in filesystem
-			debug_i(ANSI_COLOR_YELLOW "file %s not found in filemap" ANSI_COLOR_RESET, fileName.c_str());
+			cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onFile: " ANSI_COLOR_YELLOW "file %s not found in filemap" ANSI_COLOR_RESET, fileName.c_str());
 			if(!app.isFilesystemMounted()) {
 				response.setContentType(MIME_TEXT);
 				response.code = HTTP_STATUS_INTERNAL_SERVER_ERROR;
@@ -788,7 +788,7 @@ void ApplicationWebserver::onFile(HttpRequest& request, HttpResponse& response)
 			}
 			if(!fileExist(fileName) && !fileExist(fileName + ".gz") && WifiAccessPoint.isEnabled()) {
 				//if accesspoint is active and we couldn`t find the file - redirect to index
-				debug_d(ANSI_COLOR_GREEN "ApplicationWebserver::onFile redirecting" ANSI_COLOR_RESET);
+				cdebug_d(APPLICATIONWEBSERVER, "ApplicationWebserver::onFile: " ANSI_COLOR_GREEN "ApplicationWebserver::onFile redirecting" ANSI_COLOR_RESET);
 				response.headers[HTTP_HEADER_LOCATION] = F("http://") + WifiAccessPoint.getIP().toString() + "/";
 			} else {
 #ifndef NOCACHE
@@ -804,21 +804,21 @@ void ApplicationWebserver::onFile(HttpRequest& request, HttpResponse& response)
 				
 				// sendFile with allowGzipFileCheck=true: tries fileName+".gz" first, sets
 				// Content-Encoding:gzip, and infers MIME from fileName (not fileName.gz).
-				debug_i(ANSI_COLOR_GREEN "sending file %s with gzip check" ANSI_COLOR_RESET, fileName.c_str());
+				cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onFile: " ANSI_COLOR_GREEN "sending file %s with gzip check" ANSI_COLOR_RESET, fileName.c_str());
 				response.sendFile(fileName, true);
 			}
 			return;
 		}
 	}
 
-	debug_i(ANSI_COLOR_BLUE "found " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " in fileMap" ANSI_COLOR_RESET, String(v.key()).c_str());
+	cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onFile: " ANSI_COLOR_BLUE "found " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " in fileMap" ANSI_COLOR_RESET, String(v.key()).c_str());
 	auto stream = std::make_unique<FSTR::Stream>(v.content());
 	response.sendDataStream(stream.release(), ContentType::fromFullFileName(fileName));
 
 }
 void ApplicationWebserver::onWebapp(HttpRequest& request, HttpResponse& response)
 {
-	debug_i(ANSI_COLOR_BLUE "http onWebapp" ANSI_COLOR_RESET);
+	cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onWebapp: " ANSI_COLOR_BLUE "http onWebapp" ANSI_COLOR_RESET);
 	if(!preflightRequest(request, response, {HttpMethod::GET})) return;
 
 	response.headers[HTTP_HEADER_LOCATION] = F("/index.html");
@@ -836,7 +836,7 @@ void ApplicationWebserver::onRedirector(HttpRequest& request, HttpResponse& resp
 	// instead of driving the device into OOM. Kept deliberately allocation-light:
 	// no stream, no body.
 	if(app.webappOta.isActive()) {
-		debug_i(ANSI_COLOR_YELLOW "onRedirector: webapp download active, shedding probe %s (429)" ANSI_COLOR_RESET, request.uri.Path.c_str());
+		cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onRedirector: " ANSI_COLOR_YELLOW "webapp download active, shedding probe %s (429)" ANSI_COLOR_RESET, request.uri.Path.c_str());
 		response.code = HTTP_STATUS_TOO_MANY_REQUESTS;
 		response.setHeader(F("Retry-After"), F("10"));
 		response.setHeader(F("Connection"), F("close"));
@@ -847,7 +847,7 @@ void ApplicationWebserver::onRedirector(HttpRequest& request, HttpResponse& resp
 
 void ApplicationWebserver::onIndex(HttpRequest& request, HttpResponse& response)
 {
-	debug_i(ANSI_COLOR_BLUE "http onIndex" ANSI_COLOR_RESET);
+	cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onIndex: " ANSI_COLOR_BLUE "http onIndex" ANSI_COLOR_RESET);
 	if(!preflightRequest(request, response, {HttpMethod::GET})) return;
 #ifdef ARCH_ESP8266
 	if(app.ota.isProccessing()) {
@@ -864,7 +864,7 @@ void ApplicationWebserver::onIndex(HttpRequest& request, HttpResponse& response)
 
 	// Case 1: AP active with no WiFi credentials → serve captive portal
 	if(WifiAccessPoint.isEnabled() && !WifiStation.isConnected() && !hasLfsIndex) {
-		debug_i(ANSI_COLOR_BLUE "onIndex: serving captive portal" ANSI_COLOR_RESET);
+		cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onIndex: " ANSI_COLOR_BLUE "serving captive portal" ANSI_COLOR_RESET);
 		auto v = fileMap[F("captive.html")];
 		if(v) {
 			setCorsHeaders(response);
@@ -877,7 +877,7 @@ void ApplicationWebserver::onIndex(HttpRequest& request, HttpResponse& response)
 
 	// Case 2: WiFi connected but webapp not yet in LFS → show progress page
 	if(WifiStation.isConnected() && !hasLfsIndex) {
-		debug_i(ANSI_COLOR_BLUE "onIndex: serving updating page" ANSI_COLOR_RESET);
+		cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onIndex: " ANSI_COLOR_BLUE "serving updating page" ANSI_COLOR_RESET);
 		// Kick off webapp OTA if not already running
 		if(!app.webappOta.isActive()) {
 			app.webappOta.checkForUpdate();
@@ -903,7 +903,7 @@ void ApplicationWebserver::onIndex(HttpRequest& request, HttpResponse& response)
 
 void ApplicationWebserver::onWebappCheck(HttpRequest& request, HttpResponse& response)
 {
-	debug_i(ANSI_COLOR_BLUE "http onWebappCheck" ANSI_COLOR_RESET);
+	cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onWebappCheck: " ANSI_COLOR_BLUE "http onWebappCheck" ANSI_COLOR_RESET);
 	if(!preflightRequest(request, response, {HttpMethod::GET, HttpMethod::POST})) return;
 	if(!checkHeap(response)) return;
 
@@ -931,7 +931,7 @@ void ApplicationWebserver::onWebappCheck(HttpRequest& request, HttpResponse& res
 
 void ApplicationWebserver::onWebappStatus(HttpRequest& request, HttpResponse& response)
 {
-	debug_i(ANSI_COLOR_BLUE "http onWebappStatus" ANSI_COLOR_RESET);
+	cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onWebappStatus: " ANSI_COLOR_BLUE "http onWebappStatus" ANSI_COLOR_RESET);
 	if(!preflightRequest(request, response, {HttpMethod::GET}, 12000)) return;
 
 	unsigned long now = millis();
@@ -986,10 +986,10 @@ bool ApplicationWebserver::checkHeap(HttpResponse& response, uint32_t minHeap)
  */
 bool ApplicationWebserver::preflightRequest(HttpRequest& request, HttpResponse& response, std::initializer_list<HttpMethod> allowedMethods,  uint32_t minHeap)
 {
-	debug_i(ANSI_COLOR_BLUE "preflightRequest: %d %s" ANSI_COLOR_RESET, (int)request.method, request.uri.Path.c_str());
+	cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::preflightRequest: " ANSI_COLOR_BLUE "%d %s" ANSI_COLOR_RESET, (int)request.method, request.uri.Path.c_str());
 	const HttpMethod reqMethod = request.method;
 
-	debug_i(ANSI_COLOR_BLUE "checking heap..." ANSI_COLOR_RESET);
+	cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::preflightRequest: " ANSI_COLOR_BLUE "checking heap..." ANSI_COLOR_RESET);
     // 1. Heap Check
 	if (!checkHeap(response, minHeap)) {
     	setCorsHeaders(response);
@@ -1014,23 +1014,23 @@ bool ApplicationWebserver::preflightRequest(HttpRequest& request, HttpResponse& 
 			}
 			
 			response.setHeader(F("Retry-After"), retryAfterHeader);
-			debug_e(ANSI_COLOR_RED "Not enough heap free, rejecting request. Free heap: " ANSI_COLOR_CYAN "%u" ANSI_COLOR_RED " bytes" ANSI_COLOR_RESET, app.getFreeHeapSize());
+			cdebug_e(APPLICATIONWEBSERVER, "ApplicationWebserver::preflightRequest: " ANSI_COLOR_RED "Not enough heap free, rejecting request. Free heap: " ANSI_COLOR_CYAN "%u" ANSI_COLOR_RED " bytes" ANSI_COLOR_RESET, app.getFreeHeapSize());
 			return false;
 	}
 
-	debug_i(ANSI_COLOR_BLUE "heap check passed, checking OPTIONS..." ANSI_COLOR_RESET);
+	cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::preflightRequest: " ANSI_COLOR_BLUE "heap check passed, checking OPTIONS..." ANSI_COLOR_RESET);
    // 2. CORS Preflight (OPTIONS) - Must handle this before method check or Auth
     if(reqMethod == HttpMethod::OPTIONS) {
         setCorsHeaders(response);
         sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
-        debug_i(ANSI_COLOR_BLUE "Handled OPTIONS preflight (generic)" ANSI_COLOR_RESET);
+        cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::preflightRequest: " ANSI_COLOR_BLUE "Handled OPTIONS preflight (generic)" ANSI_COLOR_RESET);
         return false; // Handled, stop processing
     }
-	debug_i(ANSI_COLOR_BLUE "OPTIONS check passed, checking method..." ANSI_COLOR_RESET);
+	cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::preflightRequest: " ANSI_COLOR_BLUE "OPTIONS check passed, checking method..." ANSI_COLOR_RESET);
     // 3. Method validation
     bool methodAllowed = false;
 
-    debug_i(ANSI_COLOR_BLUE "Method check passed, checking authentication..." ANSI_COLOR_RESET);
+    cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::preflightRequest: " ANSI_COLOR_BLUE "Method check passed, checking authentication..." ANSI_COLOR_RESET);
     for(auto m : allowedMethods) {
 		if(reqMethod == m) {
             methodAllowed = true;
@@ -1046,9 +1046,9 @@ bool ApplicationWebserver::preflightRequest(HttpRequest& request, HttpResponse& 
 
     // 4. Global Authentication
     // Responds with 401 if security is enabled and auth fails
-	debug_i(ANSI_COLOR_BLUE "Checking authentication..." ANSI_COLOR_RESET);
+	cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::preflightRequest: " ANSI_COLOR_BLUE "Checking authentication..." ANSI_COLOR_RESET);
     if(!authenticated(request, response)) {
-		debug_i(ANSI_COLOR_RED "preflightRequest: %d %s - Authentication failed" ANSI_COLOR_RESET, (int)request.method, request.uri.Path.c_str());
+		cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::preflightRequest: " ANSI_COLOR_RED "%d %s - Authentication failed" ANSI_COLOR_RESET, (int)request.method, request.uri.Path.c_str());
         return false;
     }
 
@@ -1063,7 +1063,7 @@ bool ApplicationWebserver::preflightRequest(HttpRequest& request, HttpResponse& 
 
 void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response)
 {
-	debug_i(ANSI_COLOR_BLUE "onConfig" ANSI_COLOR_RESET);
+	cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onConfig: " ANSI_COLOR_BLUE "onConfig" ANSI_COLOR_RESET);
 	if(!preflightRequest(request, response, {HttpMethod::POST, HttpMethod::GET}, 12000)) return;
 
 #ifdef ARCH_ESP8266
@@ -1076,7 +1076,7 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 
 
 	if(request.method == HttpMethod::POST) {
-		debug_i(ANSI_COLOR_BLUE "======================\nHTTP POST request received, " ANSI_COLOR_RESET);
+		cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onConfig: " ANSI_COLOR_BLUE "======================\nHTTP POST request received, " ANSI_COLOR_RESET);
 		app.telemetryClient.log(F("onConfig POST"));
 		// Invalidate the cached security flag so any password/secured changes take effect immediately.
 		_apiSecuredCache = -1;
@@ -1086,7 +1086,7 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 		bool mqttEnabled, dhcpEnabled,oldSyslogEnabled,oldTelemetryEnabled;
 		int oldColorMode,oldSyslogPort;
 		{
-			debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::onConfig storing old settings" ANSI_COLOR_RESET);
+			cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onConfig: " ANSI_COLOR_BLUE "ApplicationWebserver::onConfig storing old settings" ANSI_COLOR_RESET);
 			app.telemetryClient.log(F("onConfig storing old settings"));
 			AppConfig::Network network(*app.cfg);
 			oldIP = network.connection.getIp();
@@ -1132,7 +1132,7 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 			bool newMqttEnabled,newDhcpEnabled,newSyslogEnabled, newTelemetryEnabled;
 			int newColorMode,newSyslogPort;
 			{
-				debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::onConfig getting new settings" ANSI_COLOR_RESET);
+				cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onConfig: " ANSI_COLOR_BLUE "ApplicationWebserver::onConfig getting new settings" ANSI_COLOR_RESET);
 				app.telemetryClient.log(F("onConfig getting new settings"));
 				AppConfig::Network network(*app.cfg);
 				newIP = network.connection.getIp();
@@ -1164,7 +1164,7 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 			*/
 			if(oldIP != newIP) {
 				//if (restart) {
-				debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::onConfig ip settings changed - rebooting" ANSI_COLOR_RESET);
+				cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onConfig: " ANSI_COLOR_BLUE "ApplicationWebserver::onConfig ip settings changed - rebooting" ANSI_COLOR_RESET);
 				app.telemetryClient.log(F("onConfig ip settings changed - rebooting"));
 				String msg = F("new IP, ")+newIP;
 				app.wsBroadcast(F("notification"), msg);
@@ -1186,7 +1186,7 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 			if(oldSSID != newSSID) {
 				//
 				if(WifiAccessPoint.isEnabled()) {
-					debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::onConfig wifiap settings changed - rebooting" ANSI_COLOR_RESET);
+					cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onConfig: " ANSI_COLOR_BLUE "ApplicationWebserver::onConfig wifiap settings changed - rebooting" ANSI_COLOR_RESET);
 					app.telemetryClient.log(F("onConfig wifiap settings changed - rebooting"));
 					// report the fact that the system will restart to the frontend
 					String msg = F("new SSID, ")+newSSID;
@@ -1204,17 +1204,17 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 			if(mqttEnabled != newMqttEnabled) {
 				if(newMqttEnabled) {
 					if(!app.mqttclient.isRunning()) {
-						debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::onConfig mqtt settings changed - starting mqtt" ANSI_COLOR_RESET);
+						cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onConfig: " ANSI_COLOR_BLUE "ApplicationWebserver::onConfig mqtt settings changed - starting mqtt" ANSI_COLOR_RESET);
 						app.telemetryClient.log(F("onConfig mqtt settings changed - starting mqtt"));
 						app.mqttclient.start();
 					}
 				} else {
 					if(app.mqttclient.isRunning()) {
-						debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::onConfig mqtt settings changed - stopping mqtt" ANSI_COLOR_RESET);
+						cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onConfig: " ANSI_COLOR_BLUE "ApplicationWebserver::onConfig mqtt settings changed - stopping mqtt" ANSI_COLOR_RESET);
 						app.telemetryClient.log(F("onConfig mqtt settings changed - stopping mqtt"));
 						app.mqttclient.stop();
 					} else {
-						debug_i(ANSI_COLOR_BLUE "mqttclient was not running, no need to stop" ANSI_COLOR_RESET);
+						cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onConfig: " ANSI_COLOR_BLUE "mqttclient was not running, no need to stop" ANSI_COLOR_RESET);
 					}
 				}
 			
@@ -1227,10 +1227,10 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 			*/
 			if(newTelemetryEnabled!=oldTelemetryEnabled){
 				if(newTelemetryEnabled){
-					debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::onConfig telemetry settings changed - starting telemetry" ANSI_COLOR_RESET);
+					cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onConfig: " ANSI_COLOR_BLUE "ApplicationWebserver::onConfig telemetry settings changed - starting telemetry" ANSI_COLOR_RESET);
 					app.telemetryClient.start();
 				}else{
-					debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::onConfig telemetry settings changed - stopping telemetry" ANSI_COLOR_RESET);
+					cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onConfig: " ANSI_COLOR_BLUE "ApplicationWebserver::onConfig telemetry settings changed - stopping telemetry" ANSI_COLOR_RESET);
 					app.telemetryClient.stop();
 				}
 			}
@@ -1245,7 +1245,7 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 				if(newDhcpEnabled){
 					WifiStation.enableDHCP(true);
 				}else{
-					debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::onConfig ip settings changed - rebooting" ANSI_COLOR_RESET);
+					cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onConfig: " ANSI_COLOR_BLUE "ApplicationWebserver::onConfig ip settings changed - rebooting" ANSI_COLOR_RESET);
 					app.telemetryClient.log(F("onConfig ip settings changed - rebooting"));
 					String msg = F("new IP, ")+newIP;
 					app.wsBroadcast(F("notification"), msg);
@@ -1292,15 +1292,15 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 			if(syslogTargetChanged || syslogEnabledChanged) {
 #ifndef SMING_RELEASE
 				if(!app.udpSyslogStream.reconfigure(newSyslogHost, newSyslogPort, newSyslogEnabled)) {
-					debug_w(ANSI_COLOR_YELLOW "ApplicationWebserver::onConfig could not reconfigure UDP syslog target" ANSI_COLOR_RESET);
+					cdebug_w(APPLICATIONWEBSERVER, "ApplicationWebserver::onConfig: " ANSI_COLOR_YELLOW "ApplicationWebserver::onConfig could not reconfigure UDP syslog target" ANSI_COLOR_RESET);
 				}
 #endif
 			}
 
-			debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::onConfig " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE ", " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET,newColorMode,oldColorMode);
+			cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onConfig: " ANSI_COLOR_BLUE "ApplicationWebserver::onConfig " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE ", " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET,newColorMode,oldColorMode);
 			if (newColorMode!=oldColorMode){
 				// color Mode has been updated, requires reconfiguration, will restart for now
-				debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::onConfig color settings changed - restarting" ANSI_COLOR_RESET);
+				cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onConfig: " ANSI_COLOR_BLUE "ApplicationWebserver::onConfig color settings changed - restarting" ANSI_COLOR_RESET);
 				app.telemetryClient.log(F("onConfig color settings changed - restarting"));
 				String msg=F("Color Mode changed");
 				app.wsBroadcast(F("notification"), msg);
@@ -1350,7 +1350,7 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 }
 
 void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response){
-	debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::onInfo" ANSI_COLOR_RESET);
+	cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onInfo: " ANSI_COLOR_BLUE "ApplicationWebserver::onInfo" ANSI_COLOR_RESET);
 	if(!preflightRequest(request, response, { HttpMethod::GET },app.ota.isProccessing() ? 10000 : 0)) return;
 
 	// Build params from query string
@@ -1418,7 +1418,7 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response){
 
 void ApplicationWebserver::onColorGet(HttpRequest& request, HttpResponse& response)
 {
-	debug_i(ANSI_COLOR_BLUE "onColorGet" ANSI_COLOR_RESET);
+	cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onColorGet: " ANSI_COLOR_BLUE "onColorGet" ANSI_COLOR_RESET);
 
 	String payload;
 	payload.reserve(256);
@@ -1443,16 +1443,16 @@ void ApplicationWebserver::onColorGet(HttpRequest& request, HttpResponse& respon
  */
 void ApplicationWebserver::onColorPost(HttpRequest& request, HttpResponse& response)
 {
-	debug_i(ANSI_COLOR_BLUE "onColorPost" ANSI_COLOR_RESET);
+	cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onColorPost: " ANSI_COLOR_BLUE "onColorPost" ANSI_COLOR_RESET);
 
 	String msg;
 	const bool ok = dispatchBodyCommand(request, F("color"), msg);
 
 	if(!ok) {
-		debug_i(ANSI_COLOR_BLUE "received color update with message " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, msg.c_str());
+		cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onColorPost: " ANSI_COLOR_BLUE "received color update with message " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, msg.c_str());
 		sendApiCode(response, API_CODES::API_BAD_REQUEST, msg);
 	} else {
-		debug_i(ANSI_COLOR_BLUE "received color update with message " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, msg.c_str());
+		cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onColorPost: " ANSI_COLOR_BLUE "received color update with message " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, msg.c_str());
 		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 	}
 }
@@ -1475,17 +1475,17 @@ void ApplicationWebserver::onColor(HttpRequest& request, HttpResponse& response)
 		return;
 	}
 #endif
-	debug_i(ANSI_COLOR_BLUE "received /color request" ANSI_COLOR_RESET);
+	cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onColor: " ANSI_COLOR_BLUE "received /color request" ANSI_COLOR_RESET);
 
 	bool error = false;
 	if(request.method == HttpMethod::POST) {
-		debug_i(ANSI_COLOR_BLUE "POST" ANSI_COLOR_RESET);
+		cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onColor: " ANSI_COLOR_BLUE "POST" ANSI_COLOR_RESET);
 		ApplicationWebserver::onColorPost(request, response);
 	} else if(request.method == HttpMethod::GET) {
-		debug_i(ANSI_COLOR_BLUE "GET" ANSI_COLOR_RESET);
+		cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onColor: " ANSI_COLOR_BLUE "GET" ANSI_COLOR_RESET);
 		ApplicationWebserver::onColorGet(request, response);
 	} else {
-		debug_i(ANSI_COLOR_BLUE "found unimplementd http_method " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, (int)request.method);
+		cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onColor: " ANSI_COLOR_BLUE "found unimplementd http_method " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, (int)request.method);
 	}
 }
 
@@ -1520,7 +1520,7 @@ bool ApplicationWebserver::isPrintable(const String& str)
  */
 void ApplicationWebserver::onNetworks(HttpRequest& request, HttpResponse& response)
 {
-	debug_i(ANSI_COLOR_BLUE "onNetworks" ANSI_COLOR_RESET);
+	cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onNetworks: " ANSI_COLOR_BLUE "onNetworks" ANSI_COLOR_RESET);
 	if(!preflightRequest(request, response, {HttpMethod::GET})) return;
 #ifdef ARCH_ESP8266
 	if(app.ota.isProccessing()) {
@@ -1598,10 +1598,10 @@ void ApplicationWebserver::onScanNetworks(HttpRequest& request, HttpResponse& re
  */
 void ApplicationWebserver::onConnect(HttpRequest& request, HttpResponse& response)
 {
-	debug_i(ANSI_COLOR_BLUE "onConnect" ANSI_COLOR_RESET);
+	cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onConnect: " ANSI_COLOR_BLUE "onConnect" ANSI_COLOR_RESET);
     if(!preflightRequest(request, response, {HttpMethod::POST, HttpMethod::GET})) return;
 
-	debug_i(ANSI_COLOR_BLUE "passed checks" ANSI_COLOR_RESET);
+	cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onConnect: " ANSI_COLOR_BLUE "passed checks" ANSI_COLOR_RESET);
 #ifdef ARCH_ESP8266
 	if(app.ota.isProccessing()) {
 		sendApiCode(response, API_CODES::API_UPDATE_IN_PROGRESS);
@@ -1610,7 +1610,7 @@ void ApplicationWebserver::onConnect(HttpRequest& request, HttpResponse& respons
 #endif
 
 	if(request.method == HttpMethod::POST) {
-		debug_i(ANSI_COLOR_BLUE "is POST" ANSI_COLOR_RESET);
+		cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onConnect: " ANSI_COLOR_BLUE "is POST" ANSI_COLOR_RESET);
 		String ssid;
 		String password;
 		{
@@ -1628,7 +1628,7 @@ void ApplicationWebserver::onConnect(HttpRequest& request, HttpResponse& respons
 			password = connectRequest.getPassword();
 		}
 		if(ssid.length() > 0) {
-			debug_d("ssid %s - pass %s", ssid.c_str(), password.c_str());
+			cdebug_d(APPLICATIONWEBSERVER, "ApplicationWebserver::onConnect: " "ssid %s - pass %s", ssid.c_str(), password.c_str());
 			app.network.connect(ssid, password, true);
 			sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 			return;
@@ -1648,7 +1648,7 @@ void ApplicationWebserver::onConnect(HttpRequest& request, HttpResponse& respons
 				result.setError(app.network.get_con_err_msg());
 			} else if(status == CONNECTION_STATUS::CONNECTED) {
 				// return connected
-				debug_i(ANSI_COLOR_BLUE "wifi connected, checking if dhcp enabled" ANSI_COLOR_RESET);
+				cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onConnect: " ANSI_COLOR_BLUE "wifi connected, checking if dhcp enabled" ANSI_COLOR_RESET);
 				AppConfig::Network network(*app.cfg);
 
 				if(network.connection.getDhcp()) {
@@ -1726,7 +1726,7 @@ void ApplicationWebserver::onSystemReq(HttpRequest& request, HttpResponse& respo
 		clearOta = systemRequest.getClearOTA();
 	}
 
-	debug_i(ANSI_COLOR_BLUE "ApplicationWebserver::onSystemReq" ANSI_COLOR_RESET);
+	cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onSystemReq: " ANSI_COLOR_BLUE "ApplicationWebserver::onSystemReq" ANSI_COLOR_RESET);
 	String errorMsg;
 	const bool ok = cmd.length() > 0 ? app.api->dispatchSystemCommand(cmd, enable, clearOta, errorMsg) :
 											 (errorMsg = F("missing cmd"), false);
@@ -1766,7 +1766,7 @@ void ApplicationWebserver::onUpdate(HttpRequest& request, HttpResponse& response
 		// probably a CORS request
 		setCorsHeaders(response);
 		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
-		debug_i(ANSI_COLOR_BLUE "/update HttpMethod::OPTIONS Request, sent API_SUCCSSS" ANSI_COLOR_RESET);
+		cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onUpdate: " ANSI_COLOR_BLUE "/update HttpMethod::OPTIONS Request, sent API_SUCCSSS" ANSI_COLOR_RESET);
 		return;
 	}
 	if(request.method != HttpMethod::POST && request.method != HttpMethod::GET) {
@@ -1798,9 +1798,9 @@ void ApplicationWebserver::onUpdate(HttpRequest& request, HttpResponse& response
 		//String spiffsurl;
 		//Json::getValue(doc[F("spiffs")][F("url")],spiffsurl);
 
-		debug_i(ANSI_COLOR_BLUE "starting update process with \n    romurl: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, romurl.c_str());
+		cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onUpdate: " ANSI_COLOR_BLUE "starting update process with \n    romurl: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, romurl.c_str());
 		if(romurl == "") {
-			debug_i(ANSI_COLOR_BLUE "missing rom url" ANSI_COLOR_RESET);
+			cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onUpdate: " ANSI_COLOR_BLUE "missing rom url" ANSI_COLOR_RESET);
 			sendApiCode(response, API_CODES::API_MISSING_PARAM);
 		} else {
 			app.ota.start(romurl);
@@ -1953,7 +1953,7 @@ void ApplicationWebserver::onHosts(HttpRequest& request, HttpResponse& response)
 
     if(!app.controllers) {
         setCorsHeaders(response);
-		debug_i(ANSI_COLOR_BLUE "Controllers not initialized" ANSI_COLOR_RESET);
+		cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onHosts: " ANSI_COLOR_BLUE "Controllers not initialized" ANSI_COLOR_RESET);
 		DynamicJsonDocument doc(256);
         return;
     }
@@ -2001,18 +2001,18 @@ void ApplicationWebserver::onData(HttpRequest& request, HttpResponse& response){
 
 		auto bodyStream = request.getBodyStream();
 		if(bodyStream) {
-			debug_i(ANSI_COLOR_BLUE "received Data bodyStream" ANSI_COLOR_RESET);
+			cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onData: " ANSI_COLOR_BLUE "received Data bodyStream" ANSI_COLOR_RESET);
 			ConfigDB::Status status = app.data->importFromStream(ConfigDB::Json::format, *bodyStream);
 			String statusMsg = status.toString();
 			if(status){
-				debug_i(ANSI_COLOR_BLUE "successfully updated app-data" ANSI_COLOR_RESET);
+				cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onData: " ANSI_COLOR_BLUE "successfully updated app-data" ANSI_COLOR_RESET);
 				sendApiCode(response, API_CODES::API_SUCCESS, statusMsg);
 			}else{
-				debug_i(ANSI_COLOR_BLUE "could not update app-data" ANSI_COLOR_RESET);
+				cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onData: " ANSI_COLOR_BLUE "could not update app-data" ANSI_COLOR_RESET);
 				sendApiCode(response, API_CODES::API_BAD_REQUEST, statusMsg);
 			}
 		}else{
-			debug_i(ANSI_COLOR_BLUE "could not get bodyStream" ANSI_COLOR_RESET);
+			cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onData: " ANSI_COLOR_BLUE "could not get bodyStream" ANSI_COLOR_RESET);
 			sendApiCode(response, API_CODES::API_BAD_REQUEST, F("could not get bodyStream"));
 		}
 	}
@@ -2024,7 +2024,7 @@ void ApplicationWebserver::onSetOn(HttpRequest &request, HttpResponse &response)
     if(!preflightRequest(request, response, {HttpMethod::POST}, 4000)) return;
     
 
-	debug_i(ANSI_COLOR_BLUE "onSetOn" ANSI_COLOR_RESET);
+	cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onSetOn: " ANSI_COLOR_BLUE "onSetOn" ANSI_COLOR_RESET);
 
 	if(!app.api) {
 		sendApiCode(response, API_BAD_REQUEST, F("api not initialized"));
@@ -2042,7 +2042,7 @@ void ApplicationWebserver::onSetOn(HttpRequest &request, HttpResponse &response)
 void ApplicationWebserver::onSetOff(HttpRequest &request, HttpResponse &response) {
     if(!preflightRequest(request, response, {HttpMethod::POST}, 4000)) return;
     
-	debug_i(ANSI_COLOR_BLUE "onSetOff" ANSI_COLOR_RESET);
+	cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onSetOff: " ANSI_COLOR_BLUE "onSetOff" ANSI_COLOR_RESET);
 
 	if(!app.api) {
 		sendApiCode(response, API_BAD_REQUEST, F("api not initialized"));

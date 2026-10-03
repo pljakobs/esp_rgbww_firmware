@@ -166,7 +166,7 @@ bool Api::dispatchCommand(const String& method, const JsonObject& params, String
 bool Api::dispatchCommand(const char* method, const JsonObject& params, String& errorMsg, bool relay)
 {
 	const char* methodName = (method != nullptr) ? method : "";
-	debug_i(ANSI_COLOR_BLUE "Api::dispatchCommand: method=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, methodName);
+	cdebug_i(API, "Api::dispatchCommand: " ANSI_COLOR_BLUE "method=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, methodName);
 
 	switch(getCommandMethodId(method)) {
 	case CommandMethodId::Color:
@@ -216,7 +216,7 @@ bool Api::dispatchCommand(const char* method, const JsonObject& params, String& 
 
 	errorMsg = F("method not implemented: ");
 	errorMsg.concat(methodName);
-	debug_e(ANSI_COLOR_RED "Api::dispatchCommand failed: %s" ANSI_COLOR_RESET, errorMsg.c_str());
+	cdebug_e(API, "Api::dispatchCommand: " ANSI_COLOR_RED "Api::dispatchCommand failed: %s" ANSI_COLOR_RESET, errorMsg.c_str());
 	return false;
 }
 
@@ -468,7 +468,7 @@ bool Api::parseJsonRpcRequest(Stream& input, String& method, String& params, int
 		return false;
 	}
 	if(!status) {
-		debug_w(ANSI_COLOR_YELLOW "Api::parseJsonRpcRequest: ignoring unknown request fields" ANSI_COLOR_RESET);
+		cdebug_w(API, "Api::parseJsonRpcRequest: " ANSI_COLOR_YELLOW "ignoring unknown request fields" ANSI_COLOR_RESET);
 	}
 	method = request.getMethod();
 	requestId = request.getId().toInt();

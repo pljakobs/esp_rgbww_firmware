@@ -227,7 +227,7 @@ public:
         txt.add(F("type=CONTROLLER"));
         txt.add(F("host_type=CONTROLLER"));
         txt.add(_isLeader ? F("isLeader=1") : F("isLeader=0"));
-        debug_i("[mDNS] API Service TXT records: %s", txt.toString().c_str());
+        cdebug_i(LEDCONTROLLERSWARMSERVICE, "LEDControllerSwarmService::addText: " "API Service TXT records: %s", txt.toString().c_str());
     }
 
 private:

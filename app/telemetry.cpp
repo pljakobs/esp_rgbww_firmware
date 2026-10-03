@@ -52,13 +52,13 @@ void TelemetryClient::start() {
 	_telemetryLog=network.telemetry.getLogEnabled();
 
 	if((_telemetryStats  or _telemetryLog ) && telemetryURL.length() > 0){
-		debug_i(ANSI_COLOR_BLUE "Application::startServices - starting remote telemetry" ANSI_COLOR_RESET);
+		cdebug_i(TELEMETRYCLIENT, "TelemetryClient::start: " ANSI_COLOR_BLUE "starting remote telemetry" ANSI_COLOR_RESET);
 
-		debug_i(ANSI_COLOR_BLUE "Application::startServices - telemetry mqtt server: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, telemetryURL.c_str());
+		cdebug_i(TELEMETRYCLIENT, "TelemetryClient::start: " ANSI_COLOR_BLUE "telemetry mqtt server: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, telemetryURL.c_str());
 		connect(telemetryURL, telemetryUser, telemetryPass);
 	}
 	else {
-		debug_i(ANSI_COLOR_BLUE "Application::startServices - mqtt telemetry disabled" ANSI_COLOR_RESET);
+		cdebug_i(TELEMETRYCLIENT, "TelemetryClient::start: " ANSI_COLOR_BLUE "mqtt telemetry disabled" ANSI_COLOR_RESET);
 		stop();
 	}
 }
@@ -79,7 +79,7 @@ void TelemetryClient::connect(const char* telemetryURL, const char* telemetryUse
 	if(!mqtt) {
 		mqtt = new MqttClient();
 		if(!mqtt) {
-			debug_e(ANSI_COLOR_RED "Telemetry MQTT client allocation failed" ANSI_COLOR_RESET);
+			cdebug_e(TELEMETRYCLIENT, "TelemetryClient::connect: " ANSI_COLOR_RED "Telemetry MQTT client allocation failed" ANSI_COLOR_RESET);
 			return;
 		}
 	}
@@ -88,7 +88,7 @@ void TelemetryClient::connect(const char* telemetryURL, const char* telemetryUse
 		// Build URL: mqtt://user:pass@server:port
 		char url[256];
         snprintf(url, sizeof(url), "mqtt://%s:%s@%s", telemetryUser, telemetryPass, telemetryURL);
-        debug_i(ANSI_COLOR_BLUE "Telemetry MQTT connecting to " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, url);
+        cdebug_i(TELEMETRYCLIENT, "TelemetryClient::connect: " ANSI_COLOR_BLUE "Telemetry MQTT connecting to " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, url);
         char clientId[64];
         snprintf(clientId, sizeof(clientId), "telemetry_client_%s", _chipId);
 		mqtt->connect(url, clientId);
@@ -96,7 +96,7 @@ void TelemetryClient::connect(const char* telemetryURL, const char* telemetryUse
 		mqtt->setConnectedHandler([this](MqttClient& client, mqtt_message_t* message) { return this->onConnected(client, message); });
 		mqtt->setMessageHandler([this](MqttClient& client, mqtt_message_t* message) { return this->onMessageReceived(client, message); });
 	} else {
-		debug_i(ANSI_COLOR_BLUE "Telemetry MQTT not configured properly" ANSI_COLOR_RESET);
+		cdebug_i(TELEMETRYCLIENT, "TelemetryClient::connect: " ANSI_COLOR_BLUE "Telemetry MQTT not configured properly" ANSI_COLOR_RESET);
 	}
 }
 
@@ -120,14 +120,14 @@ void TelemetryClient::doReconnect() {
 
 void TelemetryClient::onComplete(TcpClient& client, bool success) {
 	if (!success) {
-		debug_i(ANSI_COLOR_BLUE "Telemetry MQTT connection failed" ANSI_COLOR_RESET);
+		cdebug_i(TELEMETRYCLIENT, "TelemetryClient::onComplete: " ANSI_COLOR_BLUE "Telemetry MQTT connection failed" ANSI_COLOR_RESET);
 		_isRunning = false;
 		requestReconnect("connection failed");
 	}
 }
 
 int TelemetryClient::onConnected(MqttClient& client, mqtt_message_t* message) {
-	debug_i(ANSI_COLOR_BLUE "Telemetry MQTT connected" ANSI_COLOR_RESET);
+	cdebug_i(TELEMETRYCLIENT, "TelemetryClient::onConnected: " ANSI_COLOR_BLUE "Telemetry MQTT connected" ANSI_COLOR_RESET);
     _isRunning = true;
 	return 0;
 }
@@ -153,7 +153,7 @@ void TelemetryClient::requestReconnect(const char* reason) {
 		return;
 	}
 
-	debug_i(ANSI_COLOR_BLUE "Telemetry MQTT reconnect scheduled after %s" ANSI_COLOR_RESET, reason);
+	cdebug_i(TELEMETRYCLIENT, "TelemetryClient::requestReconnect: " ANSI_COLOR_BLUE "Telemetry MQTT reconnect scheduled after %s" ANSI_COLOR_RESET, reason);
 	_reconnectPending = true;
 	_lastReconnectAttempt = now;
 	_reconnectBackoffMs = backoffMs < 150000 ? backoffMs * 2 : 300000;
@@ -172,7 +172,7 @@ bool TelemetryClient::publishPayload(const char* topic, const char* payload) {
 		return true;
 	}
 
-	debug_w("Telemetry MQTT queue rejected publish; recycling telemetry client");
+	cdebug_w(TELEMETRYCLIENT, "TelemetryClient::publishPayload: " "Telemetry MQTT queue rejected publish; recycling telemetry client");
 	_isRunning = false;
 	requestReconnect("publish rejected");
 	return false;
@@ -181,7 +181,7 @@ bool TelemetryClient::publishPayload(const char* topic, const char* payload) {
 bool TelemetryClient::publish(const char* topic, const JsonDocument& doc) {
 	String payload;
 	serializeJson(doc, payload);
-	debug_i(ANSI_COLOR_BLUE "Telemetry MQTT publishing " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " to topic: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, payload.c_str(), topic);
+	cdebug_i(TELEMETRYCLIENT, "TelemetryClient::publish: " ANSI_COLOR_BLUE "Telemetry MQTT publishing " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " to topic: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, payload.c_str(), topic);
 	return publishPayload(topic, payload.c_str());
 }
 
@@ -200,7 +200,7 @@ bool TelemetryClient::publish(const String& topic, const JsonDocument& doc) {
 }
 
 bool TelemetryClient::publish(const char* topic, const char* payload) {
-	debug_i(ANSI_COLOR_BLUE "Telemetry MQTT publishing " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " to topic: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, payload, topic);
+	cdebug_i(TELEMETRYCLIENT, "TelemetryClient::publish: " ANSI_COLOR_BLUE "Telemetry MQTT publishing " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " to topic: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, payload, topic);
 	return publishPayload(topic, payload);
 }
 

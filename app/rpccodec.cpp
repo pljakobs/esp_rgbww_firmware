@@ -48,7 +48,7 @@ RpcCodec::RpcCodec() : _db(F("jsonrpc"))
 bool RpcCodec::render(const Message& msg, const ConfigDB::Object& body, String& out)
 {
 	if(_rendering) {
-		debug_e(ANSI_COLOR_RED "RpcCodec::render: re-entrant call while another message is serializing - dropping to avoid corrupting the shared jsonrpc store" ANSI_COLOR_RESET);
+		cdebug_e(RPCCODEC, "RpcCodec::render: " ANSI_COLOR_RED "re-entrant call while another message is serializing - dropping to avoid corrupting the shared jsonrpc store" ANSI_COLOR_RESET);
 		return false;
 	}
 	ScopedFlag guard(_rendering);
@@ -64,7 +64,7 @@ bool RpcCodec::render(const Message& msg, const ConfigDB::Object& body, String& 
 bool RpcCodec::renderPayload(const ConfigDB::Object& body, String& out)
 {
 	if(_rendering) {
-		debug_e(ANSI_COLOR_RED "RpcCodec::renderPayload: re-entrant call while another message is serializing - dropping to avoid corrupting the shared jsonrpc store" ANSI_COLOR_RESET);
+		cdebug_e(RPCCODEC, "RpcCodec::renderPayload: " ANSI_COLOR_RED "re-entrant call while another message is serializing - dropping to avoid corrupting the shared jsonrpc store" ANSI_COLOR_RESET);
 		return false;
 	}
 	ScopedFlag guard(_rendering);

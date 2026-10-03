@@ -103,7 +103,7 @@ bool JsonProcessor::onColor(JsonObject root, String& msg, bool relay)
 bool JsonProcessor::runColor(RequestParameters& params, std::vector<RequestParameters>& batch, String& errorMsg)
 {
 	if(!app.checkHeap(MIN_HEAP_FREE)) {
-		debug_i(ANSI_COLOR_BLUE "out of memory in processing onColor" ANSI_COLOR_RESET);
+		cdebug_i(JSONPROCESSOR, "JsonProcessor::runColor: " ANSI_COLOR_BLUE "out of memory in processing onColor" ANSI_COLOR_RESET);
 		errorMsg = F("out of memory in processing onColor");
 		return false;
 	}
@@ -112,7 +112,7 @@ bool JsonProcessor::runColor(RequestParameters& params, std::vector<RequestParam
 		return runColorCommand(params, errorMsg);
 	}
 
-	debug_i(ANSI_COLOR_BLUE "  multi command post" ANSI_COLOR_RESET);
+	cdebug_i(JSONPROCESSOR, "JsonProcessor::runColor: " ANSI_COLOR_BLUE "  multi command post" ANSI_COLOR_RESET);
 	String errors;
 	for(unsigned i = 0; i < batch.size(); ++i) {
 		String itemError;
@@ -128,7 +128,7 @@ bool JsonProcessor::runColor(RequestParameters& params, std::vector<RequestParam
 	if(errors.length() == 0) {
 		return true;
 	}
-	debug_i(ANSI_COLOR_BLUE "  multi command post, " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, errors.c_str());
+	cdebug_i(JSONPROCESSOR, "JsonProcessor::runColor: " ANSI_COLOR_BLUE "  multi command post, " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, errors.c_str());
 	errorMsg = errors;
 	return false;
 }
@@ -319,7 +319,7 @@ void JsonProcessor::runToggle()
 bool JsonProcessor::runColorCommand(RequestParameters& params, String& errorMsg)
 {
 	if(params.checkParams(errorMsg) != 0) {
-		debug_i(ANSI_COLOR_BLUE "checkParams failed:" ANSI_COLOR_RESET,errorMsg.c_str());
+		cdebug_i(JSONPROCESSOR, "JsonProcessor::runColorCommand: " ANSI_COLOR_BLUE "checkParams failed:" ANSI_COLOR_RESET,errorMsg.c_str());
 		return false;
 	}
 
@@ -348,12 +348,12 @@ bool JsonProcessor::runColorCommand(RequestParameters& params, String& errorMsg)
 		}
 	} else {
 		errorMsg = F("No color object!");
-		debug_i(ANSI_COLOR_BLUE "no color object" ANSI_COLOR_RESET);
+		cdebug_i(JSONPROCESSOR, "JsonProcessor::runColorCommand: " ANSI_COLOR_BLUE "no color object" ANSI_COLOR_RESET);
 		return false;
 	}
 
 	if(!queueOk) {
-		debug_i(ANSI_COLOR_BLUE "queue full" ANSI_COLOR_RESET);
+		cdebug_i(JSONPROCESSOR, "JsonProcessor::runColorCommand: " ANSI_COLOR_BLUE "queue full" ANSI_COLOR_RESET);
 		errorMsg = F("Queue full");
 	}
 	return queueOk;
@@ -660,7 +660,7 @@ bool JsonProcessor::parseRequest(Stream& body, RequestParameters& params, std::v
 			errorMsg = F("Invalid JSON: ") + status.toString();
 			return false;
 		}
-		debug_w(ANSI_COLOR_YELLOW "JsonProcessor::parseRequest: ignoring unknown field(s)" ANSI_COLOR_RESET);
+		cdebug_w(JSONPROCESSOR, "JsonProcessor::parseRequest: " ANSI_COLOR_YELLOW "ignoring unknown field(s)" ANSI_COLOR_RESET);
 	}
 
 	parseCommandRequestFields(fields, params);
@@ -735,7 +735,7 @@ int JsonProcessor::RequestParameters::checkParams(String& errorMsg) const
  */
 bool JsonProcessor::onJsonRpc(const String& json)
 {
-	debug_d("JsonProcessor::onJsonRpc: %s\n", json.c_str());
+	cdebug_d(JSONPROCESSOR, "JsonProcessor::onJsonRpc: " "%s\n", json.c_str());
 	if(app.api) {
 		String errorMsg;
 		return app.api->dispatchJsonRpc(json, errorMsg, false);

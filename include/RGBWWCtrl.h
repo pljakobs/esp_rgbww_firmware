@@ -97,7 +97,37 @@
 #define ANSI_COLOR_RESET "\033[0m"
 
 // Debugging
-#define DEBUG_APP 1
+// Per-class debug output switches; values must be literal 0 or 1.
+#define API_DEBUG 1
+#define APPLEDCTRL_DEBUG 1
+#define APPLICATION_DEBUG 1
+#define APPLICATIONOTA_DEBUG 1
+#define APPLICATIONWEBSERVER_DEBUG 1
+#define APPMQTTCLIENT_DEBUG 1
+#define APPWIFI_DEBUG 1
+#define CONTROLLERS_DEBUG 1
+#define EVENTSERVER_DEBUG 1
+#define JSONPROCESSOR_DEBUG 1
+#define LEDCONTROLLERSWARMSERVICE_DEBUG 1
+#define MDNSHANDLER_DEBUG 1
+#define RPCCODEC_DEBUG 1
+#define STEPSYNC_DEBUG 1
+#define TELEMETRYCLIENT_DEBUG 1
+#define UDPSYSLOGSTREAM_DEBUG 1
+#define VERSIONLISTENER_DEBUG 1
+#define WEBAPPOTA_DEBUG 1
+// Verbose mDNS packet tracing (mdnsHandler, Controllers)
+//#define DEBUG_MDNS
+
+#define CDEBUG_CAT_(a, b) a##b
+#define CDEBUG_CAT(a, b) CDEBUG_CAT_(a, b)
+#define CDEBUG_0(level, ...) debug_none(__VA_ARGS__)
+#define CDEBUG_1(level, ...) debug_##level(__VA_ARGS__)
+// Errors are always printed; the class argument is kept for uniformity.
+#define cdebug_e(cls, ...) debug_e(__VA_ARGS__)
+#define cdebug_w(cls, ...) CDEBUG_CAT(CDEBUG_, cls##_DEBUG)(w, __VA_ARGS__)
+#define cdebug_i(cls, ...) CDEBUG_CAT(CDEBUG_, cls##_DEBUG)(i, __VA_ARGS__)
+#define cdebug_d(cls, ...) CDEBUG_CAT(CDEBUG_, cls##_DEBUG)(d, __VA_ARGS__)
 
 /*------------------------------------------------
 |
