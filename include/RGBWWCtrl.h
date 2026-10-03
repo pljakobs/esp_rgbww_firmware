@@ -146,6 +146,36 @@
 #define FS_DOWNLOAD_MARGIN 32768UL  // extra headroom (bytes) required on top of the reported bundle size to allow for filesystem overhead
 
 /*------------------------------------------------
+| Controller inventory bounds
+|
+| Every discovered peer grows the in-RAM visibleControllers vector, its
+| ConfigDB mirror, and the transient buffer used to render /hosts. On the
+| ESP8266 the free heap is tight, so we strictly bound the inventory:
+|   - a hard ceiling on the number of visible controllers, and
+|   - a free-heap floor below which NO new controller is admitted.
+| Existing controllers always keep updating (ttl/ip/hostname); only brand-new
+| entries are refused once either limit is hit. The heap floor is the actual
+| crash-guard; the count ceiling bounds the worst-case render cost.
+| Override via -D... in component.mk if needed.
+------------------------------------------------*/
+#ifndef MAX_VISIBLE_CONTROLLERS
+  #if defined(ARCH_ESP8266)
+    #define MAX_VISIBLE_CONTROLLERS 24
+  #else
+    #define MAX_VISIBLE_CONTROLLERS 128
+  #endif
+#endif
+#ifndef CONTROLLERS_MIN_FREE_HEAP
+  #if defined(ARCH_ESP8266)
+    #define CONTROLLERS_MIN_FREE_HEAP 8000
+  #elif defined(ARCH_ESP32)
+    #define CONTROLLERS_MIN_FREE_HEAP 16000
+  #else
+    #define CONTROLLERS_MIN_FREE_HEAP 4000
+  #endif
+#endif
+
+/*------------------------------------------------
 | crash handling
 |
 | the Esp8266 has 512 bytes of memory 

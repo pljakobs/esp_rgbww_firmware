@@ -61,9 +61,14 @@ public:
 
     struct VisibleController {
         unsigned int id;
+        // RFC 6762 cache record: ttl is the advertised lifetime (seconds) and
+        // lastSeenMs is when we last heard it. ONLINE/OFFLINE is derived live
+        // from (now - lastSeenMs) vs ttl, never decremented on a fixed cadence.
+        // state only stores the sticky LOCALHOST marker; it is ignored otherwise.
         int ttl;
+        uint32_t lastSeenMs = 0;
         HostType hostType = HOST_TYPE_UNKNOWN;
-        ControllerState state;
+        ControllerState state = OFFLINE;
     };
 
     class Iterator {
@@ -88,7 +93,17 @@ public:
     // Core methods
     void addOrUpdate(unsigned int id, const char* hostname, const char* ipAddress, int ttl, HostType hostType = HOST_TYPE_UNKNOWN);
     void addOrUpdate(unsigned int id, const String& hostname, const String& ipAddress, int ttl, HostType hostType = HOST_TYPE_UNKNOWN);
-    void removeExpired(int elapsedSeconds);
+
+    // mDNS fragment handlers. The id is the immutable controller identity and is
+    // only ever carried by a TXT record; an A record carries only hostname + ip.
+    // These let discovery complete across separate packets instead of requiring
+    // SRV + A + TXT to arrive together in one message.
+    void noteIdentity(unsigned int id, const char* hostname, int ttl, HostType hostType = HOST_TYPE_UNKNOWN);
+    void noteAddress(const char* hostname, const char* ipAddress, int ttl);
+
+    // Prune records whose advertised TTL (plus grace) has elapsed since they were
+    // last heard. Derives expiry from the wall clock, not the caller's cadence.
+    void removeExpired();
 
     static HostType hostTypeFromString(const String& type);
     static const char* hostTypeToString(HostType type);
@@ -124,6 +139,9 @@ public:
     // Number of times a known controller ID was seen with a different hostname / IP address
     uint32_t hostnameChanges = 0;
     uint32_t ipChanges = 0;
+    // Number of brand-new controllers refused because the inventory bound (count
+    // ceiling or free-heap floor) was hit. Existing controllers still update.
+    uint32_t controllersDropped = 0;
 
     // Iterator support
     Iterator begin();
@@ -136,9 +154,33 @@ private:
     static const size_t INVALID_INDEX = SIZE_MAX;
     
     std::vector<VisibleController> visibleControllers;
+
+    // Address fragments (hostname + ip) seen before the controller's id is known
+    // (its TXT record hasn't arrived yet). Held here, bounded and TTL-reaped,
+    // until a TXT reveals the id and the record can enter the id-keyed inventory.
+    struct PendingAddress {
+        char hostname[CONTROLLER_HOSTNAME_MAX_SIZE];
+        char ipAddress[CONTROLLER_IP_MAX_SIZE];
+        int ttl;
+        uint32_t lastSeenMs = 0;
+    };
+    std::vector<PendingAddress> pendingAddresses;
+
+    // Latches the "inventory bound reached" warning so it logs once per episode
+    // instead of on every refused mDNS response.
+    bool _inventoryFullReported = false;
     
+    // Grace period beyond the advertised TTL before a silent record is dropped
+    // (RFC 6762 cache-flush tolerance), so a single missed refresh never evicts.
+    static constexpr int VISIBLE_CONTROLLER_GRACE_SECONDS = 300;
+
     // Helper methods
+    // Derives the live ControllerState (and remaining ttl, seconds) for a cached
+    // record from the last-seen timestamp per RFC 6762 §10.
+    static ControllerState liveState(const VisibleController& controller, int& remainingTtl);
     size_t findVisibleControllerIndex(unsigned int id);
+    size_t findPendingAddressIndex(const char* hostname);
+    void writePartialIdentity(unsigned int id, const char* hostname);
     ControllerInfo findById(unsigned int id);
     ControllerInfo findByIpAddress(const char* ipAddress);
     ControllerInfo findByIpAddress(const String& ipAddress);

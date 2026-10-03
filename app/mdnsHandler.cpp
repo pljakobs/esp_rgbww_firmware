@@ -274,68 +274,59 @@ bool mdnsHandler::processSwarmServiceResponse(mDNS::Message& message, mDNS::Answ
 {
     using namespace mDNS;
 
-    // Extract required information from the message
-    struct {
-        char hostName[64];
-        IpAddress ipAddr;
-        unsigned int ttl;
-        unsigned int ID;
-    } info;
-
     const String instanceName = String(srv.getName());
     const String target = String(Resource::SRV(srv).getHost());
-    auto a_answer = findAnswer(message, ResourceType::A, target);
-    auto txt_answer = findAnswer(message, ResourceType::TXT, instanceName);
-    if(a_answer == nullptr || txt_answer == nullptr) {
-        return false;
+
+    // Hostname label = SRV target with the trailing ".local" removed. This is
+    // available from the SRV answer alone, even when this packet carries no A
+    // record, so it bridges TXT (id) and A (ip) fragments across packets.
+    char hostName[64];
+    strncpy(hostName, target.c_str(), sizeof(hostName) - 1);
+    hostName[sizeof(hostName) - 1] = '\0';
+    if (char* dot = strstr(hostName, ".local")) {
+        *dot = '\0';
     }
 
-    {
-        String name = String(a_answer->getName());
-        strncpy(info.hostName, name.c_str(), sizeof(info.hostName) - 1);
-        info.hostName[sizeof(info.hostName) - 1] = '\0';
-        char* dot = strstr(info.hostName, ".local");
-        if (dot) {
-            *dot = '\0';
+    bool handled = false;
+
+    // TXT fragment carries the immutable id (plus type and leader flag). It binds
+    // the id to the hostname label so a later A record can complete the record.
+    if (auto txt_answer = findAnswer(message, ResourceType::TXT, instanceName)) {
+        mDNS::Resource::TXT txt(*txt_answer);
+        unsigned int id = parseControllerId(txt["id"]);
+        if (id != 0) {
+            if (txt[F("isLeader")] == "1") {
+                _leaderDetected = true;
+#ifdef DEBUG_MDNS
+                cdebug_i(MDNSHANDLER, "mdnsHandler::processSwarmServiceResponse: " ANSI_COLOR_BLUE "Detected leader: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RESET, hostName);
+#endif
+            }
+            String hostnameType = txt[F("host_type")];
+            if (hostnameType.length() == 0) {
+                hostnameType = txt[F("type")];
+            }
+            const Controllers::HostType hostType = Controllers::hostTypeFromString(hostnameType);
+            app.controllers->noteIdentity(id, hostName, txt_answer->getTtl(), hostType);
+            handled = true;
         }
-        info.ipAddr = String(a_answer->getRecordString());
-        info.ttl = a_answer->getTtl();
     }
 
-    mDNS::Resource::TXT txt(*txt_answer);
-    info.ID = parseControllerId(txt["id"]);
-    if(info.ID == 0) {
-        return false;
+    // A fragment carries the address; it completes the record once the id for
+    // this hostname is known (or is staged until then).
+    if (auto a_answer = findAnswer(message, ResourceType::A, target)) {
+        String ip = a_answer->getRecordString();
+        app.controllers->noteAddress(hostName, ip.c_str(), a_answer->getTtl());
+        handled = true;
     }
 
-    // Check for leader
-    String isLeaderTxt = txt[F("isLeader")];
-    if (isLeaderTxt == "1") {
-        _leaderDetected = true;
-#ifdef DEBUG_MDNS
-        cdebug_i(MDNSHANDLER, "mdnsHandler::processSwarmServiceResponse: " ANSI_COLOR_BLUE "Detected leader: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, info.hostName);
-#endif
-    }
-
-    // Get hostname type
-    String hostnameType = txt[F("host_type")];
-    if (hostnameType.length() == 0) {
-        hostnameType = txt[F("type")];
-    }
-    if (hostnameType.length() == 0)
-        hostnameType = F("undefined");
-#ifdef DEBUG_MDNS
-    cdebug_i(MDNSHANDLER, "mdnsHandler::processSwarmServiceResponse: " ANSI_COLOR_BLUE "Hostname " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ", type: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, info.hostName, hostnameType.c_str());
-#endif
-    const Controllers::HostType hostType = Controllers::hostTypeFromString(hostnameType);
-    app.controllers->addOrUpdate(info.ID, info.hostName, info.ipAddr.toString(), info.ttl, hostType);
-    return true;
+    return handled;
 }
 
 // Process hostname A record responses
 bool mdnsHandler::processHostnameARecord(mDNS::Message& message, mDNS::Answer* a_answer)
 {
     using namespace mDNS;
+    (void)message;
 
     // Extract hostname from A record
 	String hostname_local = String(a_answer->getName());
@@ -356,91 +347,42 @@ bool mdnsHandler::processHostnameARecord(mDNS::Message& message, mDNS::Answer* a
     cdebug_i(MDNSHANDLER, "mdnsHandler::processHostnameARecord: " ANSI_COLOR_BLUE "Got A record for hostname: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ", IP: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, hostname, ipAddress.c_str());
 #endif
 
-    // Look up ID by hostname in our persistent controller database
-    unsigned int controllerId = 0;
-    AppData::Root::Controllers controllers(*app.data);
-
-    for (auto it = controllers.begin(); it != controllers.end(); ++it) {
-        String storedName = (*it).getName();
-
-        // Case-insensitive comparison
-        if (strcasecmp(hostname, storedName.c_str()) == 0) {
-            controllerId = parseControllerId((*it).getId());
-#ifdef DEBUG_MDNS
-            cdebug_i(MDNSHANDLER, "mdnsHandler::processHostnameARecord: " ANSI_COLOR_BLUE "Found matching controller ID: " ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, controllerId);
-#endif
-            break;
-        }
-    }
-
-    // Only process if we found the controller ID
-    if (controllerId > 0) {
-        app.controllers->addOrUpdate(controllerId, hostname, ipAddress, ttl);
-        return true;
-    }
-
-    // Save this information for later matching with TXT records
-    //_pendingHostnameResolutions[hostname] = ipAddress;
-
-#ifdef DEBUG_MDNS
-    cdebug_i(MDNSHANDLER, "mdnsHandler::processHostnameARecord: " ANSI_COLOR_BLUE "Hostname stored for later ID resolution: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, hostname);
-#endif
-
-    return false; // Not fully processed yet
+    // Feed the address fragment. If a TXT already bound this hostname to an id
+    // the record completes immediately; otherwise the address is staged until a
+    // TXT reveals the id.
+    app.controllers->noteAddress(hostname, ipAddress.c_str(), ttl);
+    return true;
 }
 
 // Process hostname responses with potential SRV records
 bool mdnsHandler::processHostnameResponse(mDNS::Message& message, mDNS::Answer& srv, const char* hostname)
 {
     using namespace mDNS;
-    String controllerType;
 
-    String ipAddress;
-    unsigned int ttl = 60; // Default TTL
+    bool handled = false;
 
-    {
-        auto a_answer = findAnswer(message, ResourceType::A, String(Resource::SRV(srv).getHost()));
-
-        if (a_answer != nullptr) {
-            ipAddress = a_answer->getRecordString();
-            ttl = a_answer->getTtl();
-#ifdef DEBUG_MDNS
-            cdebug_i(MDNSHANDLER, "mdnsHandler::processHostnameResponse: " ANSI_COLOR_BLUE "Hostname IP address: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " (TTL: " ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE ")" ANSI_COLOR_RESET, ipAddress.c_str(), ttl);
-#endif
-        } else {
-            // No A record, can't proceed
-            return false;
-        }
-    }
-
-    // Try to get TXT record for ID
-    {
-        auto txt_answer = findAnswer(message, ResourceType::TXT, String(srv.getName()));
-        unsigned int controllerId = 0;
-
-        if (txt_answer != nullptr) {
-            mDNS::Resource::TXT txt(*txt_answer);
-            controllerId = parseControllerId(txt["id"]);
-            controllerType = txt["type"];
-#ifdef DEBUG_MDNS
-            cdebug_i(MDNSHANDLER, "mdnsHandler::processHostnameResponse: " ANSI_COLOR_BLUE "Found controller ID: " ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE ", type: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, controllerId, controllerType.c_str());
-#endif
-
-            if (controllerId > 0) {
-                Controllers::HostType hostType = Controllers::hostTypeFromString(txt["host_type"]);
-                if (hostType == Controllers::HOST_TYPE_UNKNOWN) {
-                    hostType = Controllers::hostTypeFromString(controllerType);
-                }
-                app.controllers->addOrUpdate(controllerId, hostname, ipAddress, ttl, hostType);
-                return true;
+    // TXT fragment carries the immutable id (plus type).
+    if (auto txt_answer = findAnswer(message, ResourceType::TXT, String(srv.getName()))) {
+        mDNS::Resource::TXT txt(*txt_answer);
+        unsigned int controllerId = parseControllerId(txt["id"]);
+        if (controllerId != 0) {
+            Controllers::HostType hostType = Controllers::hostTypeFromString(txt["host_type"]);
+            if (hostType == Controllers::HOST_TYPE_UNKNOWN) {
+                hostType = Controllers::hostTypeFromString(txt["type"]);
             }
+            app.controllers->noteIdentity(controllerId, hostname, txt_answer->getTtl(), hostType);
+            handled = true;
         }
     }
-    // No valid TXT record or not a host type - don't fall back to hostname lookup
-#ifdef DEBUG_MDNS
-    cdebug_i(MDNSHANDLER, "mdnsHandler::processHostnameResponse: " ANSI_COLOR_BLUE "No valid host TXT record found for " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " - ignoring" ANSI_COLOR_RESET, hostname);
-#endif
-    return false;
+
+    // A fragment carries the address; completes the record once the id is known.
+    if (auto a_answer = findAnswer(message, ResourceType::A, String(Resource::SRV(srv).getHost()))) {
+        String ipAddress = a_answer->getRecordString();
+        app.controllers->noteAddress(hostname, ipAddress.c_str(), a_answer->getTtl());
+        handled = true;
+    }
+
+    return handled;
 }
 
 void mdnsHandler::sendSearch()
@@ -481,7 +423,7 @@ void mdnsHandler::sendSearch()
     }
     // Restart the timer
     _mdnsSearchTimer.startOnce();
-    app.controllers->removeExpired(_mdnsTimerInterval / 1000);
+    app.controllers->removeExpired();
 }
 
 void mdnsHandler::sendSearchCb(void* pTimerArg) {
