@@ -64,6 +64,43 @@ Controllers::Controllers() {
     }
     debug_i(ANSI_COLOR_BLUE "Controllers constructor: accessing ConfigDB..." ANSI_COLOR_RESET);
     AppData::Root::Controllers controllers(*app.data);
+    if (auto controllersUpdate = controllers.update()) {
+        for (unsigned configIndex = 0; configIndex < controllersUpdate.getItemCount();) {
+            uint32_t id;
+            {
+                auto controllerItem = controllersUpdate[configIndex];
+                id = parseControllerId(controllerItem.getId());
+            }
+            bool duplicate = false;
+            for (unsigned otherIndex = controllersUpdate.getItemCount(); otherIndex > configIndex + 1;) {
+                --otherIndex;
+                bool sameId;
+                {
+                    auto controllerItem = controllersUpdate[otherIndex];
+                    sameId = parseControllerId(controllerItem.getId()) == id;
+                }
+                if (sameId) {
+                    if (!controllersUpdate.removeItem(otherIndex)) {
+                        debug_e(ANSI_COLOR_RED "error: failed to remove duplicate stored controller" ANSI_COLOR_RESET);
+                        return;
+                    }
+                    duplicate = true;
+                }
+            }
+            if (duplicate) {
+                if (!controllersUpdate.removeItem(configIndex)) {
+                    debug_e(ANSI_COLOR_RED "error: failed to remove duplicate stored controller" ANSI_COLOR_RESET);
+                    return;
+                }
+                debug_w(ANSI_COLOR_YELLOW "Removed duplicate controller ID %u from ConfigDB; awaiting discovery" ANSI_COLOR_RESET, id);
+            } else {
+                ++configIndex;
+            }
+        }
+    } else {
+        debug_e(ANSI_COLOR_RED "error: failed to open stored controllers for cleanup" ANSI_COLOR_RESET);
+        return;
+    }
     size_t count = 0;
     for (auto it = controllers.begin(); it != controllers.end(); ++it) {
         count++;
@@ -129,45 +166,54 @@ void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char*
     bool foundInConfig = false;
     
     if (auto controllersUpdate = controllers.update()) {
-        // Find the specific controller to update (must iterate)
-        for (auto controllerItem : controllersUpdate) {
-            if (parseControllerId(controllerItem.getId()) == id) {
-                foundInConfig = true;
-                #ifdef DEBUG_MDNS
-                debug_i(ANSI_COLOR_BLUE "Hostname " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " already in list" ANSI_COLOR_RESET, hostname);
-                #endif
+        for (unsigned configIndex = 0; configIndex < controllersUpdate.getItemCount();) {
+            bool duplicate = false;
+            {
+                auto controllerItem = controllersUpdate[configIndex];
+                if (parseControllerId(controllerItem.getId()) == id && foundInConfig) {
+                    duplicate = true;
+                } else if (parseControllerId(controllerItem.getId()) == id) {
+                    foundInConfig = true;
+                    #ifdef DEBUG_MDNS
+                    debug_i(ANSI_COLOR_BLUE "Hostname " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " already in list" ANSI_COLOR_RESET, hostname);
+                    #endif
 
-                // Always update IP address
-                if (controllerItem.getIpAddress() != ipAddress) {
-                    debug_i(ANSI_COLOR_BLUE "IP address changed from " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " to " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, 
-                           controllerItem.getIpAddress().c_str(), ipAddress);
-                    controllerItem.setIpAddress(ipAddress);
+                    // Always update IP address
+                    if (controllerItem.getIpAddress() != ipAddress) {
+                        debug_i(ANSI_COLOR_BLUE "IP address changed from " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " to " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET,
+                               controllerItem.getIpAddress().c_str(), ipAddress);
+                        controllerItem.setIpAddress(ipAddress);
+                        ++ipChanges;
+                    }
+
+                    // Only update hostname if this is NOT a group or leader hostname
+                    if ( controllerItem.getName() != hostname) {
+                        debug_i(ANSI_COLOR_BLUE "Hostname changed from " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " to " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET,
+                               controllerItem.getName().c_str(), hostname);
+                        controllerItem.setName(hostname);
+                        ++hostnameChanges;
+                    }
                 }
-                
-                // Only update hostname if this is NOT a group or leader hostname
-                if ( controllerItem.getName() != hostname) {
-                    debug_i(ANSI_COLOR_BLUE "Hostname changed from " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " to " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, 
-                           controllerItem.getName().c_str(), hostname);
-                    controllerItem.setName(hostname);
+            }
+            if (duplicate) {
+                if (!controllersUpdate.removeItem(configIndex)) {
+                    debug_e(ANSI_COLOR_RED "error: failed to remove duplicate host" ANSI_COLOR_RESET);
+                    return;
                 }
-                break;
+            } else {
+                ++configIndex;
             }
         }
-    } else {
-        debug_e(ANSI_COLOR_RED "error: failed to open hosts db for update" ANSI_COLOR_RESET);
-    }
 
-    if(!foundInConfig) {
-        debug_i(ANSI_COLOR_BLUE "Hostname " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " not in list adding to hostname db" ANSI_COLOR_RESET, hostname);
-
-        if(auto controllersUpdate = controllers.update()) {
+        if(!foundInConfig) {
+            debug_i(ANSI_COLOR_BLUE "Hostname " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " not in list adding to hostname db" ANSI_COLOR_RESET, hostname);
             auto newController = controllersUpdate.addItem();
             newController.setName(hostname);
             newController.setIpAddress(ipAddress);
             newController.setId(String(id));
-        } else {
-            debug_e(ANSI_COLOR_RED "error: failed to add host" ANSI_COLOR_RESET);
         }
+    } else {
+        debug_e(ANSI_COLOR_RED "error: failed to open hosts db for update" ANSI_COLOR_RESET);
     }
 }
 
@@ -181,7 +227,7 @@ void Controllers::removeExpired(int elapsedSeconds) {
         if (controller.id == (unsigned int)system_get_chip_id() || controller.state == LOCALHOST) {
             continue;
         }
-        controller.ttl = std::max(0, controller.ttl - elapsedSeconds);
+        controller.ttl -= elapsedSeconds;
         if (controller.ttl <= 0) {
             controller.state = OFFLINE;
         }

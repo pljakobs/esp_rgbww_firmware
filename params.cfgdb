@@ -322,7 +322,9 @@
         "websocket_connections": { "$ref": "value-types/$defs/non-negative-integer" },
         "eventserver_clients": { "$ref": "value-types/$defs/non-negative-integer" },
         "tcp_pcb_size": { "$ref": "value-types/$defs/non-negative-integer" },
-        "tcp_active_estimated_bytes": { "$ref": "value-types/$defs/non-negative-integer" }
+        "tcp_active_estimated_bytes": { "$ref": "value-types/$defs/non-negative-integer" },
+        "mdns_hostname_changes": { "$ref": "value-types/$defs/non-negative-integer" },
+        "mdns_ip_changes": { "$ref": "value-types/$defs/non-negative-integer" }
       },
       "additionalProperties": false
     },

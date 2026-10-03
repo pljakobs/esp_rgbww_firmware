@@ -121,6 +121,10 @@ public:
     void update();
     void forgetControllers();
 
+    // Number of times a known controller ID was seen with a different hostname / IP address
+    uint32_t hostnameChanges = 0;
+    uint32_t ipChanges = 0;
+
     // Iterator support
     Iterator begin();
     Iterator end();

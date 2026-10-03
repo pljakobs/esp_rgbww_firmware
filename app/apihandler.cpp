@@ -591,6 +591,10 @@ bool Api::renderData(const String& method, bool sparse, String& out, int request
 				debug.setHttpActiveConnections(app.webserver.getHttpActiveConnections());
 				debug.setWebsocketConnections(app.webserver.getWebsocketConnectionCount());
 				debug.setEventserverClients(app.eventserver.activeClients);
+				if(app.controllers) {
+					debug.setMdnsHostnameChanges(app.controllers->hostnameChanges);
+					debug.setMdnsIpChanges(app.controllers->ipChanges);
+				}
 			}
 			else {
 				auto stat = info.toInfoStaticParams();
