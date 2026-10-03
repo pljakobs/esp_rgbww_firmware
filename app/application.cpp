@@ -443,6 +443,8 @@ void Application::checkRam()
 			runtimeInfo.setMinfreeHeap10min(_minimumHeap10min);
 			runtimeInfo.setHeapLowErrUptime(_HeapLowErrUptime);
 			runtimeInfo.setHeapLowErr10min(_HeapLowErr10min);	
+			runtimeInfo.setMaxFreeBlock(getMaxFreeBlockSize());
+			runtimeInfo.setFragmentation(frag);
 			runtimeInfo.setActiveConnections(webserver.getWebsocketConnectionCount());
 		}
 		String runtimeNotification;
