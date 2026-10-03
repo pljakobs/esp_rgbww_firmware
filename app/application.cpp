@@ -56,7 +56,7 @@
 
 //IMPORT_FSTR_LOCAL(default_config, PROJECT_DIR "/default_config.json");
 
-#ifdef ARCH_ESP8266
+#if defined(ARCH_ESP8266) && !defined(SMING_RELEASE)
 #include <Platform/OsMessageInterceptor.h>
 
 static OsMessageInterceptor osMessageInterceptor;
@@ -336,8 +336,10 @@ void onReady()
 	
 #ifdef ARCH_ESP8266
 	app.readCrashDump();
+#ifndef SMING_RELEASE
 	osMessageInterceptor.begin(onOsMessage);
 	debug_i(ANSI_COLOR_BLUE "starting os message interceptor" ANSI_COLOR_RESET);
+#endif
 #endif
 
 	// Crash-loop rollback: may switch ROM and restart before we bring anything up.
