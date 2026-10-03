@@ -59,12 +59,13 @@ private:
     bool _telemetryStats;
     bool _telemetryLog;
 
-    int _lastReconnectAttempt = 0;
+    uint32_t _lastReconnectAttempt = 0;
+    uint32_t _reconnectBackoffMs = 10000;
     bool _reconnectPending = false;
-    SimpleTimer _reconnectGateTimer;
-    static void reconnectGateTimeoutCb(void* arg);
     Timer _reconnectTimer;
     void doReconnect();
+    void requestReconnect(const char* reason);
+    bool publishPayload(const char* topic, const char* payload);
 
     bool _isRunning = false;
     MqttClient* mqtt = nullptr;
