@@ -94,6 +94,7 @@ public:
     uint32_t getUptime();
     void uptimeCounter();
     size_t getFreeHeapSize();
+    size_t getMaxFreeBlockSize();
     bool checkHeap(uint32_t minHeap);
     size_t getMinimumHeapUptime() { return _minimumHeapUptime; }
     size_t getMinimumHeap10min() { return _minimumHeap10min; }
@@ -176,6 +177,7 @@ private:
     size_t _minimumHeap10min  = 0x80000;
     size_t _HeapLowErrUptime  = 0;
     size_t _HeapLowErr10min   = 0;
+    size_t _minMaxFreeBlock   = 0x80000;
 
     std::array<int, 17> _lastToggles;
 

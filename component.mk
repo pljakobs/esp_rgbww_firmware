@@ -113,6 +113,10 @@ endif
 # Esp8266 propagates USER_CFLAGS into external lwIP sources, where older GCC
 # toolchains can reject -Werror=format-security even with -Wformat enabled.
 
+ifeq ($(ENABLE_CUSTOM_HEAP),1)
+USER_CFLAGS += -DAPP_UMM_HEAP=1
+endif
+
 CUSTOM_LWIP_OPTS += -DLWIP_IPV6=0 \
 	       -DLWIP_IGMP=1 \
 	       -DLWIP_DNS=1 \

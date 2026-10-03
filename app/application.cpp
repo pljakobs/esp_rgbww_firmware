@@ -39,6 +39,11 @@
 #if ARCH_HOST
 	#include <malloc_count.h>
 #endif
+#if defined(ARCH_ESP8266) && defined(APP_UMM_HEAP)
+extern "C" {
+#include <umm_malloc_cfg.h>
+}
+#endif
 
 
 #ifdef RSYSLOG
@@ -420,7 +425,14 @@ void Application::checkRam()
 {
 	// generate and send memory update to fronend
 	{
-		debug_i(ANSI_COLOR_BLUE "Free heap: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE ", uptime: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, getFreeHeapSize(), millis() / 1000);
+		const size_t freeHeap = getFreeHeapSize();
+		const size_t maxBlock = getMaxFreeBlockSize();
+		if(maxBlock < _minMaxFreeBlock) {
+			_minMaxFreeBlock = maxBlock;
+		}
+		const unsigned frag = freeHeap > 0 ? 100 - unsigned((uint64_t)maxBlock * 100 / freeHeap) : 0;
+		debug_i(ANSI_COLOR_BLUE "Free heap: " ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE ", max block: " ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE " (min " ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE "), frag: " ANSI_COLOR_CYAN "%u%%" ANSI_COLOR_BLUE ", uptime: " ANSI_COLOR_CYAN "%u" ANSI_COLOR_RESET,
+				(unsigned)freeHeap, (unsigned)maxBlock, (unsigned)_minMaxFreeBlock, frag, (unsigned)(millis() / 1000));
 		auto& codec = rpcCodec();
 		Jsonrpc::Root root(codec.db());
 		if(auto update = root.update()){
@@ -514,6 +526,37 @@ size_t Application::getFreeHeapSize(){
 	if (fh<_minimumHeap10min) _minimumHeap10min=fh;
 	
 	return fh;
+}
+
+size_t Application::getMaxFreeBlockSize()
+{
+#if defined(ARCH_ESP8266) && defined(APP_UMM_HEAP)
+	umm_info(nullptr, 0);
+	const size_t blocks = ummHeapInfo.maxFreeContiguousBlocks;
+	// umm blocks are 8 bytes; one block's 4-byte header isn't usable payload.
+	return blocks > 0 ? blocks * 8 - 4 : 0;
+#else
+#ifdef ARCH_ESP8266
+	// Failed probes make the SDK print "E:M", which the OS message interceptor treats as an error.
+	const uint8_t osPrint = system_get_os_print();
+	system_set_os_print(0);
+#endif
+	size_t lo = 0;
+	size_t hi = system_get_free_heap_size() + 1;
+	while(hi - lo > 16) {
+		const size_t mid = lo + (hi - lo) / 2;
+		if(void* p = malloc(mid)) {
+			free(p);
+			lo = mid;
+		} else {
+			hi = mid;
+		}
+	}
+#ifdef ARCH_ESP8266
+	system_set_os_print(osPrint);
+#endif
+	return lo;
+#endif
 }
 
 bool Application::checkHeap( uint32_t minHeap)
