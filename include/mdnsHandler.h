@@ -402,9 +402,9 @@ private:
     //std::map<String, String> _pendingHostnameResolutions;
 
     // Process different types of mDNS responses
-    bool processSwarmServiceResponse(mDNS::Message& message); // _lightinator._tcp replies
+    bool processSwarmServiceResponse(mDNS::Message& message, mDNS::Answer& srv); // _lightinator._tcp replies
     bool processHostnameARecord(mDNS::Message& message, mDNS::Answer* a_answer);
-    bool processHostnameResponse(mDNS::Message& message, const char* hostname);
+    bool processHostnameResponse(mDNS::Message& message, mDNS::Answer& srv, const char* hostname);
 
 };
 

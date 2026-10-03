@@ -35,6 +35,26 @@ extern Application app;
 // No global pointer needed — swarm state is managed via the
 // ledControllerSwarmService member of mdnsHandler directly.
 
+namespace
+{
+// One reply can carry records for many instances, so records must be matched by owner name.
+mDNS::Answer* findAnswer(mDNS::Message& message, mDNS::ResourceType type, const String& name)
+{
+    for(auto& ans : message.answers) {
+        if(ans.getType() == type && ans.getName() == name) {
+            return &ans;
+        }
+    }
+    return nullptr;
+}
+
+bool hasSuffix(const char* name, const char* suffix)
+{
+    const char* p = strstr(name, suffix);
+    return p != nullptr && p[strlen(suffix)] == '\0';
+}
+} // namespace
+
 mdnsHandler::mdnsHandler() {
     // Initialize with default values
     _currentMdnsTimerInterval = _mdnsTimerInterval;
@@ -200,39 +220,24 @@ bool mdnsHandler::onMessage(mDNS::Message& message)
     }
     // update debug counter
     app._mDNS_replies++;
-    auto srv_answer = message[mDNS::ResourceType::SRV];
-    if (srv_answer == nullptr) {
-#ifdef DEBUG_MDNS
-        debug_i(ANSI_COLOR_BLUE "No SRV record in this message" ANSI_COLOR_RESET);
-#endif
-        // Let's check if this is a direct A record response without SRV
-        auto a_answer = message[mDNS::ResourceType::A];
-        if (a_answer != nullptr) {
-            // Process hostname A record response
-            return processHostnameARecord(message, a_answer);
+
+    bool hasSrv = false;
+    bool handled = false;
+    for(auto& srv_answer : message.answers) {
+        if(srv_answer.getType() != mDNS::ResourceType::SRV) {
+            continue;
         }
-        return false;
-    }
+        hasSrv = true;
+        const String answerNameString = String(srv_answer.getName());
+        const char* answerName = answerNameString.c_str();
 
-    const String answerNameString = String(srv_answer->getName());
-    const char* answerName = answerNameString.c_str();
-#ifdef DEBUG_MDNS
-    debug_i(ANSI_COLOR_BLUE "answerName: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "searchName: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, answerName, searchName.c_str());
-#endif
-
-    // Check if this is a swarm or wall-panel service response
-    const char* swarm_suffix = "._lightinator._tcp.local";
-    const char* wallpanel_suffix = "._wall-panel-api._tcp.local";
-    const char* p_swarm = strstr(answerName, swarm_suffix);
-    const char* p_wallpanel = strstr(answerName, wallpanel_suffix);
-    if ((p_swarm != nullptr && p_swarm[strlen(swarm_suffix)] == '\0') ||
-        (p_wallpanel != nullptr && p_wallpanel[strlen(wallpanel_suffix)] == '\0')) {
-        return processSwarmServiceResponse(message);
-    } else {
+        if(hasSuffix(answerName, "._lightinator._tcp.local") || hasSuffix(answerName, "._wall-panel-api._tcp.local")) {
+            handled |= processSwarmServiceResponse(message, srv_answer);
+            continue;
+        }
         const char* http_tcp_local = "._http._tcp.local";
-        const char* p = strstr(answerName, http_tcp_local);
-        if (p != nullptr && p[strlen(http_tcp_local)] == '\0') {
-            // This is likely a hostname response
+        if(hasSuffix(answerName, http_tcp_local)) {
+            const char* p = strstr(answerName, http_tcp_local);
             size_t hostname_len = p - answerName;
             // Bound the copy to a fixed buffer: answerName comes straight off
             // the network, so a VLA sized from it would let a remote peer decide
@@ -249,25 +254,25 @@ bool mdnsHandler::onMessage(mDNS::Message& message)
 #ifdef DEBUG_MDNS
             debug_i(ANSI_COLOR_BLUE "Processing hostname response for: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, hostname);
 #endif
-
-            // Extract hostname data from the message
-            return processHostnameResponse(message, hostname);
+            handled |= processHostnameResponse(message, srv_answer, hostname);
         }
     }
 
-    // Not a response we're interested in
-    return false;
+    if(!hasSrv) {
+        // Plain A record responses: each A record is resolved independently by its own name.
+        for(auto& a_answer : message.answers) {
+            if(a_answer.getType() == mDNS::ResourceType::A) {
+                handled |= processHostnameARecord(message, &a_answer);
+            }
+        }
+    }
+    return handled;
 }
 
 // Process swarm service responses (_lightinator._tcp)
-bool mdnsHandler::processSwarmServiceResponse(mDNS::Message& message)
+bool mdnsHandler::processSwarmServiceResponse(mDNS::Message& message, mDNS::Answer& srv)
 {
     using namespace mDNS;
-    bool msgHasA = false, msgHasTXT = false;
-
-#ifdef DEBUG_MDNS
-    debug_i(ANSI_COLOR_BLUE "Found matching SRV record" ANSI_COLOR_RESET);
-#endif
 
     // Extract required information from the message
     struct {
@@ -277,58 +282,54 @@ bool mdnsHandler::processSwarmServiceResponse(mDNS::Message& message)
         unsigned int ID;
     } info;
 
-    auto answer = message[mDNS::ResourceType::A];
-    if (answer != nullptr) {
-        String name = String(answer->getName());
+    const String instanceName = String(srv.getName());
+    const String target = String(Resource::SRV(srv).getHost());
+    auto a_answer = findAnswer(message, ResourceType::A, target);
+    auto txt_answer = findAnswer(message, ResourceType::TXT, instanceName);
+    if(a_answer == nullptr || txt_answer == nullptr) {
+        return false;
+    }
+
+    {
+        String name = String(a_answer->getName());
         strncpy(info.hostName, name.c_str(), sizeof(info.hostName) - 1);
         info.hostName[sizeof(info.hostName) - 1] = '\0';
         char* dot = strstr(info.hostName, ".local");
         if (dot) {
             *dot = '\0';
         }
-        info.ipAddr = String(answer->getRecordString());
-        info.ttl = answer->getTtl();
-        msgHasA = true;
+        info.ipAddr = String(a_answer->getRecordString());
+        info.ttl = a_answer->getTtl();
     }
 
-    answer = message[mDNS::ResourceType::TXT];
-    if (answer != nullptr) {
-        mDNS::Resource::TXT txt(*answer);
-        info.ID = txt["id"].toInt();
-        msgHasTXT = true;
-    }
-
-    if (msgHasA && msgHasTXT) {
-        answer = message[mDNS::ResourceType::TXT];
-        if (answer != nullptr) {
-            mDNS::Resource::TXT txt(*answer);
-
-            // Check for leader
-            String isLeaderTxt = txt[F("isLeader")];
-            if (isLeaderTxt == "1") {
-                _leaderDetected = true;
-#ifdef DEBUG_MDNS
-                debug_i(ANSI_COLOR_BLUE "Detected leader: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, info.hostName);
-#endif
-            }
-
-            // Get hostname type
-            String hostnameType = txt[F("host_type")];
-            if (hostnameType.length() == 0) {
-                hostnameType = txt[F("type")];
-            }
-            if (hostnameType.length() == 0)
-                hostnameType = F("undefined");
-#ifdef DEBUG_MDNS
-            debug_i(ANSI_COLOR_BLUE "Hostname " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ", type: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, info.hostName, hostnameType.c_str());
-#endif
-            const Controllers::HostType hostType = Controllers::hostTypeFromString(hostnameType);
-            app.controllers->addOrUpdate(info.ID, info.hostName, info.ipAddr.toString(), info.ttl, hostType);
-        }
-        return true;
-    } else {
+    mDNS::Resource::TXT txt(*txt_answer);
+    info.ID = parseControllerId(txt["id"]);
+    if(info.ID == 0) {
         return false;
     }
+
+    // Check for leader
+    String isLeaderTxt = txt[F("isLeader")];
+    if (isLeaderTxt == "1") {
+        _leaderDetected = true;
+#ifdef DEBUG_MDNS
+        debug_i(ANSI_COLOR_BLUE "Detected leader: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, info.hostName);
+#endif
+    }
+
+    // Get hostname type
+    String hostnameType = txt[F("host_type")];
+    if (hostnameType.length() == 0) {
+        hostnameType = txt[F("type")];
+    }
+    if (hostnameType.length() == 0)
+        hostnameType = F("undefined");
+#ifdef DEBUG_MDNS
+    debug_i(ANSI_COLOR_BLUE "Hostname " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ", type: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, info.hostName, hostnameType.c_str());
+#endif
+    const Controllers::HostType hostType = Controllers::hostTypeFromString(hostnameType);
+    app.controllers->addOrUpdate(info.ID, info.hostName, info.ipAddr.toString(), info.ttl, hostType);
+    return true;
 }
 
 // Process hostname A record responses
@@ -389,7 +390,7 @@ bool mdnsHandler::processHostnameARecord(mDNS::Message& message, mDNS::Answer* a
 }
 
 // Process hostname responses with potential SRV records
-bool mdnsHandler::processHostnameResponse(mDNS::Message& message, const char* hostname)
+bool mdnsHandler::processHostnameResponse(mDNS::Message& message, mDNS::Answer& srv, const char* hostname)
 {
     using namespace mDNS;
     String controllerType;
@@ -398,8 +399,7 @@ bool mdnsHandler::processHostnameResponse(mDNS::Message& message, const char* ho
     unsigned int ttl = 60; // Default TTL
 
     {
-        // Get A record if available
-        auto a_answer = message[mDNS::ResourceType::A];
+        auto a_answer = findAnswer(message, ResourceType::A, String(Resource::SRV(srv).getHost()));
 
         if (a_answer != nullptr) {
             ipAddress = a_answer->getRecordString();
@@ -415,12 +415,12 @@ bool mdnsHandler::processHostnameResponse(mDNS::Message& message, const char* ho
 
     // Try to get TXT record for ID
     {
-        auto txt_answer = message[mDNS::ResourceType::TXT];
+        auto txt_answer = findAnswer(message, ResourceType::TXT, String(srv.getName()));
         unsigned int controllerId = 0;
 
         if (txt_answer != nullptr) {
             mDNS::Resource::TXT txt(*txt_answer);
-            controllerId = txt["id"].toInt();
+            controllerId = parseControllerId(txt["id"]);
             controllerType = txt["type"];
 #ifdef DEBUG_MDNS
             debug_i(ANSI_COLOR_BLUE "Found controller ID: " ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE ", type: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, controllerId, controllerType.c_str());
