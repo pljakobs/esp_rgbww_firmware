@@ -70,8 +70,12 @@ public:
             // Allocate pre-network Huffman codec on the heap.
             auto* mem = new uint8_t[PRE_NET_BUF_SIZE];
             _ringMem.reset(mem);
-            _preNetBuf.reset(new HuffmanRingBuffer(mem, PRE_NET_BUF_SIZE));
-            _encoder.reset(new HuffmanEncoder(*_preNetBuf));
+            if(mem) {
+                _preNetBuf.reset(new HuffmanRingBuffer(mem, PRE_NET_BUF_SIZE));
+            }
+            if(_preNetBuf) {
+                _encoder.reset(new HuffmanEncoder(*_preNetBuf));
+            }
         }
     }
 

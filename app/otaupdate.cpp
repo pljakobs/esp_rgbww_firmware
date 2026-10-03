@@ -195,6 +195,12 @@ void ApplicationOTA::start(String romurl)
 	 */
 	debug_i(ANSI_COLOR_BLUE "ApplicationOTA::start" ANSI_COLOR_RESET);
 	otaUpdater.reset(new Ota::Network::HttpUpgrader);
+	if(!otaUpdater) {
+		debug_e(ANSI_COLOR_RED "ApplicationOTA::start - out of memory" ANSI_COLOR_RESET);
+		broadcastOtaStatus(0, F("OTA failed: out of memory"));
+		status = OTASTATUS::OTA_FAILED;
+		return;
+	}
 	status = OTASTATUS::OTA_PROCESSING;
 
 	auto part = ota.getNextBootPartition();

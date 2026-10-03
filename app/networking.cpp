@@ -418,6 +418,7 @@ void AppWIFI::stopAp(int delay)
 
 	if(WifiAccessPoint.isEnabled()) {
 		debug_i(ANSI_COLOR_BLUE "AppWIFI::stopAp WifiAP disable" ANSI_COLOR_RESET);
+		_dnsStartTimer.stop();
 		WifiAccessPoint.enable(false, false);
 	}
 	broadcastWifiStatus(F("AP stopping"));
@@ -452,14 +453,12 @@ void AppWIFI::startAp()
 	}
 
     // Wait for AP IP to be assigned before starting DNS server
-    Timer* dnsStartTimer = new Timer();
-    dnsStartTimer->initializeMs(500, [this, dnsStartTimer]() {
+    _dnsStartTimer.initializeMs(500, [this]() {
         IpAddress apIP = WifiAccessPoint.getIP();
         if (apIP.toString() != "0.0.0.0") {
             dnsServer.start(DNS_PORT, "*", apIP);
             debug_i(ANSI_COLOR_BLUE "DNS server started: with address " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, apIP.toString().c_str());
-            dnsStartTimer->stop();
-            delete dnsStartTimer;
+            _dnsStartTimer.stop();
         }
     }).start();
 	broadcastWifiStatus(F("AP started"));

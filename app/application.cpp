@@ -546,6 +546,10 @@ void migrateWebappStore()
 	}
 
 	DynamicJsonDocument doc(content.length() * 2);
+	if(doc.capacity() == 0) {
+		debug_e(ANSI_COLOR_RED "migrateWebappStore: out of memory, leaving %s untouched" ANSI_COLOR_RESET, rootPath.c_str());
+		return;
+	}
 	if(deserializeJson(doc, content)) {
 		debug_e(ANSI_COLOR_RED "migrateWebappStore: cannot parse %s, leaving it to ConfigDB" ANSI_COLOR_RESET, rootPath.c_str());
 		return;
@@ -555,8 +559,10 @@ void migrateWebappStore()
 	JsonVariant webapp = doc[F("webapp")];
 	if(webapp.is<JsonObject>()) {
 		String webappJson;
-		serializeJson(webapp, webappJson);
-		fileSetContent(F(configDB_PATH "/webapp.json"), webappJson);
+		if(serializeJson(webapp, webappJson) == 0 || fileSetContent(F(configDB_PATH "/webapp.json"), webappJson) < 0) {
+			debug_e(ANSI_COLOR_RED "migrateWebappStore: failed to write webapp.json, leaving %s untouched" ANSI_COLOR_RESET, rootPath.c_str());
+			return;
+		}
 	}
 
 	doc.remove(F("webapp"));
@@ -1336,12 +1342,7 @@ void Application::wsBroadcast(const String& message)
     size_t length = message.length();
     if(length > MAX_LOG_LINE_SIZE) length = MAX_LOG_LINE_SIZE;
 
-    char* buffer = new char[length + 1]; // +1 for null terminator
-    message.toCharArray(buffer, length + 1);
-
-    app.webserver.wsSendBroadcast(buffer, length);
-
-    delete[] buffer;
+    app.webserver.wsSendBroadcast(message.c_str(), length);
 }
 
 /*

@@ -77,6 +77,14 @@ void TelemetryClient::stop() {
 void TelemetryClient::connect(const char* telemetryURL, const char* telemetryUser, const char* telemetryPass) {
 	// Connect to public MQTT server (example: test.mosquitto.org)
 
+	if(!mqtt) {
+		mqtt = new MqttClient();
+		if(!mqtt) {
+			debug_e(ANSI_COLOR_RED "Telemetry MQTT client allocation failed" ANSI_COLOR_RESET);
+			return;
+		}
+	}
+
 	if(strlen(telemetryURL)>0 && strlen(telemetryUser)>0 && strlen(telemetryPass)>0){
 		// Build URL: mqtt://user:pass@server:port
 		char url[256];

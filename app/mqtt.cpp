@@ -141,6 +141,10 @@ void AppMqttClient::start()
         return;
 	}
 	mqtt = new MqttClient();
+	if(!mqtt) {
+		debug_e(ANSI_COLOR_RED "mqttclient start - MqttClient allocation failed" ANSI_COLOR_RESET);
+		return;
+	}
 	mqtt->setEventHandler(MQTT_TYPE_PUBLISH, MqttDelegate(&AppMqttClient::onMessageReceived, this));
 	mqtt->setConnectedHandler(MqttDelegate(&AppMqttClient::onConnected,this));
 	connect();

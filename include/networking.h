@@ -67,6 +67,7 @@ private:
     String _tmp_ssid;
     String _tmp_password;
     Timer _timer;
+    Timer _dnsStartTimer;
     BssList _networks;
     IpAddress _ApIP;
     IpAddress IP;
