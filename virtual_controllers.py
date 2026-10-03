@@ -5,27 +5,36 @@ Simulates N virtual Lightinator controllers broadcasting mDNS services
 matching mdnsHandler.cpp / mdnsHandler.h behavior.
 """
 
+from __future__ import annotations
+
 import argparse
+from ipaddress import IPv4Address
 import socket
-import sys
 import time
 from zeroconf import IPVersion, ServiceInfo, Zeroconf
 
-DEFAULT_WEBAPP_VERSION = "v2.1.0"
 BASE_CHIP_ID = 1000100
 
 
 class VirtualController:
-    def __init__(self, index: int, ip_address: str, webapp_ver: str, is_leader: bool = False):
+    def __init__(self, index: int, ip_address: str, is_leader: bool = False, base_chip_id: int = BASE_CHIP_ID,
+                 hostname: str | None = None):
         self.index = index
-        self.chip_id = BASE_CHIP_ID + index
-        self.hostname_raw = f"lightinator-{self.chip_id}"
-        self.hostname_fqdn = f"{self.hostname_raw}.local."
-        self.ip_address = ip_address
-        self.ip_bytes = socket.inet_aton(ip_address)
-        self.webapp_ver = webapp_ver
+        self.chip_id = base_chip_id + index
+        self.set_hostname(hostname or f"lightinator-{self.chip_id}")
+        self.set_ip(ip_address)
         self.is_leader = is_leader
         self.services = []
+
+    def set_hostname(self, hostname: str) -> None:
+        """Change the advertised hostname; the controller ID stays the same. Call build_services() afterwards."""
+        self.hostname_raw = hostname
+        self.hostname_fqdn = f"{hostname}.local."
+
+    def set_ip(self, ip_address: str) -> None:
+        """Change the advertised IPv4 address; the controller ID stays the same. Call build_services() afterwards."""
+        self.ip_address = ip_address
+        self.ip_bytes = socket.inet_aton(ip_address)
 
     def build_services(self) -> list[ServiceInfo]:
         """Constructs the 3 mDNS services per controller matching mdnsHandler.cpp"""
@@ -54,8 +63,7 @@ class VirtualController:
             "id": str(self.chip_id),
             "type": "CONTROLLER",
             "host_type": "CONTROLLER",
-            "isLeader": "1" if self.is_leader else "0",
-            "webapp": self.webapp_ver
+            "isLeader": "1" if self.is_leader else "0"
         }
         swarm_service = ServiceInfo(
             "_lightinator._tcp.local.",
@@ -86,6 +94,12 @@ class VirtualController:
         return self.services
 
 
+def controller_ip(ip_start: str, index: int) -> str:
+    if index < 0:
+        raise ValueError("controller index must be non-negative")
+    return str(IPv4Address(int(IPv4Address(ip_start)) + index))
+
+
 def get_default_ip() -> str:
     """Detects primary local IP address."""
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -114,17 +128,27 @@ def main():
         help="IP address to advertise (defaults to primary local interface IP)"
     )
     parser.add_argument(
-        "-v", "--version",
-        type=str,
-        default=DEFAULT_WEBAPP_VERSION,
-        help=f"Webapp version string to report in TXT records (default: {DEFAULT_WEBAPP_VERSION})"
+        "--ip-start",
+        help="First advertised IPv4 address; subsequent controllers use successive addresses"
+    )
+    parser.add_argument(
+        "--interface-ip",
+        help="Local IPv4 interface used to send mDNS (for example 192.168.13.1)"
     )
 
     args = parser.parse_args()
+    if args.count < 1:
+        parser.error("count must be positive")
+    if args.ip_start:
+        try:
+            controller_ip(args.ip_start, args.count - 1)
+        except ValueError as exc:
+            parser.error(str(exc))
     target_ip = args.ip or get_default_ip()
 
     print(f"[+] Initializing mDNS engine on {target_ip}...")
-    zc = Zeroconf(ip_version=IPVersion.V4Only)
+    interfaces = {"interfaces": [args.interface_ip]} if args.interface_ip else {}
+    zc = Zeroconf(ip_version=IPVersion.V4Only, **interfaces)
 
     # Highest chip ID becomes the swarm leader (matching checkForLeadership logic)
     highest_index = args.count - 1
@@ -136,8 +160,7 @@ def main():
             is_leader = (i == highest_index)
             ctrl = VirtualController(
                 index=i,
-                ip_address=target_ip,
-                webapp_ver=args.version,
+                ip_address=controller_ip(args.ip_start, i) if args.ip_start else target_ip,
                 is_leader=is_leader
             )
             controllers.append(ctrl)

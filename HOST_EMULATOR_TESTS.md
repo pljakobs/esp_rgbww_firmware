@@ -26,6 +26,58 @@ must not be described as a fully clean Memcheck exit when teardown aborted.
 
 ## Test Categories
 
+### Opt-In mDNS Inventory and Heap Ramp
+
+`tests/host_mdns_test.py` has offline simulator/response-contract tests and one
+opt-in live test using `virtual_controllers.py`. Install `zeroconf` in the test
+environment. Run the offline checks with:
+
+```bash
+python3 -m pytest -q tests/host_mdns_test.py
+```
+
+With an isolated Host emulator already running on TAP:
+
+```bash
+HOST_SMOKE_APP_IP=192.168.13.2 \
+HOST_SMOKE_LOG_DIR=out/host-diag/mdns-ramp \
+HOST_SMOKE_CAPTURE_LOG_SERVICE=0 \
+HOST_MDNS_RAMP=1 HOST_MDNS_INTERFACE_IP=192.168.13.1 \
+HOST_MDNS_IP_START=192.168.13.100 HOST_MDNS_BASE_ID=1000400 \
+HOST_MDNS_COUNTS=0,4,8,16,32,64,96,128 HOST_MDNS_TIMEOUT=300 \
+python3 -m pytest -v -s tests/host_mdns_test.py
+```
+
+Each run persists discovered IDs in Host storage; choose a fresh
+`HOST_MDNS_BASE_ID` for subsequent runs. The full ramp can take many minutes.
+
+Advertised A records can contain different IPs even though all mDNS packets
+originate from one local interface. These are discovery-only controllers, not
+HTTP servers; reserve the advertised addresses to avoid real-device collisions.
+All three service types advertise the same identity/address per controller,
+without the obsolete `webapp` TXT property.
+
+The live test validates IDs, IPs, names, types, online/offline states, and
+deduplication in `/hosts` and `/hosts?all=true`. It keeps one measurement
+WebSocket open across the ramp. Before each phase's inventory checks and heap
+sampling, it waits twice `HOST_MDNS_TTL` (default 30 seconds, so a 60-second
+settle). Active records are refreshed every TTL/3 with matching registration
+and refresh TTLs; after withdrawal no further refreshes are sent. It uses
+periodic runtime notifications after re-subscribing and setting a fresh
+device-uptime fence, rather than heap sampled during an HTTP response. Queued
+pre-settle measurements are discarded; timeout diagnostics report stale and
+unrelated frames.
+`mdns-heap-ramp.jsonl` records sample ranges, medians, baseline deltas and measured
+incremental bytes per controller. No assumed per-controller budget is asserted.
+`mdns-initial-hosts.json` preserves the baseline inventory, including failures.
+
+Services are unregistered on success or failure. Withdrawal verifies invisibility
+while ConfigDB records remain. Runtime entries expire after TTL plus the existing
+300-second grace period; vector capacity and ConfigDB allocations may remain,
+so full heap recovery is not asserted. Use fresh emulator storage or select a
+new `HOST_MDNS_BASE_ID` when repeating a ramp. The test never starts, stops, or
+reboots the emulator, and is not enabled in ordinary CI.
+
 ### 1. **Basic Connectivity**
 - **Endpoint**: `/ping`
 - **Purpose**: Validates Host emulator is ready and responsive
