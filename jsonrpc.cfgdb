@@ -28,18 +28,8 @@
             ]
         },
         {
-            "type": "object",
-            "title": "runtime_info",
-            "properties": {
-                "uptime": { "$ref": "value-types/$defs/non-negative-integer" },
-                "heap_free": { "$ref": "value-types/$defs/non-negative-integer" },
-                "minfreeHeapRuntime": { "$ref": "value-types/$defs/non-negative-integer" },
-                "minfreeHeap10min": { "$ref": "value-types/$defs/non-negative-integer" },
-                "heapLowErrUptime": { "$ref": "value-types/$defs/non-negative-integer" },
-                "heapLowErr10min": { "$ref": "value-types/$defs/non-negative-integer" },
-                "activeConnections": { "$ref": "value-types/$defs/non-negative-integer" }
-
-            }
+            "$ref": "params/$defs/runtime-info",
+            "title": "runtime_info"
         },
         {
             "type": "object",
