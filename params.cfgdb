@@ -312,6 +312,8 @@
             "minfreeHeap10min": { "$ref": "value-types/$defs/non-negative-integer" },
             "heapLowErrUptime": { "$ref": "value-types/$defs/non-negative-integer" },
             "heapLowErr10min": { "$ref": "value-types/$defs/non-negative-integer" },
+            "maxFreeBlock": { "$ref": "value-types/$defs/non-negative-integer" },
+            "fragmentation": { "$ref": "value-types/$defs/non-negative-integer" },
             "activeConnections": { "$ref": "value-types/$defs/non-negative-integer" }
         }
     },
