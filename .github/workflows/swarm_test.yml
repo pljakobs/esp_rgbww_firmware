@@ -25,11 +25,14 @@ on:
           - experimental
 
 jobs:
-  # Multi-controller mDNS discovery swarm on the self-hosted runner.
+  # Single-controller mDNS neighbour-scaling check on the self-hosted runner.
+  # Instead of launching N real emulators, this starts ONE device-under-test and
+  # uses virtual_controllers.py to advertise a growing fleet of synthetic
+  # neighbours (16, 32, 48, 64), verifying the DUT converges on each stage.
   # SECURITY: never runs on pull_request events — a self-hosted runner must not
   # execute untrusted code submitted via a PR. Only push / workflow_dispatch.
   swarm-mdns:
-    # No dependency on host-smoke: the swarm builds its own Host binary, so it
+    # No dependency on host-smoke: this job builds its own Host binary, so it
     # can start immediately and run in parallel with the smoke job.
     if: github.event_name != 'pull_request'
     runs-on: [self-hosted, Linux, X64]
@@ -45,7 +48,7 @@ jobs:
       - name: Ensure host TUN/TAP support
         if: always()
         run: |
-          # The swarm builds TAP interfaces inside the privileged container, which
+          # The DUT builds a TAP interface inside the privileged container, which
           # needs the host kernel's tun driver loaded and a /dev/net/tun node.
           sudo modprobe tun 2>/dev/null || true
           if [ ! -c /dev/net/tun ]; then
@@ -58,41 +61,40 @@ jobs:
       - name: Pull Docker Image
         run: docker pull docker.io/pjakobs/sming:latest
 
-      - name: Run multi-controller mDNS discovery swarm
+      - name: Run single-controller mDNS neighbour-scaling check
         if: always()
         continue-on-error: true
         env:
           GITHUB_ACTIONS: 'true'
-          SWARM_SIZE: '50'
+          MDNS_STAGES: '16,32,48,64'
         run: |
           set -uo pipefail
           mkdir -p out/host-swarm
-          echo "Starting mDNS discovery swarm at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "Starting mDNS neighbour-scaling check at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
           # Heartbeat so the job never looks stalled during convergence polling.
           (
             while true; do
               sleep 20
-              echo "[swarm][heartbeat] $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              echo "[vswarm][heartbeat] $(date -u +%Y-%m-%dT%H:%M:%SZ)"
             done
           ) &
           HEARTBEAT_PID=$!
           trap 'kill "$HEARTBEAT_PID" >/dev/null 2>&1 || true' EXIT
 
-          # Build the Host binary fresh on this runner and launch the swarm.
+          # Build the Host binary fresh on this runner and run the staged check.
           # Building here (instead of reusing the smoke artifact) decouples this
-          # job from host-smoke so both run in parallel. Just do a normal Host
-          # build+flash (default sanitizers, which link fine in the image), then
-          # run the swarm against that prebuilt binary (SWARM_SKIP_BUILD=1).
+          # job from host-smoke so both run in parallel. Then launch ONE DUT and
+          # advertise synthetic neighbours in stages via testswarm-virtual.sh.
           docker run --rm --privileged --device /dev/net/tun -v ${{ github.workspace }}:/workspace -w /workspace \
             -e GITHUB_ACTIONS=${{ env.GITHUB_ACTIONS }} \
-            -e SWARM_SIZE=${{ env.SWARM_SIZE }} \
-            -e SWARM_SKIP_BUILD=1 \
+            -e MDNS_STAGES=${{ env.MDNS_STAGES }} \
+            -e SWARM_SKIP_BUILD=0 \
             docker.io/pjakobs/sming:latest \
-            bash -lc "git config --global --add safe.directory /workspace && { source /opt/Sming/Tools/export.sh || source /opt/sming/Tools/export.sh; } && make SMING_ARCH=Host flash DISABLE_WERROR=1 COM_SPEED=115200 && bash ./testswarm-local.sh none" \
+            bash -lc "git config --global --add safe.directory /workspace && { source /opt/Sming/Tools/export.sh || source /opt/sming/Tools/export.sh; } && bash ./testswarm-virtual.sh none" \
             2>&1 | tee out/host-swarm/swarm-discovery.log || true
 
-          echo "mDNS discovery swarm step completed (soft; non-blocking)."
+          echo "mDNS neighbour-scaling check completed (soft; non-blocking)."
 
       - name: Upload swarm logs and results
         if: always()
@@ -107,14 +109,14 @@ jobs:
       - name: Create swarm job summary
         if: always()
         run: |
-          echo "## 🛰️ Multi-controller mDNS Discovery Swarm (soft)" >> "$GITHUB_STEP_SUMMARY"
+          echo "## 🛰️ Single-controller mDNS Neighbour-Scaling Check (soft)" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Nodes: ${SWARM_SIZE:-50}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Stages: ${MDNS_STAGES:-16,32,48,64} synthetic neighbours" >> "$GITHUB_STEP_SUMMARY"
           SWARM_SUMMARY="out/host-swarm/summary.txt"
           if [[ -f "$SWARM_SUMMARY" ]]; then
             echo '```' >> "$GITHUB_STEP_SUMMARY"
             cat "$SWARM_SUMMARY" >> "$GITHUB_STEP_SUMMARY"
             echo '```' >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "- ⚠️ Swarm summary not found ($SWARM_SUMMARY) — see swarm-discovery.log" >> "$GITHUB_STEP_SUMMARY"
+            echo "- ⚠️ Check summary not found ($SWARM_SUMMARY) — see swarm-discovery.log" >> "$GITHUB_STEP_SUMMARY"
           fi
