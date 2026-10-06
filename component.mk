@@ -114,8 +114,10 @@ endif
 # toolchains can reject -Werror=format-security even with -Wformat enabled.
 
 ifeq ($(ENABLE_CUSTOM_HEAP),1)
-USER_CFLAGS += -DAPP_UMM_HEAP=1
+USER_CFLAGS += -DAPP_UMM_HEAP=1 
 endif
+
+USER_CFLAGS += -fcheck-new
 
 CUSTOM_LWIP_OPTS += -DLWIP_IPV6=0 \
 	       -DLWIP_IGMP=1 \
