@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "homeassistant-info": {
+      "type": "object",
+      "properties": {
+        "enabled": { "$ref": "value-types/$defs/boolean-value" },
+        "discovery_prefix": { "$ref": "value-types/$defs/string-value" },
+        "Node ID": { "$ref": "value-types/$defs/string-value" }
+      },
+      "required": ["enabled", "discovery_prefix", "Node ID"],
+      "additionalProperties": false
+    },
+    "ha-channel-command": {
+      "type": "object",
+      "properties": {
+        "state": { "$ref": "value-types/$defs/string-value" },
+        "brightness": { "$ref": "value-types/$defs/string-value" }
+      },
+      "additionalProperties": false
+    },
+    "ha-command-color": {
+      "type": "object",
+      "properties": {
+        "h": { "$ref": "value-types/$defs/string-value" },
+        "s": { "$ref": "value-types/$defs/string-value" }
+      },
+      "additionalProperties": false
+    },
+    "ha-command": {
+      "type": "object",
+      "properties": {
+        "state": { "$ref": "value-types/$defs/string-value" },
+        "brightness": { "$ref": "value-types/$defs/string-value" },
+        "color": { "$ref": "#/$defs/ha-command-color" },
+        "color_temp": { "$ref": "value-types/$defs/string-value" },
+        "transition": { "$ref": "value-types/$defs/string-value" }
+      },
+      "additionalProperties": false
+    },
+    "ha-discovery-params": {
+      "type": "object",
+      "properties": {
+        "name": { "$ref": "value-types/$defs/string-value" },
+        "unique_id": { "$ref": "value-types/$defs/string-value" },
+        "cmd_t": { "$ref": "value-types/$defs/string-value" },
+        "stat_t": { "$ref": "value-types/$defs/string-value" },
+        "schema": { "type": "string", "const": "json" }
+      },
+      "required": ["name", "unique_id", "cmd_t", "stat_t"]
+    },
+    "ha-state-color-temp": {
+      "type": "object",
+      "properties": {
+        "state": { "$ref": "value-types/$defs/string-value" },
+        "brightness": { "$ref": "value-types/$defs/non-negative-integer" },
+        "color_mode": { "$ref": "value-types/$defs/string-value" },
+        "color_temp": { "$ref": "value-types/$defs/non-negative-integer" }
+      },
+      "additionalProperties": false
+    },
+    "ha-hs-color": {
+      "type": "object",
+      "properties": {
+        "h": { "$ref": "value-types/$defs/hue-value" },
+        "s": { "$ref": "value-types/$defs/percentage-value" }
+      },
+      "additionalProperties": false
+    },
+    "ha-state-hs": {
+      "type": "object",
+      "properties": {
+        "state": { "$ref": "value-types/$defs/string-value" },
+        "brightness": { "$ref": "value-types/$defs/non-negative-integer" },
+        "color_mode": { "$ref": "value-types/$defs/string-value" },
+        "color": { "$ref": "#/$defs/ha-hs-color" }
+      },
+      "additionalProperties": false
+    },
+    "ha-channel-state": {
+      "type": "object",
+      "properties": {
+        "state": { "$ref": "value-types/$defs/string-value" },
+        "brightness": { "$ref": "value-types/$defs/raw-value" }
+      },
+      "additionalProperties": false
+    },
+    "ha-string-array": {
+      "type": "array",
+      "items": { "$ref": "value-types/$defs/string-value" }
+    },
+    "ha-discovery-device": {
+      "type": "object",
+      "properties": {
+        "identifiers": { "$ref": "#/$defs/ha-string-array" },
+        "name": { "$ref": "value-types/$defs/string-value" },
+        "model": { "$ref": "value-types/$defs/string-value" },
+        "manufacturer": { "$ref": "value-types/$defs/string-value" },
+        "sw_version": { "$ref": "value-types/$defs/string-value" }
+      },
+      "additionalProperties": false
+    },
+    "ha-discovery-main": {
+      "type": "object",
+      "properties": {
+        "device": { "$ref": "#/$defs/ha-discovery-device" },
+        "name": { "$ref": "value-types/$defs/string-value" },
+        "unique_id": { "$ref": "value-types/$defs/string-value" },
+        "availability_topic": { "$ref": "value-types/$defs/string-value" },
+        "payload_available": { "$ref": "value-types/$defs/string-value" },
+        "payload_not_available": { "$ref": "value-types/$defs/string-value" },
+        "state_topic": { "$ref": "value-types/$defs/string-value" },
+        "command_topic": { "$ref": "value-types/$defs/string-value" },
+        "schema": { "$ref": "value-types/$defs/string-value" },
+        "brightness": { "$ref": "value-types/$defs/boolean-value" },
+        "brightness_scale": { "$ref": "value-types/$defs/non-negative-integer" },
+        "color_mode": { "$ref": "value-types/$defs/boolean-value" },
+        "supported_color_modes": { "$ref": "#/$defs/ha-string-array" },
+        "min_mireds": { "$ref": "value-types/$defs/non-negative-integer" },
+        "max_mireds": { "$ref": "value-types/$defs/non-negative-integer" },
+        "optimistic": { "$ref": "value-types/$defs/boolean-value" },
+        "retain": { "$ref": "value-types/$defs/boolean-value" }
+      },
+      "additionalProperties": false
+    },
+    "ha-discovery-channel": {
+      "type": "object",
+      "properties": {
+        "name": { "$ref": "value-types/$defs/string-value" },
+        "unique_id": { "$ref": "value-types/$defs/string-value" },
+        "state_topic": { "$ref": "value-types/$defs/string-value" },
+        "command_topic": { "$ref": "value-types/$defs/string-value" },
+        "schema": { "$ref": "value-types/$defs/string-value" },
+        "brightness": { "$ref": "value-types/$defs/boolean-value" },
+        "brightness_scale": { "$ref": "value-types/$defs/non-negative-integer" },
+        "color_mode": { "$ref": "value-types/$defs/boolean-value" },
+        "device": { "$ref": "#/$defs/ha-discovery-device" }
+      },
+      "additionalProperties": false
+    }
+  }
+}
