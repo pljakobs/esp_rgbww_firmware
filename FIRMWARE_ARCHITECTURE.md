@@ -114,3 +114,67 @@ are conditional on their configuration and on network availability.
 For the public endpoint and command contracts, see the [HTTP API](README.md#http-api-reference),
 [WebSocket API](README.md#websocket-api), and [MQTT integration](README.md#mqtt-integration)
 sections in the README.
+
+## Message Schema Layering
+
+Outbound and inbound API messages are modelled by four ConfigDB schema files
+that form a deliberate layered stack. The split exists so a single populated
+payload object can be serialized either bare (HTTP) or wrapped in a JSON-RPC
+envelope (WebSocket / TCP event server / MQTT) without redefining its shape.
+
+| File | Layer | Role |
+|---|---|---|
+| [value-types.cfgdb](value-types.cfgdb) | scalars | Reusable constrained primitives (`string-value`, `raw-value`, `hue-value`, `error-code`, …). |
+| [homeassistant.cfgdb](homeassistant.cfgdb) | Home Assistant | Home Assistant MQTT command, state, discovery, and info payload schemas. |
+| [params.cfgdb](params.cfgdb) | payload | Transport-independent body objects. This is exactly what the HTTP interface sends and receives, and also what becomes the JSON-RPC `params`/`result`. |
+| [jsonrpc.cfgdb](jsonrpc.cfgdb) | framing | A root `oneOf` of message bodies. The ConfigDB library emits the `{"jsonrpc":"2.0",…}` envelope and selects the `params`/`result`/`error` key from `Message::kind`; each member references the body shape it frames. |
+
+### Two serialization entry points, one payload
+
+- **HTTP** renders a [params.cfgdb](params.cfgdb) body object directly (bare,
+  unframed).
+- **WS / TCP / MQTT** render the same body wrapped by the
+  [jsonrpc.cfgdb](jsonrpc.cfgdb) envelope.
+
+`RpcCodec` (see the component table above) owns both paths so one producer
+populates one payload object and either transport can render it.
+
+### Authoring rule
+
+Define a reusable transport-independent body once in [params.cfgdb](params.cfgdb)
+`$defs` and reference it. Keep Home Assistant-specific MQTT schemas in
+[homeassistant.cfgdb](homeassistant.cfgdb). Add a [jsonrpc.cfgdb](jsonrpc.cfgdb)
+root member only when a body is actually sent over a framed transport; HTTP-only
+bodies need no framing entry. Primitive constraints belong in
+[value-types.cfgdb](value-types.cfgdb), never inlined.
+
+Design and migration history for this stack lives in
+[CONFIGDB_JSONRPC_MESSAGES_PLAN.md](CONFIGDB_JSONRPC_MESSAGES_PLAN.md),
+[CONFIGDB_JSON_MIGRATION_PLAN.md](CONFIGDB_JSON_MIGRATION_PLAN.md) and
+[CONFIGDB_JSON_INBOUND_PLAN.md](CONFIGDB_JSON_INBOUND_PLAN.md).
+
+### Known deviations (cleanup backlog)
+
+The current files violate the authoring rule in two ways; both are tracked here
+so the layering intent stays legible until they are reconciled:
+
+- **Bodies inlined in `jsonrpc.cfgdb` instead of referencing `params.cfgdb`.**
+  The framing members `wifi_status`, `transition_finished`, `clock_slave_status`,
+  `keep_alive`, `message_event`, `ota_status`, `webapp_ota_status`,
+  `api_success`, `api_error`, `authenticate_result`, `subscription_result`,
+  `rpc_error` and `error` define their object bodies inline rather than via
+  `$ref` into [params.cfgdb](params.cfgdb).
+- **Orphaned payload `$defs`.** [params.cfgdb](params.cfgdb) already carries
+   `wifi-status-params`, `transition-finished-params`, `clock-slave-status-params`
+   and `keep-alive-params`, which duplicate (or should back) those inline bodies
+   but are currently referenced nowhere. [homeassistant.cfgdb](homeassistant.cfgdb)
+   also carries the currently unused `ha-discovery-params` definition.
+- **Conflicting `error` shapes.** [params.cfgdb](params.cfgdb) `error` is
+  `{code, message, data}`; the [jsonrpc.cfgdb](jsonrpc.cfgdb) inline `error`
+  wraps `{error: value-types/error-msg}`; and the inline `rpc_error` adds a
+  `challenge` field. These need a single deliberate error body before they can
+  be consolidated.
+
+Reconciliation means moving each inline body into [params.cfgdb](params.cfgdb)
+`$defs` (reusing the orphaned definitions where they already match) and reducing
+the [jsonrpc.cfgdb](jsonrpc.cfgdb) members to `$ref`s.
