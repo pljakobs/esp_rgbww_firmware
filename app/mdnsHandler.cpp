@@ -216,7 +216,7 @@ bool mdnsHandler::onMessage(mDNS::Message& message)
 #ifdef DEBUG_MDNS
         cdebug_i(MDNSHANDLER, "mdnsHandler::onMessage: " ANSI_COLOR_BLUE "Ignoring query" ANSI_COLOR_RESET);
 #endif
-        return false;
+        return true;
     }
     // update debug counter
     app._mDNS_replies++;
