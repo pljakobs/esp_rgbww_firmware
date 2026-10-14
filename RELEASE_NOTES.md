@@ -1,5 +1,12 @@
 # Release Notes
 
+## 2026-10-14
+
+### Reliability and discovery
+
+- Fixed mDNS query propagation after hostname changes so API, controller-chatter,
+  and frontend service responders continue to receive queries (`c4c32df`).
+
 ## 2026-10-01
 
 Firmware development since April focused on a schema-driven API, safer webapp
