@@ -23,7 +23,6 @@
 #include <array>
 #include <deque>
 #include <functional>
-#include <new>
 
 namespace
 {
@@ -218,7 +217,7 @@ private:
 			auto& slot = slots[index];
 			const bool fin = eof && ready.empty();
 			const auto type = firstFrame ? WS_FRAME_TEXT : WS_FRAME_CONTINUATION_OPCODE;
-			auto frame = new (std::nothrow) SegmentStream(shared_from_this(), index);
+			auto frame = new SegmentStream(shared_from_this(), index);
 			if(frame == nullptr) {
 				pumping = false;
 				finish(false);
@@ -317,7 +316,7 @@ std::unique_ptr<IDataSourceStream> RpcCodec::renderStream(const Message& msg, co
 		return nullptr;
 	}
 
-	return std::unique_ptr<IDataSourceStream>(new (std::nothrow) JsonRPC::ReadStream(msg, bodyRef));
+	return std::unique_ptr<IDataSourceStream>(new JsonRPC::ReadStream(msg, bodyRef));
 }
 
 std::shared_ptr<RpcCodec::StreamTask> RpcCodec::sendWebsocketStream(WebsocketConnection& socket,
@@ -328,11 +327,11 @@ std::shared_ptr<RpcCodec::StreamTask> RpcCodec::sendWebsocketStream(WebsocketCon
 		return nullptr;
 	}
 	auto state = std::shared_ptr<StreamTask::State>(
-		new (std::nothrow) StreamTask::State(socket, std::move(source), std::move(onComplete)));
+		new StreamTask::State(socket, std::move(source), std::move(onComplete)));
 	if(!state) {
 		return nullptr;
 	}
-	auto task = std::shared_ptr<StreamTask>(new (std::nothrow) StreamTask(state));
+	auto task = std::shared_ptr<StreamTask>(new StreamTask(state));
 	if(!task) {
 		state->cancel();
 		return nullptr;
