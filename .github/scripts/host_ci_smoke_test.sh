@@ -49,10 +49,7 @@ PYTEST_MD_AVAILABLE=0
 
 cleanup() {
   set +e
-  if [[ -n "${APP_PID:-}" ]] && kill -0 "$APP_PID" 2>/dev/null; then
-    kill "$APP_PID" 2>/dev/null || true
-    wait "$APP_PID" 2>/dev/null || true
-  fi
+  stop_host_app
   if [[ -n "${IP_BIN:-}" ]] && "$IP_BIN" link show "$TAP_IF" >/dev/null 2>&1; then
     "$IP_BIN" link del "$TAP_IF" >/dev/null 2>&1 || true
   fi
@@ -365,7 +362,39 @@ collect_runtime_valgrind_snapshot() {
 
 stop_host_app() {
   if [[ -n "${APP_PID:-}" ]] && kill -0 "$APP_PID" 2>/dev/null; then
-    kill "$APP_PID" 2>/dev/null || true
+    echo "Requesting Host shutdown through POST /system restart"
+    if python3 - "http://${APP_IP}/system" <<'PY'
+import json
+import sys
+import urllib.request
+
+req = urllib.request.Request(
+    sys.argv[1],
+    data=b'{"cmd":"restart"}',
+    headers={"Content-Type": "application/json"},
+    method="POST",
+)
+try:
+    with urllib.request.urlopen(req, timeout=5) as response:
+        payload = json.load(response)
+        if response.status != 200 or payload.get("success") is not True:
+            raise RuntimeError("Host rejected restart command")
+except Exception as exc:
+    print(f"Host restart request failed: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+PY
+    then
+      for shutdown_poll in $(seq 1 60); do
+        if ! kill -0 "$APP_PID" 2>/dev/null; then
+          break
+        fi
+        sleep 0.25
+      done
+    fi
+    if kill -0 "$APP_PID" 2>/dev/null; then
+      echo "WARNING: Host did not exit through the API; falling back to termination signal" >&2
+      kill "$APP_PID" 2>/dev/null || true
+    fi
     wait "$APP_PID" 2>/dev/null || true
   fi
   APP_PID=""
@@ -495,8 +524,8 @@ if [[ "$HOST_CI_SKIP_BUILD" != "1" ]]; then
   set -u
 
   echo "===== Host build output =====" > "$BUILD_LOG"
-  make SMING_ARCH=Host configdb-rebuild 2>&1 | tee -a "$BUILD_LOG"
-  make SMING_ARCH=Host flash DISABLE_WERROR=1 COM_SPEED=115200 2>&1 | tee -a "$BUILD_LOG"
+  make SMING_ARCH=Host configdb-rebuild ENABLE_GDB=0 ENABLE_GDB_CONSOLE=0 2>&1 | tee -a "$BUILD_LOG"
+  make SMING_ARCH=Host flash ENABLE_GDB=0 ENABLE_GDB_CONSOLE=0 DISABLE_WERROR=1 COM_SPEED=115200 2>&1 | tee -a "$BUILD_LOG"
 
   # Collect non-fatal compiler warnings from the Host build output for CI visibility.
   grep -E '\bwarning:' "$BUILD_LOG" > "$COMPILER_WARNINGS_LOG" || true
@@ -590,6 +619,8 @@ export HOST_SMOKE_WS_HOST="$WS_HOST"
 export HOST_SMOKE_WS_PORT="$WS_PORT"
 export HOST_SMOKE_WS_PATH="$WS_PATH"
 export HOST_SMOKE_LOG_DIR="$LOG_DIR"
+export HOST_SMOKE_REAL_DEVICE=0
+export HOST_SMOKE_CAPTURE_LOG_SERVICE=0
 export RGBWW_TEST_TIME_SCALE="${RGBWW_TEST_TIME_SCALE:-0.2}"
 export RGBWW_RAMP_ACCURACY_SECONDS="${RGBWW_RAMP_ACCURACY_SECONDS:-12}"
 export RGBWW_RAMP_ACCURACY_ITERATIONS="${RGBWW_RAMP_ACCURACY_ITERATIONS:-3}"

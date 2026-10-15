@@ -1,3 +1,7 @@
+/**
+ * @author  Peter Jakobs http://github.com/pljakobs
+ */
+
 #include "fileMap.h"
 
 //include auto-generated file List (provided by the front-end build process)

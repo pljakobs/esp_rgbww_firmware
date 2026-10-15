@@ -1,3 +1,20 @@
+/**
+ * @author  Peter Jakobs http://github.com/pljakobs
+ * 
+ * @section LICENSE
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License as
+ * published by the Free Software Foundation; either version 3 of
+ * the License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+ * General Public License for more details at
+ * https://www.gnu.org/copyleft/gpl.html
+ */
+
 #pragma once
 
 #include <Wiring/WVector.h>
@@ -6,8 +23,8 @@
 
 class EventServer : public TcpServer{
 public:
-    EventServer() : webServer(nullptr) {} // Empty constructor
-	EventServer(ApplicationWebserver& webServer) : webServer(&webServer){} ;
+    EventServer() : webServer(nullptr), enabled(false) {} // Empty constructor
+	EventServer(ApplicationWebserver& webServer) : webServer(&webServer), enabled(false) {};
 	virtual ~EventServer();
 
     void start(ApplicationWebserver& webServer); // Add this line
@@ -40,6 +57,8 @@ private:
     const unsigned long _minEventInterval = 500; // 500ms = 2 per second max
 	
 	ChannelOutput _lastRaw;
+	HSVCT _lastHsv;
+	bool _lastHasHsv = false;
 	// websocket interface
     ApplicationWebserver* webServer;
 	};

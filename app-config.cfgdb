@@ -19,22 +19,12 @@
           "type": "integer",
           "default":50
         },
-        "pin_config": {
-          "type": "string",
-          "default":"13,12,14,5,4"
-        },
         "buttons_config": {
           "type": "string"
         },
         "pin_config_url":{
             "type":"string",
             "default":"https://raw.githubusercontent.com/pljakobs/esp_rgb_webapp2/devel/public/config/pinconfig.json"
-        },
-        "channels":{
-            "type":"array",
-            "items":{
-                "$ref":"defs/$defs/channel"
-            }
         },
         "supported_color_models":{
             "type": "array",
@@ -46,6 +36,10 @@
         "current_pin_config_name":{
           "type":"string",
           "default":"mrpj"
+        },
+        "allow_web_icons":{
+          "type":"boolean",
+          "default":true
         }
       }
     },
@@ -77,6 +71,21 @@
         "startup_color": {
           "type": "string",
           "default": "last"
+        },
+        "startup": {
+          "description":"modern startup color selection",
+          "type":"object",
+          "properties":{  
+            "mode":{
+              "type":"string",
+              "default":"LAST",
+              "ctype":"ColorStartupMode",
+              "enum":[ "LAST", "SET"]
+            },
+            "color":{
+              "type":"string"
+            }
+          }
         },
         "brightness": {
           "type": "object",
@@ -151,6 +160,36 @@
             "cyan": {
               "type": "integer",
               "default":0
+            }
+          }
+        },
+        "calibration":{
+          "type":"object",
+          "properties":{
+             "gamma": {
+              "type": "number",
+              "description": "System output gamma for correction calculation (e.g. 2.2)"
+            },
+            "ct_range": {
+                "type": "object",
+                "description": "Kelvin range normalization bounds",
+                "properties": {
+                    "min": { "type": "integer", "minimum": 1000, "default":1000 },
+                    "max": { "type": "integer", "maximum": 20000, "default": 20000 }
+                }
+            },
+            "hsv": {
+              "type": "array",
+              "description": "12 Parabolic coefficients for 30-degree Hue sectors (0, 30, ... 330)",
+              "minItems": 12,
+              "maxItems": 12,
+              "items": {
+                "$ref": "defs/$defs/parabola"
+              }
+            },
+            "ct": {
+              "description": "Parabolic coefficients for Color Temperature curve",
+              "$ref": "defs/$defs/parabola"
             }
           }
         }
@@ -258,6 +297,23 @@
             "username": {
               "type": "string",
               "default":""
+            },
+            "homeassistant": {
+              "type":"object",
+              "properties":{
+                "enable": {
+                  "type": "boolean",
+                  "default": true
+                },
+                "discovery_prefix": {
+                  "type": "string",
+                  "default": "homeassistant"
+                },
+                "node_id": {
+                  "type": "string",
+                  "default": ""  
+                }
+              }
             }
           }
         },
@@ -326,6 +382,51 @@
               "type":"string"
             }
           }
+        },
+        "rsyslog":{
+          "type":"object",
+          "properties":{
+            "enabled":{
+              "type":"boolean",
+              "default": false
+            },
+            "host":{
+              "type":"string"
+            },
+            "port":{
+              "type":"integer",
+              "default":514
+            }
+          }
+        },
+        "telemetry": {
+          "type": "object",
+          "properties": {
+            "statsEnabled": {
+              "type":"boolean",
+              "@default":"False if SMING_RELEASE else True"
+            },
+            "logEnabled": {
+              "type":"boolean",
+              "default":false
+          },
+            "url": {
+              "type": "string",
+              "default":"lightinator.de:1883"
+            },
+            "user": {
+              "type": "string",
+              "default":"rgbww"
+            },
+            "password": {
+              "type": "string",
+              "default":"rgbwwdebug"
+            },
+            "numReboots": {
+              "type": "integer",
+              "default":0
+            }
+          }
         }
       }
     },
@@ -336,6 +437,68 @@
         "version":{
           "type":"integer",
           "default":0
+        },
+        "pwm":{
+          "type":"object",
+          "properties":{
+            "timer":{
+              "type":"object",
+              "properties":{
+                "speed_mode":{
+                  "type":"string",
+                  "default":"LOWSPEED",
+                  "ctype":"TimerSpeedMode",
+                  "enum":[ "LOWSPEED", "HIGHSPEED"]
+                },
+                "frequency":{
+                  "type":"integer",
+                  "default":1000
+                },
+                "resolution":{
+                  "type":"integer",
+                  "default":10, 
+                  "minimum":1,
+                  "maximum":14
+                },
+                "number":{
+                  "type":"integer",
+                  "default":0,
+                  "minimum":0,
+                  "maximum":3
+                }
+              }
+            },
+            "spreadSpectrum":{
+              "type":"object",
+              "properties":{
+                "mode":{
+                  "type":"string",
+                  "default":"ON",
+                  "ctype":"SpreadSpectrumMode",
+                  "enum":[ "ON", "OFF"]
+                },
+                "width":{
+                  "type":"integer",
+                  "default":15
+                },
+                "subsampling":{
+                  "type":"integer",
+                  "default":4
+                }
+              }
+            },
+            "phaseShift":{
+              "type":"object",
+              "properties":{
+                "mode":{ 
+                  "type":"string",
+                  "ctype":"PhaseShiftMode",
+                  "default":"ON",
+                  "enum":[ "ON", "OFF"]
+                }
+              }
+            }
+          }
         },
         "available_pins":{
           "type":"array",
@@ -367,6 +530,9 @@
               },
               "model":{
                 "type":"string"
+              },
+              "clear_pin":{
+                "type":"integer"
               },
               "channels": {
                 "type":"array",

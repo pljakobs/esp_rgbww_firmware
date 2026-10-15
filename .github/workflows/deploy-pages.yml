@@ -15,6 +15,7 @@ on:
           - stable
           - testing
           - develop
+          - experimental
 
 jobs:
   get-version:
@@ -23,33 +24,87 @@ jobs:
     outputs:
       fw_version: ${{ steps.version.outputs.fw_version }}
       fw_branch: ${{ steps.version.outputs.fw_branch }}
+      latest_run_id: ${{ steps.get_run.outputs.latest_run_id }}  
+      supported_socs: ${{ steps.version.outputs.supported_socs }}
       
     steps:
-      - name: Get Branch
+      - name: Disable Jekyll processing
+        run: touch .nojekyll
+
+      - name: Get Branch and Artifact Branch
         id: get_branch
         run: |
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            echo "branch=${{ github.event.inputs.branch }}" >> $GITHUB_OUTPUT
+            triggering_branch="${{ github.event.inputs.branch }}"
+            artifact_branch="${{ github.event.inputs.branch }}"
           else
-            echo "branch=develop" >> $GITHUB_OUTPUT
+            # For workflow_run events
+            echo "Workflow run ID: ${{ github.event.workflow_run.id }}"
+            echo "Workflow run head branch: ${{ github.event.workflow_run.head_branch }}"
+            echo "Current GitHub ref: ${{ github.ref }}"
+            
+            # Get complete details from the API
+            api_response=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              "https://api.github.com/repos/pljakobs/esp_rgbww_firmware/actions/runs/${{ github.event.workflow_run.id }}")
+            
+            echo "API Response details:"
+            echo "$api_response" | jq '{id, head_branch, head_sha, event, pull_requests}'
+            
+            # Determine the branch where the workflow ran (for artifacts)
+            if [ -n "${{ github.event.workflow_run.head_branch }}" ]; then
+              artifact_branch="${{ github.event.workflow_run.head_branch }}"
+            else  
+              artifact_branch=$(echo "$api_response" | jq -r '.head_branch')
+            fi
+            
+            # Check if this was triggered from a PR
+            pr_info=$(echo "$api_response" | jq -r '.pull_requests[0].head.ref // empty')
+            if [ -n "$pr_info" ]; then
+              echo "This appears to be from a PR. Original branch: $pr_info"
+              # Use the PR source branch for artifacts
+              artifact_branch="$pr_info"
+            fi
+            
+            # For target branch (deployment), use current branch
+            triggering_branch="${{ github.ref_name }}"
           fi
+          
+          echo "Determined branch for deployment: $triggering_branch"
+          echo "Determined branch for artifacts: $artifact_branch"
+          echo "branch=$triggering_branch" >> $GITHUB_OUTPUT
+          echo "source_branch=$artifact_branch" >> $GITHUB_ENV
 
       - name: Get Latest Successful Workflow Run
         id: get_run
         run: |
-          latest_run_id=$(curl -s -H "Authorization: token ${{ secrets.artifact_download_token }}" \
-            "https://api.github.com/repos/pljakobs/esp_rgbww_firmware/actions/runs?status=success" | \
-            jq -r '.workflow_runs[] | select(.name == "firmwareBuild") | .id' | head -n 1)
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            # For manual dispatch, get the latest successful firmware build
+            # for the selected branch, regardless of how that build started.
+            latest_run_id=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              "https://api.github.com/repos/pljakobs/esp_rgbww_firmware/actions/workflows/build_firmware.yml/runs?branch=${{ github.event.inputs.branch }}&status=success&per_page=1" \
+              | jq -r '.workflow_runs[0].id // empty')
+            
+            if [ -z "$latest_run_id" ] || [ "$latest_run_id" == "null" ]; then
+              echo "ERROR: No successful workflow runs found"
+              exit 1
+            fi
+          else
+            # For workflow_run trigger, use the run that triggered this workflow
+            latest_run_id="${{ github.event.workflow_run.id }}"
+          fi
+          
+          echo "Latest successful run ID: $latest_run_id"
           echo "latest_run_id=$latest_run_id" >> $GITHUB_OUTPUT
           echo "latest_run_id=$latest_run_id" >> $GITHUB_ENV
           
       - name: Download version info
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
-          github-token: ${{ secrets.artifact_download_token }}
-          run-id: ${{ env.latest_run_id }}
-          name: version-info-${{ steps.get_branch.outputs.branch }}
+          name: version-info-${{ env.source_branch }}
           path: ./version-info
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: pljakobs/esp_rgbww_firmware
+          run-id: ${{ env.latest_run_id }}
           
       - name: Load version info
         id: version
@@ -57,6 +112,8 @@ jobs:
           source ./version-info/version-info.txt
           echo "fw_version=$fw_version" >> $GITHUB_OUTPUT
           echo "fw_branch=$fw_branch" >> $GITHUB_OUTPUT
+          # Fall back to current known list for artifacts built before this change
+          echo "supported_socs=${supported_socs:-esp8266,esp32,esp32c3}" >> $GITHUB_OUTPUT
 
   publish:
     runs-on: ubuntu-latest
@@ -64,52 +121,69 @@ jobs:
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
     
     steps:
-      - name: Checkout gh-pages branch
-        uses: actions/checkout@v3
-        with:
-          ref: gh-pages
+      # Setup branch variables once at the beginning
+      - name: Setup branch variables
+        run: |
+          source_branch="${{ needs.get-version.outputs.fw_branch }}"
+          target_branch="$source_branch"
           
-      # Create download directories for all branches
+          echo "Source branch (for artifact names): $source_branch"
+          echo "Target branch (for deployment): $target_branch"
+          echo "Version: ${{ needs.get-version.outputs.fw_version }}"
+          
+          # Export to environment variables for later steps
+          echo "source_branch=$source_branch" >> $GITHUB_ENV
+          echo "target_branch=$target_branch" >> $GITHUB_ENV
+          echo "version=${{ needs.get-version.outputs.fw_version }}" >> $GITHUB_ENV
+          echo "supported_socs=${{ needs.get-version.outputs.supported_socs }}" >> $GITHUB_ENV
+          echo "deploy_run_key=${{ github.run_id }}-${{ github.run_attempt }}" >> $GITHUB_ENV
+   
+      # Checkout main repository to get manage_version.py
+      - name: Checkout main repository
+        uses: actions/checkout@v6
+        with:
+          path: esp_firmware_repo
+              
       - name: Create directories
         run: |
-          for branch in stable testing develop; do
-            for soc in esp8266 esp32 esp32c3; do
-              mkdir -p download/$soc/$branch/debug
-              mkdir -p download/$soc/$branch/release
-              mkdir -p download/$soc/$branch/debug/single_image
-              mkdir -p download/$soc/$branch/release/single_image
-            done
+          IFS=',' read -ra soc_list <<< "${{ env.supported_socs }}"
+          for soc in "${soc_list[@]}"; do
+            soc=$(echo "$soc" | tr -d ' ')
+            mkdir -p download/${{ env.target_branch }}/${{ env.version }}/$soc/debug
+            mkdir -p download/${{ env.target_branch }}/${{ env.version }}/$soc/release
+            mkdir -p download/${{ env.target_branch }}/${{ env.version }}/$soc/debug/single_image
+            mkdir -p download/${{ env.target_branch }}/${{ env.version }}/$soc/release/single_image
           done
+          
+          # Create version.txt file instead of symlink
+          mkdir -p download/${{ env.target_branch }}/latest
+          echo "${{ env.version }}" > download/${{ env.target_branch }}/latest/version.txt
+          echo "<html><head><meta http-equiv=\"refresh\" content=\"0; URL=../${{ env.version }}/\"></head></html>" > download/${{ env.target_branch }}/latest/index.html
           
       # Download artifacts for the current branch
       - name: Download artifacts
         run: |
-          branch="${{ needs.get-version.outputs.fw_branch }}"
-          latest_run_id=$(curl -s -H "Authorization: token ${{ secrets.artifact_download_token }}" \
-            "https://api.github.com/repos/pljakobs/esp_rgbww_firmware/actions/runs?status=success" | \
-            jq -r '.workflow_runs[] | select(.name == "firmwareBuild") | .id' | head -n 1)
-          echo "latest_run_id=$latest_run_id" >> $GITHUB_ENV
-          
-          # Define all combinations for artifact downloads
-          combinations=(
-            "esp8266 debug 0 download/$branch/esp8266/debug"
-            "esp8266 release 0 download/$branch/esp8266/release"
-            "esp32 debug 0 download/$branch/esp32/debug"
-            "esp32 release 0 download/$branch/esp32/release"
-            "esp32c3 debug 0 download/$branch/esp32c3/debug"
-            "esp32c3 release 0 download/$branch/esp32c3/release"
-            "esp8266 debug 1 download/$branch/esp8266/debug/single_image"
-            "esp8266 release 1 download/$branch/esp8266/release/single_image"
-            "esp32 debug 1 download/$branch/esp32/debug/single_image"
-            "esp32 release 1 download/$branch/esp32/release/single_image"
-            "esp32c3 debug 1 download/$branch/esp32c3/debug/single_image"
-            "esp32c3 release 1 download/$branch/esp32c3/release/single_image"
-          )
+          # Build combinations dynamically from supported_socs
+          IFS=',' read -ra soc_list <<< "${{ env.supported_socs }}"
+          combinations=()
+          for soc in "${soc_list[@]}"; do
+            soc=$(echo "$soc" | tr -d ' ')
+            for build_type in debug release; do
+              for single_img in 0 1; do
+                if [ "$single_img" = "1" ]; then
+                  path="download/${{ env.target_branch }}/${{ env.version }}/$soc/$build_type/single_image"
+                else
+                  path="download/${{ env.target_branch }}/${{ env.version }}/$soc/$build_type"
+                fi
+                combinations+=("$soc $build_type $single_img $path")
+              done
+            done
+          done
           
           for combo in "${combinations[@]}"; do
             read -r soc build_type single_img path <<< "$combo"
             
-            # Determine artifact name
+            # Use source_branch for artifact names but target_branch for deployment paths
             if [ "$single_img" = "1" ]; then
               tag="-single_image"
             else
@@ -117,182 +191,45 @@ jobs:
             fi
             
             if [ "$build_type" = "release" ]; then
-              artifact_name="lightinator-${soc}-release${tag}-${branch}"
+              artifact_name="lightinator-${soc}-release${tag}-${{ env.source_branch }}"
             else
-              artifact_name="lightinator-${soc}-debug${tag}-${branch}"
+              artifact_name="lightinator-${soc}-debug${tag}-${{ env.source_branch }}"
             fi
             
-            echo "Downloading $artifact_name"
+            echo "Downloading $artifact_name to $path"
             
             # Create directory and download
             mkdir -p "$path"
             
             # Download the artifact - continue on errors
-            actions/download-artifact@v4 \
-              --github-token ${{ secrets.artifact_download_token }} \
-              --run-id ${{ env.latest_run_id }} \
-              --name "$artifact_name" \
-              --path "$path" || echo "Failed to download $artifact_name"
-          done
-          
-      # Copy Python script to update version.json
-      - name: Setup version.json updater
-        run: |
-          cat > update_version.py << 'EOF'
-          #!/usr/bin/env python3
-          
-          import json
-          import os
-          import sys
-
-          def load_json(file_path):
-              if not os.path.exists(file_path):
-                  return None
-              with open(file_path, 'r') as file:
-                  try:
-                      return json.load(file)
-                  except json.JSONDecodeError:
-                      return None
-
-          def save_json(data, file_path):
-              with open(file_path, 'w') as file:
-                  json.dump(data, file, indent=4)
-
-          def prime_json(file_path):
-              data = {
-                  "rom": {
-                      "fw_version": "V5.0-1-develop",
-                      "url": "http://lightinator.de/download/esp8266/develop/release/rom0.bin"
-                  },
-                  "spiffs": {
-                      "webapp_version": "0.3.3",
-                      "url": "http://rgbww.dronezone.de/testing/spiff_rom.bin"
-                  },
-                  "firmware": []
-              }
-              save_json(data, file_path)
-              return data
-
-          def add_or_update_entry(data, soc, type_, branch, fw_version, url):
-              new_entry = {
-                  "soc": soc,
-                  "type": type_,
-                  "branch": branch,
-                  "fw_version": fw_version,
-                  "files": {
-                      "rom": {
-                          "url": url
-                      }
-                  }
-              }
-              for i, entry in enumerate(data['firmware']):
-                  if (entry['soc'] == soc and
-                      entry['type'] == type_ and
-                      entry['branch'] == branch):
-                      data['firmware'][i] = new_entry
-                      if soc == 'esp8266' and type_ == 'release' and branch == 'stable':
-                          data['rom'] = new_entry['files']['rom']
-                      return data
-              data['firmware'].append(new_entry)
-              if soc == 'esp8266' and type_ == 'release' and branch == 'stable':
-                  data['rom'] = {
-                      "fw_version": fw_version,
-                      "url": url
-                  }
-              return data
-
-          def delete_entry(data, soc, type_, branch):
-              data['firmware'] = [entry for entry in data['firmware'] if not (
-                  entry['soc'] == soc and entry['type'] == type_ and entry['branch'] == branch)]
-              return data
-
-          def main():
-              if len(sys.argv) < 2:
-                  print("Usage: script.py <json_file> [add|delete] [soc type branch fw_version url|soc type branch]")
-                  return
-
-              file_path = sys.argv[1]
-              action = sys.argv[2]
-
-              data = load_json(file_path)
-              if data is None:
-                  data = prime_json(file_path)
-
-              if action == 'add':
-                  if len(sys.argv) < 7:
-                      print("Usage: script.py <json_file> add <soc> <type> <branch> <fw_version> <url>")
-                      return
-                  soc = sys.argv[3]
-                  type_ = sys.argv[4]
-                  branch = sys.argv[5]
-                  fw_version = sys.argv[6]
-                  url = sys.argv[7]
-                  data = add_or_update_entry(data, soc, type_, branch, fw_version, url)
-              elif action == 'delete':
-                  if len(sys.argv) < 6:
-                      print("Usage: script.py <json_file> delete <soc> <type> <branch>")
-                      return
-                  soc = sys.argv[3]
-                  type_ = sys.argv[4]
-                  branch = sys.argv[5]
-                  data = delete_entry(data, soc, type_, branch)
-              else:
-                  print("Invalid action. Use add or delete.")
-                  return
-
-              save_json(data, file_path)
-
-          if __name__ == "__main__":
-              main()
-          EOF
-          
-          chmod +x update_version.py
-      
-      # Download version.json from lightinator.de if it doesn't exist locally
-      - name: Get version.json
-        run: |
-          if [ ! -f "version.json" ]; then
-            echo "Downloading version.json from lightinator.de"
-            curl -L -o version.json https://lightinator.de/version.json
-            if [ ! -f "version.json" ] || [ ! -s "version.json" ]; then
-              echo "Failed to download version.json, creating a new one"
-              ./update_version.py version.json add esp8266 release stable "V5.0-init-stable" "http://lightinator.de/download/esp8266/stable/release/rom0.bin"
-            fi
-          fi
-          
-      # Update version.json using the Python script for each firmware combination
-      - name: Update version.json
-        run: |
-          branch="${{ needs.get-version.outputs.fw_branch }}"
-          version="${{ needs.get-version.outputs.fw_version }}"
-          deploy_server="lightinator.de"
-          
-          # Define all combinations to update - only for non-single-image builds
-          for soc in esp8266 esp32 esp32c3; do
-            for type in debug release; do
-              # Determine correct file path based on soc
-              if [ "$soc" = "esp8266" ]; then
-                file="rom0.bin"
+            curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -o /tmp/artifact_list.json \
+              "https://api.github.com/repos/pljakobs/esp_rgbww_firmware/actions/runs/${{ needs.get-version.outputs.latest_run_id }}/artifacts"
+            
+            artifact_url=$(cat /tmp/artifact_list.json | jq -r ".artifacts[] | select(.name == \"$artifact_name\") | .archive_download_url")
+            
+            if [ -n "$artifact_url" ]; then
+              curl -L -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                -o "$path/artifact.zip" "$artifact_url"
+              
+              # Extract the artifact if download was successful
+              if [ -f "$path/artifact.zip" ]; then
+                unzip -q -o "$path/artifact.zip" -d "$path"
+                rm "$path/artifact.zip"
               else
-                file="app.bin"
+                echo "Failed to download $artifact_name"
               fi
-              
-              # Update entry in version.json
-              url="http://$deploy_server/download/$soc/$branch/$type/$file"
-              ./update_version.py version.json add $soc $type $branch "$version" "$url"
-              
-              # We're not adding single image entries to version.json per requirements
-            done
+            else
+              echo "No artifact named $artifact_name found"
+            fi
           done
-          
-      - name: Commit and push changes
-        run: |
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
-          git add .
-          git commit -m "Publish firmware for ${{ needs.get-version.outputs.fw_branch }} branch, version ${{ needs.get-version.outputs.fw_version }}" || echo "No changes to commit"
-          git push origin gh-pages
-          
+      
+      # Download version.json from lightinator.de into staging if it exists, to ensure we have a base
+      # But actually, we will be updating the one ON the server, so we don't strictly need to download it 
+      # unless we want to validate something locally.
+      # The previous steps "Get version.json" and "Update version.json" are now redundant 
+      # because we moved the logic to the remote server in the "Deploy" step.
+      
       # Setup and deploy to your external server
       - name: Setup SSH and deploy
         uses: webfactory/ssh-agent@v0.7.0
@@ -303,39 +240,139 @@ jobs:
         run: |
           echo "deploy_user=github-deploy" >> $GITHUB_ENV
           echo "deploy_server=lightinator.de" >> $GITHUB_ENV
-          echo "deploy_path=~/nginx/html" >> $GITHUB_ENV
+          echo "deploy_path=/home/github-deploy/nginx/html" >> $GITHUB_ENV
           
       - name: Add server to known_hosts
         run: |
           ssh-keyscan ${{ env.deploy_server }} >> ~/.ssh/known_hosts
           
-      - name: Deploy to External Server
+      - name: Deploy to External Server (rsync)
         run: |
-          branch="${{ needs.get-version.outputs.fw_branch }}"
+          # 1. Prepare Staging Area
+          mkdir -p staging
           
-          # Copy only the files for this branch
-          for soc in esp8266 esp32 esp32c3; do
-            ssh ${{ env.deploy_user }}@${{ env.deploy_server }} "mkdir -p ${{ env.deploy_path }}/download/$soc/$branch/debug"
-            ssh ${{ env.deploy_user }}@${{ env.deploy_server }} "mkdir -p ${{ env.deploy_path }}/download/$soc/$branch/release"
-            ssh ${{ env.deploy_user }}@${{ env.deploy_server }} "mkdir -p ${{ env.deploy_path }}/download/$soc/$branch/debug/single_image"
-            ssh ${{ env.deploy_user }}@${{ env.deploy_server }} "mkdir -p ${{ env.deploy_path }}/download/$soc/$branch/release/single_image"
-            
-            scp -r download/$soc/$branch/debug/* ${{ env.deploy_user }}@${{ env.deploy_server }}:${{ env.deploy_path }}/download/$soc/$branch/debug/
-            scp -r download/$soc/$branch/release/* ${{ env.deploy_user }}@${{ env.deploy_server }}:${{ env.deploy_path }}/download/$soc/$branch/release/
-            
-            # Copy single image files if they exist
-            if [ -d "download/$soc/$branch/debug/single_image" ] && [ "$(ls -A download/$soc/$branch/debug/single_image)" ]; then
-              scp -r download/$soc/$branch/debug/single_image/* ${{ env.deploy_user }}@${{ env.deploy_server }}:${{ env.deploy_path }}/download/$soc/$branch/debug/single_image/
-            fi
-            
-            if [ -d "download/$soc/$branch/release/single_image" ] && [ "$(ls -A download/$soc/$branch/release/single_image)" ]; then
-              scp -r download/$soc/$branch/release/single_image/* ${{ env.deploy_user }}@${{ env.deploy_server }}:${{ env.deploy_path }}/download/$soc/$branch/release/single_image/
-            fi
+          # Move download directory to staging
+          mv download staging/
+          
+          # Use run-specific names so concurrent publishes cannot overwrite
+          # files before they acquire the remote deployment lock.
+          cp esp_firmware_repo/manage_version.py "staging/manage_version-${{ env.deploy_run_key }}.py"
+          
+          # Create the remote script that will orchestrate the update on the server
+          # This script handles:
+          # 1. Updating version.json with the new files (using the uploaded manage_version.py)
+          # 2. Culling old versions
+          # 3. Setting permissions
+          cat > "staging/remote_update-${{ env.deploy_run_key }}.sh" << 'EOF'
+          #!/bin/bash
+          set -e
+          
+          # Variables passed from the workflow env
+          DEPLOY_PATH="${{ env.deploy_path }}"
+          TARGET_BRANCH="${{ env.target_branch }}"
+          VERSION="${{ env.version }}"
+          DEPLOY_SERVER="${{ env.deploy_server }}"
+          SUPPORTED_SOCS="${{ env.supported_socs }}"
+          MANAGE_SCRIPT="manage_version-${{ env.deploy_run_key }}.py"
+          REMOTE_SCRIPT="remote_update-${{ env.deploy_run_key }}.sh"
+          
+          cd "$DEPLOY_PATH"
+          
+          echo "Updating version.json on remote..."
+          
+          # Make the uploaded script executable
+          chmod +x "$MANAGE_SCRIPT"
+          
+          # Update version.json for each uploaded artifact
+          IFS=',' read -ra soc_list <<< "$SUPPORTED_SOCS"
+          for soc in "${soc_list[@]}"; do
+            soc=$(echo "$soc" | tr -d ' ')
+            for type in debug release; do
+              if [ "$soc" = "esp8266" ]; then
+                bin_file="rom0.bin"
+                elf_file="app_0.out"
+                map_file="app_0.map"
+              else
+                bin_file="app.bin"
+                elf_file="app.out"
+                map_file="app.map"
+              fi
+              
+              url="http://$DEPLOY_SERVER/download/$TARGET_BRANCH/$VERSION/$soc/$type/$bin_file"
+              python3 "$MANAGE_SCRIPT" version.json add $soc $type $TARGET_BRANCH "$VERSION" "$url"
+              
+              # ELF and map are sibling files — URL predictable by replacing bin filename.
+              echo "ELF deployed at: http://$DEPLOY_SERVER/download/$TARGET_BRANCH/$VERSION/$soc/$type/$elf_file"
+              echo "MAP deployed at: http://$DEPLOY_SERVER/download/$TARGET_BRANCH/$VERSION/$soc/$type/$map_file"
+            done
           done
           
-          # Replace placeholders and upload version.json
-          sed <version.json -e "s/%host%/http:\/\/${{ env.deploy_server }}/" | ssh ${{ env.deploy_user }}@${{ env.deploy_server }} "cat >${{ env.deploy_path }}/version.json"
+          # Update 'latest' pointer
+          mkdir -p download/$TARGET_BRANCH/latest
+          # We need to make sure the target directory structure exists before writing to it
+          # validation: check if the latest version directory actually exists
+          if [ -d "download/$TARGET_BRANCH/$VERSION" ]; then
+              echo "$VERSION" > download/$TARGET_BRANCH/latest/version.txt
+              echo "<html><head><meta http-equiv=\"refresh\" content=\"0; URL=../$VERSION/\"></head></html>" > download/$TARGET_BRANCH/latest/index.html
+          else
+              echo "Warning: Version directory download/$TARGET_BRANCH/$VERSION does not exist on remote"
+          fi
+
+          # Create/update direct download symlinks: download/<soc>/<branch>/<type>/app-merged.bin
+          # These match the static HTML download links and always point to the latest version.
+          echo "Updating direct download symlinks..."
+          IFS=',' read -ra soc_list <<< "$SUPPORTED_SOCS"
+          for soc in "${soc_list[@]}"; do
+            soc=$(echo "$soc" | tr -d ' ')
+            for type in debug release; do
+              symlink_dir="download/$soc/$TARGET_BRANCH/$type"
+              mkdir -p "$symlink_dir"
+              # Relative path from download/<soc>/<branch>/<type>/ up to download/ then into versioned path
+              ln -sf "../../../$TARGET_BRANCH/$VERSION/$soc/$type/single_image/app-merged.bin" \
+                "$symlink_dir/app-merged.bin"
+              echo "Symlink: $symlink_dir/app-merged.bin -> ../../../$TARGET_BRANCH/$VERSION/$soc/$type/single_image/app-merged.bin"
+            done
+          done
+
+          echo "Culling old versions..."
+          python3 "$MANAGE_SCRIPT" version.json cull
           
-      - name: Change ownership of uploaded files
-        run: |
-          ssh ${{ env.deploy_user }}@${{ env.deploy_server }} "chown -R github-deploy:nginx ${{ env.deploy_path }}/*"
+          echo "Fixing permissions..."
+          # Set ownership to deploy user:nginx group
+          chown -R github-deploy:nginx *
+          # Ensure directories are 755 and files are 644
+          find download -type d -exec chmod 755 {} \;
+          find download -type f -exec chmod 644 {} \;
+          chmod +x "$MANAGE_SCRIPT"
+          
+          rm "$MANAGE_SCRIPT" "$REMOTE_SCRIPT"
+          EOF
+          
+          chmod +x "staging/remote_update-${{ env.deploy_run_key }}.sh"
+          
+          # 1b. Port Knocking
+          # Explicitly allow the current runner's IP address
+          if [ -n "${{ secrets.DEPLOY_KNOCK_URL }}" ]; then
+            echo "Performing port knock..."
+            curl -s "${{ secrets.DEPLOY_KNOCK_URL }}" || echo "Knock failed, continuing anyway..."
+          else
+            echo "No knock URL configured, skipping..."
+          fi
+          
+          # 2. Deploy using rsync
+          # -r: recursive
+          # -l: copy symlinks as symlinks
+          # -v: verbose
+          # -z: compress
+          # --chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r: set destination permissions specifically for new files
+          # We avoid -a (archive) because it includes -p (perms), -t (times), -o (owner), -g (group)
+          # which can cause "code 23" errors if the remote user doesn't own the destination files.
+          
+          echo "Syncing files..."
+          rsync -rlvz --chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r -e "ssh -o StrictHostKeyChecking=no" staging/ ${{ env.deploy_user }}@${{ env.deploy_server }}:${{ env.deploy_path }}/
+          
+          # 3. Execute the update logic on the remote server
+          echo "Running remote update script..."
+          ssh -o StrictHostKeyChecking=no ${{ env.deploy_user }}@${{ env.deploy_server }} \
+            "flock /tmp/lightinator-firmware-deploy.lock bash ${{ env.deploy_path }}/remote_update-${{ env.deploy_run_key }}.sh"
+

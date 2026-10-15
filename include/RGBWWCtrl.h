@@ -1,6 +1,8 @@
 /**
  * @file
  * @author  Patrick Jahns http://github.com/patrickjahns
+ *          Peter Jakobs http://github.com/pljakobs
+ * 
  *
  * @section LICENSE
  *
@@ -34,8 +36,16 @@
 	#define SOC "esp32c3"
 #elif defined(SOC_ESP32)
     #define SOC "esp32"
+#elif defined(ARCH_HOST)
+    #define SOC "host"
 #else
     #define SOC "unknown"
+#endif
+
+#if defined(ARCH_ESP32)
+    #define HTTP_MAX_CONNECTIONS 10
+#else
+    #define HTTP_MAX_CONNECTIONS 8
 #endif
 
 #if defined(SMING_RELEASE)
@@ -47,7 +57,6 @@
 //default defines
 
 #if defined ARCH_ESP8266
-    #define CLEAR_PIN 16
 #endif
 
 #if defined ARCH_ESP32
@@ -57,13 +66,14 @@
 #define DEFAULT_AP_IP "192.168.4.1"
 #define DEFAULT_AP_SECURED false
 #define DEFAULT_AP_PASSWORD "rgbwwctrl"
-#define DEFAULT_AP_SSIDPREFIX "RGBWW"
+#define DEFAULT_AP_SSIDPREFIX "Lightinator_"
+
 #define DEFAULT_API_SECURED false
 #define DEFAULT_API_PASSWORD "rgbwwctrl"
 #define DEFAULT_CONNECTION_RETRIES 10
 #define DEFAULT_OTA_URL "https://lightinator.de/version.json"
 
-// RGBWW relatedssh 192.
+// RGBWW related
 #define DEFAULT_COLORTEMP_WW 2700
 #define DEFAULT_COLORTEMP_CW 6000
 
@@ -85,15 +95,28 @@
     #include <otaupdate.h>
 #endif
 
-#include <config.h>
+#include <JsonObjectStream.h>
+#include <ConfigDB/Json/Format.h>
+#include <ConfigDB/Network/HttpImportResource.h>
+
+#include <Data/CStringArray.h>
+#include <Data/Format/Json.h>
+
+#include "app-config.h"
+#include "app-data.h"
+
 #include <ledctrl.h>
 #include <networking.h>
 #include <webserver.h>
+#include <mdnsHandler.h>
+#include <telemetry.h>
 #include <mqtt.h>
 #include <eventserver.h>
 #include <jsonprocessor.h>
 #include <application.h>
 #include <stepsync.h>
 #include <arduinojson.h>
+#include <controllers.h>
 
-
+#define configDB_PATH "app-config"
+#define dataDB_PATH "app-data"

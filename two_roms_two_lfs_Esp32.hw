@@ -39,25 +39,26 @@
             "encrypted": false,
             "filename": ""
         },
-        "lfs1": {
+	"lfs1": {
             "device": "spiFlash",
-            "address": "0x00360000",
-            "size": "632K",
+            "address": "0x360000",
+            "size": "616K", 
             "type": "data",
-            "subtype": "littlefs",
-            "readonly": false,
-            "encrypted": false,
-            "filename": ""
+            "subtype": "littlefs"
+        },
+        "coredump": {
+            "device": "spiFlash",
+            "address": "0x3FA000", 
+            "size": "16K",
+            "type": "data",
+            "subtype": "coredump" 
         },
         "otadata": {
             "device": "spiFlash",
-            "address": "0x003fe000",
+            "address": "0x3FE000",
             "size": "8K",
             "type": "data",
-            "subtype": "ota",
-            "readonly": false,
-            "encrypted": false,
-            "filename": ""
+            "subtype": "ota"
         }
     }
 }

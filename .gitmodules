@@ -2,4 +2,5 @@
 [submodule "RGBWWLed"]
 	path = Components/RGBWWLed
 	url = https://github.com/pljakobs/RGBWWled.git
-	branch = develop
+	branch = origin/feature/fade
+

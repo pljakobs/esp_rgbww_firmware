@@ -1,6 +1,9 @@
+#include <ArduinoJson.h>
+
 /**
  * @file
  * @author  Patrick Jahns http://github.com/patrickjahns
+ * 			Peter Jakobs http://github.com/pljakobs
  *
  * @section LICENSE
  *
@@ -18,16 +21,89 @@
  * @section DESCRIPTION
  *
  */
+
 #include <RGBWWCtrl.h>
 #include <Data/WebHelpers/base64.h>
+#include <memory>
 
 #include <Network/Http/Websocket/WebsocketResource.h>
 #include <Storage.h>
 #include <config.h>
+#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
+extern "C" {
+#include <lwip/tcp.h>
+}
+#endif
 
 #include <fileMap.h>
 
+struct TcpPcbStats
+{
+	uint8_t active_total{0};
+	uint8_t established{0};
+	uint8_t syn_sent{0};
+	uint8_t syn_rcvd{0};
+	uint8_t fin_wait_1{0};
+	uint8_t fin_wait_2{0};
+	uint8_t close_wait{0};
+	uint8_t closing{0};
+	uint8_t last_ack{0};
+	uint8_t time_wait{0};
+	uint8_t closed{0};
+};
+
+static TcpPcbStats getTcpPcbStats()
+{
+	TcpPcbStats stats;
+#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
+	for(const tcp_pcb* pcb = tcp_active_pcbs; pcb != nullptr; pcb = pcb->next) {
+		++stats.active_total;
+		switch(pcb->state) {
+		case ESTABLISHED:
+			++stats.established;
+			break;
+		case SYN_SENT:
+			++stats.syn_sent;
+			break;
+		case SYN_RCVD:
+			++stats.syn_rcvd;
+			break;
+		case FIN_WAIT_1:
+			++stats.fin_wait_1;
+			break;
+		case FIN_WAIT_2:
+			++stats.fin_wait_2;
+			break;
+		case CLOSE_WAIT:
+			++stats.close_wait;
+			break;
+		case CLOSING:
+			++stats.closing;
+			break;
+		case LAST_ACK:
+			++stats.last_ack;
+			break;
+		case TIME_WAIT:
+			++stats.time_wait;
+			break;
+		case CLOSED:
+			++stats.closed;
+			break;
+		default:
+			break;
+		}
+	}
+#endif
+	return stats;
+}
+
+static uint8_t getActiveTcpConnectionCount()
+{
+	return getTcpPcbStats().active_total;
+}
+
 //#define NOCACHE
+
 
 // ToDo: think about implementing a parameterized API to read objects from appData by id
 
@@ -37,10 +113,9 @@ ApplicationWebserver::ApplicationWebserver()
 	// keep some heap space free
 	// value is a good guess and tested to not crash when issuing multiple parallel requests
 	HttpServerSettings settings;
-	settings.maxActiveConnections = 40;
-	settings.minHeapSize = _minimumHeapAccept;
-	settings.keepAliveSeconds =
-		10; // do not close instantly when no transmission occurs. some clients are a bit slow (like FHEM)
+	settings.maxActiveConnections = HTTP_MAX_CONNECTIONS;
+	settings.minHeapSize = MINIMUM_HEAP_ACCEPT;
+	settings.keepAliveSeconds = 10; // do not close instantly when no transmission occurs. some clients are a bit slow (like FHEM)
 	configure(settings);
 
 	// workaround for bug in Sming 3.5.0
@@ -65,10 +140,9 @@ void ApplicationWebserver::init()
 	paths.set(F("/hosts"), HttpPathDelegate(&ApplicationWebserver::onHosts, this));
 	paths.set(F("/data"), HttpPathDelegate(&ApplicationWebserver::onData, this));
 
-	// redirectors for initial configuration
-	paths.set(F("/canonical.html"), HttpPathDelegate(&ApplicationWebserver::onIndex, this));
-	paths.set(F("/generate_204"), HttpPathDelegate(&ApplicationWebserver::onIndex, this));
-	paths.set(F("/static/hotspot.txt"), HttpPathDelegate(&ApplicationWebserver::onIndex, this));
+	// basic settings
+	paths.set(F("/on"), HttpPathDelegate(&ApplicationWebserver::onSetOn, this));
+	paths.set(F("/off"), HttpPathDelegate(&ApplicationWebserver::onSetOff, this));
 
 	// animation controls
 	paths.set(F("/stop"), HttpPathDelegate(&ApplicationWebserver::onStop, this));
@@ -78,10 +152,19 @@ void ApplicationWebserver::init()
 	paths.set(F("/blink"), HttpPathDelegate(&ApplicationWebserver::onBlink, this));
 	paths.set(F("/toggle"), HttpPathDelegate(&ApplicationWebserver::onToggle, this));
 
+	// redirectors for initial configuration
+	paths.set(F("/canonical.html"), HttpPathDelegate(&ApplicationWebserver::onIndex, this)); 
+	paths.set(F("/generate_204"), HttpPathDelegate(&ApplicationWebserver::onIndex, this)); //android
+	paths.set(F("/static/hotspot.txt"), HttpPathDelegate(&ApplicationWebserver::onIndex, this));
+	paths.set(F("/connecttest.txt"), HttpPathDelegate(&ApplicationWebserver::onIndex, this)); //Windows
+	paths.set(F("/hotspot-detect.html"), HttpPathDelegate(&ApplicationWebserver::onIndex, this)); //iOS/macOS
+	paths.set(F("/nmcheck.gnome.org"), HttpPathDelegate(&ApplicationWebserver::onIndex, this)); //Linux (NetworkManager)
+
 	// websocket api
 	wsResource = new WebsocketResource();
 	wsResource->setConnectionHandler([this](WebsocketConnection& socket) { this->wsConnected(socket); });
 	wsResource->setDisconnectionHandler([this](WebsocketConnection& socket) { this->wsDisconnected(socket); });
+	wsResource->setMessageHandler([this](WebsocketConnection& socket, const String& message) { this->wsMessage(socket, message); });
 	paths.set("/ws", wsResource);
 
 	_init = true;
@@ -101,15 +184,78 @@ void ApplicationWebserver::wsDisconnected(WebsocketConnection& socket)
 	debug_i("===>nr of websockets: %i", webSockets.size());
 }
 
+void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& message)
+{
+	StaticJsonDocument<1024> requestDoc;
+	DeserializationError err = deserializeJson(requestDoc, message);
+	if(err) {
+		socket.sendString(F("{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32700,\"message\":\"Parse error\"},\"id\":null}"));
+		return;
+	}
+
+	JsonObject req = requestDoc.as<JsonObject>();
+	const char* method = req[F("method")] | "";
+	JsonVariant id = req[F("id")];
+
+	StaticJsonDocument<512> responseDoc;
+	JsonObject resp = responseDoc.to<JsonObject>();
+	resp[F("jsonrpc")] = F("2.0");
+	if(!id.isNull()) {
+		resp[F("id")] = id;
+	}
+
+	if(method[0] == '\0') {
+		JsonObject errorObj = resp.createNestedObject(F("error"));
+		errorObj[F("code")] = -32600;
+		errorObj[F("message")] = F("missing method");
+	} else {
+		JsonObject params = req[F("params")].as<JsonObject>();
+		String msg;
+		bool ok = false;
+		if(strcmp_P(method, PSTR("color")) == 0) {
+			ok = app.jsonproc.onColor(params, msg, false);
+		} else if(strcmp_P(method, PSTR("stop")) == 0) {
+			ok = app.jsonproc.onStop(params, msg, false);
+		} else if(strcmp_P(method, PSTR("skip")) == 0) {
+			ok = app.jsonproc.onSkip(params, msg, false);
+		} else if(strcmp_P(method, PSTR("pause")) == 0) {
+			ok = app.jsonproc.onPause(params, msg, false);
+		} else if(strcmp_P(method, PSTR("continue")) == 0) {
+			ok = app.jsonproc.onContinue(params, msg, false);
+		} else if(strcmp_P(method, PSTR("blink")) == 0) {
+			ok = app.jsonproc.onBlink(params, msg, false);
+		} else if(strcmp_P(method, PSTR("toggle")) == 0) {
+			ok = app.jsonproc.onToggle(params, msg, false);
+		} else if(strcmp_P(method, PSTR("direct")) == 0) {
+			ok = app.jsonproc.onDirect(params, msg, false);
+		} else {
+			msg = String(F("method not implemented: ")) + method;
+		}
+
+		if(ok) {
+			resp.createNestedObject(F("result"))[F("success")] = true;
+		} else {
+			JsonObject errorObj = resp.createNestedObject(F("error"));
+			errorObj[F("code")] = -32601;
+			errorObj[F("message")] = msg;
+		}
+	}
+
+	String responseStr;
+	serializeJson(responseDoc, responseStr);
+	socket.sendString(responseStr);
+}
+
 /*
 *	send a websocket broadcast
 */
 void ICACHE_FLASH_ATTR ApplicationWebserver::wsSendBroadcast(const char* buffer, size_t length)
 {
-    if (!webSockets.isEmpty()) {
-        WebsocketConnection* socket = webSockets[0];
-        // Use firstSocket as needed
-        socket->broadcast(buffer, length, WS_FRAME_TEXT);
+    if(buffer == nullptr || length == 0 || webSockets.isEmpty()) { return; }
+    for(unsigned i = 0; i < webSockets.size(); ++i) {
+        WebsocketConnection* socket = webSockets[i];
+        if(socket == nullptr) { continue; }
+        socket->send(buffer, length, WS_FRAME_TEXT);
     }
 }
 
@@ -179,24 +325,27 @@ bool ICACHE_FLASH_ATTR ApplicationWebserver::authenticated(HttpRequest& request,
 	return authenticated;
 }
 
-String ApplicationWebserver::getApiCodeMsg(API_CODES code)
+const char* ApplicationWebserver::getApiCodeMsg(API_CODES code)
 {
 	switch(code) {
 	case API_CODES::API_MISSING_PARAM:
-		return String(F("missing param"));
+		return "missing param";
 	case API_CODES::API_UNAUTHORIZED:
-		return String(F("authorization required"));
+		return "authorization required";
 	case API_CODES::API_UPDATE_IN_PROGRESS:
-		return String(F("update in progress"));
+		return "update in progress";
 	default:
-		return String(F("bad request"));
+		return "bad request";
 	}
 }
 
 void ApplicationWebserver::sendApiResponse(HttpResponse& response, JsonObjectStream* stream, HttpStatus code)
 {
 	if(!checkHeap(response)) {
-		delete stream;
+		if (stream) {
+			delete stream;
+			stream = nullptr;
+		}
 		return;
 	}
 
@@ -207,34 +356,78 @@ void ApplicationWebserver::sendApiResponse(HttpResponse& response, JsonObjectStr
 		response.code = HTTP_STATUS_BAD_REQUEST;
 	}
 	response.sendDataStream(stream, MIME_JSON);
+
 }
 
-void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, String msg /* = "" */)
+void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, const String& msg)
 {
-	JsonObjectStream* stream = new JsonObjectStream();
+	sendApiCode(response, code, msg.c_str());
+}
+
+void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, const __FlashStringHelper* msg)
+{
+	if(msg == nullptr) {
+		sendApiCode(response, code, getApiCodeMsg(code));
+		return;
+	}
+	String flashMsg(msg);
+	sendApiCode(response, code, flashMsg);
+}
+
+void ApplicationWebserver::addInfoFields(JsonObject& obj)
+{
+	JsonObject dev = obj.createNestedObject(F("device"));
+
+	dev[F("deviceid")] = system_get_chip_id();
+	dev[F("soc")] = SOC;
+#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
+	dev[F("current_rom")] = String(app.ota.getRomPartition().name());
+#endif
+	JsonObject application = obj.createNestedObject(F("app"));
+	application[F("webapp_version")] = WEBAPP_VERSION;
+	application[F("git_version")] = fw_git_version;
+	application[F("build_type")] = BUILD_TYPE;
+	application[F("git_date")] = fw_git_date;
+
+	JsonObject sming = obj.createNestedObject(F("sming"));
+	sming[F("version")] = SMING_VERSION;
+	JsonObject run = obj.createNestedObject(F("runtime"));
+	run[F("uptime")] = app.getUptime();
+	run[F("heap_free")] = app.getFreeHeapSize();
+	run[F("minimumfreeHeapRuntime")]=app.getMinimumHeapUptime();
+	run[F("minimumfreeHeap10min")]=app.getMinimumHeap10min();
+	run[F("heapLowErrUptime")]=app.getHeapLowErrUptime();
+	run[F("heapLowErr10min")]=app.getHeapLowErr10min();
+}
+
+void ApplicationWebserver::sendApiCode(HttpResponse& response, API_CODES code, const char* msg)
+{
+	const String stableMsg = (msg == nullptr) ? String(getApiCodeMsg(code)) : String(msg);
+	auto stream = std::make_unique<JsonObjectStream>();
 	JsonObject json = stream->getRoot();
 
 	setCorsHeaders(response);
 	response.setHeader(F("accept"), F("GET, POST, OPTIONS"));
 
-	if(msg == "") {
-		msg = getApiCodeMsg(code);
-	}
 	if(code == API_CODES::API_SUCCESS) {
 		json[F("success")] = true;
-		sendApiResponse(response, stream, HTTP_STATUS_OK);
+		sendApiResponse(response, stream.release(), HTTP_STATUS_OK);
 	} else {
-		json[F("error")] = msg;
-		sendApiResponse(response, stream, HTTP_STATUS_BAD_REQUEST);
+		if(code == API_CODES::API_UPDATE_IN_PROGRESS) {
+			debug_i("API update in progress, adding info to response");
+			JsonObject data = json.createNestedObject(F("info"));
+			addInfoFields(data);
+		}
+
+		json[F("error")] = stableMsg;
+		sendApiResponse(response, stream.release(), HTTP_STATUS_BAD_REQUEST);
 	}
 }
 
 void ApplicationWebserver::onFile(HttpRequest& request, HttpResponse& response)
 {
 	debug_i("http onFile");
-	if(!authenticated(request, response)) {
-		return;
-	}
+	if(!preflightRequest(request, response, {HttpMethod::GET, HttpMethod::HEAD})) return;
 
 #ifdef ARCH_ESP8266
 	if(app.ota.isProccessing()) {
@@ -293,15 +486,14 @@ void ApplicationWebserver::onFile(HttpRequest& request, HttpResponse& response)
 	}
 
 	debug_i("found %s in fileMap", String(v.key()).c_str());
-	auto stream = new FSTR::Stream(v.content());
-	response.sendDataStream(stream, ContentType::fromFullFileName(fileName));
+	auto stream = std::make_unique<FSTR::Stream>(v.content());
+	response.sendDataStream(stream.release(), ContentType::fromFullFileName(fileName));
+
 }
 void ApplicationWebserver::onWebapp(HttpRequest& request, HttpResponse& response)
 {
 	debug_i("http onWebapp");
-	if(!authenticated(request, response)) {
-		return;
-	}
+	if(!preflightRequest(request, response, {HttpMethod::GET})) return;
 
 	response.headers[HTTP_HEADER_LOCATION] = F("/index.html");
 	setCorsHeaders(response);
@@ -313,10 +505,7 @@ void ApplicationWebserver::onWebapp(HttpRequest& request, HttpResponse& response
 void ApplicationWebserver::onIndex(HttpRequest& request, HttpResponse& response)
 {
 	debug_i("http onIndex");
-	if(!authenticated(request, response)) {
-		return;
-	}
-
+	if(!preflightRequest(request, response, {HttpMethod::GET})) return;
 #ifdef ARCH_ESP8266
 	if(app.ota.isProccessing()) {
 		response.setContentType(MIME_TEXT);
@@ -336,25 +525,95 @@ void ApplicationWebserver::onIndex(HttpRequest& request, HttpResponse& response)
 
 bool ApplicationWebserver::checkHeap(HttpResponse& response)
 {
-	unsigned fh = system_get_free_heap_size();
-	if(fh < _minimumHeap) {
+	return checkHeap(response, MINIMUM_HEAP);
+}
+
+bool ApplicationWebserver::checkHeap(HttpResponse& response, int minHeap)
+{
+
+	if(!app.checkHeap(minHeap) ) {
 		setCorsHeaders(response);
 		response.code = HTTP_STATUS_TOO_MANY_REQUESTS;
-		response.setHeader(F("Retry-After"), "2");
+		response.setHeader(F("Retry-After"), "4");
+		debug_e("Not enough heap free, rejecting request. Free heap: %u", app.getFreeHeapSize());
 		return false;
 	}
 	return true;
 }
 
+/**
+ * @brief Helper to handle standard checks: Heap, CORS(Options), Method allow-list, Global Auth
+ * 
+ * @param minHeap Optional minimum heap required (default 0 loops back to _minimumHeap)
+ * @return true if request is valid and should proceed. false if response handled (e.g. error or options)
+ */
+bool ApplicationWebserver::preflightRequest(HttpRequest& request, HttpResponse& response, std::initializer_list<HttpMethod> allowedMethods, int minHeap)
+{
+    // Default to no-cache for API/dynamic checks. 
+    // Static file handler (onFile) will override this if caching is desired.
+    debug_i("preflightRequest: %s %s", String((int)request.method).c_str(), request.uri.Path.c_str());
+    response.setHeader(F("Cache-Control"), F("no-cache, no-store, must-revalidate"));
+    response.setHeader(F("Pragma"), F("no-cache"));
+    response.setHeader(F("Expires"), F("0"));
+
+    // 1. Heap Check
+    if(!checkHeap(response, minHeap)) {
+        return false;
+    }
+
+   // 2. CORS Preflight (OPTIONS) - Must handle this before method check or Auth
+    if(request.method == HttpMethod::OPTIONS) {
+        setCorsHeaders(response);
+        sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
+        debug_i("Handled OPTIONS preflight (generic)");
+        return false; // Handled, stop processing
+    }
+
+    // 3. Method validation
+    bool methodAllowed = false;
+
+    String allowedMethodsStr;
+    bool first = true;
+    for(auto m : allowedMethods) {
+        if (!first) {
+             allowedMethodsStr += ", ";
+        }
+        allowedMethodsStr += String((int)m);
+        first = false;
+    }
+    
+    for(auto m : allowedMethods) {
+        if(request.method == m) {
+            methodAllowed = true;
+            break;
+        }
+    }
+
+    if(!methodAllowed) {
+        setCorsHeaders(response);
+        String msg = F("Method not allowed. Allowed: ");
+        msg += allowedMethodsStr;
+        msg += F(". Current: ");
+        msg += String((int)request.method);
+        sendApiCode(response, API_CODES::API_BAD_REQUEST, msg.c_str());
+        return false;
+    }
+
+    // 4. Global Authentication
+    // Responds with 401 if security is enabled and auth fails
+    if(!authenticated(request, response)) {
+        return false;
+    }
+
+    // 5. Ensure CORS headers for actual response
+    setCorsHeaders(response);
+    return true;
+}
+
 void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response)
 {
 	debug_i("onConfig");
-	if(!checkHeap(response))
-		return;
-
-	if(!authenticated(request, response)) {
-		return;
-	}
+	if(!preflightRequest(request, response, {HttpMethod::POST, HttpMethod::GET}, 12000)) return;
 
 #ifdef ARCH_ESP8266
 	if(app.ota.isProccessing()) {
@@ -363,45 +622,40 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 	}
 #endif
 
-	if(request.method != HTTP_POST && request.method != HTTP_GET && request.method != HTTP_OPTIONS) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not POST, GET or OPTIONS request"));
-		return;
-	}
 
-	/*
-    / handle HTTP_OPTIONS request to check if server is CORS permissive (which this firmware 
-    / has been for years) this is just to reply to that request in order to pass the CORS test
-    */
-	if(request.method == HTTP_OPTIONS) {
-		// probably a CORS preflight request
-		setCorsHeaders(response);
-		response.setHeader(F("Access-Control-Allow-Headers"), F("Content-Type"));
-		sendApiCode(response, API_CODES::API_SUCCESS, "");
-		debug_i("HTTP_OPTIONS Request, sent API_SUCCSSS");
-		return;
-	}
 
-	if(request.method == HTTP_POST) {
+	if(request.method == HttpMethod::POST) {
 		debug_i("======================\nHTTP POST request received, ");
+		app.telemetryClient.log(F("onConfig POST"));
 
 		/* ConfigDB importFomStream */
-		String oldIP, oldSSID, oldDeviceName, oldCurrentPinConfigName;
-		bool mqttEnabled, dhcpEnabled;
-		int oldColorMode;
+		String oldIP, oldSSID, oldDeviceName, oldCurrentPinConfigName, oldSyslogHost;
+		bool mqttEnabled, dhcpEnabled,oldSyslogEnabled,oldTelemetryEnabled;
+		int oldColorMode,oldSyslogPort;
 		{
 			debug_i("ApplicationWebserver::onConfig storing old settings");
+			app.telemetryClient.log(F("onConfig storing old settings"));
 			AppConfig::Network network(*app.cfg);
-			AppConfig::General general(*app.cfg);
 			oldIP = network.connection.getIp();
 			oldSSID = network.ap.getSsid();
 			mqttEnabled = network.mqtt.getEnabled();
+			oldSyslogEnabled=network.rsyslog.getEnabled();
+			oldTelemetryEnabled=network.telemetry.getStatsEnabled();
+			oldSyslogPort=network.rsyslog.getPort();
+			oldSyslogHost=network.rsyslog.getHost();
 			dhcpEnabled=network.connection.getDhcp();
-			AppConfig::Color color(*app.cfg);
-			oldColorMode=color.getColorMode();
+		}
+		{
+			AppConfig::General general(*app.cfg);
 			oldDeviceName=general.getDeviceName();
 			oldCurrentPinConfigName=general.getCurrentPinConfigName();
 		}
 		
+		{
+			AppConfig::Color color(*app.cfg);
+			oldColorMode=color.getColorMode();
+			// TODO: Store other color settings if needed		
+		}
 
 		auto bodyStream = request.getBodyStream();
 		if(bodyStream) {
@@ -420,49 +674,91 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 
 			// bool restart = root[F("restart")] | false;
 
-			String newIP, newSSID,newDeviceName, newCurrentPinConfigName;
-			bool newMqttEnabled,newDhcpEnabled;
-			int newColorMode;
+			
+			String newIP, newSSID, newDeviceName, newCurrentPinConfigName, newSyslogHost;
+			bool newMqttEnabled,newDhcpEnabled,newSyslogEnabled, newTelemetryEnabled;
+			int newColorMode,newSyslogPort;
 			{
-				debug_i("ApplicationWebserver::onConfig geting new ip settings");
+				debug_i("ApplicationWebserver::onConfig getting new settings");
+				app.telemetryClient.log(F("onConfig getting new settings"));
 				AppConfig::Network network(*app.cfg);
-				AppConfig::General general(*app.cfg);
 				newIP = network.connection.getIp();
 				newSSID = network.ap.getSsid();
 				newMqttEnabled = network.mqtt.getEnabled();
 				newDhcpEnabled=network.connection.getDhcp();
-				AppConfig::Color color(*app.cfg);
-				newColorMode=color.getColorMode();
+				newSyslogEnabled=network.rsyslog.getEnabled();
+				newTelemetryEnabled=network.telemetry.getStatsEnabled();
+				newSyslogHost=network.rsyslog.getHost();
+				newSyslogPort=network.rsyslog.getPort();
+			}
+			{
+				AppConfig::General general(*app.cfg);
 				newDeviceName=general.getDeviceName();
 				newCurrentPinConfigName=general.getCurrentPinConfigName();
 			}
+			{
+				AppConfig::Color color(*app.cfg);
+				newColorMode=color.getColorMode();
+			}
 			
+			/*
+			*
+			* handle ip address change - this will require the controller to reboot 
+			* this only happens if the user configures a new fixed ip address, so they
+			* are expectd to know that and reconnect to the new address (or the old
+			* dns / mDNS name, once updated )
+			* 
+			*/
 			if(oldIP != newIP) {
 				//if (restart) {
 				debug_i("ApplicationWebserver::onConfig ip settings changed - rebooting");
-				app.delayedCMD(F("restart"), 3000); // wait 3s to first send response
+				app.telemetryClient.log(F("onConfig ip settings changed - rebooting"));
 				String msg = F("new IP, ")+newIP;
 				app.wsBroadcast(F("notification"), msg);
+				app.telemetryClient.log(msg);
+				app.delayedCMD(F("restart"), 3000); // wait 3s to first send response
 			}
+
+			/*
+			*
+			* handle wifi ssid change - this will require the controller to reboot 
+			* this is a bit more tricky than the ip address change as we don't know
+			* what new ip address the controller will get once connecting to a new 
+			* wifi network.
+			* not sure if much can be done about it - maybe
+			* todo: see if we can connect to the new wifi, record the ip -address, go back to
+			* the old wifi, send the new address to the frontend using websocket and then reboot. This would allow the frontend to automatically reconnect to the new address after the controller has rebooted and connected to the new wifi. But it is a bit of a hassle to implement and test, so for now we just reboot and expect the user to reconnect manually using the new ip address or dns / mDNS name.
+			* 
+			*/
 			if(oldSSID != newSSID) {
 				//
 				if(WifiAccessPoint.isEnabled()) {
 					debug_i("ApplicationWebserver::onConfig wifiap settings changed - rebooting");
+					app.telemetryClient.log(F("onConfig wifiap settings changed - rebooting"));
 					// report the fact that the system will restart to the frontend
 					String msg = F("new SSID, ")+newSSID;
 					app.wsBroadcast(F("notification"), msg);
+					app.telemetryClient.log(msg);
 					app.delayedCMD(F("restart"), 3000); // wait 3s to first send response
 				}
 			}
+
+			/*
+			*
+			* mqtt changes - those will be handled on the fly 
+			*
+			*/
 			if(mqttEnabled != newMqttEnabled) {
 				if(newMqttEnabled) {
 					if(!app.mqttclient.isRunning()) {
 						debug_i("ApplicationWebserver::onConfig mqtt settings changed - starting mqtt");
+						app.telemetryClient.log(F("onConfig mqtt settings changed - starting mqtt"));
 						app.mqttclient.start();
 					}
 				} else {
 					if(app.mqttclient.isRunning()) {
 						debug_i("ApplicationWebserver::onConfig mqtt settings changed - stopping mqtt");
+						app.telemetryClient.log(F("onConfig mqtt settings changed - stopping mqtt"));
 						app.mqttclient.stop();
 					} else {
 						debug_i("mqttclient was not running, no need to stop");
@@ -470,35 +766,99 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 				}
 			
 			}
+			
+			/*
+			* 
+			* telemetry changes - those will be handled on the fly 
+			*
+			*/
+			if(newTelemetryEnabled!=oldTelemetryEnabled){
+				if(newTelemetryEnabled){
+					debug_i("ApplicationWebserver::onConfig telemetry settings changed - starting telemetry");
+					app.telemetryClient.start();
+				}else{
+					debug_i("ApplicationWebserver::onConfig telemetry settings changed - stopping telemetry");
+					app.telemetryClient.stop();
+				}
+			}
+			
+			/*
+			* 
+			* DHCP changes - if DHCP is enabled we can just switch to DHCP, 
+			* if DHCP is disabled we need to reboot to apply the new static ip settings
+			*
+			*/
 			if(newDhcpEnabled!=dhcpEnabled){
 				if(newDhcpEnabled){
 					WifiStation.enableDHCP(true);
 				}else{
 					debug_i("ApplicationWebserver::onConfig ip settings changed - rebooting");
+					app.telemetryClient.log(F("onConfig ip settings changed - rebooting"));
 					String msg = F("new IP, ")+newIP;
 					app.wsBroadcast(F("notification"), msg);
+					app.telemetryClient.log(msg);
 					app.delayedCMD(F("restart"), 3000); // wait 3s to first send response
 				}
 			}
+			
+			/*
+			*
+			* pin config changes - those will require a reboot
+			*
+			*/
 			if(oldCurrentPinConfigName!=newCurrentPinConfigName){
 				String msg = F("Channel config has changed - rebooting ");
 				app.wsBroadcast(F("notification"), msg);
+				app.telemetryClient.log(msg);
 				app.delayedCMD(F("restart"),1000);
 			}
+
+			/*
+			*
+			* device name changes - change all necessary services on the fly and send notification 
+			* to frontend, no reboot required
+			*
+			*/
 			if(oldDeviceName!=newDeviceName){
-				String msg = F("new Device Name, ")+newDeviceName;
+				String msg = F("device name change, old Device Name: ")+oldDeviceName+F(", new Device Name: ")+newDeviceName;
 				AppConfig::Network::OuterUpdater network(*app.cfg);
 				network.mdns.setName(app.sanitizeName(newDeviceName));
 				app.wsBroadcast(F("notification"), msg);
-				app.delayedCMD(F("restart"),1000);
+				app.telemetryClient.log(msg);
+				app.mdnsService.setHostname(newDeviceName);
+				//app.delayedCMD(F("restart"),1000);
+			}
+
+			/*
+			*
+			* syslog changes - those will be handled on the fly 
+			*
+			*/
+			if(oldSyslogHost!=newSyslogHost || oldSyslogPort!=newSyslogPort){
+#ifndef SMING_RELEASE
+				app.udpSyslogStream.begin(newSyslogHost,newSyslogPort);
+#endif
+			}
+
+			/*
+			*
+			* syslog enable/disable changes - those will be handled on the fly 
+			*
+			*/
+			if(oldSyslogEnabled!=newSyslogEnabled){
+#ifndef SMING_RELEASE
+				app.udpSyslogStream.setStatus(newSyslogEnabled);
+#endif
 			}
 
 			debug_i("ApplicationWebserver::onConfig %i, %i",newColorMode,oldColorMode);
 			if (newColorMode!=oldColorMode){
 				// color Mode has been updated, requires reconfiguration, will restart for now
 				debug_i("ApplicationWebserver::onConfig color settings changed - restarting");
+				app.telemetryClient.log(F("onConfig color settings changed - restarting"));
 				String msg=F("Color Mode changed");
 				app.wsBroadcast(F("notification"), msg);
+				app.telemetryClient.log(msg);
 				app.delayedCMD(F("restart"), 1000); // wait 1s to first send response
 			}
 
@@ -519,7 +879,7 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
             */
 
 			setCorsHeaders(response);
-			sendApiCode(response, API_CODES::API_SUCCESS);
+			sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 		} else {
 			//CofigDB provide correct error message
 
@@ -535,91 +895,179 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
          * /config GET
          */
 		setCorsHeaders(response);
+		app.telemetryClient.log(F("onConfig GET"));
+
 		auto configStream = app.cfg->createExportStream(ConfigDB::Json::format);
 		response.sendDataStream(configStream.release(), MIME_JSON);
 	}
 }
 
-void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response)
-{
+void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response){
 	debug_i("onInfo");
-	if(!checkHeap(response))
-		return;
+	if(!preflightRequest(request, response, { HttpMethod::GET },app.ota.isProccessing() ? 4000 : 0)) return;
 
-	if(!authenticated(request, response)) {
-		return;
-	}
-
-#ifdef ARCH_ESP8266
-	if(app.ota.isProccessing()) {
-		sendApiCode(response, API_CODES::API_UPDATE_IN_PROGRESS);
-		return;
-	}
-#endif
-
-	if(request.method != HTTP_GET) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not GET");
-		return;
-	}
-
-	JsonObjectStream* stream = new JsonObjectStream();
+	auto stream = std::make_unique<JsonObjectStream>();
 	JsonObject data = stream->getRoot();
-	data[F("deviceid")] = String(system_get_chip_id());
-#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
-	data[F("current_rom")] = String(app.ota.getRomPartition().name());
+	debug_i("onInfo request v=%s", request.getQueryParameter(F("V")).c_str());
+	if(request.getQueryParameter(F("V")) == "2"||request.getQueryParameter(F("v")) == "2"  ){
+		debug_i("onInfo v2");
+		addInfoFields(data);
+		const auto tcpStats = getTcpPcbStats();
+
+#ifndef SMING_RELEASE
+		{
+			const char* preNetState = "unknown";
+			switch(app.syslogPreNetState()) {
+			case UdpSyslogStream::PreNetState::Buffering:
+				preNetState = "buffering";
+				break;
+			case UdpSyslogStream::PreNetState::Draining:
+				preNetState = "draining";
+				break;
+			case UdpSyslogStream::PreNetState::Done:
+				preNetState = "done";
+				break;
+			}
+			JsonObject debug = data.createNestedObject(F("debug"));
+			debug[F("syslog_pre_net_state")] = preNetState;
+			debug[F("http_active_connections")] = activeClients;
+			debug[F("websocket_connections")] = webSockets.size();
+			debug[F("eventserver_clients")] = app.eventserver.activeClients;
+			debug[F("syslog_pre_net_buffer_allocated")] = app.udpSyslogStream.preNetBufferAllocated();
+			debug[F("syslog_pre_net_encoder_allocated")] = app.udpSyslogStream.preNetEncoderAllocated();
+			debug[F("syslog_pre_net_buffer_capacity")] = app.udpSyslogStream.preNetBufferCapacity();
+			debug[F("syslog_pre_net_buffer_used")] = app.udpSyslogStream.preNetBufferUsed();
+			debug[F("syslog_pre_net_buffer_frames")] = app.udpSyslogStream.preNetBufferedFrames();
+			debug[F("syslog_pre_net_buffer_evicted")] = app.udpSyslogStream.preNetEvictedFrames();
+		#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
+			debug[F("tcp_pcb_size")] = sizeof(tcp_pcb);
+			debug[F("tcp_active_estimated_bytes")] = static_cast<uint32_t>(tcpStats.active_total) * sizeof(tcp_pcb);
+		#else
+			debug[F("tcp_pcb_size")] = 0;
+			debug[F("tcp_active_estimated_bytes")] = 0;
+		#endif
+		}
 #endif
-	data[F("git_version")] = fw_git_version;
-	data[F("build_type")] = BUILD_TYPE;
-	data[F("git_date")] = fw_git_date;
-	data[F("webapp_version")] = WEBAPP_VERSION;
-	data[F("sming")] = SMING_VERSION;
-	data[F("event_num_clients")] = app.eventserver.activeClients;
-	data[F("uptime")] = app.getUptime();
-	data[F("heap_free")] = system_get_free_heap_size();
-	data[F("soc")]=SOC;
-	
-	/*
-    FileSystem::Info fsInfo;
-    app.getinfo(fsInfo);
-    JsonObject FS=data.createNestedObject("fs");
-    FS[F("mounted")] = fsInfo.partition?"true":"false";
-    FS[F("size")] = fsInfo.total;
-    FS[F("used")] = fsInfo.used;
-    FS[F("available")] = fsInfo.freeSpace;
-*/
-	JsonObject rgbww = data.createNestedObject("rgbww");
-	rgbww[F("version")] = RGBWW_VERSION;
-	rgbww[F("queuesize")] = RGBWW_ANIMATIONQSIZE;
+		
+		JsonObject rgbww = data.createNestedObject(F("rgbww"));
+		rgbww[F("version")] = RGBWW_VERSION;
+		rgbww[F("queuesize")] = RGBWW_ANIMATIONQSIZE;
 
-	JsonObject con = data.createNestedObject("connection");
-	con[F("connected")] = WifiStation.isConnected();
-	con[F("ssid")] = WifiStation.getSSID();
-	con[F("dhcp")] = WifiStation.isEnabledDHCP();
-	con[F("ip")] = WifiStation.getIP().toString();
-	con[F("netmask")] = WifiStation.getNetworkMask().toString();
-	con[F("gateway")] = WifiStation.getNetworkGateway().toString();
-	con[F("mac")] = WifiStation.getMAC();
-	//con[F("mdnshostname")] = app.cfg.network.connection.mdnshostname.c_str();
 
-	sendApiResponse(response, stream);
+		JsonObject con = data.createNestedObject(F("connection"));
+		con[F("connected")] = WifiStation.isConnected();
+		if(WifiStation.isConnected()) {
+			con[F("ssid")] = WifiStation.getSSID();
+			con[F("dhcp")] = WifiStation.isEnabledDHCP();
+			con[F("ip")] = WifiStation.getIP().toString();
+			con[F("netmask")] = WifiStation.getNetworkMask().toString();
+			con[F("gateway")] = WifiStation.getNetworkGateway().toString();
+			con[F("mac")] = WifiStation.getMAC();
+			con[F("rssi")] = WifiStation.getRssi();
+
+			JsonObject net = data.createNestedObject(F("network"));
+			net[F("max http connections")] = HTTP_MAX_CONNECTIONS;
+			net[F("tcp_connections")] = getActiveTcpConnectionCount();
+			net[F("tcp_active")]= tcpStats.active_total;
+			net[F("tcp_established")] = tcpStats.established;
+			net[F("tcp_syn_sent")] = tcpStats.syn_sent;
+			net[F("tcp_syn_rcvd")] = tcpStats.syn_rcvd;
+			net[F("tcp_fin_wait_1")] = tcpStats.fin_wait_1;
+			net[F("tcp_fin_wait_2")] = tcpStats.fin_wait_2;
+			net[F("tcp_close_wait")] = tcpStats.close_wait;
+			net[F("tcp_closing")] = tcpStats.closing;
+			net[F("tcp_last_ack")] = tcpStats.last_ack;
+			net[F("tcp_time_wait")] = tcpStats.time_wait;
+			net[F("tcp_closed")] = tcpStats.closed;
+		}
+		// Skip ConfigDB reads during OTA — they consume heap and flash I/O we can't afford
+		if(!app.ota.isProccessing()) {
+			AppConfig::Network network(*app.cfg);
+			JsonObject mqtt=data.createNestedObject(F("mqtt"));
+			if(network.mqtt.getEnabled() && !app.mqttclient.isRunning()) {
+				mqtt[F("status")] = F("configured but not running");
+			} else if(network.mqtt.getEnabled() && app.mqttclient.isRunning()) {
+				mqtt[F("status")] = F("running");
+			} else {
+				mqtt[F("status")] = F("disabled");
+			}
+			mqtt[F("enabled")] = network.mqtt.getEnabled();
+			mqtt[F("broker")] = network.mqtt.getServer();
+			mqtt[F("topic")] = network.mqtt.getTopicBase();
+			if(network.mqtt.homeassistant.getEnable())
+			{
+				JsonObject ha = data.createNestedObject("homeassistant");
+				ha[F("enabled")] = network.mqtt.homeassistant.getEnable();
+				ha[F("discovery_prefix")] = network.mqtt.homeassistant.getDiscoveryPrefix();
+				ha[F("Node ID")]= network.mqtt.homeassistant.getNodeId();
+			}
+		}
+
+		if(app.ota.isProccessing()) {
+			JsonObject ota=data.createNestedObject(F("ota"));
+			ota[F("status")] = F("in progress");
+		}
+
+	}else{
+		debug_i("old style onInfo");	
+		#ifdef ARCH_ESP8266
+			if(app.ota.isProccessing()) {
+				sendApiCode(response, API_CODES::API_UPDATE_IN_PROGRESS);
+				return;
+			}
+		#endif
+
+			data[F("deviceid")] = system_get_chip_id();
+		#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
+			data[F("current_rom")] = String(app.ota.getRomPartition().name());
+		#endif
+			data[F("git_version")] = fw_git_version;
+			data[F("build_type")] = BUILD_TYPE;
+			data[F("git_date")] = fw_git_date;
+			data[F("webapp_version")] = WEBAPP_VERSION;
+			data[F("sming")] = SMING_VERSION;
+			data[F("event_num_clients")] = app.eventserver.activeClients;
+			data[F("uptime")] = app.getUptime();
+			data[F("heap_free")] = app.getFreeHeapSize();
+			data[F("soc")]=SOC;
+			
+			/*
+			FileSystem::Info fsInfo;
+			app.getinfo(fsInfo);
+			JsonObject FS=data.createNestedObject("fs");
+			FS[F("mounted")] = fsInfo.partition?"true":"false";
+			FS[F("size")] = fsInfo.total;
+			FS[F("used")] = fsInfo.used;
+			FS[F("available")] = fsInfo.freeSpace;
+		*/
+			JsonObject rgbww = data.createNestedObject("rgbww");
+			rgbww[F("version")] = RGBWW_VERSION;
+			rgbww[F("queuesize")] = RGBWW_ANIMATIONQSIZE;
+
+			JsonObject con = data.createNestedObject("connection");
+			con[F("connected")] = WifiStation.isConnected();
+			con[F("ssid")] = WifiStation.getSSID();
+			con[F("dhcp")] = WifiStation.isEnabledDHCP();
+			con[F("ip")] = WifiStation.getIP().toString();
+			con[F("netmask")] = WifiStation.getNetworkMask().toString();
+			con[F("gateway")] = WifiStation.getNetworkGateway().toString();
+			con[F("mac")] = WifiStation.getMAC();
+			//con[F("mdnshostname")] = app.cfg.network.connection.mdnshostname.c_str();
+
+		}
+		sendApiResponse(response, stream.release());
+
 }
 
-/**
- * @brief Handles the HTTP GET request for retrieving the current color information.
- *
- * This function is responsible for handling the HTTP GET request and returning the current color information
- * in JSON format. The color information includes the raw RGBWW values and the corresponding HSV values.
- *
- * @param request The HTTP request object.
- * @param response The HTTP response object.
- */
 void ApplicationWebserver::onColorGet(HttpRequest& request, HttpResponse& response)
 {
 	debug_i("onColorGet");
-	if(!checkHeap(response))
+    /*
+	if(!checkHeap(response,2000))
 		return;
+    */
 
-	JsonObjectStream* stream = new JsonObjectStream();
+	auto stream = std::make_unique<JsonObjectStream>();
 	JsonObject json = stream->getRoot();
 
 	JsonObject raw = json.createNestedObject("raw");
@@ -642,7 +1090,8 @@ void ApplicationWebserver::onColorGet(HttpRequest& request, HttpResponse& respon
 
 	setCorsHeaders(response);
 
-	sendApiResponse(response, stream);
+	sendApiResponse(response, stream.release());
+
 }
 
 /**
@@ -660,12 +1109,8 @@ void ApplicationWebserver::onColorPost(HttpRequest& request, HttpResponse& respo
 {
 	String body = request.getBody();
 
-	setCorsHeaders(response);
-	response.setHeader(F("Access-Control-Allow-Methods"), F("GET, PUT, POST, OPTIONS"));
-	response.setHeader(F("Access-Control-Allow-Credentials"), F("true"));
-
 	if(body == NULL) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, "no body");
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("no body"));
 		return;
 	}
 
@@ -677,7 +1122,7 @@ void ApplicationWebserver::onColorPost(HttpRequest& request, HttpResponse& respo
 		sendApiCode(response, API_CODES::API_BAD_REQUEST, msg);
 	} else {
 		debug_i("received color update with message %s", msg.c_str());
-		sendApiCode(response, API_CODES::API_SUCCESS);
+		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 	}
 }
 
@@ -692,10 +1137,7 @@ void ApplicationWebserver::onColorPost(HttpRequest& request, HttpResponse& respo
  * @param response The HTTP response object.
  */
 void ApplicationWebserver::onColor(HttpRequest& request, HttpResponse& response){
-	if(!authenticated(request, response)) {
-		return;
-	}
-
+	if(!preflightRequest(request, response, {HttpMethod::POST, HttpMethod::GET})) return;
 #ifdef ARCH_ESP8266
 	if(app.ota.isProccessing()) {
 		sendApiCode(response, API_CODES::API_UPDATE_IN_PROGRESS);
@@ -703,28 +1145,12 @@ void ApplicationWebserver::onColor(HttpRequest& request, HttpResponse& response)
 	}
 #endif
 	debug_i("received /color request");
-	setCorsHeaders(response);
-	response.setHeader(F("Access-Control-Allow-Origin"), F("*"));
-
-	if(request.method != HTTP_POST && request.method != HTTP_GET && request.method != HTTP_OPTIONS) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not POST, GET or OPTIONS"));
-		debug_i("not POST, GET or OPTIONS");
-		return;
-	}
-
-	if(request.method == HTTP_OPTIONS) {
-		response.setHeader(F("Access-Control-Allow-Methods"), F("GET, PUT, POST, OPTIONS"));
-
-		debug_i("OPTIONS");
-		sendApiCode(response, API_CODES::API_SUCCESS);
-		return;
-	}
 
 	bool error = false;
-	if(request.method == HTTP_POST) {
+	if(request.method == HttpMethod::POST) {
 		debug_i("POST");
 		ApplicationWebserver::onColorPost(request, response);
-	} else if(request.method == HTTP_GET) {
+	} else if(request.method == HttpMethod::GET) {
 		debug_i("GET");
 		ApplicationWebserver::onColorGet(request, response);
 	} else {
@@ -741,7 +1167,7 @@ void ApplicationWebserver::onColor(HttpRequest& request, HttpResponse& response)
  * @param str The string to be checked.
  * @return True if the string is printable, false otherwise.
  */
-bool ApplicationWebserver::isPrintable(String& str)
+bool ApplicationWebserver::isPrintable(const String& str)
 {
 	for(unsigned int i = 0; i < str.length(); ++i) {
 		char c = str[i];
@@ -764,28 +1190,15 @@ bool ApplicationWebserver::isPrintable(String& str)
 void ApplicationWebserver::onNetworks(HttpRequest& request, HttpResponse& response)
 {
 	debug_i("onNetworks");
-	if(!authenticated(request, response)) {
-		return;
-	}
-
+	if(!preflightRequest(request, response, {HttpMethod::GET})) return;
 #ifdef ARCH_ESP8266
 	if(app.ota.isProccessing()) {
 		sendApiCode(response, API_CODES::API_UPDATE_IN_PROGRESS);
 		return;
 	}
 #endif
-	if(request.method == HTTP_OPTIONS) {
-		setCorsHeaders(response);
 
-		sendApiCode(response, API_CODES::API_SUCCESS);
-		return;
-	}
-	if(request.method != HTTP_GET) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not HTTP GET");
-		return;
-	}
-
-	JsonObjectStream* stream = new JsonObjectStream();
+	auto stream = std::make_unique<JsonObjectStream>();
 	JsonObject json = stream->getRoot();
 
 	bool error = false;
@@ -794,7 +1207,7 @@ void ApplicationWebserver::onNetworks(HttpRequest& request, HttpResponse& respon
 		json[F("scanning")] = true;
 	} else {
 		json[F("scanning")] = false;
-		JsonArray netlist = json.createNestedArray("available");
+		JsonArray netlist = json.createNestedArray(F("available"));
 		BssList networks = app.network.getAvailableNetworks();
 		for(unsigned int i = 0; i < networks.count(); i++) {
 			if(networks[i].hidden)
@@ -818,7 +1231,8 @@ void ApplicationWebserver::onNetworks(HttpRequest& request, HttpResponse& respon
 		}
 	}
 	setCorsHeaders(response);
-	sendApiResponse(response, stream);
+	sendApiResponse(response, stream.release());
+
 }
 
 /**
@@ -833,9 +1247,16 @@ void ApplicationWebserver::onNetworks(HttpRequest& request, HttpResponse& respon
  */
 void ApplicationWebserver::onScanNetworks(HttpRequest& request, HttpResponse& response)
 {
+    if(!preflightRequest(request, response, {HttpMethod::POST})) return;
+
+    /*
+	if(!checkHeap(response)) {
+		return;
+	}
 	if(!authenticated(request, response)) {
 		return;
 	}
+    */
 
 #ifdef ARCH_ESP8266
 	if(app.ota.isProccessing()) {
@@ -844,15 +1265,17 @@ void ApplicationWebserver::onScanNetworks(HttpRequest& request, HttpResponse& re
 	}
 #endif
 
-	if(request.method != HTTP_POST) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not HTTP POST");
+    /*
+	if(request.method != HttpMethod::POST) {
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not HTTP POST"));
 		return;
 	}
+    */
 	if(!app.network.isScanning()) {
 		app.network.scan(false);
 	}
 
-	sendApiCode(response, API_CODES::API_SUCCESS);
+	sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 }
 
 /**
@@ -866,10 +1289,26 @@ void ApplicationWebserver::onScanNetworks(HttpRequest& request, HttpResponse& re
  */
 void ApplicationWebserver::onConnect(HttpRequest& request, HttpResponse& response)
 {
+	debug_i("onConnect");
+    if(!preflightRequest(request, response, {HttpMethod::POST, HttpMethod::GET})) return;
+
+    /*
+	if(!checkHeap(response)) {
+		return;
+	}
+	debug_i("onConnect request.method: %i", request.method);
+	if(request.method == HttpMethod::OPTIONS) {
+		setCorsHeaders(response);
+		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
+		return;
+	}
+	
 	if(!authenticated(request, response)) {
 		return;
 	}
+    */
 
+	debug_i("passed checks");
 #ifdef ARCH_ESP8266
 	if(app.ota.isProccessing()) {
 		sendApiCode(response, API_CODES::API_UPDATE_IN_PROGRESS);
@@ -877,15 +1316,19 @@ void ApplicationWebserver::onConnect(HttpRequest& request, HttpResponse& respons
 	}
 #endif
 
-	if(request.method != HTTP_POST && request.method != HTTP_GET) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not HTTP POST or GET");
+    /*
+	if(request.method != HttpMethod::POST && request.method != HttpMethod::GET) {
+		debug_i("not HTTP POST or GET");
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not HTTP POST or GET"));
 		return;
 	}
+    */
 
-	if(request.method == HTTP_POST) {
+	if(request.method == HttpMethod::POST) {
 		String body = request.getBody();
+		debug_i("is POST");
 		if(body == NULL) {
-			sendApiCode(response, API_CODES::API_BAD_REQUEST, "could not get HTTP body");
+			sendApiCode(response, API_CODES::API_BAD_REQUEST, F("could not get HTTP body"));
 			return;
 		}
 		// ConfigDB - CONFIG_MAX_LENGTH was no longer defined, what's the right size here?
@@ -897,7 +1340,7 @@ void ApplicationWebserver::onConnect(HttpRequest& request, HttpResponse& respons
 			password = doc[F("password")].as<const char*>();
 			debug_d("ssid %s - pass %s", ssid.c_str(), password.c_str());
 			app.network.connect(ssid, password, true);
-			sendApiCode(response, API_CODES::API_SUCCESS);
+			sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 			return;
 
 		} else {
@@ -905,7 +1348,7 @@ void ApplicationWebserver::onConnect(HttpRequest& request, HttpResponse& respons
 			return;
 		}
 	} else {
-		JsonObjectStream* stream = new JsonObjectStream();
+		auto stream = std::make_unique<JsonObjectStream>();
 		JsonObject json = stream->getRoot();
 
 		CONNECTION_STATUS status = app.network.get_con_status();
@@ -926,7 +1369,7 @@ void ApplicationWebserver::onConnect(HttpRequest& request, HttpResponse& respons
 			json[F("dhcp")] = network.connection.getDhcp() ? F("True") : F("False");
 			json[F("ssid")] = WifiStation.getSSID();
 		}
-		sendApiResponse(response, stream);
+		sendApiResponse(response, stream.release());
 	}
 }
 
@@ -945,32 +1388,20 @@ void ApplicationWebserver::onConnect(HttpRequest& request, HttpResponse& respons
  */
 void ApplicationWebserver::onSystemReq(HttpRequest& request, HttpResponse& response)
 {
-	if(!authenticated(request, response)) {
-		return;
-	}
-
+    if(!preflightRequest(request, response, {HttpMethod::POST})) return;
+    
+/*
 #ifdef ARCH_ESP8266
 	if(app.ota.isProccessing()) {
 		sendApiCode(response, API_CODES::API_UPDATE_IN_PROGRESS);
 		return;
 	}
 #endif
-
-	if(request.method == HTTP_OPTIONS) {
-		setCorsHeaders(response);
-
-		sendApiCode(response, API_CODES::API_SUCCESS);
-		return;
-	}
-	if(request.method != HTTP_POST) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not HTTP POST");
-		return;
-	}
-
+*/
 	bool error = false;
 	String body = request.getBody();
 	if(body == NULL) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, "could not get HTTP body");
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("could not get HTTP body"));
 		return;
 	} else {
 		debug_i("ApplicationWebserver::onSystemReq: %s", body.c_str());
@@ -980,11 +1411,19 @@ void ApplicationWebserver::onSystemReq(HttpRequest& request, HttpResponse& respo
 
 		String cmd = doc[F("cmd")].as<const char*>();
 		if(cmd) {
-			if(cmd.equals("debug")) {
+			if(cmd.equals(F("debug"))) {
 				bool enable;
 				if(Json::getValue(doc[F("enable")], enable)) {
 					Serial.systemDebugOutput(enable);
 				} else {
+					error = true;
+				}
+
+			} else if(cmd.equals(F("restart"))) {
+				bool clearOta = false;
+				Json::getValue(doc[F("clearOTA")], clearOta);
+				String restartCmd = clearOta ? F("clear_ota_restart") : F("restart");
+				if(!app.delayedCMD(restartCmd, 1500)) {
 					error = true;
 				}
 
@@ -999,7 +1438,7 @@ void ApplicationWebserver::onSystemReq(HttpRequest& request, HttpResponse& respo
 	setCorsHeaders(response);
 
 	if(!error) {
-		sendApiCode(response, API_CODES::API_SUCCESS);
+		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 	} else {
 		sendApiCode(response, API_CODES::API_MISSING_PARAM);
 	}
@@ -1016,27 +1455,30 @@ void ApplicationWebserver::onSystemReq(HttpRequest& request, HttpResponse& respo
  */
 void ApplicationWebserver::onUpdate(HttpRequest& request, HttpResponse& response)
 {
+	if(!checkHeap(response)) {
+		return;
+	}
 	if(!authenticated(request, response)) {
 		return;
 	}
 
 #ifdef ARCH_HOST
-	sendApiCode(response, API_CODES::API_BAD_REQUEST, "not supported on Host");
+	sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not supported on Host"));
 	return;
 #else
-	if(request.method == HTTP_OPTIONS) {
+	if(request.method == HttpMethod::OPTIONS) {
 		// probably a CORS request
 		setCorsHeaders(response);
-		sendApiCode(response, API_CODES::API_SUCCESS, "");
-		debug_i("/update HTTP_OPTIONS Request, sent API_SUCCSSS");
+		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
+		debug_i("/update HttpMethod::OPTIONS Request, sent API_SUCCSSS");
 		return;
 	}
-	if(request.method != HTTP_POST && request.method != HTTP_GET) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not HTTP POST or GET");
+	if(request.method != HttpMethod::POST && request.method != HttpMethod::GET) {
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not HTTP POST or GET"));
 		return;
 	}
 
-	if(request.method == HTTP_POST) {
+	if(request.method == HttpMethod::POST) {
 		if(app.ota.isProccessing()) {
 			sendApiCode(response, API_CODES::API_UPDATE_IN_PROGRESS);
 			return;
@@ -1044,7 +1486,7 @@ void ApplicationWebserver::onUpdate(HttpRequest& request, HttpResponse& response
 
 		String body = request.getBody();
 		if(body == NULL) {
-			sendApiCode(response, API_CODES::API_BAD_REQUEST, "could not parse HTTP body");
+			sendApiCode(response, API_CODES::API_BAD_REQUEST, F("could not parse HTTP body"));
 			return;
 		}
 
@@ -1065,14 +1507,15 @@ void ApplicationWebserver::onUpdate(HttpRequest& request, HttpResponse& response
 		} else {
 			app.ota.start(romurl);
 			setCorsHeaders(response);
-			sendApiCode(response, API_CODES::API_SUCCESS);
+			sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 		}
 		return;
 	}
-	JsonObjectStream* stream = new JsonObjectStream();
+	auto stream = std::make_unique<JsonObjectStream>();
 	JsonObject json = stream->getRoot();
 	json[F("status")] = int(app.ota.getStatus());
-	sendApiResponse(response, stream);
+	sendApiResponse(response, stream.release());
+
 #endif
 }
 
@@ -1091,26 +1534,40 @@ void ApplicationWebserver::onUpdate(HttpRequest& request, HttpResponse& response
  */
 void ApplicationWebserver::onPing(HttpRequest& request, HttpResponse& response)
 {
-	if(request.method != HTTP_GET) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not HTTP GET");
+    if(!preflightRequest(request, response, {HttpMethod::GET})) return;
+
+    /*
+	if(!checkHeap(response)) {
 		return;
 	}
-	JsonObjectStream* stream = new JsonObjectStream();
+	if(request.method != HttpMethod::GET) {
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not HTTP GET"));
+		return;
+	}
+    */
+	auto stream = std::make_unique<JsonObjectStream>();
 	JsonObject json = stream->getRoot();
 	json[F("ping")] = "pong";
-	sendApiResponse(response, stream);
+	sendApiResponse(response, stream.release());
 }
 
 void ApplicationWebserver::onStop(HttpRequest& request, HttpResponse& response)
 {
-	if(request.method != HTTP_POST) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not HTTP POST");
+    if(!preflightRequest(request, response, {HttpMethod::POST})) return;
+    
+    /*
+	if(!checkHeap(response)) {
 		return;
 	}
+	if(request.method != HttpMethod::POST) {
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("not HTTP POST"));
+		return;
+	}
+    */
 
 	String msg;
 	if(app.jsonproc.onStop(request.getBody(), msg, true)) {
-		sendApiCode(response, API_CODES::API_SUCCESS);
+		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 	} else {
 		sendApiCode(response, API_CODES::API_BAD_REQUEST);
 	}
@@ -1118,14 +1575,12 @@ void ApplicationWebserver::onStop(HttpRequest& request, HttpResponse& response)
 
 void ApplicationWebserver::onSkip(HttpRequest& request, HttpResponse& response)
 {
-	if(request.method != HTTP_POST) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not HTTP POST");
-		return;
-	}
+    if(!preflightRequest(request, response, {HttpMethod::POST})) return;
+    
 
 	String msg;
 	if(app.jsonproc.onSkip(request.getBody(), msg)) {
-		sendApiCode(response, API_CODES::API_SUCCESS);
+		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 	} else {
 		sendApiCode(response, API_CODES::API_BAD_REQUEST);
 	}
@@ -1133,14 +1588,11 @@ void ApplicationWebserver::onSkip(HttpRequest& request, HttpResponse& response)
 
 void ApplicationWebserver::onPause(HttpRequest& request, HttpResponse& response)
 {
-	if(request.method != HTTP_POST) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not HTTP POST");
-		return;
-	}
-
+    if(!preflightRequest(request, response, {HttpMethod::POST})) return;
+    
 	String msg;
 	if(app.jsonproc.onPause(request.getBody(), msg, true)) {
-		sendApiCode(response, API_CODES::API_SUCCESS);
+		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 	} else {
 		sendApiCode(response, API_CODES::API_BAD_REQUEST);
 	}
@@ -1148,14 +1600,11 @@ void ApplicationWebserver::onPause(HttpRequest& request, HttpResponse& response)
 
 void ApplicationWebserver::onContinue(HttpRequest& request, HttpResponse& response)
 {
-	if(request.method != HTTP_POST) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not HTTP POST");
-		return;
-	}
-
+    if(!preflightRequest(request, response, {HttpMethod::POST})) return;
+    
 	String msg;
 	if(app.jsonproc.onContinue(request.getBody(), msg)) {
-		sendApiCode(response, API_CODES::API_SUCCESS);
+		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 	} else {
 		sendApiCode(response, API_CODES::API_BAD_REQUEST);
 	}
@@ -1163,14 +1612,11 @@ void ApplicationWebserver::onContinue(HttpRequest& request, HttpResponse& respon
 
 void ApplicationWebserver::onBlink(HttpRequest& request, HttpResponse& response)
 {
-	if(request.method != HTTP_POST) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not HTTP POST");
-		return;
-	}
+    if(!preflightRequest(request, response, {HttpMethod::POST})) return;
 
 	String msg;
 	if(app.jsonproc.onBlink(request.getBody(), msg)) {
-		sendApiCode(response, API_CODES::API_SUCCESS);
+		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 	} else {
 		sendApiCode(response, API_CODES::API_BAD_REQUEST);
 	}
@@ -1178,116 +1624,52 @@ void ApplicationWebserver::onBlink(HttpRequest& request, HttpResponse& response)
 
 void ApplicationWebserver::onToggle(HttpRequest& request, HttpResponse& response)
 {
-	if(request.method != HTTP_POST) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not HTTP POST");
-		return;
-	}
-
+    if(!preflightRequest(request, response, {HttpMethod::POST})) return;
+    
 	String msg;
 	if(app.jsonproc.onToggle(request.getBody(), msg)) {
-		sendApiCode(response, API_CODES::API_SUCCESS);
+		sendApiCode(response, API_CODES::API_SUCCESS, (const char*)nullptr);
 	} else {
 		sendApiCode(response, API_CODES::API_BAD_REQUEST);
 	}
 }
 
-void ApplicationWebserver::onStorage(HttpRequest& request, HttpResponse& response)
-{
-	if(request.method != HTTP_POST && request.method != HTTP_GET && request.method != HTTP_OPTIONS) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not POST, GET or OPTIONS request");
-		return;
-	}
-
-	/*
-    / axios sends a HTTP_OPTIONS request to check if server is CORS permissive (which this firmware 
-    / has been for years) this is just to reply to that request in order to pass the CORS test
-    */
-	if(request.method == HTTP_OPTIONS) {
-		// probably a CORS request
-		sendApiCode(response, API_CODES::API_SUCCESS, "");
-		debug_i("HTTP_OPTIONS Request, sent API_SUCCSSS");
-		return;
-	}
-
-	if(request.method == HTTP_POST) {
-		debug_i("======================\nHTTP POST request received, ");
-		String header = request.getHeader("Content-type");
-		if(header != "application/json") {
-			sendApiCode(response, API_BAD_REQUEST, "only json content allowed");
-		}
-		debug_i("got post with content type %s", header.c_str());
-		String body = request.getBody();
-		if(body == NULL || body.length() > FILE_MAX_SIZE) {
-			sendApiCode(response, API_CODES::API_BAD_REQUEST, "could not parse HTTP body");
-			return;
-		}
-
-		bool error = false;
-
-		debug_i("body length: %i", body.length());
-		// ConfigDB - CONFIG_MAX_LENGTH was no longer defined, what's the right size here?
-		StaticJsonDocument<512> doc;
-		Json::deserialize(doc, body);
-		String fileName = doc[F("filename")];
-
-		//DynamicJsonDocument data(body.length()+32);
-		//Json::deserialize(data, Json::serialize(doc[F("data")]));
-		//doc.clear(); //clearing the original document to save RAM
-		debug_i("will save to file %s", fileName.c_str());
-		debug_i("original document uses %i bytes", doc.memoryUsage());
-		String data = doc[F("data")];
-		debug_i("data: %s", data.c_str());
-
-		FileHandle file =
-			fileOpen(fileName.c_str(), IFS::OpenFlag::Write | IFS::OpenFlag::Create | IFS::OpenFlag::Truncate);
-		if(!fileWrite(file, data.c_str(), data.length())) {
-			debug_e("Saving config to file %s failed!", fileName.c_str());
-		}
-		fileClose(file);
-		setCorsHeaders(response);
-		sendApiCode(response, API_CODES::API_SUCCESS);
-		return;
-	}
-}
 
 void ApplicationWebserver::onHosts(HttpRequest& request, HttpResponse& response)
 {
-	if(request.method != HTTP_GET && request.method != HTTP_OPTIONS) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not GET or OPTIONS request");
-		return;
-	}
+    if(!preflightRequest(request, response, {HttpMethod::GET})) return;
 
-	if(request.method == HTTP_OPTIONS) {
-		// probably a CORS request
-		sendApiCode(response, API_CODES::API_SUCCESS, "");
-		debug_i("HTTP_OPTIONS Request, sent API_SUCCSSS");
-		return;
-	}
+    if(!app.controllers) {
+        setCorsHeaders(response);
+		debug_i("Controllers not initialized");
+        sendApiCode(response, API_CODES::API_BAD_REQUEST, F("Controllers not initialized"));
+        return;
+    }
 
-	String myHosts;
-	// Set the response body with the JSON
-	setCorsHeaders(response);
-	response.setContentType(F("application/json"));
-	response.sendString(app.network.getMdnsHosts());
+    bool showAll = request.getQueryParameter(F("all")) == "1" || request.getQueryParameter(F("all")) == "true";
+	bool showDebug= request.getQueryParameter(F("debug"))== "1" || request.getQueryParameter(F("debug")) == "true";
 
-	return;
+    Controllers::JsonFilter filter;
+    if (showAll || showDebug) {
+        filter = Controllers::ALL_ENTRIES;  // Show all controllers including incomplete ones
+    } else {
+        filter = Controllers::VISIBLE_ONLY; // Show only visible/online controllers
+    }
+
+    setCorsHeaders(response);
+    response.setContentType(MIME_JSON);
+
+    // Use the JsonStream for automatic streaming
+    auto stream = app.controllers->createJsonStream(filter, false); // Compact format for HTTP
+    response.sendDataStream(stream.release(), MIME_JSON);
+
+//todo 
 }
 
 void ApplicationWebserver::onData(HttpRequest& request, HttpResponse& response){
-	if(request.method != HTTP_POST && request.method != HTTP_GET && request.method != HTTP_OPTIONS) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, "not GET or OPTIONS request");
-		return;
-	}
-
-	if(request.method == HTTP_OPTIONS) {
-		// probably a CORS request
-		sendApiCode(response, API_CODES::API_SUCCESS, "");
-		debug_i("HTTP_OPTIONS Request, sent API_SUCCSSS");
-		return;
-	}
-
-	if(request.method==HTTP_GET){
-
+    if(!preflightRequest(request, response, {HttpMethod::POST, HttpMethod::GET}, 12000)) return;
+    
+	if(request.method==HttpMethod::GET){	
 		setCorsHeaders(response);
 
 		response.setContentType(F("application/json"));
@@ -1295,30 +1677,72 @@ void ApplicationWebserver::onData(HttpRequest& request, HttpResponse& response){
 		auto dataStream = app.data->createExportStream(ConfigDB::Json::format);
 		response.sendDataStream(dataStream.release(), MIME_JSON);
 
-	} else if (request.method==HTTP_POST){
+	} else if (request.method==HttpMethod::POST){
 
 		auto bodyStream = request.getBodyStream();
 		if(bodyStream) {
 			debug_i("received Data bodyStream");
 			ConfigDB::Status status = app.data->importFromStream(ConfigDB::Json::format, *bodyStream);
+			String statusMsg = status.toString();
 			if(status){
 				debug_i("successfully updated app-data");
-				sendApiCode(response, API_CODES::API_SUCCESS, status.toString());
+				sendApiCode(response, API_CODES::API_SUCCESS, statusMsg);
 			}else{
 				debug_i("could not update app-data");
-				sendApiCode(response, API_CODES::API_BAD_REQUEST, status.toString());
+				sendApiCode(response, API_CODES::API_BAD_REQUEST, statusMsg);
 			}
 		}else{
 			debug_i("could not get bodyStream");
-			sendApiCode(response, API_CODES::API_BAD_REQUEST, "could not get bodyStream");
+			sendApiCode(response, API_CODES::API_BAD_REQUEST, F("could not get bodyStream"));
 		}
 	}
 
 	return;
 }
 
+void ApplicationWebserver::onSetOn(HttpRequest &request, HttpResponse &response) {
+    if(!preflightRequest(request, response, {HttpMethod::POST}, 4000)) return;
+    
+
+	debug_i("onSetOn");
+		
+	String body = request.getBody();
+	StaticJsonDocument<512> doc;
+	DeserializationError err = deserializeJson(doc, body);
+	if (err) {
+		sendApiCode(response, API_BAD_REQUEST, F("Invalid JSON"));
+		return;
+	}
+	String msg;
+		if (app.jsonproc.onSetOn(doc.as<JsonObject>(), msg, true)) {
+		sendApiCode(response, API_SUCCESS, F("SetOn OK"));
+	} else {
+		sendApiCode(response, API_BAD_REQUEST, msg);
+	}
+}
+
+void ApplicationWebserver::onSetOff(HttpRequest &request, HttpResponse &response) {
+    if(!preflightRequest(request, response, {HttpMethod::POST}, 4000)) return;
+    
+	debug_i("onSetOff");
+
+	String body = request.getBody();
+	StaticJsonDocument<512> doc;
+	DeserializationError err = deserializeJson(doc, body);
+	if (err) {
+		sendApiCode(response, API_BAD_REQUEST, F("Invalid JSON"));
+		return;
+	}
+	String msg;
+		if (app.jsonproc.onSetOff(doc.as<JsonObject>(), msg, true)) {
+		sendApiCode(response, API_SUCCESS, F("SetOff OK"));
+	} else {
+		sendApiCode(response, API_BAD_REQUEST, msg);
+	}
+}
+
 void ApplicationWebserver::setCorsHeaders(HttpResponse& response)
 {
 	response.setAllowCrossDomainOrigin("*");
-	response.setHeader(F("Access-Control-Allow-Headers"), F("Content-Type"));
+	response.setHeader(F("Access-Control-Allow-Headers"), F("Content-Type, Cache-Control"));
 }

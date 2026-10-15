@@ -30,8 +30,8 @@ RUN apt-get -y update \
 
 RUN git clone $SMING_REPO -b $SMING_BRANCH /opt/Sming 
 
-WORKDIR "/opt/Sming/Sming/Libraries/ConfigDB"
-RUN git rev-parse --abbrev-ref HEAD
+WORKDIR "/opt/Sming"
+RUN git submodule update --init Sming/Libraries/ConfigDB
 
 SHELL ["/bin/bash", "-c"]
 WORKDIR "/opt/Sming"

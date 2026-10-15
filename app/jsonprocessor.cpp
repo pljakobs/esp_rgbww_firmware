@@ -1,3 +1,28 @@
+/**
+ * @file
+ * @author  Patrick Jahns http://github.com/patrickjahns
+ *          Peter Jakobs http://github.com/pljakobs
+ * 
+ *
+ * @section LICENSE
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License as
+ * published by the Free Software Foundation; either version 3 of
+ * the License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+ * General Public License for more details at
+ * https://www.gnu.org/copyleft/gpl.html
+ *
+ * @section DESCRIPTION
+ *
+ *
+ */
+
+
 #include <RGBWWCtrl.h>
 
 #define MIN_HEAP_FREE 8192
@@ -16,7 +41,11 @@ bool JsonProcessor::onColor(const String& json, String& msg, bool relay)
 {
 	debug_e("JsonProcessor::onColor: %s", json.c_str());
 	StaticJsonDocument<400> doc;
-	Json::deserialize(doc, json);
+	DeserializationError err = deserializeJson(doc, json);
+	if(err) {
+		msg = F("Invalid JSON");
+		return false;
+	}
 	return onColor(doc.as<JsonObject>(), msg, relay);
 }
 
@@ -34,9 +63,9 @@ bool JsonProcessor::onColor(const String& json, String& msg, bool relay)
 bool JsonProcessor::onColor(JsonObject root, String& msg, bool relay)
 {
 	bool result = false;
-	if(system_get_free_heap_size()<MIN_HEAP_FREE) {
+	if(!app.checkHeap(MIN_HEAP_FREE)) {
 		debug_i("out of memory in processing onColor");
-		msg = "out of memory in processing onColor";
+		msg = F("out of memory in processing onColor");
 		return false;
 	}
 	auto cmds = root[F("cmds")].as<JsonArray>();
@@ -363,7 +392,7 @@ bool JsonProcessor::onSingleColorCommand(JsonObject root, String& errorMsg)
 	bool queueOk = false;
 	if(params.mode == RequestParameters::Mode::Hsv) {
 		if(!params.hasHsvFrom) {
-			if(params.cmd == "fade") {
+			if(params.cmd == F("fade")) {
 				queueOk = app.rgbwwctrl.fadeHSV(params.hsv, params.ramp, params.direction, params.queue, params.requeue,
 												params.name);
 			} else {
@@ -375,7 +404,7 @@ bool JsonProcessor::onSingleColorCommand(JsonObject root, String& errorMsg)
 		}
 	} else if(params.mode == RequestParameters::Mode::Raw) {
 		if(!params.hasRawFrom) {
-			if(params.cmd == "fade") {
+			if(params.cmd == F("fade")) {
 				queueOk = app.rgbwwctrl.fadeRAW(params.raw, params.ramp, params.queue);
 			} else {
 				queueOk = app.rgbwwctrl.setRAW(params.raw, params.ramp.value, params.queue);
@@ -384,14 +413,14 @@ bool JsonProcessor::onSingleColorCommand(JsonObject root, String& errorMsg)
 			app.rgbwwctrl.fadeRAW(params.rawFrom, params.raw, params.ramp, params.queue);
 		}
 	} else {
-		errorMsg = "No color object!";
+		errorMsg = F("No color object!");
 		debug_i("no color object");
 		return false;
 	}
 
 	if(!queueOk) {
 		debug_i("queue full");
-		errorMsg = "Queue full";
+		errorMsg = F("Queue full");
 	}
 	return queueOk;
 }
@@ -436,7 +465,7 @@ bool JsonProcessor::onDirect(JsonObject root, String& msg, bool relay)
 	} else if(params.mode == RequestParameters::Mode::Raw) {
 		app.rgbwwctrl.colorDirectRAW(params.raw);
 	} else {
-		msg = "No color object!";
+		msg = F("No color object!");
 	}
 
 	if(relay)
@@ -532,13 +561,13 @@ void JsonProcessor::parseRequestParams(JsonObject root, RequestParameters& param
 
 	if(!root[F("q")].isNull()) {
 		String q = root[F("q")];
-		if(q == "back")
+		if(q == F("back"))
 			params.queue = QueuePolicy::Back;
-		else if(q == "front")
+		else if(q == F("front"))
 			params.queue = QueuePolicy::Front;
-		else if(q == "front_reset")
+		else if(q == F("front_reset"))
 			params.queue = QueuePolicy::FrontReset;
-		else if(q == "single")
+		else if(q == F("single"))
 			params.queue = QueuePolicy::Single;
 		else {
 			params.queue = QueuePolicy::Invalid;
@@ -549,23 +578,23 @@ void JsonProcessor::parseRequestParams(JsonObject root, RequestParameters& param
 	if(Json::getValue(root[F("channels")], arr)) {
 		for(size_t i = 0; i < arr.size(); ++i) {
 			String str = arr[i];
-			if(str == "h") {
+			if(str == F("h")) {
 				params.channels.add(CtrlChannel::Hue);
-			} else if(str == "s") {
+			} else if(str == F("s")) {
 				params.channels.add(CtrlChannel::Sat);
-			} else if(str == "v") {
+			} else if(str == F("v")) {
 				params.channels.add(CtrlChannel::Val);
-			} else if(str == "ct") {
+			} else if(str == F("ct")) {
 				params.channels.add(CtrlChannel::ColorTemp);
-			} else if(str == "r") {
+			} else if(str == F("r")) {
 				params.channels.add(CtrlChannel::Red);
-			} else if(str == "g") {
+			} else if(str == F("g")) {
 				params.channels.add(CtrlChannel::Green);
-			} else if(str == "b") {
+			} else if(str == F("b")) {
 				params.channels.add(CtrlChannel::Blue);
-			} else if(str == "ww") {
+			} else if(str == F("ww")) {
 				params.channels.add(CtrlChannel::WarmWhite);
-			} else if(str == "cw") {
+			} else if(str == F("cw")) {
 				params.channels.add(CtrlChannel::ColdWhite);
 			}
 		}
@@ -585,39 +614,39 @@ int JsonProcessor::RequestParameters::checkParams(String& errorMsg) const
 	if(mode == Mode::Hsv) {
 		if(hsv.ct.hasValue()) {
 			if(hsv.ct != 0 && (hsv.ct < 100 || hsv.ct > 10000 || (hsv.ct > 500 && hsv.ct < 2000))) {
-				errorMsg = "bad param for ct";
+				errorMsg = F("bad param for ct");
 				return 1;
 			}
 		}
 
 		if(!hsv.h.hasValue() && !hsv.s.hasValue() && !hsv.v.hasValue() && !hsv.ct.hasValue()) {
-			errorMsg = "Need at least one HSVCT component!";
+			errorMsg = F("Need at least one HSVCT component!");
 			return 1;
 		}
 	} else if(mode == Mode::Raw) {
 		if(!raw.r.hasValue() && !raw.g.hasValue() && !raw.b.hasValue() && !raw.ww.hasValue() && !raw.cw.hasValue()) {
-			errorMsg = "Need at least one RAW component!";
+			errorMsg = F("Need at least one RAW component!");
 			return 1;
 		}
 	}
 
 	if(queue == QueuePolicy::Invalid) {
-		errorMsg = "Invalid queue policy";
+		errorMsg = F("Invalid queue policy");
 		return 1;
 	}
 
-	if(cmd != "fade" && cmd != "solid") {
-		errorMsg = "Invalid cmd";
+	if(cmd != F("fade") && cmd != F("solid")) {
+		errorMsg = F("Invalid cmd");
 		return 1;
 	}
 
 	if(direction < 0 || direction > 1) {
-		errorMsg = "Invalid direction";
+		errorMsg = F("Invalid direction");
 		return 1;
 	}
 
 	if(ramp.type == RampTimeOrSpeed::Type::Speed && ramp.value == 0) {
-		errorMsg = "Speed cannot be 0!";
+		errorMsg = F("Speed cannot be 0!");
 		return 1;
 	}
 
@@ -636,22 +665,26 @@ bool JsonProcessor::onJsonRpc(const String& json)
 {
 	debug_d("JsonProcessor::onJsonRpc: %s\n", json.c_str());
 	JsonRpcMessageIn rpc(json);
+	if(!rpc.isValid()) {
+		debug_w("JsonProcessor::onJsonRpc: malformed json: %s", rpc.getError().c_str());
+		return false;
+	}
 
 	String msg;
 	String method = rpc.getMethod();
-	if(method == "color") {
+	if(method == F("color")) {
 		return onColor(rpc.getParams(), msg, false);
-	} else if(method == "stop") {
+	} else if(method == F("stop")) {
 		return onStop(rpc.getParams(), msg, false);
-	} else if(method == "blink") {
+	} else if(method == F("blink")) {
 		return onBlink(rpc.getParams(), msg, false);
-	} else if(method == "skip") {
+	} else if(method == F("skip")) {
 		return onSkip(rpc.getParams(), msg, false);
-	} else if(method == "pause") {
+	} else if(method == F("pause")) {
 		return onPause(rpc.getParams(), msg, false);
-	} else if(method == "continue") {
+	} else if(method == F("continue")) {
 		return onContinue(rpc.getParams(), msg, false);
-	} else if(method == "direct") {
+	} else if(method == F("direct")) {
 		return onDirect(rpc.getParams(), msg, false);
 	} else {
 		return false;
@@ -700,4 +733,46 @@ void JsonProcessor::addChannelStatesToCmd(JsonObject root, const RGBWWLed::Chann
 		break;
 	}
 	}
+}
+bool JsonProcessor::onSetOn(JsonObject root, String& msg, bool relay) {
+	RequestParameters params;
+	parseRequestParams(root, params);
+
+	app.rgbwwctrl.setOn(
+		params.channels,
+		params.direction,
+		params.ramp,
+		params.queue,
+		params.requeue,
+		params.name
+	);
+	// Optionally relay or set msg
+	return true;
+}
+
+bool JsonProcessor::onSetOff(JsonObject root, String& msg, bool relay) {
+	RequestParameters params;
+	parseRequestParams(root, params);
+
+	// If no color specified and mode is HSV, use current HSV but set v=0
+	bool hasColor = params.mode == RequestParameters::Mode::Hsv &&
+		(params.hsv.h.hasValue() || params.hsv.s.hasValue() || params.hsv.v.hasValue() || params.hsv.ct.hasValue());
+
+	if (!hasColor && app.rgbwwctrl.getMode() == RGBWWLed::ColorMode::Hsv) {
+		HSVCT current = app.rgbwwctrl.getCurrentColor();
+		params.hsv = current;
+		params.mode = RequestParameters::Mode::Hsv;
+		params.hsv.v = 0;
+	}
+
+	app.rgbwwctrl.setOff(
+		params.channels,
+		params.direction,
+		params.ramp,
+		params.queue,
+		params.requeue,
+		params.name
+	);
+	// Optionally relay or set msg
+	return true;
 }

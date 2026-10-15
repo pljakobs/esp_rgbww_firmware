@@ -1,6 +1,7 @@
 /**
  * @file
  * @author  Patrick Jahns http://github.com/patrickjahns
+ *          Peter Jakobs http://github.com/pljakobs
  *
  * @section LICENSE
  *
@@ -29,6 +30,7 @@
 #include <Ota/Upgrader.h>
 #include <Storage.h>
 #include <Storage/Debug.h>
+#include <Timer.h>
 
 #ifdef ARCH_ESP8266
 #include <Crypto/Md5.h>
@@ -65,8 +67,8 @@ public:
 
     void start(String romurl);                   // v2 partition layout only needs rom as the webapp is wrapped into the rom
     void checkAtBoot();
-    inline OTASTATUS getStatus() { 
-        return status; 
+    inline OTASTATUS getStatus() {
+        return status;
     };
     inline bool isProccessing() { 
         return status == OTASTATUS::OTA_PROCESSING; 
@@ -105,12 +107,14 @@ protected:
 protected:
     Storage::Partition dataPartition;
     OtaUpgrader ota;
+    Timer otaWatchdog;
+    void broadcastOtaStatus(int step, const String& message);
     void upgradeCallback(Ota::Network::HttpUpgrader& client, bool result);
     void reset();
     void beforeOTA();
     void afterOTA();
     void doSwitch();
-    void saveStatus(OTASTATUS status);
+    void saveStatus(OTASTATUS newStatus);
     OTASTATUS loadStatus();
     Storage::Partition findSpiffsPartition(Storage::Partition appPart);
     bool switchPartition(uint8_t slot);

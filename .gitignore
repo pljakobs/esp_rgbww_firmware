@@ -69,3 +69,29 @@ latex/*
 
 debug_Esp32.hw
 include/fileList.h
+flashloop.sh
+colgrep
+colgrep.cfg
+esp_rgbww_8266.log
+out.*
+mqtt_pass
+ouput.txt
+output.txt
+setup_runner.sh
+setup_runner_user.sh
+install_services.sh
+configure_runners.sh
+install_runner_service.sh
+fix_docker_simple.sh
+fix_docker_permissions.sh
+RUNNER_SETUP.md
+configure_docker_sysctl.sh
+fix_docker_final.sh
+disable_apparmor_docker.sh
+fix_lxc_docker.md
+buildtime.sh
+build_benchmarks_ThinkpadL14-with_mitigation.log build_benchmarks_ThinkpadL14-without_mitigation.log build_benchmarks_ThinkpadL14.log
+perf.data perf.data.old
+output.log
+__pycache__
+test/__pycache__

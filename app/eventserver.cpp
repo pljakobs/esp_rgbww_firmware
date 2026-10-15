@@ -1,8 +1,26 @@
-/*
+/**
+ * @file
+ * @author  Robin http://github.com/verybadsoldier
+ *          Peter Jakobs http://github.com/pljakobs
+ * 
+ *
+ * @section LICENSE
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License as
+ * published by the Free Software Foundation; either version 3 of
+ * the License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+ * General Public License for more details at
+ * https://www.gnu.org/copyleft/gpl.html
+ *
+ * @section DESCRIPTION
+ *
  * eventserver.cpp
  *
- *  Created on: 26.03.2017
- *      Author: Robin
  */
 #include <RGBWWCtrl.h>
 
@@ -41,10 +59,22 @@ void EventServer::start(ApplicationWebserver& webServer)
  */
 void EventServer::stop()
 {
-	if(not active)
-		return;
+	_keepAliveTimer.stop();
 
-	shutdown();
+	// TcpServer::shutdown() calls delete this when connections drain.
+	// EventServer is an embedded Application member, so self-delete is invalid.
+	if(tcp) {
+		tcp_arg(tcp, nullptr);
+		tcp_accept(tcp, nullptr);
+		tcp_close(tcp);
+		tcp = nullptr;
+	}
+
+	for(auto& connection : connections) {
+		if(connection != nullptr) {
+			connection->setTimeOut(1);
+		}
+	}
 }
 
 /**
@@ -90,16 +120,25 @@ void EventServer::onClientComplete(TcpClient& client, bool succesfull)
 void EventServer::publishCurrentState(const ChannelOutput& raw, const HSVCT* pHsv)
 {
 	//debug_i("EventServer::publishCurrentState\n");
-	if(raw == _lastRaw)
+	const bool hasHsv = (pHsv != nullptr);
+	const bool sameRaw = (raw == _lastRaw);
+	const bool sameMode = (hasHsv == _lastHasHsv);
+	const bool sameHsv = (!hasHsv || (*pHsv == _lastHsv));
+	if(sameRaw && sameMode && sameHsv) // No change
 		return;
-
+/*
 	unsigned long currentTime = millis();
 	if(currentTime - _lastEventTime < _minEventInterval) {
 		debug_i("eventserver, droppinging currentState event");
 		return; // Silently discard this event
 	}
+*/
 	_lastRaw = raw;
-	_lastEventTime = currentTime;
+	_lastHasHsv = hasHsv;
+	if(hasHsv) {
+		_lastHsv = *pHsv;
+	}
+//	_lastEventTime = currentTime;
 
 	JsonRpcMessage msg(F("color_event"));
 	JsonObject root = msg.getParams();
@@ -210,4 +249,4 @@ void EventServer::sendToClients(JsonRpcMessage& rpcMsg)
 	}
 
 	app.wsBroadcast(jsonStr);
-  }
+}

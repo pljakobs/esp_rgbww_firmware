@@ -1,6 +1,7 @@
 /**
  * @file
  * @author  Patrick Jahns http://github.com/patrickjahns
+ *          Peter Jakobs http://github.com/pljakobs
  *
  * @section LICENSE
  *
@@ -25,8 +26,11 @@
 #include <RGBWWLed/RGBWWLedColor.h>
 #include <Network/Http/Websocket/WebsocketResource.h>
 
-#define FILE_MAX_SIZE 16384 //max filesize for storage api files.
+#define FILE_MAX_SIZE 4096 //max filesize for storage api files.
 #define MAX_LOG_LINE_SIZE 512
+
+#define MINIMUM_HEAP_ACCEPT 8000
+#define MINIMUM_HEAP 8000
 
 enum API_CODES {
     API_SUCCESS = 0,
@@ -39,7 +43,7 @@ enum API_CODES {
 class ApplicationWebserver: private HttpServer {
 public:
     ApplicationWebserver();
-    virtual ~ApplicationWebserver() {};
+    virtual ~ApplicationWebserver() = default;
 
     void start();
     void stop();
@@ -48,18 +52,15 @@ public:
 
     void wsSendBroadcast(const char* buffer, size_t length);
 
-    String getApiCodeMsg(API_CODES code);
-
-
+    const char* getApiCodeMsg(API_CODES code);
 
 private:
 
     bool _init = false;
     bool _running = false;
-    unsigned _minimumHeap = 8000;
-    unsigned _minimumHeapAccept = 8000;
+    
 
-    WebsocketResource* wsResource;
+    WebsocketResource* wsResource = nullptr;
     WebsocketList webSockets;
 
     bool authenticated(HttpRequest &request, HttpResponse &response);
@@ -85,25 +86,34 @@ private:
     void onBlink(HttpRequest &request, HttpResponse &response);
     void onToggle(HttpRequest &request, HttpResponse &response);
     void onData(HttpRequest &request, HttpResponse &response);
-    
+ 
+        // SetOn/SetOff endpoints
+    void onSetOn(HttpRequest &request, HttpResponse &response);
+    void onSetOff(HttpRequest &request, HttpResponse &response);
+
     void onColorGet(HttpRequest &request, HttpResponse &response);
     void onColorPost(HttpRequest &request, HttpResponse &response);
     bool onColorPostCmd(JsonObject& root, String& errorMsg);
 
+    void addInfoFields(JsonObject& obj);
     void sendApiResponse(HttpResponse &response, JsonObjectStream* stream, HttpStatus code = HTTP_STATUS_OK);
-    void sendApiCode(HttpResponse &response, API_CODES code, String msg = "");
+    void sendApiCode(HttpResponse &response, API_CODES code, const char* msg = nullptr);
+    void sendApiCode(HttpResponse &response, API_CODES code, const String& msg);
+    void sendApiCode(HttpResponse &response, API_CODES code, const __FlashStringHelper* msg);
 
     //void onUpload(HttpRequest &request, HttpResponse &response);
     bool checkHeap(HttpResponse &response);
-
-    static bool isPrintable(String& str);
-
-    void onStorage(HttpRequest &request, HttpResponse &response);
+    bool checkHeap(HttpResponse &response, int minHeap);
+    bool preflightRequest(HttpRequest& request, HttpResponse& response, std::initializer_list<HttpMethod> allowedMethods, int minHeap = 0 );
+    String makeId();
+    
+    static bool isPrintable(const String& str);
 
     void setCorsHeaders(HttpResponse &response);
 
     void wsConnected(WebsocketConnection& socket);
     void wsDisconnected(WebsocketConnection& socket);
+    void wsMessage(WebsocketConnection& socket, const String& message);
 };
 
 #endif // APP_WEBSERVER_H_

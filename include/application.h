@@ -1,5 +1,7 @@
- /*
+/*
+ * @file
  * @author  Patrick Jahns http://github.com/patrickjahns
+ *          Peter Jakobs http://github.com/pljakobs
  *
  * @section LICENSE
  *
@@ -16,14 +18,22 @@
  *
  * @section DESCRIPTION
  *
- *
  */
 #pragma once
+#include <RGBWWCtrl.h>
 #include <otaupdate.h>
+#include <controllers.h>
+#include <mdnsHandler.h>
+#ifndef SMING_RELEASE
+#include <udpSyslogStream.h>
+#endif
+
+
 
 static const char* fw_git_version = GITVERSION;
 static const char* fw_git_date = GITDATE;
 static const char* sming_git_version = SMING_VERSION;
+
 
 // main forward declarations
 class Application {
@@ -35,6 +45,7 @@ public:
     void initButtons();
 
     void startServices();
+    void startNetworkServices();
     void stopServices();
 
     void reset();
@@ -55,7 +66,9 @@ public:
     inline bool isFirstRun() { return _first_run; };
 
     void checkRam();
+    void reportCrashDump();
 #ifdef ARCH_ESP8266
+    void readCrashDump();
     inline bool isTempBoot() { return _bootmode == MODE_TEMP_ROM; };
 #else
     bool isTempBoot() { return false; };
@@ -71,33 +84,65 @@ public:
 
     uint32_t getUptime();
     void uptimeCounter();
+    size_t getFreeHeapSize();
+    bool checkHeap(size_t minHeap);
+    size_t getMinimumHeapUptime() { return _minimumHeapUptime; }
+    size_t getMinimumHeap10min() { return _minimumHeap10min; }
+    size_t getHeapLowErrUptime() { return _HeapLowErrUptime; }
+    size_t getHeapLowErr10min() { return _HeapLowErr10min; }
+
+#ifndef SMING_RELEASE
+    /** Returns the current pre-network log buffer state (Buffering / Draining / Done). */
+    UdpSyslogStream::PreNetState syslogPreNetState() const { return udpSyslogStream.preNetState(); }
+#endif
 
 public:
     AppWIFI network;
     ApplicationWebserver webserver;
+#ifndef SMING_RELEASE
+    UdpSyslogStream udpSyslogStream;
+#endif
     APPLedCtrl rgbwwctrl;
+    std::unique_ptr<Controllers> controllers;
+    
     ApplicationOTA ota;
     std::unique_ptr<AppConfig> cfg;
-    //std::unique_ptr<AppConfig> cfg;
     std::unique_ptr<AppData> data;
+
+
+    
     EventServer eventserver;
     AppMqttClient mqttclient;
+    TelemetryClient telemetryClient;
     JsonProcessor jsonproc;
+    mdnsHandler mdnsService;
     NtpClient* pNtpclient = nullptr;
+
+        // debug counters
+    uint32_t _mDNS_received = 0;
+    uint32_t _mDNS_replies = 0;
+    struct rst_info* rtc_info;
 
     String sanitizeName(const String& input){
         String result = input;
-    for (int i = 0; i < result.length(); i++) {
-        if (result[i] == '_') {
-            result[i] = '-';
+        for (int i = 0; i < result.length(); i++) {
+            if (result[i] == '_') {
+                result[i] = '-';
+            }
         }
+        return result;
     }
-    return result;
+
+    uint8_t getCpuPercent()
+    {
+        return cpuPercent;
     }
 
 private:
     void loadbootinfo();
     void listFiles();
+    void logRestart();
+    void pollResetButton();
 
     Timer _systimer;
     int _bootmode = 0;
@@ -106,12 +151,26 @@ private:
     bool _fs_mounted = false;
     bool _run_after_ota = false;
 
+    uint8_t cpuPercent=0;
+
     Timer _uptimetimer;
     Timer _checkRamTimer;
-    uint32_t _uptimeMinutes;
+    Timer _resetPinTimer;
+
+    uint32_t _uptimeMinutes = 0;
+    size_t _minimumHeapUptime = 32768;
+    size_t _minimumHeap10min=32768;
+    size_t _HeapLowErrUptime=0;
+    size_t _HeapLowErr10min=0;
+
     std::array<int, 17> _lastToggles;
 
     uint32_t jsonrpc_id = 0;
+
+    int8_t clearPin = 16; //  GPIO16 is the default for the old mrpj boards, newer boards will load from pinconfig 
+    int8_t _clearPin = -1;
+
+    bool _reboot_reported=false;
 };
 // forward declaration for global vars
 extern Application app;

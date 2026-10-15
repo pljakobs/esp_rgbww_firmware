@@ -1,8 +1,16 @@
 COMPONENT_SEARCH_DIRS := $(PROJECT_DIR)/Components
-COMPONENT_DEPENDS += MDNS RGBWWLed LittleFS ConfigDB ArduinoJson6 OtaNetwork 
+COMPONENT_DEPENDS += MDNS RGBWWLed LittleFS ConfigDB ArduinoJson6 OtaNetwork
+ifndef SMING_RELEASE
+COMPONENT_DEPENDS += HuffmanCodec
+endif
+
+ifeq ($(SMING_ARCH), Esp32)
+    COMPONENT_DEPENDS += Esp32HardwarePwm
+endif
 
 # Set default number of jobs to twice the number of available processors
-NUM_JOBS := $(shell echo $(($(nproc) * 2)))
+#NUM_JOBS := $(shell echo $(($(nproc) * 2)))
+NUM_JOBS := $(shell echo $(($(nproc) + 2)))
 MAKEFLAGS += -j$(NUM_JOBS)
 
 HWCONFIG :=two_roms_two_lfs_$(SMING_ARCH)
@@ -22,6 +30,15 @@ RBOOT_BIG_FLASH = 1
 ENABLE_CUSTOM_PWM = 0
 #ENABLE_CUSTOM_PWM = 0
 
+# MQTT credentials management
+ifneq ("$(wildcard mqtt_pass)","")
+  MQTT_CRED := $(shell cat mqtt_pass)
+  MQTT_USER := $(word 1,$(subst :, ,$(MQTT_CRED)))
+  MQTT_PASS := $(word 2,$(subst :, ,$(MQTT_CRED)))
+  export MQTT_USER
+  export MQTT_PASS
+endif
+
 //COM_SPEED = 230400
 //COM_SPEED = 460800
 //COM_SPEED = 921600
@@ -40,10 +57,10 @@ ifeq ($(SMING_ARCH), Esp8266)
     $(info COM_PORT is $(COM_PORT)@$(COM_SPEED) for $(SMING_ARCH))
 else ifeq ($(SMING_ARCH), Esp32)
     ifeq ($(strip $(COM_PORT)),)
-        override COM_PORT=/dev/serial/by-id/usb-1a86_USB_Single_Serial_5647022450-if00
+        override COM_PORT=/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0
     endif
     ifeq ($(strip $(COM_SPEED)),)
-        override COM_SPEED=115200
+        override COM_SPEED=460800
     endif
     $(info COM_PORT is $(COM_PORT)@$(COM_SPEED) for $(SMING_ARCH))
 endif
@@ -51,11 +68,37 @@ endif
 CUSTOM_TARGETS += check_versions
 
 #### GIT VERSION Information #####
-GIT_VERSION = $(shell git describe --abbrev=4 --dirty --always --tags)"-["$(shell git rev-parse --abbrev-ref HEAD)"]"
+ifdef GITHUB_RUN_NUMBER
+  GIT_VERSION = V5.0-$(GITHUB_RUN_NUMBER)-$(shell git rev-parse --abbrev-ref HEAD)
+else
+  # For local builds: find the nearest ancestor CI build tag (ci/<branch>/<run_number>)
+  # and format as V5.0-<run>-<branch>-<hostname>-<commits_since_tag>[-dirty]
+  _CI_DESC    := $(shell git fetch --tags --quiet 2>/dev/null; git describe --tags --match 'ci/*/*' --long 2>/dev/null)
+  _LOCAL_HOST := $(shell hostname -s 2>/dev/null || echo local)
+  ifneq ($(_CI_DESC),)
+    _CI_BRANCH  := $(shell echo '$(_CI_DESC)' | sed 's|ci/\([^/]*\)/.*|\1|')
+    _CI_RUN     := $(shell echo '$(_CI_DESC)' | sed 's|ci/[^/]*/\([0-9]*\)-[0-9]*-g[0-9a-f]*.*|\1|')
+    _CI_COMMITS := $(shell echo '$(_CI_DESC)' | sed 's|.*-\([0-9]*\)-g[0-9a-f]*$$|\1|')
+    _DIRTY      := $(shell git diff --quiet HEAD 2>/dev/null || echo -dirty)
+    GIT_VERSION  = V5.0-$(_CI_RUN)-$(_CI_BRANCH)-$(_LOCAL_HOST)-$(_CI_COMMITS)$(_DIRTY)
+  else
+    GIT_VERSION = $(shell git describe --abbrev=4 --dirty --always --tags)"-["$(shell git rev-parse --abbrev-ref HEAD)"]"
+  endif
+endif
 GIT_DATE = $(firstword $(shell git --no-pager show --date=short --format="%ad" --name-only))
 SMING_GITVERSION =	$(shell git -C $(SMING_HOME)/.. describe --abbrev=4 --dirty --always --tags)"-["$(shell git -C $(SMING_HOME)/.. rev-parse --abbrev-ref HEAD)"]"
 WEBAPP_VERSION = $(shell cat $(PROJECT_DIR)/webapp/VERSION)
-USER_CFLAGS = -DGITVERSION=\"$(GIT_VERSION)\" -DGITDATE=\"$(GIT_DATE)\" -DWEBAPP_VERSION=\"$(WEBAPP_VERSION)\" -DSMING_GITVERSION=\"$(SMING_GITVERSION)\"
+USER_CFLAGS = -DGITVERSION=\"$(GIT_VERSION)\" -DGITDATE=\"$(GIT_DATE)\" -DWEBAPP_VERSION=\"$(WEBAPP_VERSION)\" -DSMING_GITVERSION=\"$(SMING_GITVERSION)\" -DMQTT_USER=\"$(MQTT_USER)\" -DMQTT_PASS=\"$(MQTT_PASS)\"
+# Keep format-string type checking strict even when global WERROR is disabled in CI.
+# Use COMPONENT_CFLAGS so this only applies to our app sources, not Sming sub-components like esp-open-lwip.
+COMPONENT_CFLAGS += -Wformat -Werror=format -Werror=format-security
+COMPONENT_CXXFLAGS += -Wformat -Werror=format -Werror=format-security
+COMPONENT_CPPFLAGS += -DCONFIG_ESP_CONSOLE_USB_CDC=1
+
+
+#ifdef MDNS_DEBUG
+#    USER_CFLAGS += -DMDNS_DEBUG
+#endif
 
 $(info using firmware version $(GIT_VERSION))
 $(info using WEBapp $(WEBAPP_VERSION))

@@ -1,6 +1,7 @@
- /**
+/**
  * @file
  * @author  Patrick Jahns http://github.com/patrickjahns
+ * 			Peter Jakobs http://github.com/pljakobs
  *
  * @section LICENSE
  *
@@ -32,7 +33,10 @@
 #include <VersionListener.h>
 #include <FlashString/Stream.hpp>
 #include <fileMap.h>
-
+#ifndef SMING_RELEASE
+#include <MultiOutputStream.h>
+#include <udpSyslogStream.h>
+#endif
 
 #if ARCH_ESP8266
 #define PART0 "lfs0"
@@ -122,30 +126,121 @@ extern "C" void __wrap_user_pre_init(void)
 	__real_user_pre_init();
 }
 
-#endif
+// ─── Crash-dump capture via RTC user memory ──────────────────────────────────
+// RTC user area: slots 64-127, each 4 bytes → 256 bytes total.
+// Layout: magic(4) + reason(4) + exccause(4) + epc1(4) + epc2(4) + epc3(4)
+//         + excvaddr(4) + depc(4) + stackBase(4) + stackCount(4)
+//         + stackWords[53](212) = 256 bytes exactly
+// Output format is compatible with Sming decode-stacktrace.py.
+#define CRASH_RTC_SLOT    64
+#define CRASH_RTC_MAGIC   0xDEADC0DEu
+#define CRASH_STACK_WORDS 54
+
+struct CrashDump {
+	uint32_t magic;
+	uint32_t reason;
+	uint32_t exccause;
+	uint32_t epc1, epc2, epc3;
+	uint32_t excvaddr, depc;
+	uint32_t stackBase;   // sp at crash time — needed for decode-stacktrace address column
+	uint32_t stackCount;
+	uint32_t stackWords[CRASH_STACK_WORDS];
+};
+static_assert(sizeof(CrashDump) == 256, "CrashDump must fit exactly in RTC user memory");
+
+static CrashDump g_crashDump;
+static bool g_crashDumpValid = false;
+
+// Overrides the weak alias in crash_handler.c — runs before the reset.
+// Keep it minimal: only SDK primitive writes are safe here.
+extern "C" void custom_crash_callback(struct rst_info* ri, uint32_t stack, uint32_t stack_end)
+{
+	CrashDump dump{};
+	dump.magic    = CRASH_RTC_MAGIC;
+	dump.reason   = ri->reason;
+	dump.exccause = ri->exccause;
+	dump.epc1     = ri->epc1;
+	dump.epc2     = ri->epc2;
+	dump.epc3     = ri->epc3;
+	dump.excvaddr = ri->excvaddr;
+	dump.depc     = ri->depc;
+	dump.stackBase = stack;
+
+	uint32_t count = 0;
+	for(uint32_t addr = stack; addr < stack_end && count < CRASH_STACK_WORDS; addr += 4) {
+		dump.stackWords[count++] = *reinterpret_cast<const uint32_t*>(addr);
+	}
+	dump.stackCount = count;
+
+	system_rtc_mem_write(CRASH_RTC_SLOT, &dump, sizeof(dump));
+}
+
+#endif // ARCH_ESP8266
 
 Application app;
 
-// Sming Framework INIT method - called during boot
-void init()
-{
-	Serial.begin(SERIAL_BAUD_RATE); // 115200 by default
-	Serial.systemDebugOutput(true); // Debug output to serial
-	//System.setCpuFrequencye(CF_160MHz);
+#ifndef SMING_RELEASE
+MultiOutputStream debugStream;
 
+size_t debugStreamOutputCallback(const char* buffer, unsigned int length)
+{
+	return debugStream.write((const uint8_t*)buffer, length);
+}
+#endif
+
+void onReady()
+{
+	
+	//System.setCpuFrequencye(CF_160MHz);
+	app.rtc_info = system_get_rst_info();
+	
 #ifdef ARCH_ESP8266
+	app.readCrashDump();
 	osMessageInterceptor.begin(onOsMessage);
 	debug_i("starting os message interceptor");
 #endif
 
-	// set CLR pin to input
-	// pinMode(CLEAR_PIN, INPUT)
+#ifdef ARCH_ESP32
+	esp_wifi_set_ps (WIFI_PS_NONE);
+#endif
+#ifndef SMING_RELEASE
+	Serial.systemDebugOutput(false); // disable direct Serial hook; output now goes through debugStreamOutputCallback only
+	auto oldCallback = m_setPuts(&debugStreamOutputCallback);
+	debugStream.addStream(&Serial, false);
+	debugStream.addStream(&app.udpSyslogStream, false);
+#endif
 
 	// seperated application init
 	app.init();
 
 	// Run Services on system ready
-	System.onReady(SystemReadyDelegate(&Application::startServices, &app));
+	//System.onReady(SystemReadyDelegate(&Application::startServices, &app));
+	app.startServices();
+}
+
+// Sming Framework INIT method - called during boot
+void init(){	
+
+	// use the JTAG-USB serial for debug output if available
+	#ifdef UART_ID_SERIAL_USB_JTAG 
+        //Serial.setPort(UART_ID_SERIAL_USB_JTAG);
+    #endif
+
+    Serial.begin(SERIAL_BAUD_RATE);
+    
+	Serial.systemDebugOutput(true);
+    
+	delay(500);
+	Serial.setTxBufferSize(512);
+	Serial.setTxWait(false); // Make sure debug output doesn't stall
+	Serial.systemDebugOutput(true);
+	
+	// System.setCpuFrequency(CpuCycleClockFast::cpuFrequency());
+
+	Serial.print(_F("Available heap: "));
+	Serial.println(app.getFreeHeapSize());
+	Serial.println("===starting cpu profiling===");
+	onReady(); // this is just in preparation for cpu profiling
 }
 
 int32_t getVersion(IDataSourceStream& input)
@@ -172,36 +267,94 @@ Application::~Application()
 void Application::uptimeCounter()
 {
 	++_uptimeMinutes;
+	if (_uptimeMinutes % 10 ==0){
+		_minimumHeap10min=system_get_free_heap_size();
+		_HeapLowErr10min=0;
+	}
+	
 }
 
 void Application::checkRam()
 {
+	// Create JSON object with uptime and free heap
+	StaticJsonDocument<256> doc;
+	time_t now = time(nullptr); // should be unix time if ntp is running
+	doc[F("id")] = (uint32_t)system_get_chip_id();
+	doc[F("time")] = now;	
+	doc[F("uptime")] = _uptimeMinutes*60;
+	doc[F("ip")] = WifiStation.getIP().toString();
+	doc[F("freeHeap")] = getFreeHeapSize();
+	doc[F("minimumfreeHeapRuntime")]=_minimumHeapUptime;
+	doc[F("minimumfreeHeap10min")]=_minimumHeap10min;
+	doc[F("heapLowErrUptime")]=_HeapLowErrUptime;
+	doc[F("heapLowErr10min")]=_HeapLowErr10min;
+	doc[F("firmware")] = fw_git_version;
+	doc[F("build")] = BUILD_TYPE;
+	doc[F("soc")] = SOC;
+	doc[F("neighbours")]=app.controllers->getVisibleCount();
 	
-	debug_i("Free heap: %d", system_get_free_heap_size());
+	if (app.rtc_info->reason!= 0 && !_reboot_reported)
+	{
+		AppConfig::Network::Telemetry telemetryCfg(*cfg);
+
+		doc[F("reboot")][F("number")] = telemetryCfg.getNumReboots();
+		doc[F("reboot")][F("reason")] = app.rtc_info->reason;
+		doc[F("reboot")][F("exccause")] = app.rtc_info->exccause;
+		doc[F("reboot")][F("epc1")] = app.rtc_info->epc1;
+		doc[F("reboot")][F("epc2")] = app.rtc_info->epc2;
+		doc[F("reboot")][F("epc3")] = app.rtc_info->epc3;
+		doc[F("reboot")][F("excvaddr")] = app.rtc_info->excvaddr;
+		doc[F("reboot")][F("depc")] = app.rtc_info->depc;
+	}
+	doc[F("mDNS")][F("received")] = _mDNS_received;
+	doc[F("mDNS")][F("replies")] = _mDNS_replies;
+
+	debug_i("Free heap: %d, uptime: %d", getFreeHeapSize(), millis() / 1000);
+	if (!telemetryClient.stat(doc))
+	{
+		debug_i("Failed to publish monitor data to telemetry MQTT");
+		/* 
+		if (!telemetryClient.isRunning()){
+			debug_i("restarting telemetry MQTT client");
+			telemetryClient.reconnect();
+		}
+		*/
+	}
 	
-	/* 
-	String _client_status = WifiStation.getConnectionStatusName();
-	debug_i("wifi conection Status: %s", _client_status.c_str());
-	*/
+	if (app.rtc_info->reason!= 0 && !_reboot_reported){
+		_reboot_reported=true;	
+		AppConfig::Network::Telemetry telemetryCfg(*cfg);
+		auto reboots=telemetryCfg.getNumReboots();
+		if(auto telemetryUpdate = telemetryCfg.update()){
+			telemetryUpdate.setNumReboots(reboots+1);
+		}
+	} 
+}
+
+size_t Application::getFreeHeapSize(){
+	size_t fh = system_get_free_heap_size();
+	if (fh<_minimumHeapUptime ) _minimumHeapUptime=fh;
+	if (fh<_minimumHeap10min) _minimumHeap10min=fh;
+	
+	return fh;
+}
+
+bool Application::checkHeap( size_t minHeap)
+{
+	if(getFreeHeapSize()<minHeap){
+		_HeapLowErrUptime++;
+		_HeapLowErr10min++;
+		return false;
+	}
+	return true;
 }
 
 void Application::init()
 {
-	for(int i = 0; i < 10; i++) {
-		Serial.print(_F("="));
-		delay(200);
-	}
-	Serial.print("\r\n");
-	// ConfigDB obsoleted debug_i("going to initialize config");
-	// ConfigDB obsoleted config::initializeConfig(cfg); // initialize the config structure if necessary
 	debug_i("ESP RGBWW Controller Version %s\r\n", fw_git_version);
 	debug_i("Sming Version: %s\r\n", sming_git_version);
 
-debug_i("Platform: %s\r\n", SOC);
-
-#if defined(ARCH_ESP8266) || defined(ESP32)
-	app.ota.checkAtBoot();
-#endif
+	debug_i("Platform: %s\r\n", SOC);
 
 #if defined(ARCH_ESP8266) //|| defined(ESP32)
 	/*
@@ -215,22 +368,7 @@ debug_i("Platform: %s\r\n", SOC);
 	if(!Storage::findPartition(PART0) && !Storage::findPartition(F("lfs1"))) {
 		// mount existing data partition
 		debug_i("application init (with spiffs) => Mounting file system");
-		/* ConfigDB - may need rework
-        if(mountfs(app.getRomSlot())){
-            if (cfg.exist()) {
-                debug_i("application init (with spiffs) => reading config");
-                cfg.load();
-                debug_i("application init (with spiffs) => config loaded, pin config %s",cfg.general.pin_config_name.c_str());
-            }
-        }else{
-            debug_i("application init (with spiffs) => failed to find config file");
-        }
-        */
-
-		/*
-        * now, app.cfg is the valid full configuration
-        * next step is to change the partition layout
-        */
+	
 		debug_i("application init => switching file systems - partition 1");
 		ota.switchPartitions();
 		debug_i("application init => saving config");
@@ -240,7 +378,8 @@ debug_i("Platform: %s\r\n", SOC);
 
 	//load settings
 	_uptimetimer.initializeMs(60000, TimerDelegate(&Application::uptimeCounter, this)).start();
-	_checkRamTimer.initializeMs(10000, TimerDelegate(&Application::checkRam, this)).start();
+	_checkRamTimer.initializeMs(30000, TimerDelegate(&Application::checkRam, this)).start();
+
 #ifdef ARCH_ESP8266
 	// load boot information
 	uint8 bootmode, bootslot;
@@ -259,14 +398,7 @@ debug_i("Platform: %s\r\n", SOC);
 debug_i("Application::init - check running partition");
 auto part=app.ota.ota.getRunningPartition();
 debug_i("Application::init - running partition %s", part.name());
-// list spiffs partitions
-//listSpiffsPartitions();
 
-// mount filesystem
-//auto romPartition=app.ota.getRomPartition();
-
-//debug_i("Application::init - got rom partition %s @0x%#08x", romPartition.name(),romPartition.address());
-//auto spiffsPartition=app.ota.findSpiffsPartition(romPartition);
 #if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
 	mountfs(getRomSlot());
 	// ToDo - rework mounting filesystem
@@ -280,7 +412,12 @@ debug_i("Application::init - running partition %s", part.name());
 		}
 		Serial << dir.count() << _F(" files found") << endl << endl;
 	}
+
+//#if defined(ARCH_ESP8266) || defined(ESP32)
+	app.ota.checkAtBoot();
+//#endif
 #endif
+	(void)getFreeHeapSize(); // sample heap after fs mount + OTA check
 #ifdef ARCH_HOST
 	debug_i("mounting host file system");
 	fileSetFileSystem(&IFS::Host::getFileSystem());
@@ -289,15 +426,18 @@ debug_i("Application::init - running partition %s", part.name());
 	// initialize config and data
 	cfg =  std::make_unique<AppConfig>(configDB_PATH);
 	data = std::make_unique<AppData>(dataDB_PATH);
+	controllers = std::make_unique<Controllers>();
+	(void)getFreeHeapSize(); // sample heap after ConfigDB + Controllers construction
 
 	// verify if there is a new version of the hardware config
-
-
-	AppConfig::Hardware hardware(*cfg);
-	debug_i("Application::init - hardware config loaded");
 	
-	uint32_t currentVersion=hardware.getVersion();
+
 	{
+		// check if the pinconfig json provided with the frontend is newer than the pinconfig array in the configdb
+		// this allows to simply add new pin configs to running controllers
+		AppConfig::Hardware hardware(*cfg);
+		uint32_t currentVersion=hardware.getVersion();
+
 		debug_i("make pinconfig stream");
 		FSTR::Stream fs(fileMap["config/pinconfig.json"]);	
 		//Serial.println(fileMap["config/pinconfig.json"]);
@@ -314,30 +454,56 @@ debug_i("Application::init - running partition %s", part.name());
 			}
 		}
 	}
+	{
+    	int clearPin = -1;
+		{
+			AppConfig::General general(*cfg);
+			AppConfig::Hardware hardware(*cfg);
+
+			String pinConfigName = general.getCurrentPinConfigName();
+			String SoC = SOC;
+
+			if (hardware.pinconfigs.getItemCount() > 0) {
+				for (auto pinconfig : hardware.pinconfigs) {
+					if (pinconfig.getName() == pinConfigName && pinconfig.getSoc() == SoC) {
+						clearPin = pinconfig.getClearPin();
+						break;
+					}
+				}
+			}
+		}
+		debug_i("Application::init - clear pin %d", clearPin);
+		if(clearPin >= 0) {
+			pinMode(clearPin, INPUT);
+			debug_i("Application::init - clear pin set to input");
+		
+			_clearPin = clearPin;
+            _resetPinTimer.initializeMs(100, TimerDelegate(&Application::pollResetButton, this)).start();
+        }
+		#if !defined(ARCH_HOST)
+
+			if(clearPin >=0 && digitalRead(clearPin) < 1) {
+				debug_i("CLR button low - resetting settings");
+				// ConfigDB - decide if to reload defaults or load a specific saved version
+				// perhaps by holding the clear pin low for a certain time along with blink codes?
+				// cfg.reset();
+				network.forgetWifi();
+			}
+
+		#endif
+	}
+
+	debug_i("Application::init - hardware config loaded");
+	
 
 // check if we need to reset settings
-#if !defined(ARCH_HOST)
 
-/*	if(digitalRead(CLEAR_PIN) < 1) {
-		debug_i("CLR button low - resetting settings");
-		// ConfigDB - decide if to reload defaults or load a specific saved version
-		// perhaps by holding the clear pin low for a certain time along with blink codes?
-		// cfg.reset();
-		network.forgetWifi();
-	}
-*/
-#endif
 
 	// check ota
 #ifdef ARCH_ESP8266
 	ota.checkAtBoot();
 #endif
-	/* Serial << endl << _F("** Stream **") << endl;
-	Serial << "#########################################################################################"<<endl;
-	cfg->exportToStream(ConfigDB::Json::format, Serial);
-	Serial <<endl;
-	Serial << "#########################################################################################"<<endl;
-	*/
+	
 	{
 		debug_i("application init => checking ConfigDB");
 		AppConfig::General general(*cfg);
@@ -367,6 +533,24 @@ debug_i("Application::init - running partition %s", part.name());
 			}
 		}
 	}
+
+	// prepare active hosts list
+	{
+		// pre-allocate heap for the visible hosts vector. 
+		// this should adapt to the number of hosts detected in earlier boots
+		AppData::Root::Controllers controllers(*app.data);
+		
+		auto myId=(uint32_t)system_get_chip_id();
+		AppConfig::General general(*cfg);
+		String myName=general.getDeviceName();
+		if(myName.length()<=0){
+			char myName_buf[64];
+			snprintf(myName_buf, sizeof(myName_buf), "rgbww-%x", myId);
+			myName = myName_buf;
+		}
+		app.controllers->addOrUpdate( myId,myName, WifiStation.getIP().toString(), 1200); // add myself to the list
+	}
+
 	/*
 	Serial << endl << _F("** Stream **") << endl;
 	Serial << "#########################################################################################"<<endl;
@@ -374,14 +558,12 @@ debug_i("Application::init - running partition %s", part.name());
 	Serial <<endl;
 	Serial << "#########################################################################################"<<endl;
 	*/
-	debug_i("start network init");
-	// initialize networking
-	network.init();
-	debug_i("network initizalized, ssid: %s", WifiStation.getSSID().c_str());
+
 	
 	/// initialize led ctrl
 	rgbwwctrl.init();
 	debug_i("ledctrl initialized");
+	(void)getFreeHeapSize(); // sample heap after LED ctrl init (PWM + color config)
 
 	initButtons();
 	debug_i("buttons initialized");
@@ -389,64 +571,29 @@ debug_i("Application::init - running partition %s", part.name());
 	// initialize webserver
 	app.webserver.init();
 	debug_i("webserver initialized");
+	(void)getFreeHeapSize(); // sample heap after route registration
 
 	debug_i("pin config string %s", fileMap["pin_config"]);
 
-	// ConfigDB: temp only: create an example preset
-	/*
+	debug_i("start network init");
+	// initialize networking
+	network.init();
+	debug_i("network initizalized, ssid: %s", WifiStation.getSSID().c_str());
+	(void)getFreeHeapSize(); // sample heap after WiFi init
 	{
-		AppData::Root::OuterUpdater appData(*data);
-
-		appData.presets.clear();
-
-		auto preset = appData.presets.addItem();
-		preset.setName("example-hsv");
-		preset.setFavorite(true);
-		auto hsvUpdater = preset.color.toHsv();
-		hsvUpdater.setH(0);
-		hsvUpdater.setS(100);
-		hsvUpdater.setV(100);
-	}
-	{
-		AppData::Root::OuterUpdater appData(*data);
-
-		appData.presets.clear();
-
-		auto preset = appData.presets.addItem();
-		preset.setName("example-raw");
-		auto rawUpdater = preset.color.toRaw();
-		rawUpdater.setR(255);
-		rawUpdater.setG(255);
-		rawUpdater.setB(255);
-		rawUpdater.setWw(255);
-		rawUpdater.setCw(255);
+		AppConfig::Network network(*cfg);
+		if(network.rsyslog.getEnabled()) {
+			String host = network.rsyslog.getHost();
+			uint16_t port = network.rsyslog.getPort();
+			AppConfig::General general(*cfg);
+			String myName=general.getDeviceName();
+			debug_i("Initializing remote syslog with host %s and port %d", host.c_str(), port);
+#ifndef SMING_RELEASE
+			app.udpSyslogStream.begin(host, port, myName, F("Lightinator"));
+#endif
+		}
 	}
 	
-	{
-		debug_i("creating example scene");
-		AppData::Scenes::OuterUpdater scenes(*data);
-		auto scene = scenes.addItem();
-		scene.setName("example-scene");
-
-		{
-			auto item=scene.settings.addItem();
-			item.setControllerId(1234567);
-			auto hsvUpdater=item.color.toHsv();
-			hsvUpdater.setH(0);
-			hsvUpdater.setS(100);
-			hsvUpdater.setV(100);
-		}
-
-		{
-			auto item=scene.settings.addItem();
-			item.setControllerId(7654321);
-			auto hsvUpdater=item.color.toHsv();
-			hsvUpdater.setH(60);
-			hsvUpdater.setS(50);
-			hsvUpdater.setV(100);
-		}
-	}
-	*/
 	
 }
 void Application::initButtons()
@@ -488,6 +635,7 @@ void Application::initButtons()
 void Application::startServices()
 {
 	debug_i("Application::startServices");
+
 	rgbwwctrl.start();
 	webserver.start();
 
@@ -499,24 +647,138 @@ void Application::startServices()
 			eventserver.start(app.webserver);
 		}
 	} // end of ConfigDB root context
-
+}
+void Application::startNetworkServices()
+{
+	debug_i("Application::startServices - starting mqtt");
+	bool mqttEnabled = false;
 	{
-		debug_i("Application::startServices - starting mqtt");
 		AppConfig::Network network(*cfg);
-		mqttclient.init(); // initialize mqtt client with node name
-		if(network.mqtt.getEnabled()) {
-			mqttclient.start();
+		AppConfig::General general(*cfg);
+		debug_i("Application::startServices - mqtt enabled: %s", network.mqtt.getEnabled() ? "true" : "false");
+		String mqttClientId = network.mqtt.homeassistant.getNodeId();
+		if(mqttClientId.length() > 0) {
+			debug_i("Application::startServices - mqtt client id: %s", mqttClientId.c_str());
+		} else {
+			if(general.getDeviceName().length() > 0) {
+				mqttClientId = general.getDeviceName();
+			} else {
+				mqttClientId = F("rgbww_") + String(WifiStation.getMAC());
+			}
 		}
+		mqttEnabled = network.mqtt.getEnabled();
+	} // close ConfigDB contexts before mqttclient.init() opens its own
+	mqttclient.init(); // initialize mqtt client with node name
+	debug_i("Application::startServices - mqtt client initialized");
+	(void)getFreeHeapSize(); // sample heap after MQTT client init
+	if(mqttEnabled) {
+		mqttclient.start();
+	}
+	telemetryClient.start();
+	
+}
+
+void Application::stopServices()
+{
+	debug_i("Application::stopServices");
+
+	// Stop timers first so no new work is queued while sockets are closing.
+	_systimer.stop();
+	_uptimetimer.stop();
+	_checkRamTimer.stop();
+	_resetPinTimer.stop();
+
+	rgbwwctrl.stop();
+	eventserver.stop();
+	webserver.stop();
+	mqttclient.stop();
+	telemetryClient.stop();
+
+	if(network.isApActive()) {
+		network.stopAp();
 	}
 }
 
+void Application::logRestart(){
+	char msg[128];
+	m_snprintf(msg, sizeof(msg), "restart, reason: %u, exccause: %u", 
+	           (unsigned int)app.rtc_info->reason, (unsigned int)app.rtc_info->exccause);
+	telemetryClient.log(msg);
+}
+
+#ifdef ARCH_ESP8266
+void Application::readCrashDump()
+{
+	CrashDump dump{};
+	system_rtc_mem_read(CRASH_RTC_SLOT, &dump, sizeof(dump));
+	if(dump.magic == CRASH_RTC_MAGIC) {
+		g_crashDump = dump;
+		g_crashDumpValid = true;
+		// clear magic so we don't re-report on the next boot
+		dump.magic = 0;
+		system_rtc_mem_write(CRASH_RTC_SLOT, &dump, sizeof(dump));
+	}
+}
+#endif
+
+void Application::reportCrashDump()
+{
+	bool fullDumpReported = false;
+#ifdef ARCH_ESP8266
+	if(g_crashDumpValid) {
+		g_crashDumpValid = false;
+		fullDumpReported = true;
+		// Emit in the format that Sming decode-stacktrace.py recognises.
+		// "pc=" line puts the tool into IN_REGISTERS state.
+		debug_w("pc=0x%08x sp=0x%08x excvaddr=0x%08x",
+		        g_crashDump.epc1, g_crashDump.stackBase, g_crashDump.excvaddr);
+		// Emit remaining exception registers on a separate line
+		// (the tool picks these up as generic r00/r01 style or passes them through)
+		debug_w("epc2=0x%08x epc3=0x%08x exccause=%u depc=0x%08x reason=%u",
+		        g_crashDump.epc2, g_crashDump.epc3,
+		        g_crashDump.exccause, g_crashDump.depc, g_crashDump.reason);
+		// Stack dump in the format "xxxxxxxx:  XXXXXXXX XXXXXXXX XXXXXXXX XXXXXXXX"
+		debug_w("Stack dump:");
+		uint32_t addr = g_crashDump.stackBase;
+		for(uint32_t i = 0; i < g_crashDump.stackCount; i += 4, addr += 16) {
+			uint32_t w0 = g_crashDump.stackWords[i];
+			uint32_t w1 = (i + 1 < g_crashDump.stackCount) ? g_crashDump.stackWords[i + 1] : 0;
+			uint32_t w2 = (i + 2 < g_crashDump.stackCount) ? g_crashDump.stackWords[i + 2] : 0;
+			uint32_t w3 = (i + 3 < g_crashDump.stackCount) ? g_crashDump.stackWords[i + 3] : 0;
+			debug_w("%08x:  %08x %08x %08x %08x", addr, w0, w1, w2, w3);
+		}
+	}
+#endif
+	// Fallback: emit reason/registers if we didn't already emit a full dump above.
+	// On ESP32 this is always the path (no crash callback available).
+	// On ESP8266 this fires only if the RTC magic was invalid (rare: RTC scrambled on hard reset).
+	if(!fullDumpReported && rtc_info != nullptr &&
+	   (rtc_info->reason == REASON_EXCEPTION_RST ||
+	    rtc_info->reason == REASON_SOFT_WDT_RST  ||
+	    rtc_info->reason == REASON_WDT_RST)) {
+		debug_w("*** CRASH REBOOT: reason=%u exccause=%u epc1=0x%08x excvaddr=0x%08x",
+		        rtc_info->reason, rtc_info->exccause, rtc_info->epc1, rtc_info->excvaddr);
+	}
+}
 void Application::restart()
 {
+	static bool gracefulRestartInProgress = false;
+
 	debug_i("Application::restart");
 	if(network.isApActive()) {
 		network.stopAp();
 		_systimer.initializeMs(500, TimerDelegate(&Application::restart, this)).startOnce();
+		return;
 	}
+
+	if(!gracefulRestartInProgress) {
+		gracefulRestartInProgress = true;
+		stopServices();
+		// Give network stacks a short window to process close callbacks cleanly.
+		_systimer.initializeMs(250, TimerDelegate(&Application::restart, this)).startOnce();
+		return;
+	}
+
 	System.restart();
 }
 
@@ -543,10 +805,19 @@ bool Application::delayedCMD(String cmd, int delay)
 	if(cmd.equals(F("reset"))) {
 		wsBroadcast(F("notification"), F("Controller will reset and restart"));
 		wsBroadcast(F("webapp_cmd"), F("reload"));
+		telemetryClient.log(F("delaycmd reset"));
 		_systimer.initializeMs(delay, TimerDelegate(&Application::reset, this)).startOnce();
 	} else if(cmd.equals(F("restart"))) {
 		wsBroadcast(F("notification"), F("Controller will restart"));
 		wsBroadcast(F("webapp_cmd"), F("reload"));
+		telemetryClient.log(F("delaycmd restart"));
+		_systimer.initializeMs(delay, TimerDelegate(&Application::restart, this)).startOnce();
+	} else if(cmd.equals(F("clear_ota_restart"))) {
+		debug_i("Application::delayedCMD: clearing OTA status before restart");
+		ota.saveStatus(OTASTATUS::OTA_NOT_UPDATING);
+		wsBroadcast(F("notification"), F("Controller will restart (OTA status cleared)"));
+		wsBroadcast(F("webapp_cmd"), F("reload"));
+		telemetryClient.log(F("delaycmd clear_ota_restart"));
 		_systimer.initializeMs(delay, TimerDelegate(&Application::restart, this)).startOnce();
 	} else if(cmd.equals(F("stopap"))) {
 		wsBroadcast(F("notification"), F("Controller will disable the access point"));
@@ -566,11 +837,12 @@ bool Application::delayedCMD(String cmd, int delay)
 	} else if(cmd.equals(F("switch_rom"))) {
 		wsBroadcast(F("notification"), F("Controller will switch to other rom"));
 		wsBroadcast(F("webapp_cmd"), F("reload"));
-#if ARCH_ESP8266
-		switchRom();
-//_systimer.initializeMs(delay, TimerDelegate(&Application::restart, this)).startOnce();
-#endif
-	} else {
+		telemetryClient.log(F("delaycmd switch_rom"));
+		_systimer.initializeMs(delay, TimerDelegate(&Application::switchRom, this)).startOnce();
+	} else if(cmd.equals(F("forget_controllers"))){
+		app.controllers->forgetControllers();
+		wsBroadcast(F("notification"), F("Controller list cleared"));
+	}else {
 		return false;
 	}
 	return true;
@@ -600,31 +872,41 @@ bool Application::mountfs(int slot)
      */
 	debug_i("mounting host file system");
 	fileSetFileSystem(&IFS::Host::getFileSystem());
-	return true;
+	_fs_mounted = true;
+	return _fs_mounted;
 #else
 	/*
      * on device file system
      */
 
-	auto part = Storage::findPartition("spiffs" + String(slot));
+	auto part = Storage::findPartition(F("spiffs") + String(slot));
 	if(part) {
 		debug_i("mouting spiffs partition %i at %x, length %d", slot, part.address(), part.size());
-		return spiffs_mount(part);
+		_fs_mounted = spiffs_mount(part);
+		return _fs_mounted;
 	} else {
 		part = Storage::findPartition(F("lfs0"));
 		if(part) {
 			debug_i("mouting primary littlefs partition at %x, length %d", part.address(), part.size());
 			if(lfs_mount(part)) {
-				return true;
+				_fs_mounted = true;
+				return _fs_mounted;
 			} else {
-				part = Storage::findPartition(F("lfs1"));
+				auto secondary = Storage::findPartition(F("lfs1"));
+				if(!secondary) {
+					debug_e("primary partition mount failed and secondary lfs partition was not found");
+					_fs_mounted = false;
+					return _fs_mounted;
+				}
 				debug_e("primary partition mount failed, mounting secondary lfs partition  at %x, length %d",
-						part.address(), part.size());
-				return lfs_mount(part);
+						secondary.address(), secondary.size());
+				_fs_mounted = lfs_mount(secondary);
+				return _fs_mounted;
 			};
 		}
 		debug_i("partition is neither spiffs nor lfs");
-		return false;
+		_fs_mounted = false;
+		return _fs_mounted;
 	}
 #endif
 }
@@ -635,6 +917,14 @@ void Application::listFiles()
 		debug_i("found VERSION file");
 		char buffer[64];
 		int bytesRead = fileRead(file, buffer, sizeof(buffer));
+		if(bytesRead < 0) {
+			debug_e("Failed reading VERSION file");
+			fileClose(file);
+			return;
+		}
+		if(bytesRead >= static_cast<int>(sizeof(buffer))) {
+			bytesRead = sizeof(buffer) - 1;
+		}
 		buffer[bytesRead] = '\0';
 		debug_i("\nweb app version String: %s", buffer);
 		fileClose(file);
@@ -672,7 +962,7 @@ void Application::umountfs()
     }
     */
 }
-#if defined(ARCH_ESP8266) || defined(ESP32)
+#if defined(ARCH_ESP8266) || defined(ESP32) || defined(ARCH_HOST)
 void Application::switchRom()
 {
 	//ToDo - rewrite to use ota.getRunningPartition() and ota.getNextBootPartition()
@@ -695,33 +985,36 @@ void Application::switchRom()
     */
 	app.ota.doSwitch();
 }
+#else
+void Application::switchRom(){}
 #endif
 
-#if defined(ARCH_ESP8266) || defined(ESP32)
 int Application::getRomSlot()
 {
 	auto partition = app.ota.getRomPartition();
 	uint8_t slot;
-	if(partition.name() == "rom1") {
+	if(partition.name() == F("rom1")) {
 		slot = 1;
 	} else {
 		slot = 0;
 	}
 	return slot;
 }
-#endif
 
 /*
 *	send a jsonrpc message from a fully constructed JsonRpcMessage object string
 */
 void Application::wsBroadcast(String message)
 {
-	static char buffer[MAX_LOG_LINE_SIZE];//max log line size for wsBroadcast
-	message.toCharArray(buffer, MAX_LOG_LINE_SIZE);
-	size_t length = message.length();
-	if(length>MAX_LOG_LINE_SIZE) length=MAX_LOG_LINE_SIZE;
+    size_t length = message.length();
+    if(length > MAX_LOG_LINE_SIZE) length = MAX_LOG_LINE_SIZE;
 
-	app.webserver.wsSendBroadcast(buffer, length);
+    char* buffer = new char[length + 1]; // +1 for null terminator
+    message.toCharArray(buffer, length + 1);
+
+    app.webserver.wsSendBroadcast(buffer, length);
+
+    delete[] buffer;
 }
 
 /*
@@ -761,6 +1054,7 @@ void Application::onCommandRelay(const String& method, const JsonObject& params)
 
 void Application::onButtonTogglePressed(int pin)
 {
+	/*
 	uint32_t now = millis();
 	uint32_t diff = now - _lastToggles[pin];
 	debug_i("Application::onButtonTogglePressed");
@@ -772,6 +1066,40 @@ void Application::onButtonTogglePressed(int pin)
 	} else {
 		debug_d("Button press ignored by debounce. Diff: %d Debounce: %d", diff, general.getButtonsDebounceMs());
 	}
+	*/
+}
+
+void Application::pollResetButton()
+{
+    // Static counter to keep track of hold duration across function calls
+    static int holdCounter = 0;
+
+    if (_clearPin < 0) return;
+
+    // Check if button is pressed (Active LOW)
+    if (digitalRead(_clearPin) == LOW) {
+        holdCounter++;
+        
+        // 30 ticks * 100ms = 3000ms (3 seconds)
+        if (holdCounter >= 30) {
+            debug_w("Emergency ROM Switch triggered via Reset Pin!");
+
+            // Reset counter to prevent multiple triggers (though we reboot anyway)
+            holdCounter = 0;
+
+            // Visual feedback
+            for(int i = 0; i < 4; i++) {
+                rgbwwctrl.toggle();
+                delay(250);
+            }
+
+            switchRom();
+            delayedCMD(F("restart"),1000);
+        }
+    } else {
+        // Button released, reset counter
+        holdCounter = 0;
+    }
 }
 
 uint32_t Application::getUptime()

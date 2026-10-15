@@ -1,6 +1,7 @@
 /**
  * @file
  * @author  Patrick Jahns http://github.com/patrickjahns
+ * 			Peter Jakobs http://github.com/pljakobs
  *
  * @section LICENSE
  *
@@ -34,85 +35,48 @@
  *   flash cell has failed), the socondary file system shall be used and a 
  *   degraded warning shall be displayed
  * 
- * layout pre partition change
- *
+ * The following layouts are esp8266 only, esp32 uses larger rom partitions due to the
+ * compiler creating larger binaries. (esp-idf is inherently larger than esp8266 nonos)
  * 
- * 0x00000000   +-------------------------+
- *              |                         |
- * 0x00002000   +-------------------------+
- *              | rom0                    |
- *              |                         |
- *              |                         |
- *              |                         |
- *              |                         |
- * 0x000FA000   +-------------------------+
- *              |                         |
- * 0x00100000   +-------------------------+
- *              | spiffs0                 |
- *              |                         |
- *              |                         |
- *              |                         |
- *              |                         |
- * 0x001C0000   +-------------------------+
- *              |                         |
- * 0x00202000   +-------------------------+
- *              | rom1                    |
- *              |                         |
- *              |                         |
- *              |                         |
- *              |                         |
- * 0x002FA000   +-------------------------+
-*               |                         |
- * 0x00300000   +-------------------------+
- *              | spiffs1                 |
- *              |                         |
- *              |                         |
- *              |                         |
- *              |                         |
- * 0x003C0000   +-------------------------+
- *              |                         |
- *              |                         |
- * 0x003FFFFF   +-------------------------+
- * 
- *
- * layout post partition change
- * 
- * 0x00000000   +-------------------------+
- *              | partition Table         |
- * 0x00002000   +-------------------------+
- *              | rom0                    |
- *              |                         |
- *              |                         |
- *              |                         |
- *              |                         |
- * 0x000FA000   +-------------------------+
- *              |                         |
- * 0x00100000   +-------------------------+
- *              | lfs0                    |
- *              | extended from 768kB     |
- *              | to 1000kB               |
- *              |                         |
- *              |                         |
- * 0x001FA000   +-------------------------+
- *              |                         |
- * 0x00202000   +-------------------------+
- *              | rom1                    |
- *              |                         |
- *              |                         |
- *              |                         |
- *              |                         |
- * 0x002FA000   +-------------------------+
- *              |                         |
- * 0x00300000   +-------------------------+
- *              | lfs1                    |
- *              | extended from 768kB     |
- *              | to 1000kB               |
- *              |                         |
- *              |                         |
- * 0x003FA000   +-------------------------+
- *              |                         |
- *              |                         |
- * 0x003FFFFF   +-------------------------+
+ * layout pre partition change                         layout post partition change
+ *                                                     
+ *                                                    
+ * 0x00000000   +-------------------------+          * 0x00000000   +-------------------------+
+ *              |                         |          *              | partition Table         |
+ * 0x00002000   +-------------------------+          * 0x00002000   +-------------------------+
+ *              | rom0                    |          *              | rom0                    |
+ *              |                         |          *              |                         |
+ *              |                         |          *              |                         |
+ *              |                         |          *              |                         |
+ *              |                         |          *              |                         |
+ * 0x000FA000   +-------------------------+          * 0x000FA000   +-------------------------+
+ *              |                         |          *              |                         |
+ * 0x00100000   +-------------------------+          * 0x00100000   +-------------------------+
+ *              | spiffs0                 |          *              | lfs0                    |
+ *              |                         |          *              | extended from 768kB     |
+ *              |                         |          *              | to 1000kB               |
+ *              |                         |          *              |                         |
+ *              |                         |          *              |                         |
+ * 0x001C0000   +-------------------------+          * 0x001FA000   +-------------------------+
+ *              |                         |          *              |                         |
+ * 0x00202000   +-------------------------+          * 0x00202000   +-------------------------+
+ *              | rom1                    |          *              | rom1                    |
+ *              |                         |          *              |                         |
+ *              |                         |          *              |                         |
+ *              |                         |          *              |                         |
+ *              |                         |          *              |                         |
+ * 0x002FA000   +-------------------------+          * 0x002FA000   +-------------------------+
+ *              |                         |          *              |                         |
+ * 0x00300000   +-------------------------+          * 0x00300000   +-------------------------+
+ *              | spiffs1                 |          *              | lfs1                    |
+ *              |                         |          *              | extended from 768kB     |
+ *              |                         |          *              | to 1000kB               |
+ *              |                         |          *              |                         |
+ *              |                         |          *              |                         |
+ * 0x003C0000   +-------------------------+          * 0x003FA000   +-------------------------+
+ *              |                         |          *              |                         |
+ *              |                         |          *              |                         |
+ * 0x003FFFFF   +-------------------------+          * 0x003FFFFF   +-------------------------+
  * 
  * Concepts:
  * 
@@ -205,22 +169,44 @@
 #include <otaupdate.h>
 #include <RGBWWCtrl.h>
 
+void ApplicationOTA::broadcastOtaStatus(int step, const String& message)
+{
+	StaticJsonDocument<128> doc;
+	JsonObject params = doc.to<JsonObject>();
+	params[F("status")] = step;
+	params[F("message")] = message;
+	app.wsBroadcast(F("ota_status"), params);
+}
+
 void ApplicationOTA::start(String romurl)
 {
+	/*
+	 * ############################################################
+	 * ##### HIGH RISK: CORE OTA TRANSACTION SETUP            #####
+	 * ##### Changes here can brick OTA-only recoverable      #####
+	 * ##### devices.                                          #####
+	 * ############################################################
+	 */
 	debug_i("ApplicationOTA::start");
-	app.wsBroadcast(F("ota_status"), F("started"));
 	otaUpdater.reset(new Ota::Network::HttpUpgrader);
 	status = OTASTATUS::OTA_PROCESSING;
 
 	auto part = ota.getNextBootPartition();
 
-/*
+	/*
+	 * ############################################################
+	 * ##### HIGH RISK: OTA SAFETY CHECK                      #####
+	 * ##### Never write to the currently running partition.  #####
+	 * ##### Any regression here can leave devices unbootable.#####
+	 * ############################################################
 	 * Applications should always include a sanity check to ensure partitions being updated are
 	 * not in use. This should always included the application partition but should also consider
 	 * filing system partitions, etc. which may be actively in use.
 	 */
 	if(part == ota.getRunningPartition()) {
-		Serial << F("May be running in temporary mode. Please reboot and try again.") << endl;
+		debug_w("May be running in temporary mode. Please reboot and try again.");
+		broadcastOtaStatus(0, F("OTA failed: target partition is currently running, please reboot and try again"));
+		status = OTASTATUS::OTA_FAILED;
 		return;
 	}
 
@@ -234,8 +220,24 @@ void ApplicationOTA::start(String romurl)
 
 	beforeOTA();
 
-	unsigned fh = system_get_free_heap_size();
-	debug_i("Free heap before OTA: %i", fh);
+	/*
+	 * ############################################################
+	 * ##### HIGH RISK: OTA WATCHDOG RECOVERY                 #####
+	 * ##### This reboot path preserves field recoverability  #####
+	 * ##### when OTA stalls.                                  #####
+	 * ############################################################
+	 */
+	// Watchdog: if upgradeCallback has not fired within 2 minutes, reboot to recover
+	otaWatchdog.initializeMs<2 * 60 * 1000>([this]() {
+		debug_e("ApplicationOTA: watchdog timeout - OTA appears hung, rebooting to recover");
+		broadcastOtaStatus(0, F("OTA watchdog timeout - rebooting to recover"));
+		otaUpdater.reset();
+		status = OTASTATUS::OTA_FAILED;
+		System.restart();
+	});
+	otaWatchdog.startOnce();
+
+	debug_i("Free heap before OTA: %i", app.getFreeHeapSize());
 
 	debug_i("Current running partition: %s", ota.getRunningPartition().name());
 	debug_i("OTA target partition: %s", part.name().c_str());
@@ -249,12 +251,19 @@ void ApplicationOTA::start(String romurl)
 		debug_i("  ---------");
 	}
 	debug_i("Starting OTA ...");
-
+	broadcastOtaStatus(2, F("Starting OTA download"));
+	/*
+	 * ############################################################
+	 * ##### HIGH RISK: OTA START ACTION                      #####
+	 * ##### Starts flash write/download sequence.            #####
+	 * ############################################################
+	 */
 	otaUpdater->start();
 }
 
 void ApplicationOTA::doSwitch()
 {
+	app.wsBroadcast(F("notification"), F("Switching ROM"));
 	auto before = ota.getRunningPartition();
 	auto after = ota.getNextBootPartition();
 
@@ -278,6 +287,7 @@ void ApplicationOTA::reset() {reset");
 
 void ApplicationOTA::beforeOTA()
 {
+	broadcastOtaStatus(1, F("Preparing OTA"));
 	debug_i("ApplicationOTA::beforeOTA");
 	/*
     * this is being executed before otaUpdater->start
@@ -319,6 +329,7 @@ void ApplicationOTA::afterOTA()
 	 */
 	if(status == OTASTATUS::OTA_SUCCESS_REBOOT) {
 		debug_i("afterOta, rom Slot=%i", app.getRomSlot());
+		app.wsBroadcast(F("notification"), F("OTA successful, rebooting"));
 
 
 // ToDo: so the ota has been successful, now what?
@@ -347,7 +358,7 @@ void ApplicationOTA::afterOTA()
 		// save success to new rom
 		saveStatus(OTASTATUS::OTA_SUCCESS);
 
-// remount old filesystem
+// remount old filesystemv2
 // app.umountfs();
 // app.mountfs(app.getRomSlot());
 #endif
@@ -359,7 +370,15 @@ void ApplicationOTA::afterOTA()
 */
 void ApplicationOTA::upgradeCallback(Ota::Network::HttpUpgrader& client, bool result)
 {
+	/*
+	 * ############################################################
+	 * ##### HIGH RISK: OTA COMPLETION CALLBACK               #####
+	 * ##### Controls partition switch and restart behavior.  #####
+	 * ############################################################
+	 */
 	debug_i("ApplicationOTA::rBootCallback");
+	otaWatchdog.stop(); // disarm watchdog regardless of outcome
+	broadcastOtaStatus(3, F("OTA download complete, verifying"));
 	if(result == true) {
 		ota.end();
 
@@ -371,16 +390,45 @@ void ApplicationOTA::upgradeCallback(Ota::Network::HttpUpgrader& client, bool re
 		debug_i("configured next boot partition");
 		status = OTASTATUS::OTA_SUCCESS_REBOOT;
 		debug_i("OTA callback done, rebooting");
+		broadcastOtaStatus(4, F("OTA successful, rebooting"));
+		/*
+		 * ##########################################################
+		 * ##### HIGH RISK: IMMEDIATE REBOOT TO NEW PARTITION  #####
+		 * ##########################################################
+		 */
 		System.restart();
 	} else {
 		status = OTASTATUS::OTA_FAILED;
 		ota.abort();
-		debug_i("OTA failed");
+		otaUpdater.reset();
+		broadcastOtaStatus(0, F("OTA failed - rebooting to recover"));
+		debug_i("OTA failed, rebooting in 5s to recover network stack");
+		// Rearm the watchdog as a reboot timer: gives the WS message time to
+		// be delivered over the websocket before the restart, and ensures the
+		// controller always recovers from a failed download without physical
+		// intervention (dirty TCP/lwIP state after a large failed download
+		// can prevent the next OTA attempt from working).
+		otaWatchdog.initializeMs<5000>([this]() {
+			/*
+			 * ########################################################
+			 * ##### HIGH RISK: FORCED RECOVERY REBOOT          #####
+			 * ##### Restores OTA reachability after failure.   #####
+			 * ########################################################
+			 */
+			System.restart();
+		});
+		otaWatchdog.startOnce();
 	}
 }
 
 void ApplicationOTA::checkAtBoot()
 {
+	/*
+	 * ############################################################
+	 * ##### HIGH RISK: BOOT-TIME OTA STATE HANDLING          #####
+	 * ##### Influences post-update recovery behavior.        #####
+	 * ############################################################
+	 */
 	debug_i("ApplicationOTA::checkAtBoot");
 	status = loadStatus();
 	/*
@@ -389,13 +437,23 @@ void ApplicationOTA::checkAtBoot()
     * then change the file systems if necessary.
     */
 	int rom = app.getRomSlot();
-	Serial.systemDebugOutput(true);
+	//Serial.systemDebugOutput(true);
 	debug_i("ApplicationOTA::checkAtBoot status: %i", status);
 	debug_i("after reboot, checking partition layout");
 	debug_i("current active rom is: %i", rom);
 #if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
 	Storage::Debug::listDevices(Serial);
 #endif
+
+	// If we booted with OTA_FAILED or OTA_PROCESSING persisted, that means
+	// a previous OTA was interrupted (power loss, hard crash, watchdog reboot
+	// mid-flash).  We survived into a running image, so the ROM is good —
+	// clear the flag so the controller doesn't stay in a degraded state.
+	if(status == OTASTATUS::OTA_FAILED || status == OTASTATUS::OTA_PROCESSING) {
+		debug_w("checkAtBoot: boot after interrupted OTA (status=%i) — cleared, running normally", (int)status);
+		status = OTASTATUS::OTA_NOT_UPDATING;
+	}
+
 	if(app.isTempBoot()) {
 		debug_i("ApplicationOTA::checkAtBoot permanently enabling rom %i", app.getRomSlot());
 #ifdef ESP8266
@@ -460,6 +518,13 @@ bool ApplicationOTA::copyContent(std::unique_ptr<IFS::FileSystem> src, std::uniq
 #ifdef ARCH_ESP8266
 bool ApplicationOTA::switchPartitions()
 {
+	/*
+	 * ############################################################
+	 * ##### HIGH RISK: PARTITION MIGRATION PATH              #####
+	 * ##### Rewrites partition table and migrates filesystems.#####
+	 * ##### Errors here can break boot and OTA recovery.      #####
+	 * ############################################################
+	 */
 	if(!Storage::findPartition(F("lfs1")) && !Storage::findPartition(F("lfs0"))) {
 		std::vector<Storage::esp_partition_info_t> partitionTable = getEditablePartitionTable();
 		//if present, delete spiffs1 to make space
@@ -518,6 +583,12 @@ bool ApplicationOTA::switchPartitions()
 //#ifdef ARCH_ESP8266
 bool ApplicationOTA::switchPartition(uint8_t slot)
 {
+	/*
+	 * ############################################################
+	 * ##### HIGH RISK: SINGLE-PARTITION MIGRATION            #####
+	 * ##### Transitional layout conversion path.             #####
+	 * ############################################################
+	 */
 	String spiffsPartName = F("spiffs") + String(slot);
 	String lfsPartName = F("lfs") + String(slot);
 	if(Storage::findPartition(spiffsPartName)) {
@@ -549,12 +620,13 @@ bool ApplicationOTA::switchPartition(uint8_t slot)
 }
 #endif
 
-void ApplicationOTA::saveStatus(OTASTATUS status)
+void ApplicationOTA::saveStatus(OTASTATUS newStatus)
 {
-	debug_i("ApplicationOTA::saveStatus %i to rom partition rom%i\n", status, app.getRomSlot());
+	debug_i("ApplicationOTA::saveStatus %i to rom partition rom%i\n", newStatus, app.getRomSlot());
+	status = newStatus;
 	StaticJsonDocument<128> doc;
 	JsonObject root = doc.to<JsonObject>();
-	root[F("status")] = int(status);
+	root[F("status")] = int(newStatus);
 	Json::saveToFile(root, OTA_STATUS_FILE);
 }
 
@@ -644,6 +716,13 @@ bool ApplicationOTA::delPartition(std::vector<Storage::esp_partition_info_t>& pa
 
 bool ApplicationOTA::savePartitionTable(std::vector<Storage::esp_partition_info_t>& partitionTable)
 {
+	/*
+	 * ############################################################
+	 * ##### HIGH RISK: FLASH PARTITION TABLE WRITE           #####
+	 * ##### Writes partition metadata directly to flash.     #####
+	 * ##### Must stay deterministic and heavily validated.   #####
+	 * ############################################################
+	 */
 	std::vector<uint8_t> entries;
 	auto& flash = *Storage::spiFlash;
 	//partitions have to be sorted by start address

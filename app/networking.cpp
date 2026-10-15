@@ -1,6 +1,7 @@
 /**
  * @file
  * @author  Patrick Jahns http://github.com/patrickjahns
+ * 			Peter Jakobs http://github.com/pljakobs
  *
  * @section LICENSE
  *
@@ -20,11 +21,8 @@
  *
  */
 #include <RGBWWCtrl.h>
-#include "mdnshandler.cpp"
 
 #define DNS_PORT 53
-
-mdnsHandler mdnsHandler;
 
 DnsServer dnsServer;
 
@@ -146,13 +144,15 @@ void AppWIFI::init()
 	// ConfigDB adapt
 	if(app.isFirstRun()) {
 		debug_i("AppWIFI::init initial run - setting up AP, ssid: ");
-		String SSID = String(DEFAULT_AP_SSIDPREFIX) + String(system_get_chip_id());
-		printf("%s", SSID.c_str());
+		char ssid_buf[64];
+		snprintf(ssid_buf, sizeof(ssid_buf), "%s%u", DEFAULT_AP_SSIDPREFIX, system_get_chip_id());
+		String SSID = ssid_buf;
+		debug_i("%s", SSID.c_str());
 
 		AppConfig::Network network(*app.cfg);
 		if(auto networkUpdate = network.update()) {
-			networkUpdate.mdns.setName(String(DEFAULT_AP_SSIDPREFIX) + String(system_get_chip_id()));
-			networkUpdate.ap.setSsid(String(DEFAULT_AP_SSIDPREFIX) + String(system_get_chip_id()));
+			networkUpdate.mdns.setName(SSID);
+			networkUpdate.ap.setSsid(SSID);
 		} //this should never fail as it is during system startup, there are no asynchronous things here. I think
 		WifiAccessPoint.setIP(_ApIP);
 	}
@@ -285,10 +285,15 @@ void AppWIFI::_STAConnected(const String& ssid, MacAddress bssid, uint8_t channe
 {
 	debug_i("AppWIFI::_STAConnected SSID - %s", ssid.c_str());
 	{
-		AppConfig::General general(*app.cfg);
-		String device_name = general.getDeviceName();
+		String device_name;
+		{
+			AppConfig::General general(*app.cfg);
+			device_name = general.getDeviceName();
+		} // end ConfigDB general context
 		if(device_name == "") {
-			device_name = String(DEFAULT_AP_SSIDPREFIX) + String(system_get_chip_id());
+			char device_name_buf[64];
+			snprintf(device_name_buf, sizeof(device_name_buf), "%s%u", DEFAULT_AP_SSIDPREFIX, system_get_chip_id());
+			device_name = device_name_buf;
 			debug_i("no device name configured, building default name");
 		}
 		debug_i("AppWIFI::connect setting hostname to %s", device_name.c_str());
@@ -297,8 +302,10 @@ void AppWIFI::_STAConnected(const String& ssid, MacAddress bssid, uint8_t channe
 			AppConfig::Network::OuterUpdater network(*app.cfg);
 			network.mdns.setName(app.sanitizeName(device_name));
 		} // end ConfigDB network updater context
-	}	 // end ConfigDB general context
+	}	 
+	app.startNetworkServices();
 	broadcastWifiStatus(F("Connected to WiFi"));
+	app.telemetryClient.log(F("WiFi connected"));
 	_con_ctr = 0;
 	// wifi cstation connected
 }
@@ -316,7 +323,16 @@ void AppWIFI::_STAConnected(const String& ssid, MacAddress bssid, uint8_t channe
  */
 void AppWIFI::_STAGotIP(IpAddress ip, IpAddress mask, IpAddress gateway)
 {
+	// Set hostname immediately so every debug_i() in this callback and onwards
+	// carries the correct name — not the empty string from begin().
+	{
+		AppConfig::Network network(*app.cfg);
+#ifndef SMING_RELEASE
+		app.udpSyslogStream.setHostname(network.mdns.getName());
+#endif
+	}
 	debug_i("AppWIFI::_STAGotIP");
+
 	if(_new_connection) {
 		stopAp(90000);
 	} else {
@@ -334,23 +350,17 @@ void AppWIFI::_STAGotIP(IpAddress ip, IpAddress mask, IpAddress gateway)
 		}
 	} //end ConfigDB general and network context
 
-	mdnsHandler.start();
+	app.mdnsService.start();
 	String ipAddress = ip.toString();
 
 	{
 		AppConfig::Network network(*app.cfg);
-		/*
-		if(network.connection.getDhcp()) {
-			ipAddress = "dhcp";
-		}
-			*/
 		uint32_t id;
 		
-		id = system_get_chip_id();	
+		id = (uint32_t)system_get_chip_id();	
 
-		ipAddress=ip.toString();
 		debug_i("adding mdns host %s with ip %s and id %s", network.mdns.getName().c_str(), ipAddress.c_str(), String(id).c_str());
-		mdnsHandler.addHost(network.mdns.getName(), ipAddress, -1, id);
+		app.controllers->addOrUpdate(id, network.mdns.getName(), ipAddress, -1);
 
 		broadcastWifiStatus();
 
@@ -358,6 +368,14 @@ void AppWIFI::_STAGotIP(IpAddress ip, IpAddress mask, IpAddress gateway)
 			app.mqttclient.start();
 		}
 	} // end ConfigDB network context
+
+	// After network is up, report any crash/watchdog reboot to the syslog target
+	app.reportCrashDump();
+	// Now that we have an IP address, drain any log messages that were compressed
+	// into the pre-network ring buffer before the UDP socket was routable.
+#ifndef SMING_RELEASE
+	app.udpSyslogStream.drainPreNetBuffer();
+#endif
 }
 
 /**
@@ -414,14 +432,19 @@ void AppWIFI::startAp()
 			}
 		} // end AppConfig network context
 	}
-	//start dns server for captive portal
-	dnsServer.start(DNS_PORT, "*", WifiAccessPoint.getIP());
-	broadcastWifiStatus(F("AP started"));
-}
 
-String AppWIFI::getMdnsHosts()
-{
-	return mdnsHandler.getHosts();
+    // Wait for AP IP to be assigned before starting DNS server
+    Timer* dnsStartTimer = new Timer();
+    dnsStartTimer->initializeMs(500, [this, dnsStartTimer]() {
+        IpAddress apIP = WifiAccessPoint.getIP();
+        if (apIP.toString() != "0.0.0.0") {
+            dnsServer.start(DNS_PORT, "*", apIP);
+            debug_i("DNS server started: with address %s", apIP.toString().c_str());
+            dnsStartTimer->stop();
+            delete dnsStartTimer;
+        }
+    }).start();
+	broadcastWifiStatus(F("AP started"));
 }
 
 /**
@@ -457,7 +480,6 @@ void AppWIFI::broadcastWifiStatus(String message)
 		ap[F("ip")] = WifiAccessPoint.getIP().toString();
 
 		debug_i("rpc: root =%s", Json::serialize(root).c_str());
-		debug_i("rpc: msg =%s", Json::serialize(msg.getRoot()).c_str());
 
 		String jsonStr = Json::serialize(msg.getRoot());
 
