@@ -30,6 +30,7 @@
 #include <Data/WebHelpers/base64.h>
 #include <Crypto/Sha2.h>
 #include <cstring>
+#include <deque>
 #include <memory>
 #include <stdio.h>
 
@@ -51,6 +52,12 @@ constexpr size_t INFO_DOC_CAPACITY_V1 = 512;
 constexpr size_t INFO_DOC_CAPACITY_V2 = 1224;
 constexpr size_t WS_INFO_RESPONSE_OVERHEAD = 300;
 constexpr size_t WS_INFO_RESPONSE_CAPACITY = INFO_DOC_CAPACITY_V1 + WS_INFO_RESPONSE_OVERHEAD;
+constexpr size_t WS_MAX_QUEUED_OUTPUTS = 4;
+
+struct WsQueuedOutput {
+	std::unique_ptr<IDataSourceStream> stream;
+	String payload;
+};
 
 // Per-connection WebSocket authentication state, attached via setUserData().
 // Allocated in wsConnected(), released in wsDisconnected(). The challenge is a
@@ -60,7 +67,96 @@ struct WsAuthState {
 	bool authenticated = false;
 	bool runtimeInfoSubscribed = false;
 	String challenge;
+	std::deque<WsQueuedOutput> pendingOutput;
+	std::shared_ptr<RpcCodec::StreamTask> activeStream;
+	std::shared_ptr<uint8_t> lifetimeToken = std::make_shared<uint8_t>(0);
 };
+
+void flushWsOutput(WebsocketConnection& socket);
+
+bool queueWsOutput(WebsocketConnection& socket, WsQueuedOutput output, bool mustKeep = true)
+{
+	auto* state = static_cast<WsAuthState*>(socket.getUserData());
+	if(state == nullptr) {
+		return output.stream ? socket.send(output.stream.release()) : socket.sendString(output.payload);
+	}
+	if(state->pendingOutput.size() >= WS_MAX_QUEUED_OUTPUTS) {
+		if(mustKeep) {
+			socket.close();
+		}
+		return false;
+	}
+	state->pendingOutput.push_back(std::move(output));
+	flushWsOutput(socket);
+	return true;
+}
+
+void queueWsPayload(WebsocketConnection& socket, const char* payload, size_t length, bool mustKeep = false)
+{
+	if(payload == nullptr || length == 0) {
+		return;
+	}
+	WsQueuedOutput output;
+	output.payload.reserve(length);
+	if(!output.payload.concat(payload, length)) {
+		return;
+	}
+	queueWsOutput(socket, std::move(output), mustKeep);
+}
+
+void queueWsStream(WebsocketConnection& socket, std::unique_ptr<IDataSourceStream> stream)
+{
+	if(!stream) {
+		return;
+	}
+	WsQueuedOutput output;
+	output.stream = std::move(stream);
+	queueWsOutput(socket, std::move(output));
+}
+
+void flushWsOutput(WebsocketConnection& socket)
+{
+	auto* state = static_cast<WsAuthState*>(socket.getUserData());
+	if(state == nullptr || state->activeStream) {
+		return;
+	}
+
+	while(!state->pendingOutput.empty()) {
+		auto output = std::move(state->pendingOutput.front());
+		state->pendingOutput.pop_front();
+		if(!output.stream) {
+			if(!socket.sendString(output.payload)) {
+				socket.close();
+				return;
+			}
+			continue;
+		}
+
+		WebsocketConnection* socketPtr = &socket;
+		std::weak_ptr<uint8_t> lifetimeToken = state->lifetimeToken;
+		state->activeStream = rpcCodec().sendWebsocketStream(socket, std::move(output.stream), [socketPtr, lifetimeToken](bool success) {
+			auto lifetime = lifetimeToken.lock();
+			if(!lifetime) {
+				return;
+			}
+			auto* current = static_cast<WsAuthState*>(socketPtr->getUserData());
+			if(current == nullptr) {
+				return;
+			}
+			current->activeStream.reset();
+			if(!success) {
+				socketPtr->close();
+				return;
+			}
+			flushWsOutput(*socketPtr);
+		});
+		if(!state->activeStream) {
+			socket.close();
+			return;
+		}
+		return;
+	}
+}
 
 // Generate a 16-byte random nonce as a 32-char lowercase hex string.
 String wsMakeChallenge()
@@ -219,16 +315,24 @@ void ApplicationWebserver::wsConnected(WebsocketConnection& socket)
         
         JsonObject rpcParams = rpcRoot.createNestedObject(F("params"));
         app.webappOta.fillStatusJson(rpcParams);
-        
-        socket.sendString(Json::serialize(rpcRoot));
+
+		const String payload = Json::serialize(rpcRoot);
+		queueWsPayload(socket, payload.c_str(), payload.length(), true);
     }
 }
 
 void ApplicationWebserver::wsDisconnected(WebsocketConnection& socket)
 {
     cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::wsDisconnected: " ANSI_COLOR_BLUE "<===wsDisconnected" ANSI_COLOR_RESET);
-    
-    delete static_cast<WsAuthState*>(socket.getUserData());
+
+	auto* state = static_cast<WsAuthState*>(socket.getUserData());
+	if(state != nullptr && state->activeStream) {
+		state->activeStream->cancel();
+	}
+	if(state != nullptr) {
+		state->lifetimeToken.reset();
+	}
+	delete state;
     socket.setUserData(nullptr);
     
     webSockets.removeElement(&socket);
@@ -251,7 +355,6 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 
 	if(!app.api || !app.api->parseJsonRpcRequest(requestStream, methodName, paramsJson, requestId, authHash,
 												  sparse, paramsEmpty, errorMsg)) {
-		String parseErrorPayload;
 		auto& codec = rpcCodec();
 		Jsonrpc::Root root(codec.db());
 		if(auto update = root.update()) {
@@ -259,8 +362,8 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 			error.setCode(-32700);
 			error.setMessage(F("Parse error"));
 		}
-		if(codec.render({0, JsonRPC::Message::Kind::error, ""}, root.asRpcError(), parseErrorPayload)) {
-			socket.sendString(parseErrorPayload);
+		if(auto parseErrorStream = codec.renderStream({0, JsonRPC::Message::Kind::error, ""}, root.asRpcError())) {
+			queueWsStream(socket, std::move(parseErrorStream));
 		}
         return;
     }
@@ -380,17 +483,15 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 
 	// ---- Phase 2: stream the JSON-RPC envelope --------------------------
 	if(resultKind == RK_Data && errorMsg.length() == 0 && app.api != nullptr) {
-		String dataPayload;
-		if(app.api->renderData(methodName, sparse, dataPayload, requestId)) {
-			socket.sendString(dataPayload);
+		if(auto dataStream = app.api->renderDataStream(methodName, sparse, requestId)) {
+			queueWsStream(socket, std::move(dataStream));
 			return;
 		}
 	}
 	{
 		auto& codec = rpcCodec();
 		Jsonrpc::Root root(codec.db());
-		String rpcPayload;
-		bool rendered = false;
+		std::unique_ptr<IDataSourceStream> rpcStream;
 		if(errorMsg.length()) {
 			if(auto update = root.update()) {
 				auto error = update.toRpcError();
@@ -400,32 +501,27 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 					error.setChallenge(challenge);
 				}
 			}
-			rendered = codec.render({requestId,
-				JsonRPC::Message::Kind::error, method}, root.asRpcError(), rpcPayload);
+			rpcStream = codec.renderStream({requestId, JsonRPC::Message::Kind::error, method}, root.asRpcError());
 		} else if(resultKind == RK_Authenticated) {
 			if(auto update = root.update()) {
 				update.toAuthenticateResult().setAuthenticated(true);
 			}
-			rendered = codec.render({requestId,
-				JsonRPC::Message::Kind::result, method}, root.asAuthenticateResult(), rpcPayload);
+			rpcStream = codec.renderStream({requestId, JsonRPC::Message::Kind::result, method}, root.asAuthenticateResult());
 		} else if(resultKind == RK_SubTrue || resultKind == RK_SubFalse) {
 			if(auto update = root.update()) {
 				auto subscription = update.toSubscriptionResult();
 				subscription.setSubscribed(resultKind == RK_SubTrue);
 				subscription.setChannel(F("runtime_info"));
 			}
-			rendered = codec.render({requestId,
-				JsonRPC::Message::Kind::result, method}, root.asSubscriptionResult(), rpcPayload);
+			rpcStream = codec.renderStream({requestId, JsonRPC::Message::Kind::result, method}, root.asSubscriptionResult());
 		} else if(resultKind == RK_CommandSuccess) {
 			if(auto update = root.update()) {
 				update.toApiSuccess().setSuccess(true);
 			}
-			rendered = codec.render({requestId,
-				JsonRPC::Message::Kind::result, method}, root.asApiSuccess(), rpcPayload);
+			rpcStream = codec.renderStream({requestId, JsonRPC::Message::Kind::result, method}, root.asApiSuccess());
 		}
-		if(rendered) {
-			socket.sendString(rpcPayload);
-			return;
+		if(rpcStream) {
+			queueWsStream(socket, std::move(rpcStream));
 		}
 	}
 }
@@ -437,7 +533,7 @@ void ApplicationWebserver::wsSendBroadcast(const char* buffer, size_t length)
 {
     for (size_t i = 0; i < webSockets.size(); ++i) {
         if (webSockets[i] != nullptr) {
-            webSockets[i]->send(buffer, length, WS_FRAME_TEXT); 
+			queueWsPayload(*webSockets[i], buffer, length);
         }
     }
 }
@@ -463,7 +559,7 @@ void ApplicationWebserver::wsSendRuntimeInfo(const char* buffer, size_t length)
         if(wsAuth != nullptr && wsAuth->runtimeInfoSubscribed) {
             // Send directly without creating an intermediate String object
 			cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::wsSendRuntimeInfo: " ANSI_COLOR_GREEN "sending runtime info to websocket" ANSI_COLOR_RESET);
-            socket->send(buffer, length, WS_FRAME_TEXT);
+			queueWsPayload(*socket, buffer, length);
         }
     }
 }

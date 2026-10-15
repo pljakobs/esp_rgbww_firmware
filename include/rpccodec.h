@@ -17,21 +17,40 @@
 
 #pragma once
 
+#include <functional>
+#include <memory>
 #include <ConfigDB/JsonRPC/JsonRPC.h>
 #include "jsonrpc.h"
+
+class WebsocketConnection;
 
 /**
  * @brief Transient workspace for building outbound JSON-RPC messages.
  *
  * Unlike app.cfg / app.data this database is never persisted: a commit callback
- * clears the dirty flag before ConfigDB can save it. Only one message may be
- * under construction at a time, so a body must be fully rendered before the
- * next message is started.
+ * clears the dirty flag before ConfigDB can save it. Streaming responses retain
+ * an ObjectRef to their body store; ConfigDB copy-on-write keeps that snapshot
+ * stable while later messages are constructed.
  */
 class RpcCodec
 {
 public:
 	using Message = JsonRPC::Message;
+
+	class StreamTask
+	{
+	public:
+		~StreamTask();
+		void cancel();
+
+	private:
+		struct State;
+		explicit StreamTask(std::shared_ptr<State> state) : state(std::move(state))
+		{
+		}
+		std::shared_ptr<State> state;
+		friend class RpcCodec;
+	};
 
 	RpcCodec();
 
@@ -49,6 +68,25 @@ public:
 	bool render(const Message& msg, const ConfigDB::Object& body, String& out);
 
 	/**
+	 * @brief Create a lazy JSON-RPC envelope source.
+	 *
+	 * The source does not know its total length; use sendWebsocketStream() for
+	 * transports which require finite frame lengths.
+	 */
+	std::unique_ptr<IDataSourceStream> renderStream(const Message& msg, const ConfigDB::Object& body);
+
+	/**
+	 * @brief Send a lazy source as bounded, finite WebSocket fragments.
+	 *
+	 * The caller owns the returned task and must cancel it when the connection
+	 * is disconnected. The completion callback is deferred until all fragments
+	 * have drained from the TCP stream.
+	 */
+	std::shared_ptr<StreamTask> sendWebsocketStream(WebsocketConnection& socket,
+												 std::unique_ptr<IDataSourceStream> source,
+												 std::function<void(bool)> onComplete);
+
+	/**
 	 * @brief Serialize @a body on its own, with no JSON-RPC envelope.
 	 *
 	 * For transports that carry a bare payload, such as the MQTT state topics.
@@ -57,9 +95,8 @@ public:
 
 private:
 	Jsonrpc _db;
-	// Guards the synchronous store-read in render()/renderPayload(); catches a
-	// callback re-entering the codec mid-serialize (e.g. from a logging hook or
-	// event callback), not the field-population window before it.
+	// Guards synchronous serialization and stream-size measurement against
+	// re-entrant use; it does not cover field population before those calls.
 	bool _rendering = false;
 };
 

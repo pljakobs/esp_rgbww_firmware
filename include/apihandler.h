@@ -36,11 +36,14 @@ public:
 	bool renderData(const String& method, const JsonObject& params, String& out);
 	bool renderData(const String& method, const JsonObject& params, String& out, int requestId);
 	bool renderData(const String& method, bool sparse, String& out, int requestId);
+	std::unique_ptr<IDataSourceStream> renderDataStream(const String& method, bool sparse, int requestId);
 
 	// ConfigDB-backed command dispatch for HTTP request bodies (see CONFIGDB_JSON_INBOUND_PLAN.md Phase B)
 	bool dispatchCommandFromStream(const String& method, Stream& body, String& errorMsg, bool relay = true);
 
 private:
+	bool renderDataImpl(const String& method, bool sparse, String* out,
+						std::unique_ptr<IDataSourceStream>* streamOut, int requestId);
 	bool handleHosts(const JsonObject& params, std::unique_ptr<IDataSourceStream>& out, String& errorMsg);
 	bool handleConfig(const JsonObject& params, std::unique_ptr<IDataSourceStream>& out, String& errorMsg);
 };

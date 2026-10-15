@@ -520,7 +520,32 @@ bool Api::renderData(const String& method, const JsonObject& params, String& out
 
 bool Api::renderData(const String& method, bool sparse, String& out, int requestId)
 {
+	return renderDataImpl(method, sparse, &out, nullptr, requestId);
+}
+
+std::unique_ptr<IDataSourceStream> Api::renderDataStream(const String& method, bool sparse, int requestId)
+{
+	if(requestId < 0) {
+		return nullptr;
+	}
+	std::unique_ptr<IDataSourceStream> stream;
+	if(!renderDataImpl(method, sparse, nullptr, &stream, requestId)) {
+		return nullptr;
+	}
+	return stream;
+}
+
+bool Api::renderDataImpl(const String& method, bool sparse, String* out,
+						 std::unique_ptr<IDataSourceStream>* streamOut, int requestId)
+{
 	auto& codec = rpcCodec();
+	auto emit = [&](const JsonRPC::Message& message, const ConfigDB::Object& body) {
+		if(streamOut != nullptr) {
+			*streamOut = codec.renderStream(message, body);
+			return static_cast<bool>(*streamOut);
+		}
+		return out != nullptr && codec.render(message, body, *out);
+	};
 	Jsonrpc::Root root(codec.db());
 	const auto dataMethodId = getDataMethodId(method.c_str());
 
@@ -605,16 +630,14 @@ bool Api::renderData(const String& method, bool sparse, String& out, int request
 		const auto infoBody = root.asInfo();
 		if(!sparse) {
 			if(requestId >= 0) {
-				return codec.render({requestId, JsonRPC::Message::Kind::result, method},
-					infoBody.asInfoFullParams(), out);
+				return emit({requestId, JsonRPC::Message::Kind::result, method}, infoBody.asInfoFullParams());
 			}
-			return codec.renderPayload(infoBody.asInfoFullParams(), out);
+			return out != nullptr && codec.renderPayload(infoBody.asInfoFullParams(), *out);
 		}
 		if(requestId >= 0) {
-			return codec.render({requestId, JsonRPC::Message::Kind::result, method},
-				infoBody.asInfoStaticParams(), out);
+			return emit({requestId, JsonRPC::Message::Kind::result, method}, infoBody.asInfoStaticParams());
 		}
-		return codec.renderPayload(infoBody.asInfoStaticParams(), out);
+		return out != nullptr && codec.renderPayload(infoBody.asInfoStaticParams(), *out);
 	}
 
 	if(dataMethodId == DataMethodId::Color) {
@@ -643,9 +666,9 @@ bool Api::renderData(const String& method, bool sparse, String& out, int request
 			}
 		}
 		if(requestId >= 0) {
-			return codec.render({requestId, JsonRPC::Message::Kind::result, method}, root.asColor(), out);
+			return emit({requestId, JsonRPC::Message::Kind::result, method}, root.asColor());
 		}
-		return codec.renderPayload(root.asColor(), out);
+		return out != nullptr && codec.renderPayload(root.asColor(), *out);
 	}
 
 	if(dataMethodId == DataMethodId::Networks) {
@@ -671,10 +694,9 @@ bool Api::renderData(const String& method, bool sparse, String& out, int request
 			}
 		}
 		if(requestId >= 0) {
-			return codec.render({requestId, JsonRPC::Message::Kind::result, method},
-				root.asNetworks().asNetworksParams(), out);
+			return emit({requestId, JsonRPC::Message::Kind::result, method}, root.asNetworks().asNetworksParams());
 		}
-		return codec.renderPayload(root.asNetworks().asNetworksParams(), out);
+		return out != nullptr && codec.renderPayload(root.asNetworks().asNetworksParams(), *out);
 	}
 
 	return false;

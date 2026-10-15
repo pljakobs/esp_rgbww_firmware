@@ -315,12 +315,18 @@ def recv_until(sock: socket.socket, marker: bytes, timeout: float = 5.0) -> byte
     return data
 
 
-def ws_recv_frame(sock: socket.socket, timeout: float = 2.0) -> tuple[int | None, bytes | None]:
+def ws_recv_frame(
+    sock: socket.socket,
+    timeout: float = 2.0,
+    *,
+    include_fin: bool = False,
+) -> tuple[int | None, bytes | None] | tuple[int | None, bytes | None, bool]:
     sock.settimeout(timeout)
     header = sock.recv(2)
     if not header:
-        return None, None
+        return (None, None, False) if include_fin else (None, None)
     first, second = header
+    fin = bool(first & 0x80)
     opcode = first & 0x0F
     size = second & 0x7F
     if size == 126:
@@ -333,7 +339,7 @@ def ws_recv_frame(sock: socket.socket, timeout: float = 2.0) -> tuple[int | None
         if not chunk:
             break
         payload += chunk
-    return opcode, payload
+    return (opcode, payload, fin) if include_fin else (opcode, payload)
 
 
 def ws_send_text(sock: socket.socket, text: str) -> None:
@@ -463,20 +469,31 @@ def restore_color(smoke_config: SmokeConfig, payload: dict[str, Any]) -> None:
         pytest.fail("Could not restore raw color after API surface probe")
 
 
-def recv_ws_text(sock: socket.socket, timeout: float = 3.0) -> str:
+def recv_ws_text(sock: socket.socket, timeout: float = 3.0, fragment_count: list[int] | None = None) -> str:
+    message = bytearray()
+    frame_count = 0
     while True:
-        opcode, payload = ws_recv_frame(sock, timeout=timeout)
+        opcode, payload, fin = ws_recv_frame(sock, timeout=timeout, include_fin=True)
         if opcode is None:
             pytest.fail("WebSocket connection closed before a text frame was received")
-        if opcode == 1:
-            return (payload or b"").decode("utf-8", errors="replace")
         if opcode == 9:
             pong_payload = payload or b""
             sock.sendall(bytes([0x8A, len(pong_payload)]) + pong_payload)
             continue
         if opcode == 8:
             pytest.fail("Unexpected WebSocket close frame received")
-        pytest.fail(f"Unsupported WebSocket opcode received: {opcode}")
+        if opcode == 1:
+            if frame_count != 0:
+                pytest.fail("A new WebSocket data message started before the previous one ended")
+        elif opcode != 0 or frame_count == 0:
+            pytest.fail(f"Unexpected WebSocket opcode received: {opcode}")
+
+        message.extend(payload or b"")
+        frame_count += 1
+        if fin:
+            if fragment_count is not None:
+                fragment_count.append(frame_count)
+            return message.decode("utf-8", errors="replace")
 
 
 def jsonrpc_error_text(payload: dict[str, Any]) -> str:
@@ -497,7 +514,12 @@ def assert_method_error_variant(message: str, trace: dict[str, Any]) -> None:
         fail_with_trace("Unexpected JSON-RPC method error", trace)
 
 
-def ws_request(sock: socket.socket, payload: dict[str, Any], timeout: float = 3.0) -> tuple[dict[str, Any], dict[str, Any]]:
+def ws_request(
+    sock: socket.socket,
+    payload: dict[str, Any],
+    timeout: float = 3.0,
+    fragment_count: list[int] | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
     ws_send_text(sock, json.dumps(payload, separators=(",", ":")))
     deadline = time.monotonic() + timeout
     ignored_frames: list[dict[str, Any]] = []
@@ -508,7 +530,7 @@ def ws_request(sock: socket.socket, payload: dict[str, Any], timeout: float = 3.
                 "Timed out waiting for the matching JSON-RPC response",
                 {"request": payload, "response": {"notifications": ignored_frames}},
             )
-        response_text = recv_ws_text(sock, timeout=remaining)
+        response_text = recv_ws_text(sock, timeout=remaining, fragment_count=fragment_count)
         try:
             response = json.loads(response_text)
         except json.JSONDecodeError:
@@ -820,9 +842,11 @@ def test_websocket_query_surface(
         if "101" not in handshake_trace["response"]["status_line"]:
             fail_with_trace("WebSocket handshake failed before query-surface probe", handshake_trace)
         request_id = 9000
+        fragment_counts: list[int] = []
         payload, trace = ws_request(
             sock,
             {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params},
+            fragment_count=fragment_counts,
         )
         result = payload.get("result")
         if payload.get("id") != request_id or not isinstance(result, dict):
@@ -833,6 +857,9 @@ def test_websocket_query_surface(
             fail_with_trace(f"{method} should return the active color representation", trace)
         if not color_result and not expected_keys.issubset(result):
             fail_with_trace(f"{method} result is missing expected fields", trace)
+        encoded_size = len(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+        if method == "getInfo" and encoded_size > 1024 and (not fragment_counts or fragment_counts[0] < 2):
+            fail_with_trace("Full info response should be split across WebSocket frames", trace)
     finally:
         sock.close()
 
