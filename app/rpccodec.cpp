@@ -28,6 +28,46 @@
 namespace
 {
 constexpr ws_frame_type_t WS_FRAME_CONTINUATION_OPCODE = static_cast<ws_frame_type_t>(0x0);
+constexpr size_t StreamBlockSize = 256;
+
+class StreamBlockPool
+{
+public:
+	char* acquire()
+	{
+		for(auto& block : blocks) {
+			if(!block.used) {
+				block.used = true;
+				return block.data.data();
+			}
+		}
+		return nullptr;
+	}
+
+	bool release(char* data)
+	{
+		for(auto& block : blocks) {
+			if(block.data.data() == data) {
+				block.used = false;
+				return true;
+			}
+		}
+		return false;
+	}
+
+private:
+	struct Block {
+		std::array<char, StreamBlockSize> data{};
+		bool used{};
+	};
+	std::array<Block, 3> blocks{};
+};
+
+StreamBlockPool& streamBlockPool()
+{
+	static StreamBlockPool pool;
+	return pool;
+}
 
 // Flips `flag` back off on scope exit, regardless of which return statement is taken.
 class ScopedFlag
@@ -49,7 +89,7 @@ private:
 
 struct RpcCodec::StreamTask::State : std::enable_shared_from_this<State>
 {
-	static constexpr size_t SegmentStep = 256;
+	static constexpr size_t SegmentStep = StreamBlockSize;
 	static constexpr size_t MaxSegmentSize = 1024;
 	static constexpr size_t RestrictedSegmentSize = 512;
 	static constexpr size_t RestrictedHeapThreshold = 8192;
@@ -60,10 +100,24 @@ struct RpcCodec::StreamTask::State : std::enable_shared_from_this<State>
 	struct Slot {
 		~Slot()
 		{
-			free(data);
+			clear();
 		}
 
-		char* data{};
+		void clear()
+		{
+			for(auto& block : blocks) {
+				if(block != nullptr) {
+					if(!streamBlockPool().release(block)) {
+						free(block);
+					}
+					block = nullptr;
+				}
+			}
+			capacity = 0;
+			length = 0;
+		}
+
+		std::array<char*, MaxSegmentSize / SegmentStep> blocks{};
 		size_t capacity{};
 		size_t length{};
 		bool used{};
@@ -98,7 +152,13 @@ struct RpcCodec::StreamTask::State : std::enable_shared_from_this<State>
 				return 0;
 			}
 			const size_t count = std::min<size_t>(size, slot().length - position);
-			memcpy(data, slot().data + position, count);
+			size_t copied = 0;
+			while(copied < count) {
+				const size_t offset = (position + copied) % SegmentStep;
+				const size_t chunk = std::min(count - copied, SegmentStep - offset);
+				memcpy(data + copied, slot().blocks[(position + copied) / SegmentStep] + offset, chunk);
+				copied += chunk;
+			}
 			return static_cast<uint16_t>(count);
 		}
 
@@ -152,10 +212,7 @@ struct RpcCodec::StreamTask::State : std::enable_shared_from_this<State>
 			--inFlight;
 		}
 		slot.used = false;
-		slot.length = 0;
-		free(slot.data);
-		slot.data = nullptr;
-		slot.capacity = 0;
+		slot.clear();
 		if(active) {
 			schedulePump();
 		}
@@ -180,20 +237,25 @@ private:
 
 	bool growSlot(Slot& slot)
 	{
-		const size_t freeHeap = app.getFreeHeapSize();
-		if(freeHeap < RestrictedHeapThreshold) {
+		if(!app.checkHeap(RestrictedHeapThreshold)) {
 			segmentLimit = RestrictedSegmentSize;
 		}
 		const size_t capacity = slot.capacity + SegmentStep;
-		if(capacity > segmentLimit || freeHeap < HeapReserve + capacity + AllocationMargin) {
+		if(capacity > segmentLimit) {
 			return false;
 		}
-		auto* data = static_cast<char*>(realloc(slot.data, capacity));
+		auto* data = streamBlockPool().acquire();
+		if(data == nullptr) {
+			if(!app.checkHeap(HeapReserve + SegmentStep + AllocationMargin)) {
+				return false;
+			}
+			data = static_cast<char*>(malloc(SegmentStep));
+		}
 		if(data == nullptr) {
 			segmentLimit = RestrictedSegmentSize;
 			return false;
 		}
-		slot.data = data;
+		slot.blocks[slot.capacity / SegmentStep] = data;
 		slot.capacity = capacity;
 		return true;
 	}
@@ -209,11 +271,15 @@ private:
 			if(slot.length == slot.capacity && !growSlot(slot)) {
 				return true;
 			}
-			const auto count = source->readMemoryBlock(slot.data + slot.length,
-													 static_cast<int>(slot.capacity - slot.length));
+			const size_t offset = slot.length % SegmentStep;
+			const auto count = source->readMemoryBlock(slot.blocks[slot.length / SegmentStep] + offset,
+													 static_cast<int>(SegmentStep - offset));
 			if(count == 0) {
 				if(source->isFinished()) {
 					eof = true;
+					if(slot.length == 0) {
+						slot.clear();
+					}
 					return true;
 				}
 				debug_e("RpcCodec: source stalled while filling a WebSocket segment");
@@ -256,7 +322,7 @@ private:
 			auto& slot = slots[index];
 			const bool fin = eof && ready.empty();
 			const auto type = firstFrame ? WS_FRAME_TEXT : WS_FRAME_CONTINUATION_OPCODE;
-			if(app.getFreeHeapSize() < HeapReserve + sizeof(SegmentStream) + AllocationMargin) {
+			if(!app.checkHeap(HeapReserve + sizeof(SegmentStream) + AllocationMargin)) {
 				pumping = false;
 				finish(false);
 				return;
@@ -371,8 +437,8 @@ std::shared_ptr<RpcCodec::StreamTask> RpcCodec::sendWebsocketStream(WebsocketCon
 	if(!source) {
 		return nullptr;
 	}
-	if(app.getFreeHeapSize() < StreamTask::State::HeapReserve + sizeof(StreamTask::State)
-								 + sizeof(StreamTask) + 2 * StreamTask::State::AllocationMargin) {
+	if(!app.checkHeap(StreamTask::State::HeapReserve + sizeof(StreamTask::State)
+								 + sizeof(StreamTask) + 2 * StreamTask::State::AllocationMargin)) {
 		return nullptr;
 	}
 	auto state = std::shared_ptr<StreamTask::State>(
