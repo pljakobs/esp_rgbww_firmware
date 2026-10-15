@@ -21,6 +21,7 @@
 #include <Network/Http/Websocket/WebsocketConnection.h>
 #include <Platform/System.h>
 #include <array>
+#include <cstdlib>
 #include <deque>
 #include <functional>
 
@@ -48,11 +49,22 @@ private:
 
 struct RpcCodec::StreamTask::State : std::enable_shared_from_this<State>
 {
-	static constexpr size_t SegmentSize = 1024;
+	static constexpr size_t SegmentStep = 256;
+	static constexpr size_t MaxSegmentSize = 1024;
+	static constexpr size_t RestrictedSegmentSize = 512;
+	static constexpr size_t RestrictedHeapThreshold = 8192;
+	static constexpr size_t HeapReserve = 4096;
+	static constexpr size_t AllocationMargin = 64;
 	static constexpr size_t BufferCount = 3;
 
 	struct Slot {
-		std::array<char, SegmentSize> data{};
+		~Slot()
+		{
+			free(data);
+		}
+
+		char* data{};
+		size_t capacity{};
 		size_t length{};
 		bool used{};
 		bool inFlight{};
@@ -86,7 +98,7 @@ struct RpcCodec::StreamTask::State : std::enable_shared_from_this<State>
 				return 0;
 			}
 			const size_t count = std::min<size_t>(size, slot().length - position);
-			memcpy(data, slot().data.data() + position, count);
+			memcpy(data, slot().data + position, count);
 			return static_cast<uint16_t>(count);
 		}
 
@@ -141,6 +153,9 @@ struct RpcCodec::StreamTask::State : std::enable_shared_from_this<State>
 		}
 		slot.used = false;
 		slot.length = 0;
+		free(slot.data);
+		slot.data = nullptr;
+		slot.capacity = 0;
 		if(active) {
 			schedulePump();
 		}
@@ -163,13 +178,39 @@ private:
 		}
 	}
 
+	bool growSlot(Slot& slot)
+	{
+		const size_t freeHeap = app.getFreeHeapSize();
+		if(freeHeap < RestrictedHeapThreshold) {
+			segmentLimit = RestrictedSegmentSize;
+		}
+		const size_t capacity = slot.capacity + SegmentStep;
+		if(capacity > segmentLimit || freeHeap < HeapReserve + capacity + AllocationMargin) {
+			return false;
+		}
+		auto* data = static_cast<char*>(realloc(slot.data, capacity));
+		if(data == nullptr) {
+			segmentLimit = RestrictedSegmentSize;
+			return false;
+		}
+		slot.data = data;
+		slot.capacity = capacity;
+		return true;
+	}
+
 	bool fillSlot(size_t index)
 	{
 		auto& slot = slots[index];
 		slot.length = 0;
-		while(slot.length < SegmentSize) {
-			const auto count = source->readMemoryBlock(slot.data.data() + slot.length,
-													 static_cast<int>(SegmentSize - slot.length));
+		if(!growSlot(slot)) {
+			return false;
+		}
+		while(true) {
+			if(slot.length == slot.capacity && !growSlot(slot)) {
+				return true;
+			}
+			const auto count = source->readMemoryBlock(slot.data + slot.length,
+													 static_cast<int>(slot.capacity - slot.length));
 			if(count == 0) {
 				if(source->isFinished()) {
 					eof = true;
@@ -184,8 +225,6 @@ private:
 			}
 			slot.length += count;
 		}
-
-		return true;
 	}
 
 	void pump()
@@ -217,6 +256,11 @@ private:
 			auto& slot = slots[index];
 			const bool fin = eof && ready.empty();
 			const auto type = firstFrame ? WS_FRAME_TEXT : WS_FRAME_CONTINUATION_OPCODE;
+			if(app.getFreeHeapSize() < HeapReserve + sizeof(SegmentStream) + AllocationMargin) {
+				pumping = false;
+				finish(false);
+				return;
+			}
 			auto frame = new SegmentStream(shared_from_this(), index);
 			if(frame == nullptr) {
 				pumping = false;
@@ -260,6 +304,7 @@ private:
 	std::function<void(bool)> onComplete;
 	std::array<Slot, BufferCount> slots{};
 	std::deque<size_t> ready;
+	size_t segmentLimit{MaxSegmentSize};
 	size_t inFlight{};
 	bool active{true};
 	bool eof{};
@@ -324,6 +369,10 @@ std::shared_ptr<RpcCodec::StreamTask> RpcCodec::sendWebsocketStream(WebsocketCon
 																		 std::function<void(bool)> onComplete)
 {
 	if(!source) {
+		return nullptr;
+	}
+	if(app.getFreeHeapSize() < StreamTask::State::HeapReserve + sizeof(StreamTask::State)
+								 + sizeof(StreamTask) + 2 * StreamTask::State::AllocationMargin) {
 		return nullptr;
 	}
 	auto state = std::shared_ptr<StreamTask::State>(
