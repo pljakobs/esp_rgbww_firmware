@@ -119,6 +119,10 @@ endif
 
 USER_CFLAGS += -fcheck-new
 
+ifeq ($(SMING_ARCH),Esp8266)
+USER_CFLAGS += -DTCP_SND_BUF=2780
+endif
+
 CUSTOM_LWIP_OPTS += -DLWIP_IPV6=0 \
 	       -DLWIP_IGMP=1 \
 	       -DLWIP_DNS=1 \
