@@ -22,7 +22,6 @@
 #include <Platform/System.h>
 #include <array>
 #include <cstdlib>
-#include <deque>
 #include <functional>
 
 namespace
@@ -312,15 +311,17 @@ private:
 			}
 			if(slot.length != 0) {
 				slot.used = true;
-				ready.push_back(i);
+				ready[(readyHead + readyCount) % BufferCount] = i;
+				++readyCount;
 			}
 		}
 
-		while(!ready.empty() && (ready.size() > 1 || eof)) {
-			const size_t index = ready.front();
-			ready.pop_front();
+		while(readyCount != 0 && (readyCount > 1 || eof)) {
+			const size_t index = ready[readyHead];
+			readyHead = (readyHead + 1) % BufferCount;
+			--readyCount;
 			auto& slot = slots[index];
-			const bool fin = eof && ready.empty();
+			const bool fin = eof && readyCount == 0;
 			const auto type = firstFrame ? WS_FRAME_TEXT : WS_FRAME_CONTINUATION_OPCODE;
 			if(!app.checkHeap(HeapReserve + sizeof(SegmentStream) + AllocationMargin)) {
 				pumping = false;
@@ -344,7 +345,7 @@ private:
 		}
 
 		pumping = false;
-		if(eof && ready.empty() && inFlight == 0) {
+		if(eof && readyCount == 0 && inFlight == 0) {
 			finish(true);
 		}
 	}
@@ -369,7 +370,9 @@ private:
 	std::unique_ptr<IDataSourceStream> source;
 	std::function<void(bool)> onComplete;
 	std::array<Slot, BufferCount> slots{};
-	std::deque<size_t> ready;
+	std::array<size_t, BufferCount> ready{};
+	size_t readyHead{};
+	size_t readyCount{};
 	size_t segmentLimit{MaxSegmentSize};
 	size_t inFlight{};
 	bool active{true};

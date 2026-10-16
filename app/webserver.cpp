@@ -30,7 +30,7 @@
 #include <Data/WebHelpers/base64.h>
 #include <Crypto/Sha2.h>
 #include <cstring>
-#include <deque>
+#include <array>
 #include <memory>
 #include <stdio.h>
 
@@ -67,7 +67,9 @@ struct WsAuthState {
 	bool authenticated = false;
 	bool runtimeInfoSubscribed = false;
 	String challenge;
-	std::deque<WsQueuedOutput> pendingOutput;
+	std::array<WsQueuedOutput, WS_MAX_QUEUED_OUTPUTS> pendingOutput{};
+	size_t pendingHead{};
+	size_t pendingCount{};
 	std::shared_ptr<RpcCodec::StreamTask> activeStream;
 	std::shared_ptr<uint8_t> lifetimeToken = std::make_shared<uint8_t>(0);
 };
@@ -80,13 +82,14 @@ bool queueWsOutput(WebsocketConnection& socket, WsQueuedOutput output, bool must
 	if(state == nullptr) {
 		return output.stream ? socket.send(output.stream.release()) : socket.sendString(output.payload);
 	}
-	if(state->pendingOutput.size() >= WS_MAX_QUEUED_OUTPUTS) {
+	if(state->pendingCount >= WS_MAX_QUEUED_OUTPUTS) {
 		if(mustKeep) {
 			socket.close();
 		}
 		return false;
 	}
-	state->pendingOutput.push_back(std::move(output));
+	state->pendingOutput[(state->pendingHead + state->pendingCount) % WS_MAX_QUEUED_OUTPUTS] = std::move(output);
+	++state->pendingCount;
 	flushWsOutput(socket);
 	return true;
 }
@@ -120,12 +123,19 @@ void flushWsOutput(WebsocketConnection& socket)
 	if(state == nullptr || state->activeStream) {
 		return;
 	}
+	std::weak_ptr<uint8_t> lifetimeToken = state->lifetimeToken;
 
-	while(!state->pendingOutput.empty()) {
-		auto output = std::move(state->pendingOutput.front());
-		state->pendingOutput.pop_front();
+	while(state->pendingCount != 0) {
+		auto output = std::move(state->pendingOutput[state->pendingHead]);
+		state->pendingOutput[state->pendingHead] = {};
+		state->pendingHead = (state->pendingHead + 1) % WS_MAX_QUEUED_OUTPUTS;
+		--state->pendingCount;
 		if(!output.stream) {
-			if(!socket.sendString(output.payload)) {
+			const bool sent = socket.sendString(output.payload);
+			if(lifetimeToken.expired() || socket.getUserData() != state) {
+				return;
+			}
+			if(!sent) {
 				socket.close();
 				return;
 			}
@@ -133,8 +143,7 @@ void flushWsOutput(WebsocketConnection& socket)
 		}
 
 		WebsocketConnection* socketPtr = &socket;
-		std::weak_ptr<uint8_t> lifetimeToken = state->lifetimeToken;
-		state->activeStream = rpcCodec().sendWebsocketStream(socket, std::move(output.stream), [socketPtr, lifetimeToken](bool success) {
+		auto task = rpcCodec().sendWebsocketStream(socket, std::move(output.stream), [socketPtr, lifetimeToken](bool success) {
 			auto lifetime = lifetimeToken.lock();
 			if(!lifetime) {
 				return;
@@ -150,6 +159,10 @@ void flushWsOutput(WebsocketConnection& socket)
 			}
 			flushWsOutput(*socketPtr);
 		});
+		if(lifetimeToken.expired() || socket.getUserData() != state) {
+			return;
+		}
+		state->activeStream = std::move(task);
 		if(!state->activeStream) {
 			socket.close();
 			return;
