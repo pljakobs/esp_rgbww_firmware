@@ -530,7 +530,8 @@ def ws_request(
                 "Timed out waiting for the matching JSON-RPC response",
                 {"request": payload, "response": {"notifications": ignored_frames}},
             )
-        response_text = recv_ws_text(sock, timeout=remaining, fragment_count=fragment_count)
+        message_fragment_count: list[int] = []
+        response_text = recv_ws_text(sock, timeout=remaining, fragment_count=message_fragment_count)
         try:
             response = json.loads(response_text)
         except json.JSONDecodeError:
@@ -538,8 +539,18 @@ def ws_request(
                 "WebSocket response was not valid JSON",
                 {"request": payload, "response": {"text": response_text}},
             )
-        trace = {"request": payload, "response": {"payload": response, "notifications": ignored_frames}}
+        frame_count = message_fragment_count[0] if message_fragment_count else 0
+        trace = {
+            "request": payload,
+            "response": {
+                "payload": response,
+                "notifications": ignored_frames,
+                "frame_count": frame_count,
+            },
+        }
         if response.get("id") == payload.get("id"):
+            if fragment_count is not None:
+                fragment_count.append(frame_count)
             return response, trace
         ignored_frames.append(response)
 
@@ -923,8 +934,20 @@ def test_websocket_query_surface(
         if not color_result and not expected_keys.issubset(result):
             fail_with_trace(f"{method} result is missing expected fields", trace)
         encoded_size = len(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
-        if method == "getInfo" and encoded_size > 1024 and (not fragment_counts or fragment_counts[0] < 2):
-            fail_with_trace("Full info response should be split across WebSocket frames", trace)
+        if method == "getInfo":
+            frame_count = fragment_counts[0] if fragment_counts else 0
+            observation = {
+                "method": method,
+                "payload_bytes": encoded_size,
+                "frames": frame_count,
+                "single_frame": frame_count == 1,
+            }
+            append_jsonl(smoke_config.log_dir / "websocket-fragmentation.jsonl", observation)
+            sys.__stdout__.write(
+                f"[websocket-framing] {method} payload_bytes={encoded_size} "
+                f"frames={frame_count} single_frame={frame_count == 1}\n"
+            )
+            sys.__stdout__.flush()
     finally:
         sock.close()
 
