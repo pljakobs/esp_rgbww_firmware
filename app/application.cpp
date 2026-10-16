@@ -460,6 +460,9 @@ void Application::checkRam()
 	
 void Application::sendTelemetry()
 {
+	if(!telemetryClient.canPublishStats()) {
+		return;
+	}
 	// generate and send telemetry 
 	{
 		const uint32_t freeHeap = getFreeHeapSize();

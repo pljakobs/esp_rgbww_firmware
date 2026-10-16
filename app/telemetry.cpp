@@ -65,12 +65,14 @@ void TelemetryClient::start() {
 
 void TelemetryClient::stop() {
 	_isRunning = false;
+	_publishPending = false;
+	_publishTimer.stop();
 	_reconnectTimer.stop();
 	_reconnectPending = false;
 	// Replace the MqttClient instance so the next connect() gets a fresh TCP PCB.
 	// MqttClient::close() is inaccessible (protected base), so we recreate instead.
 	delete mqtt;
-	mqtt = new MqttClient();
+	mqtt = nullptr;
 }
 
 void TelemetryClient::connect(const char* telemetryURL, const char* telemetryUser, const char* telemetryPass) {
@@ -91,10 +93,15 @@ void TelemetryClient::connect(const char* telemetryURL, const char* telemetryUse
         cdebug_i(TELEMETRYCLIENT, "TelemetryClient::connect: " ANSI_COLOR_BLUE "Telemetry MQTT connecting to " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, url);
         char clientId[64];
         snprintf(clientId, sizeof(clientId), "telemetry_client_%s", _chipId);
-		mqtt->connect(url, clientId);
 		mqtt->setCompleteDelegate([this](TcpClient& client, bool success) { this->onComplete(client, success); });
 		mqtt->setConnectedHandler([this](MqttClient& client, mqtt_message_t* message) { return this->onConnected(client, message); });
+		mqtt->setPublishedHandler([this](MqttClient& client, mqtt_message_t* message) { return this->onPublished(client, message); });
 		mqtt->setMessageHandler([this](MqttClient& client, mqtt_message_t* message) { return this->onMessageReceived(client, message); });
+		_isRunning = false;
+		_lastReconnectAttempt = millis();
+		if(!mqtt->connect(url, clientId)) {
+			requestReconnect("connect rejected");
+		}
 	} else {
 		cdebug_i(TELEMETRYCLIENT, "TelemetryClient::connect: " ANSI_COLOR_BLUE "Telemetry MQTT not configured properly" ANSI_COLOR_RESET);
 	}
@@ -119,17 +126,36 @@ void TelemetryClient::doReconnect() {
 }
 
 void TelemetryClient::onComplete(TcpClient& client, bool success) {
-	if (!success) {
-		cdebug_i(TELEMETRYCLIENT, "TelemetryClient::onComplete: " ANSI_COLOR_BLUE "Telemetry MQTT connection failed" ANSI_COLOR_RESET);
-		_isRunning = false;
-		requestReconnect("connection failed");
-	}
+	_isRunning = false;
+	_publishPending = false;
+	_publishTimer.stop();
+	requestReconnect(success ? "connection closed" : "connection failed");
 }
 
 int TelemetryClient::onConnected(MqttClient& client, mqtt_message_t* message) {
+	if(message->connack.return_code != 0) {
+		requestReconnect("broker rejected connection");
+		return 0;
+	}
 	cdebug_i(TELEMETRYCLIENT, "TelemetryClient::onConnected: " ANSI_COLOR_BLUE "Telemetry MQTT connected" ANSI_COLOR_RESET);
     _isRunning = true;
+	_reconnectBackoffMs = 10000;
+	_reconnectPending = false;
+	_reconnectTimer.stop();
 	return 0;
+}
+
+int TelemetryClient::onPublished(MqttClient& client, mqtt_message_t* message) {
+	if(message->common.type == MQTT_TYPE_PUBACK) {
+		_publishPending = false;
+		_publishTimer.stop();
+	}
+	return 0;
+}
+
+void TelemetryClient::onPublishTimeout() {
+	stop();
+	requestReconnect("publish acknowledgment timed out");
 }
 
 int TelemetryClient::onMessageReceived(MqttClient& client, mqtt_message_t* message) {
@@ -149,15 +175,16 @@ void TelemetryClient::requestReconnect(const char* reason) {
 
 	const uint32_t now = millis();
 	const uint32_t backoffMs = _reconnectBackoffMs;
-	if (static_cast<uint32_t>(now - _lastReconnectAttempt) < backoffMs) {
-		return;
-	}
+	const uint32_t elapsed = now - _lastReconnectAttempt;
+	const uint32_t delayMs = elapsed < backoffMs ? std::max<uint32_t>(1000, backoffMs - elapsed) : 1000;
 
 	cdebug_i(TELEMETRYCLIENT, "TelemetryClient::requestReconnect: " ANSI_COLOR_BLUE "Telemetry MQTT reconnect scheduled after %s" ANSI_COLOR_RESET, reason);
+	_isRunning = false;
+	_publishPending = false;
+	_publishTimer.stop();
 	_reconnectPending = true;
-	_lastReconnectAttempt = now;
 	_reconnectBackoffMs = backoffMs < 150000 ? backoffMs * 2 : 300000;
-	reconnect();
+	_reconnectTimer.initializeMs(delayMs, TimerDelegate(&TelemetryClient::doReconnect, this)).startOnce();
 }
 
 bool TelemetryClient::publishPayload(const char* topic, const char* payload) {
@@ -165,10 +192,19 @@ bool TelemetryClient::publishPayload(const char* topic, const char* payload) {
 		requestReconnect("client disconnected");
 		return false;
 	}
+	if(_publishPending) {
+		return false;
+	}
 
 	char fullTopic[TELEMETRY_TOPIC_MAX_SIZE];
 	buildTopic(topic, fullTopic, sizeof(fullTopic));
-	if (mqtt->publish(fullTopic, payload)) {
+	const size_t packetSize = strlen(fullTopic) + strlen(payload) + 8;
+	if(!app.checkHeap(8192 + 3 * packetSize)) {
+		return false;
+	}
+	_publishPending = true;
+	_publishTimer.initializeMs<15000>(TimerDelegate(&TelemetryClient::onPublishTimeout, this)).startOnce();
+	if (mqtt->publish(fullTopic, payload, MqttClient::getFlags(MQTT_QOS_AT_LEAST_ONCE))) {
 		return true;
 	}
 
@@ -179,6 +215,9 @@ bool TelemetryClient::publishPayload(const char* topic, const char* payload) {
 }
 
 bool TelemetryClient::publish(const char* topic, const JsonDocument& doc) {
+	if(!_isRunning || _publishPending) {
+		return false;
+	}
 	String payload;
 	serializeJson(doc, payload);
 	cdebug_i(TELEMETRYCLIENT, "TelemetryClient::publish: " ANSI_COLOR_BLUE "Telemetry MQTT publishing " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " to topic: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, payload.c_str(), topic);
@@ -186,6 +225,9 @@ bool TelemetryClient::publish(const char* topic, const JsonDocument& doc) {
 }
 
 bool TelemetryClient::stat(const String& payload) {
+	if(!_telemetryStats) {
+		return false;
+	}
 	return publish("monitor", payload);
 }
 // Add to TelemetryClient class definition in telemetry.h:

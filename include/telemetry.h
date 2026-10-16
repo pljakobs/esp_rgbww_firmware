@@ -45,9 +45,12 @@ public:
     void connect(const String& debugServer, const String& debugUser, const String& debugPass);
     void reconnect();
     bool isRunning() const { return _isRunning; }
+    bool canPublishStats() const { return _telemetryStats && _isRunning && !_publishPending; }
 private:
     void onComplete(TcpClient& client, bool success);
     int onConnected(MqttClient& client, mqtt_message_t* message);
+    int onPublished(MqttClient& client, mqtt_message_t* message);
+    void onPublishTimeout();
     int onMessageReceived(MqttClient& client, mqtt_message_t* message);
     bool publish(const char* topic, const JsonDocument& doc);
     bool publish(const String& topic, const JsonDocument& doc);
@@ -56,8 +59,10 @@ private:
 
     void buildTopic(const char* suffix, char* dest, size_t size);
 
-    bool _telemetryStats;
-    bool _telemetryLog;
+    bool _telemetryStats = false;
+    bool _telemetryLog = false;
+    bool _publishPending = false;
+    Timer _publishTimer;
 
     uint32_t _lastReconnectAttempt = 0;
     uint32_t _reconnectBackoffMs = 10000;
