@@ -66,7 +66,7 @@ jobs:
           FIRMWARE_BRANCH="${{ steps.get_branch.outputs.branch }}"
           case "$FIRMWARE_BRANCH" in
             "develop")
-              WEBAPP_BRANCH="devel"
+              WEBAPP_BRANCH="develop"
               ;;
             "testing")
               WEBAPP_BRANCH="testing"
@@ -78,7 +78,7 @@ jobs:
               WEBAPP_BRANCH="experimental"
               ;;
             *)
-              WEBAPP_BRANCH="devel"
+              WEBAPP_BRANCH="develop"
               ;;
           esac
           echo "webapp_branch=$WEBAPP_BRANCH" >> $GITHUB_OUTPUT
@@ -446,7 +446,7 @@ jobs:
           FIRMWARE_BRANCH="${{ steps.get_branch.outputs.branch }}"
           case "$FIRMWARE_BRANCH" in
             "develop")
-              WEBAPP_BRANCH="devel"
+              WEBAPP_BRANCH="develop"
               ;;
             "testing")
               WEBAPP_BRANCH="testing"
@@ -458,7 +458,7 @@ jobs:
               WEBAPP_BRANCH="experimental"
               ;;
             *)
-              WEBAPP_BRANCH="devel"
+              WEBAPP_BRANCH="develop"
               ;;
           esac
           echo "webapp_branch=$WEBAPP_BRANCH" >> $GITHUB_OUTPUT
@@ -807,11 +807,11 @@ jobs:
 
           # Map firmware branch to webapp base branch
           case "$FIRMWARE_BRANCH" in
-            develop)     WEBAPP_BASE="devel"   ;;
+            develop)     WEBAPP_BASE="develop" ;;
             testing)     WEBAPP_BASE="testing" ;;
             stable|main) WEBAPP_BASE="stable"  ;;
             experimental) WEBAPP_BASE="experimental" ;;
-            *)           WEBAPP_BASE="devel"   ;;
+            *)           WEBAPP_BASE="develop" ;;
           esac
 
           echo "Dispatching firmware-schema-update to esp_rgb_webapp2 (base: $WEBAPP_BASE)"

@@ -19,7 +19,7 @@ fi
 echo "entering $BUILDROOT/esp_rgb_webapp2"
 cd $BUILDROOT/esp_rgb_webapp2
 git pull
-git checkout devel
+git checkout develop
 
 git tag nightly-$(date --iso)
 git push
@@ -37,7 +37,7 @@ echo $WEBAPP_VERSION > dist/spa/VERSION
 echo "entering $BUILDROOT/esp_rgbww_firmware"
 cd $BUILDROOT/esp_rgbww_firmware
 git pull
-git checkout devel
+git checkout develop
 git submodule update --remote --init Components/RGBWWLed
 git tag nightly-$(date --iso)
 git push

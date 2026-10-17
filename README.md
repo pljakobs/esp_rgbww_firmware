@@ -49,7 +49,7 @@ This is a fork of [Patrick Jahns' original firmware](https://github.com/patrickj
 | Shojo PCB (WemosD1 mini) | ESP8266 | 14 | 4 | 5 | 15 | 12 | 16 |
 
 Pin configurations are fetched at runtime from a remote JSON file (default:
-`https://raw.githubusercontent.com/pljakobs/esp_rgb_webapp2/devel/public/config/pinconfig.json`)
+`https://raw.githubusercontent.com/pljakobs/esp_rgb_webapp2/develop/public/config/pinconfig.json`)
 and can be overridden in the configuration.
 
 ---

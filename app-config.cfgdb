@@ -24,7 +24,7 @@
         },
         "pin_config_url":{
             "type":"string",
-            "default":"https://raw.githubusercontent.com/pljakobs/esp_rgb_webapp2/devel/public/config/pinconfig.json"
+            "default":"https://raw.githubusercontent.com/pljakobs/esp_rgb_webapp2/develop/public/config/pinconfig.json"
         },
         "supported_color_models":{
             "type": "array",
