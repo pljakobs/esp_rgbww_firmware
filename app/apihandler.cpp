@@ -553,7 +553,7 @@ bool Api::renderDataImpl(const String& method, bool sparse, String* out,
 		if(auto update = root.update()) {
 			auto info = update.toInfo();
 		auto fillCommon = [&](auto& value) {
-			#if defined(ARCH_ESP8266)
+					#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
 			value.device.setDeviceid(system_get_chip_id());
 			#else
 			value.device.setDeviceid(0);
