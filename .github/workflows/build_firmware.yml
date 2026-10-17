@@ -124,10 +124,11 @@ jobs:
 
       - name: Download fileList.h artifact
         run: |
-          WEBAPP_BRANCH="${{ steps.map_webapp_branch.outputs.webapp_branch }}"
-          if [ "$WEBAPP_BRANCH" = "experimental" ]; then
-            echo "experimental build: keeping repo fileList.h (minimal embed set)"
+          FIRMWARE_BRANCH="${{ steps.get_branch.outputs.branch }}"
+          if [ "$FIRMWARE_BRANCH" = "develop" ] || [ "$FIRMWARE_BRANCH" = "experimental" ]; then
+            echo "$FIRMWARE_BRANCH build: keeping repo fileList.h for runtime webapp fetch"
           else
+            WEBAPP_BRANCH="${{ steps.map_webapp_branch.outputs.webapp_branch }}"
             if [ -f ./include/fileList.h ]; then
               rm ./include/fileList.h
             fi
@@ -139,19 +140,17 @@ jobs:
 
       - name: Download webapp files artifact
         run: |
-          WEBAPP_BRANCH="${{ steps.map_webapp_branch.outputs.webapp_branch }}"
-          artifact_url="https://pljakobs.github.io/esp_rgb_webapp2/${WEBAPP_BRANCH}/spa-files.zip"
-          echo "Downloading webapp files from: $artifact_url"
-          curl -L -o spa-files.zip "$artifact_url"
-          if [ "$WEBAPP_BRANCH" = "experimental" ]; then
-            echo "experimental build: extracting minimal file set only"
-            # captive.html and updating.html are committed in the firmware repo
-            # (checked out above) — keep the webapp/ dir as-is so those files survive.
-            # Only pull config/pinconfig.json and VERSION from the webapp zip.
-            mkdir -p ./webapp/config
-            unzip -p spa-files.zip dist/spa/config/pinconfig.json > ./webapp/config/pinconfig.json
-            unzip -p spa-files.zip dist/spa/VERSION > ./webapp/VERSION
+          FIRMWARE_BRANCH="${{ steps.get_branch.outputs.branch }}"
+          if [ "$FIRMWARE_BRANCH" = "develop" ] || [ "$FIRMWARE_BRANCH" = "experimental" ]; then
+            echo "$FIRMWARE_BRANCH build: full webapp files are fetched at runtime"
+            if [ ! -f ./webapp/VERSION ]; then
+              printf 'runtime\n' > ./webapp/VERSION
+            fi
           else
+            WEBAPP_BRANCH="${{ steps.map_webapp_branch.outputs.webapp_branch }}"
+            artifact_url="https://pljakobs.github.io/esp_rgb_webapp2/${WEBAPP_BRANCH}/spa-files.zip"
+            echo "Downloading webapp files from: $artifact_url"
+            curl -L -o spa-files.zip "$artifact_url"
             if [ -d ./webapp ]; then
               rm -rf ./webapp
             fi
@@ -159,10 +158,10 @@ jobs:
             unzip spa-files.zip -d ./webapp
             mv ./webapp/dist/spa/* ./webapp
             rm -rf ./webapp/dist/spa
+            rm spa-files.zip
+            echo "webapp files version"
+            cat ./webapp/VERSION
           fi
-          rm spa-files.zip
-          echo "webapp files version"
-          cat ./webapp/VERSION
 
       - name: Prepare host-smoke artifact directory
         if: always()
