@@ -80,7 +80,7 @@
         "buttons_config": "",
         "buttons_debounce_ms": 50,
         "current_pin_config_name": "mrpj",
-        "pin_config_url": "https://raw.githubusercontent.com/pljakobs/esp_rgb_webapp2/devel/public/config/pinconfig.json",
+        "pin_config_url": "https://raw.githubusercontent.com/pljakobs/esp_rgb_webapp2/develop/public/config/pinconfig.json",
         "channels": [
             {
                 "pin": 13,

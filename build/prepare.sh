@@ -18,13 +18,13 @@ echo "nvm installed"
 export NODE_PATH=$NVM_DIR/v$NODE_VERSION/lib/node_modules
 export PATH=$NVM_DIR/v$NODE_VERSION/bin:$PATH
 
-# Clone your project repository and checkout the 'devel' branch
+# Clone your project repository and checkout the 'develop' branch
 git clone https://github.com/pljakobs/esp_rgbww_firmware.git
 git clone https://github.com/pljakobs/esp_rgb_webapp2.git
 
 cd $BUILDROOT/esp_rgbww_firmware
 git pull origin
-git checkout devel
+git checkout develop
 rm -rf Sming
 ln -s $BUILDROOT/Sming Sming
 export SMING_HOME=/Sming
@@ -34,7 +34,7 @@ export ESP32_PYTHON_PATH=/usr/bin
 
 cd $BUILDROOT/esp_rgb_webapp2
 git pull origin 
-git checkout devel
+git checkout develop
 
 # Install app dependencies
 npm install
