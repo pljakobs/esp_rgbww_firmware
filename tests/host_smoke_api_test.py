@@ -1031,13 +1031,15 @@ def test_websocket_runtime_subscriptions(smoke_config: SmokeConfig, api_secured:
     try:
         if "101" not in handshake_trace["response"]["status_line"]:
             fail_with_trace("WebSocket handshake failed before subscription probes", handshake_trace)
-        for request_id, method, expected in (
-            (9160, "runtime_info_subscribe", True),
-            (9161, "runtime_info_unsubscribe", False),
+        for request_id, method, params, expected in (
+            (9160, "subscribe", {"channel": "runtime_info"}, True),
+            (9161, "unsubscribe", {"channel": "runtime_info"}, False),
+            (9162, "runtime_info_subscribe", {}, True),
+            (9163, "runtime_info_unsubscribe", {}, False),
         ):
             payload, trace = ws_request(
                 sock,
-                {"jsonrpc": "2.0", "id": request_id, "method": method, "params": {}},
+                {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params},
             )
             result = payload.get("result", {})
             if (
@@ -1046,6 +1048,12 @@ def test_websocket_runtime_subscriptions(smoke_config: SmokeConfig, api_secured:
                 or result.get("channel") != "runtime_info"
             ):
                 fail_with_trace(f"{method} should acknowledge the subscription state", trace)
+        payload, trace = ws_request(
+            sock,
+            {"jsonrpc": "2.0", "id": 9164, "method": "subscribe", "params": {"channel": "hosts"}},
+        )
+        if payload.get("error", {}).get("code") != -32602:
+            fail_with_trace("subscribe should reject unsupported channels", trace)
     finally:
         sock.close()
 

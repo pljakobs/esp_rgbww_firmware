@@ -360,6 +360,7 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 	String methodName;
 	String paramsJson;
 	String authHash;
+	String notificationChannel;
 	int requestId = 0;
 	bool sparse = true;
 	bool paramsEmpty = true;
@@ -372,7 +373,7 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 #endif
 
 	if(!app.api || !app.api->parseJsonRpcRequest(requestStream, methodName, paramsJson, requestId, authHash,
-															 sparse, paramsEmpty, errorMsg, heapTestRequest)) {
+															 sparse, paramsEmpty, errorMsg, heapTestRequest, &notificationChannel)) {
 		auto& codec = rpcCodec();
 		Jsonrpc::Root root(codec.db());
 		if(auto update = root.update()) {
@@ -415,6 +416,12 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 	const bool wsSecured = (_apiSecuredCache == 1);
 	WsAuthState* wsAuth = static_cast<WsAuthState*>(socket.getUserData());
 	const bool isAuthMethod = strcmp_P(method, PSTR("authenticate")) == 0;
+	const bool isSubscribeMethod = std::strcmp(method, "subscribe") == 0;
+	const bool isUnsubscribeMethod = std::strcmp(method, "unsubscribe") == 0;
+	const bool isLegacySubscribeMethod = std::strcmp(method, "runtime_info_subscribe") == 0 ||
+										 std::strcmp(method, "subscribe_runtime_info") == 0;
+	const bool isLegacyUnsubscribeMethod = std::strcmp(method, "runtime_info_unsubscribe") == 0 ||
+										   std::strcmp(method, "unsubscribe_runtime_info") == 0;
 
 	if(isAuthMethod) {
 		const String& clientHash = authHash;
@@ -474,16 +481,21 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 		}
 		return;
 #endif
-	} else if(std::strcmp(method, "runtime_info_subscribe") == 0 || std::strcmp(method, "subscribe_runtime_info") == 0) {
-		if(wsAuth) {
-			wsAuth->runtimeInfoSubscribed = true;
+	} else if(isSubscribeMethod || isUnsubscribeMethod || isLegacySubscribeMethod || isLegacyUnsubscribeMethod) {
+		const bool subscribing = isSubscribeMethod || isLegacySubscribeMethod;
+		const bool legacyMethod = isLegacySubscribeMethod || isLegacyUnsubscribeMethod;
+		if(legacyMethod && notificationChannel.length() == 0) {
+			notificationChannel = F("runtime_info");
 		}
-		resultKind = RK_SubTrue;
-	} else if(std::strcmp(method, "runtime_info_unsubscribe") == 0 || std::strcmp(method, "unsubscribe_runtime_info") == 0) {
-		if(wsAuth) {
-			wsAuth->runtimeInfoSubscribed = false;
+		if(notificationChannel != F("runtime_info")) {
+			errorCode = -32602;
+			errorMsg = F("channel must be runtime_info");
+		} else {
+			if(wsAuth) {
+				wsAuth->runtimeInfoSubscribed = subscribing;
+			}
+			resultKind = subscribing ? RK_SubTrue : RK_SubFalse;
 		}
-		resultKind = RK_SubFalse;
 	} else if(!app.api) {
 		errorCode = -32603;
 		errorMsg = F("api not initialized");
@@ -545,7 +557,7 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 			if(auto update = root.update()) {
 				auto subscription = update.toSubscriptionResult();
 				subscription.setSubscribed(resultKind == RK_SubTrue);
-				subscription.setChannel(F("runtime_info"));
+				subscription.setChannel(notificationChannel);
 			}
 			rpcStream = codec.renderStream({requestId, JsonRPC::Message::Kind::result, method}, root.asSubscriptionResult());
 		} else if(resultKind == RK_CommandSuccess) {

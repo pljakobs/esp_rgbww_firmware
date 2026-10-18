@@ -537,7 +537,8 @@ bool Api::handleHostHeapTest(const HeapTestRequest& request, char* result, size_
 #endif
 
 bool Api::parseJsonRpcRequest(Stream& input, String& method, String& params, int& requestId, String& authHash,
-															 bool& sparse, bool& paramsEmpty, String& errorMsg, HeapTestRequest* heapTest)
+															 bool& sparse, bool& paramsEmpty, String& errorMsg, HeapTestRequest* heapTest,
+															 String* notificationChannel)
 {
 	auto& codec = rpcCodec();
 	Jsonrpc::Root root(codec.db());
@@ -563,6 +564,9 @@ bool Api::parseJsonRpcRequest(Stream& input, String& method, String& params, int
 	sparse = sparseValue.length() == 0 ||
 		!(sparseValue == F("0") || sparseValue == F("false") || sparseValue == F("off"));
 	const auto fields = request.params;
+	if(notificationChannel != nullptr) {
+		*notificationChannel = fields.getChannel();
+	}
 	if(heapTest != nullptr && method == F("heap_test")) {
 		heapTest->cmd = fields.getCmd();
 		heapTest->size = fields.getSize();
@@ -573,7 +577,7 @@ bool Api::parseJsonRpcRequest(Stream& input, String& method, String& params, int
 	}
 	paramsEmpty = fields.getCmd().length() == 0 && fields.getT() == 0 && fields.getS() == 0 && !fields.getR() &&
 			   fields.getD() == 1 && fields.getName().length() == 0 && fields.getQ().length() == 0 &&
-			   fields.getHash().length() == 0 && sparseValue.length() == 0 && !fields.getAll() && !fields.getDebug() &&
+			   fields.getHash().length() == 0 && fields.getChannel().length() == 0 && sparseValue.length() == 0 && !fields.getAll() && !fields.getDebug() &&
 			   fields.channels.getItemCount() == 0 && fields.cmds.getItemCount() == 0 &&
 			   fields.raw.getR().length() == 0 && fields.raw.getG().length() == 0 && fields.raw.getB().length() == 0 &&
 			   fields.raw.getWw().length() == 0 && fields.raw.getCw().length() == 0 &&
