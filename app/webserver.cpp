@@ -365,9 +365,14 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 	bool paramsEmpty = true;
 	String errorMsg;
 	int errorCode = 0;
+	Api::HeapTestRequest* heapTestRequest = nullptr;
+#if defined(ARCH_HOST) && !defined(SMING_RELEASE)
+	Api::HeapTestRequest heapTest;
+	heapTestRequest = &heapTest;
+#endif
 
 	if(!app.api || !app.api->parseJsonRpcRequest(requestStream, methodName, paramsJson, requestId, authHash,
-												  sparse, paramsEmpty, errorMsg)) {
+															 sparse, paramsEmpty, errorMsg, heapTestRequest)) {
 		auto& codec = rpcCodec();
 		Jsonrpc::Root root(codec.db());
 		if(auto update = root.update()) {
@@ -453,6 +458,22 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 	} else if(method[0] == '\0') {
 		errorCode = -32600;
 		errorMsg = F("missing method");
+#if defined(ARCH_HOST) && !defined(SMING_RELEASE)
+	} else if(std::strcmp(method, "heap_test") == 0) {
+		char result[192];
+		if(!app.api || !app.api->handleHostHeapTest(heapTest, result, sizeof(result))) {
+			std::strcpy(result, "{\"success\":false,\"error\":\"heap test command failed\"}");
+		}
+		char payload[320];
+		const int length = std::snprintf(payload, sizeof(payload),
+									 "{\"jsonrpc\":\"2.0\",\"id\":%d,\"result\":%s}", requestId, result);
+		if(length > 0 && static_cast<size_t>(length) < sizeof(payload)) {
+			queueWsPayload(socket, payload, static_cast<size_t>(length), true);
+		} else {
+			socket.close();
+		}
+		return;
+#endif
 	} else if(std::strcmp(method, "runtime_info_subscribe") == 0 || std::strcmp(method, "subscribe_runtime_info") == 0) {
 		if(wsAuth) {
 			wsAuth->runtimeInfoSubscribed = true;

@@ -24,6 +24,12 @@
 
 class Api {
 public:
+	struct HeapTestRequest {
+		String cmd;
+		uint32_t size = 0;
+		uint64_t address = 0;
+	};
+
 	Api() = default;
 	~Api() = default;
 
@@ -32,11 +38,14 @@ public:
 	bool dispatchSystemCommand(const String& cmd, const String& enable, const String& clearOta, String& errorMsg);
 	bool dispatchJsonRpc(const String& json, String& errorMsg, bool relay = false);
 	bool parseJsonRpcRequest(Stream& input, String& method, String& params, int& requestId, String& authHash,
-							 bool& sparse, bool& paramsEmpty, String& errorMsg);
+															 bool& sparse, bool& paramsEmpty, String& errorMsg, HeapTestRequest* heapTest = nullptr);
 	bool renderData(const String& method, const JsonObject& params, String& out);
 	bool renderData(const String& method, const JsonObject& params, String& out, int requestId);
 	bool renderData(const String& method, bool sparse, String& out, int requestId);
 	std::unique_ptr<IDataSourceStream> renderDataStream(const String& method, bool sparse, int requestId);
+#if defined(ARCH_HOST) && !defined(SMING_RELEASE)
+	bool handleHostHeapTest(const HeapTestRequest& request, char* result, size_t resultSize);
+#endif
 
 	// ConfigDB-backed command dispatch for HTTP request bodies (see CONFIGDB_JSON_INBOUND_PLAN.md Phase B)
 	bool dispatchCommandFromStream(const String& method, Stream& body, String& errorMsg, bool relay = true);
