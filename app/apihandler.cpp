@@ -4,6 +4,11 @@
 #include <BufferInputStream.h>
 #include <Data/Stream/MemoryDataStream.h>
 #include <cstring>
+#if defined(ARCH_HOST) && !defined(SMING_RELEASE)
+#include <cstdlib>
+#include <cstdio>
+#include <malloc_count.h>
+#endif
 
 // Stringify an integer macro so it can be embedded in a compile-time JSON literal.
 #ifndef RGBWW_STRINGIFY
@@ -20,6 +25,18 @@ extern "C" {
 #define NO_INLINE __attribute__((noinline))
 
 namespace {
+#if defined(ARCH_HOST) && !defined(SMING_RELEASE)
+constexpr size_t HEAP_TEST_ALLOCATION_COUNT = 32;
+constexpr size_t HEAP_TEST_MAX_ALLOCATION = 64 * 1024;
+
+struct HeapTestAllocation {
+	void* address{};
+	size_t size{};
+};
+
+std::array<HeapTestAllocation, HEAP_TEST_ALLOCATION_COUNT> heapTestAllocations{};
+#endif
+
 enum class CommandMethodId : uint8_t {
 	Unknown,
 	Color,
@@ -450,8 +467,77 @@ bool Api::dispatchJsonRpc(const String& json, String& errorMsg, bool relay)
 	return dispatchCommandFromStream(method, paramsStream, errorMsg, relay);
 }
 
+#if defined(ARCH_HOST) && !defined(SMING_RELEASE)
+bool Api::handleHostHeapTest(const HeapTestRequest& request, char* result, size_t resultSize)
+{
+	if(result == nullptr || resultSize == 0) {
+		return false;
+	}
+
+	const char* cmd = request.cmd.c_str();
+	if(std::strcmp(cmd, "get-free") == 0) {
+		size_t activeBlocks = 0;
+		for(const auto& allocation : heapTestAllocations) {
+			activeBlocks += allocation.address != nullptr;
+		}
+		return std::snprintf(result, resultSize,
+							 "{\"success\":true,\"free\":%u,\"current\":%u,\"limit\":%u,\"blocks\":%u}",
+							 static_cast<unsigned>(system_get_free_heap_size()),
+							 static_cast<unsigned>(MallocCount::getCurrent()),
+							 static_cast<unsigned>(MallocCount::getAllocLimit()),
+							 static_cast<unsigned>(activeBlocks)) > 0;
+	}
+
+	if(std::strcmp(cmd, "alloc") == 0) {
+		const auto requestedSize = request.size;
+		if(requestedSize == 0 || requestedSize > HEAP_TEST_MAX_ALLOCATION) {
+			return std::snprintf(result, resultSize, "{\"success\":false,\"error\":\"size must be 1..%u\"}",
+							 static_cast<unsigned>(HEAP_TEST_MAX_ALLOCATION)) > 0;
+		}
+
+		auto slot = std::find_if(heapTestAllocations.begin(), heapTestAllocations.end(),
+								 [](const HeapTestAllocation& allocation) { return allocation.address == nullptr; });
+		if(slot == heapTestAllocations.end()) {
+			return std::snprintf(result, resultSize, "{\"success\":false,\"error\":\"allocation table full\"}") > 0;
+		}
+		if(!app.checkHeap(static_cast<uint32_t>(requestedSize) + 512)) {
+			return std::snprintf(result, resultSize, "{\"success\":false,\"error\":\"heap floor reached\",\"free\":%u}",
+							 static_cast<unsigned>(system_get_free_heap_size())) > 0;
+		}
+
+		void* address = std::malloc(static_cast<size_t>(requestedSize));
+		if(address == nullptr) {
+			return std::snprintf(result, resultSize, "{\"success\":false,\"error\":\"allocation failed\",\"free\":%u}",
+							 static_cast<unsigned>(system_get_free_heap_size())) > 0;
+		}
+		std::memset(address, 0xa5, static_cast<size_t>(requestedSize));
+		*slot = {address, static_cast<size_t>(requestedSize)};
+		return std::snprintf(result, resultSize, "{\"success\":true,\"address\":%llu,\"size\":%u}",
+						 static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(address)),
+						 static_cast<unsigned>(requestedSize)) > 0;
+	}
+
+	if(std::strcmp(cmd, "free") == 0) {
+		const auto address = static_cast<uintptr_t>(request.address);
+		auto allocation = std::find_if(heapTestAllocations.begin(), heapTestAllocations.end(),
+									   [&](const HeapTestAllocation& entry) {
+										   return reinterpret_cast<uintptr_t>(entry.address) == address && entry.address != nullptr;
+									   });
+		if(allocation == heapTestAllocations.end()) {
+			return std::snprintf(result, resultSize, "{\"success\":false,\"error\":\"address is not an active test allocation\"}") > 0;
+		}
+		std::free(allocation->address);
+		*allocation = {};
+		return std::snprintf(result, resultSize, "{\"success\":true,\"free\":%u}",
+						 static_cast<unsigned>(system_get_free_heap_size())) > 0;
+	}
+
+	return std::snprintf(result, resultSize, "{\"success\":false,\"error\":\"cmd must be alloc, free, or get-free\"}") > 0;
+}
+#endif
+
 bool Api::parseJsonRpcRequest(Stream& input, String& method, String& params, int& requestId, String& authHash,
-							  bool& sparse, bool& paramsEmpty, String& errorMsg)
+															 bool& sparse, bool& paramsEmpty, String& errorMsg, HeapTestRequest* heapTest)
 {
 	auto& codec = rpcCodec();
 	Jsonrpc::Root root(codec.db());
@@ -477,6 +563,14 @@ bool Api::parseJsonRpcRequest(Stream& input, String& method, String& params, int
 	sparse = sparseValue.length() == 0 ||
 		!(sparseValue == F("0") || sparseValue == F("false") || sparseValue == F("off"));
 	const auto fields = request.params;
+	if(heapTest != nullptr && method == F("heap_test")) {
+		heapTest->cmd = fields.getCmd();
+		heapTest->size = fields.getSize();
+		heapTest->address = fields.getAddress();
+		paramsEmpty = heapTest->cmd.length() == 0 && heapTest->size == 0 && heapTest->address == 0;
+		params = "";
+		return true;
+	}
 	paramsEmpty = fields.getCmd().length() == 0 && fields.getT() == 0 && fields.getS() == 0 && !fields.getR() &&
 			   fields.getD() == 1 && fields.getName().length() == 0 && fields.getQ().length() == 0 &&
 			   fields.getHash().length() == 0 && sparseValue.length() == 0 && !fields.getAll() && !fields.getDebug() &&

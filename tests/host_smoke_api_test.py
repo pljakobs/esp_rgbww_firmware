@@ -555,6 +555,32 @@ def ws_request(
         ignored_frames.append(response)
 
 
+class HostHeapControl:
+    """Keep heap controls on one established WebSocket during HTTP starvation."""
+
+    def __init__(self, smoke_config: SmokeConfig, request_id: int = 8100):
+        self.socket, self.handshake_trace = websocket_handshake(smoke_config, os.urandom(16))
+        self.request_id = request_id
+        if "101" not in self.handshake_trace["response"]["status_line"]:
+            self.socket.close()
+            raise AssertionError(f"heap control WebSocket handshake failed: {self.handshake_trace}")
+
+    def command(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self.request_id += 1
+        response, _ = ws_request(
+            self.socket,
+            {"jsonrpc": "2.0", "id": self.request_id, "method": "heap_test", "params": payload},
+            timeout=6,
+        )
+        result = response.get("result")
+        if not isinstance(result, dict):
+            raise AssertionError(f"heap_test returned no result object: {response}")
+        return result
+
+    def close(self) -> None:
+        self.socket.close()
+
+
 def test_websocket_handshake(smoke_config: SmokeConfig) -> None:
     sock, trace = websocket_handshake(smoke_config, b"host-ci-websocket-key")
     try:
@@ -727,6 +753,45 @@ def test_http_json_read_surface(smoke_config: SmokeConfig, path: str) -> None:
         fail_with_trace(f"GET {path} did not return JSON", trace)
     if response["status"] != 200 or not isinstance(payload, (dict, list)):
         fail_with_trace(f"GET {path} should return a JSON object or array", trace)
+
+
+def test_host_heap_allocator_endpoint(smoke_config: SmokeConfig, api_secured: bool) -> None:
+    if os.environ.get("HOST_SMOKE_REAL_DEVICE") == "1":
+        pytest.skip("heap test endpoint is available only on debug Host builds")
+    if api_secured:
+        pytest.skip("heap test endpoint probe needs an unsecured Host controller")
+
+    control = HostHeapControl(smoke_config)
+    address = None
+    try:
+        before = control.command({"cmd": "get-free"})
+        assert before["success"] is True, before
+        baseline_blocks = before["blocks"]
+        allocated = control.command({"cmd": "alloc", "size": 512})
+        assert allocated["success"] is True
+        address = allocated["address"]
+        assert allocated["size"] == 512 and isinstance(address, int) and address > 0
+
+        during = control.command({"cmd": "get-free"})
+        assert during["blocks"] == baseline_blocks + 1
+
+        rejected = control.command({"cmd": "free", "address": 1})
+        assert rejected["success"] is False
+
+        released = control.command({"cmd": "free", "address": address})
+        address = None
+        assert released["success"] is True
+
+        after = control.command({"cmd": "get-free"})
+        assert after["blocks"] == baseline_blocks
+    finally:
+        if address is not None:
+            try:
+                control.command({"cmd": "free", "address": address})
+            finally:
+                control.close()
+        else:
+            control.close()
 
 
 @pytest.mark.parametrize(
