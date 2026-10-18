@@ -802,8 +802,10 @@ The socket serves two roles:
 | `continue` | Resume paused queue |
 | `blink` | Trigger blink |
 | `direct` | Apply direct color change |
-| `runtime_info_subscribe`, `subscribe_runtime_info` | Subscribe this connection to runtime-info updates |
-| `runtime_info_unsubscribe`, `unsubscribe_runtime_info` | Stop runtime-info updates |
+| `subscribe` with `channel: "runtime_info"` | Subscribe this connection to runtime-info updates |
+| `unsubscribe` with `channel: "runtime_info"` | Stop runtime-info updates |
+| `runtime_info_subscribe`, `subscribe_runtime_info` | Legacy runtime-info subscribe aliases |
+| `runtime_info_unsubscribe`, `unsubscribe_runtime_info` | Legacy runtime-info unsubscribe aliases |
 | `webapp_check` | Request a webapp update check |
 | `authenticate` | Complete the challenge-response auth handshake (see [Security](#security)) |
 
@@ -824,7 +826,7 @@ The controller also pushes the same events as the TCP event server:
 { "type": "notification", "data": "new SSID, MyNetwork" }
 ```
 
-After a connection subscribes with `runtime_info_subscribe`, it also receives
+After a connection subscribes to the `runtime_info` channel, it also receives
 `runtime_info` notifications containing current runtime counters. The
 subscription is per WebSocket connection.
 
