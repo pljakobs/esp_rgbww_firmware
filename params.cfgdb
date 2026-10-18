@@ -469,6 +469,10 @@
       },
       "additionalProperties": false
     },
+    "telemetry-stack-words": {
+      "type": "array",
+      "items": { "$ref": "value-types/$defs/address" }
+    },
     "telemetry-reboot": {
       "type": "object",
       "properties": {
@@ -479,7 +483,10 @@
         "epc2": { "$ref": "value-types/$defs/non-negative-integer" },
         "epc3": { "$ref": "value-types/$defs/non-negative-integer" },
         "excvaddr": { "$ref": "value-types/$defs/non-negative-integer" },
-        "depc": { "$ref": "value-types/$defs/non-negative-integer" }
+        "depc": { "$ref": "value-types/$defs/non-negative-integer" },
+        "stackBase": { "$ref": "value-types/$defs/address" },
+        "stackCount": { "type": "integer", "minimum": 0, "maximum": 50 },
+        "stackWords": { "$ref": "#/$defs/telemetry-stack-words" }
       },
       "additionalProperties": false
     },

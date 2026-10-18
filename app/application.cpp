@@ -178,6 +178,7 @@ static_assert(sizeof(CrashDump) == (CRASH_STACK_WORDS + CRASH_METADATA_WORDS) * 
 
 static CrashDump g_crashDump;
 static bool g_crashDumpValid = false;
+static bool g_crashTelemetryPending = false;
 
 // Overrides the weak alias in crash_handler.c — runs before the reset.
 // Keep it minimal: only SDK primitive writes are safe here.
@@ -493,6 +494,19 @@ void Application::sendTelemetry()
 			telemetry.reboot.setEpc3(app.rtc_info->epc3);
 			telemetry.reboot.setExcvaddr(app.rtc_info->excvaddr);
 			telemetry.reboot.setDepc(app.rtc_info->depc);
+				#ifdef ARCH_ESP8266
+			telemetry.reboot.stackWords.clear();
+			telemetry.reboot.resetStackBase();
+			telemetry.reboot.resetStackCount();
+			if(g_crashTelemetryPending) {
+				const uint32_t stackCount = g_crashDump.stackCount > CRASH_STACK_WORDS ? CRASH_STACK_WORDS : g_crashDump.stackCount;
+				telemetry.reboot.setStackBase(g_crashDump.stackBase);
+				telemetry.reboot.setStackCount(stackCount);
+				for(uint32_t i = 0; i < stackCount; ++i) {
+					telemetry.reboot.stackWords.addItem(g_crashDump.stackWords[i]);
+				}
+			}
+				#endif
 			telemetry.mDNS.setReceived(_mDNS_received);
 			telemetry.mDNS.setReplies(_mDNS_replies);
 		}
@@ -502,7 +516,8 @@ void Application::sendTelemetry()
 			return;
 		}
 		
-		if (!telemetryClient.stat(telemetryPayload))
+		const bool published = telemetryClient.stat(telemetryPayload);
+		if (!published)
 		{
 			cdebug_i(APPLICATION, "Application::sendTelemetry: " ANSI_COLOR_BLUE "Failed to publish monitor data to telemetry MQTT" ANSI_COLOR_RESET);
 			/* 
@@ -511,6 +526,10 @@ void Application::sendTelemetry()
 				telemetryClient.reconnect();
 			}
 			*/
+		} else {
+				#ifdef ARCH_ESP8266
+			g_crashTelemetryPending = false;
+				#endif
 		}
 	}
 	
@@ -1017,6 +1036,7 @@ void Application::readCrashDump()
 	if(dump.magic == CRASH_RTC_MAGIC || dump.magic == CRASH_RTC_MAGIC_OVERFLOW) {
 		g_crashDump = dump;
 		g_crashDumpValid = true;
+		g_crashTelemetryPending = true;
 		
 		// Clear magic so it doesn't re-report on subsequent reboots
 		dump.magic = 0;
