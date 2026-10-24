@@ -372,8 +372,7 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 	heapTestRequest = &heapTest;
 #endif
 
-	if(!app.api || !app.api->parseJsonRpcRequest(requestStream, methodName, paramsJson, requestId, authHash,
-															 sparse, paramsEmpty, errorMsg, heapTestRequest, &notificationChannel)) {
+	if(!app.api || !app.api->parseJsonRpcRequest(requestStream, methodName, paramsJson, requestId, authHash, sparse, paramsEmpty, errorMsg, heapTestRequest, &notificationChannel)) {
 		auto& codec = rpcCodec();
 		Jsonrpc::Root root(codec.db());
 		if(auto update = root.update()) {
@@ -473,7 +472,7 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 		}
 		char payload[320];
 		const int length = std::snprintf(payload, sizeof(payload),
-									 "{\"jsonrpc\":\"2.0\",\"id\":%d,\"result\":%s}", requestId, result);
+										 "{\"jsonrpc\":\"2.0\",\"id\":%d,\"result\":%s}", requestId, result);
 		if(length > 0 && static_cast<size_t>(length) < sizeof(payload)) {
 			queueWsPayload(socket, payload, static_cast<size_t>(length), true);
 		} else {
@@ -578,7 +577,7 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 void ApplicationWebserver::wsSendBroadcast(const char* buffer, size_t length)
 {
     for (size_t i = 0; i < webSockets.size(); ++i) {
-        if (webSockets[i] != nullptr) {
+        if (webSockets[i] != nullptr && webSockets[i]->getState() == eWSCS_Open) {
 			queueWsPayload(*webSockets[i], buffer, length);
         }
     }
@@ -1126,7 +1125,8 @@ bool ApplicationWebserver::checkHeap(HttpResponse& response, uint32_t minHeap)
  * @param minHeap Optional minimum heap required (default 0 loops back to _minimumHeap)
  * @return true if request is valid and should proceed. false if response handled (e.g. error or options)
  */
-bool ApplicationWebserver::preflightRequest(HttpRequest& request, HttpResponse& response, std::initializer_list<HttpMethod> allowedMethods,  uint32_t minHeap)
+bool ApplicationWebserver::preflightRequest(HttpRequest& request, HttpResponse& response,
+												 std::initializer_list<HttpMethod> allowedMethods, uint32_t minHeap)
 {
 	cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::preflightRequest: " ANSI_COLOR_BLUE "%d %s" ANSI_COLOR_RESET, (int)request.method, request.uri.Path.c_str());
 	const HttpMethod reqMethod = request.method;
