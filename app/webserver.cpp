@@ -1474,7 +1474,7 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 		} else {
 			//CofigDB provide correct error message
 
-			//debug_i(ANSI_COLOR_BLUE "config api error " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET,error_msg.c_str());
+			debug_i(ANSI_COLOR_BLUE "config api error " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET,error_msg.c_str());
 			//JsonObject root = doc.as<JsonObject>();
 			//sendApiCode(response, API_CODES::API_MISSING_PARAM, error_msg);
 			sendApiCode(response, API_CODES::API_MISSING_PARAM);
