@@ -1255,6 +1255,7 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 		auto bodyStream = request.getBodyStream();
 		if(bodyStream) {
 			ConfigDB::Status status = app.cfg->importFromStream(ConfigDB::Json::format, *bodyStream);
+			cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onConfig: " ANSI_COLOR_BLUE "config api error " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET,status.toString().c_str());
 
 			/*********************************
              * TODO
@@ -1474,13 +1475,14 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 		} else {
 			//CofigDB provide correct error message
 
-			debug_i(ANSI_COLOR_BLUE "config api error " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET,error_msg.c_str());
+			// debug_i(ANSI_COLOR_BLUE "config api error " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET,error_msg.c_str());
 			//JsonObject root = doc.as<JsonObject>();
 			//sendApiCode(response, API_CODES::API_MISSING_PARAM, error_msg);
 			sendApiCode(response, API_CODES::API_MISSING_PARAM);
 		}
 
 	} else {
+		cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onConfig: " ANSI_COLOR_BLUE "onConfig GET" ANSI_COLOR_RESET);
 		/*
          * /config GET
          */
