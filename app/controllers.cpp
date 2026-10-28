@@ -139,7 +139,7 @@ void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char*
         cdebug_i(CONTROLLERS, "Controllers::addOrUpdate: " ANSI_COLOR_BLUE "Controllers::addOrUpdate id=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE ", hostname=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ", ip=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ", ttl=" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, id, hostname, ipAddress, ttl);
     #endif
     if (hostType == HOST_TYPE_ALIAS || hostType == HOST_TYPE_UNKNOWN) {
-        cdebug_w(CONTROLLERS, "Controllers::addOrUpdate: " ANSI_COLOR_YELLOW "virtual host type provided, skipping addOrUpdate" ANSI_COLOR_RESET);
+        cdebug_w(CONTROLLERS, "Controllers::addOrUpdate: " ANSI_COLOR_YELLOW "type " ANSI_COLOR_CYAN "%s" ANSI_COLOR_YELLOW ", skipping addOrUpdate for " ANSI_COLOR_CYAN "%s"  ANSI_COLOR_RESET, hostType == HOST_TYPE_ALIAS ? "ALIAS" : "UNKNOWN", hostname);
         return;
     }
     if(hostname == nullptr || hostname[0] == '\0' || ipAddress == nullptr || ipAddress[0] == '\0') {
@@ -150,11 +150,13 @@ void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char*
     size_t index = findVisibleControllerIndex(id);
 
     if (index != INVALID_INDEX) {
+        cdebug_i(CONTROLLERS, "Controllers::addOrUpdate: " ANSI_COLOR_BLUE "Updating existing controller " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RESET, hostname);
         // Update existing: record the advertised TTL and stamp "last heard" now.
         // State is derived live, so we never clobber the sticky LOCALHOST marker.
         visibleControllers[index].ttl = ttl;
         visibleControllers[index].lastSeenMs = millis();
     } else {
+        cdebug_i(CONTROLLERS, "Controllers::addOrUpdate: " ANSI_COLOR_BLUE "Adding new controller " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RESET, hostname);
         // Brand-new controller: admit only while we stay within the inventory
         // ceiling and above the free-heap floor. Existing controllers (handled
         // above) always keep updating; we never drop what we already track.
