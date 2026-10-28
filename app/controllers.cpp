@@ -138,7 +138,7 @@ void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char*
     #ifdef DEBUG_MDNS
         cdebug_i(CONTROLLERS, "Controllers::addOrUpdate: " ANSI_COLOR_BLUE "Controllers::addOrUpdate id=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE ", hostname=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ", ip=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ", ttl=" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, id, hostname, ipAddress, ttl);
     #endif
-    if(hostname == nullptr || hostname[0] == '\0' || ipAddress == nullptr || ipAddress[0] == '\0') {
+    if(hostname == nullptr || hostname[0] == '\0' || ipAddress == nullptr || ipAddress[0] == '\0' || hostType == HOST_TYPE_CONTROLLER || hostType == HOST_TYPE_WALLPANEL) {
         cdebug_w(CONTROLLERS, "Controllers::addOrUpdate: " ANSI_COLOR_YELLOW "Empty hostname or IP address provided, skipping addOrUpdate" ANSI_COLOR_RESET);
         return;
     }
@@ -150,9 +150,6 @@ void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char*
         // State is derived live, so we never clobber the sticky LOCALHOST marker.
         visibleControllers[index].ttl = ttl;
         visibleControllers[index].lastSeenMs = millis();
-        if (hostType != HOST_TYPE_UNKNOWN) {
-            visibleControllers[index].hostType = hostType;
-        }
     } else {
         // Brand-new controller: admit only while we stay within the inventory
         // ceiling and above the free-heap floor. Existing controllers (handled
