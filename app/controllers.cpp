@@ -307,6 +307,7 @@ void Controllers::noteIdentity(unsigned int id, const char* hostname, int ttl, H
     // contract that the id always identifies the chip.
     ControllerInfo info = findById(id);
     if (info.state != NOT_FOUND && info.ipAddress[0] != '\0') {
+        cdebug_i(CONTROLLERS, "Controllers::noteIdentity: " ANSI_COLOR_BLUE "Refreshing existing controller " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RESET, hostname);
         addOrUpdate(id, hostname, info.ipAddress, ttl, hostType);
         return;
     }
