@@ -677,9 +677,8 @@ std::vector<Storage::esp_partition_info_t> ApplicationOTA::getEditablePartitionT
 	for(auto partition : table) {
 		Storage::esp_partition_info_t entry;
 		entry.magic = 0x50AA;
-		// TODO(#138): strncpy does not guarantee null-termination if name is exactly sizeof(entry.name) bytes.
-		// Fix: use sizeof(entry.name)-1 and set entry.name[sizeof(entry.name)-1] = '\0'.
-		strncpy(entry.name, partition.name().c_str(), sizeof(entry.name));
+		strncpy(entry.name, partition.name().c_str(), sizeof(entry.name)-1);
+		entry.name[sizeof(entry.name)-1] = '\0';
 		entry.type = partition.type();
 		entry.subtype = partition.subType();
 		entry.offset = partition.address();
