@@ -248,7 +248,7 @@ void Controllers::noteAddress(const char* hostname, const char* ipAddress, int t
     // the normal upsert path so it becomes a visible (ONLINE) controller.
     unsigned int id = getIdByHostname(hostname);
     if (id != 0) {
-        addOrUpdate(id, hostname, ipAddress, ttl);
+        addOrUpdate(id, hostname, ipAddress, ttl, Controllers::HostType::HOST_TYPE_CONTROLLER);
         return;
     }
 
