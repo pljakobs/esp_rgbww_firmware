@@ -153,9 +153,6 @@ void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char*
         // State is derived live, so we never clobber the sticky LOCALHOST marker.
         visibleControllers[index].ttl = ttl;
         visibleControllers[index].lastSeenMs = millis();
-        if (hostType != HOST_TYPE_UNKNOWN) {
-            visibleControllers[index].hostType = hostType;
-        }
     } else {
         cdebug_i(CONTROLLERS, "Controllers::addOrUpdate: " ANSI_COLOR_BLUE "Adding new controller " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RESET, hostname);
         // Brand-new controller: admit only while we stay within the inventory
