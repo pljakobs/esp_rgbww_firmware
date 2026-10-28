@@ -706,7 +706,8 @@ bool ApplicationOTA::addPartition(std::vector<Storage::esp_partition_info_t>& pa
 	Storage::esp_partition_info_t newPartition;
 	newPartition.magic = 0x50AA;
 	// TODO(#138): strncpy does not guarantee null-termination — see same issue in getEditablePartitionTable.
-	strncpy(newPartition.name, name.c_str(), sizeof(newPartition.name));
+	strncpy(newPartition.name, name.c_str(), sizeof(newPartition.name)-1);
+	newPartition.name[sizeof(newPartition.name)-1] = '\0';
 	newPartition.type = static_cast<Storage::Partition::Type>(type);
 	newPartition.subtype = subType;
 	newPartition.offset = start;
@@ -753,15 +754,19 @@ bool ApplicationOTA::savePartitionTable(std::vector<Storage::esp_partition_info_
 	bool isFirst = true;
 	uint32_t partitionEnd;
 	for(const auto& partition : partitionTable) {
-		Serial << "Partition: " << partition.name << " start: " << partition.offset
-			   << " end: " << partition.offset + partition.size << endl;
+		cdebug_i(OTAUPDATE, "ApplicationOTA::savePartitionTable: " ANSI_COLOR_BLUE "Partition: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " start: " ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE " end: " ANSI_COLOR_CYAN "%u" ANSI_COLOR_RESET,
+			   partition.name, partition.offset, partition.offset + partition.size);
 		if(!isFirst) {
-			if((partition.offset + partition.size) < partitionEnd) { // TODO(#136): condition is inverted, see above
+			if((partition.offset + partition.size) > partitionEnd) { // TODO(#136): condition is inverted, see above
 				// Overlap detected, handle error
-				Serial << "Error: Overlapping partitions detected " << partition.name << endl;
+				cdebug_e(OTAUPDATE, "ApplicationOTA::savePartitionTable: " ANSI_COLOR_RED "Error: Overlapping partitions detected " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RESET, partition.name);
 				return false;
 			} else {
 				partitionEnd = partition.offset + partition.size;
+				if (partition.offset + partition.size > 0x00400000) { // TODO(#137): upper-bound check
+					cdebug_e(OTAUPDATE, "ApplicationOTA::savePartitionTable: " ANSI_COLOR_RED "Error: Partition exceeds flash size " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RESET, partition.name);
+					return false;
+				}
 			}
 		} else {
 			partitionEnd = partition.offset + partition.size;
@@ -784,13 +789,14 @@ bool ApplicationOTA::savePartitionTable(std::vector<Storage::esp_partition_info_
 
 	for(const auto& partition : partitionTable) {
 		// Add the magic number
-		Serial << "Adding Partition " << partition.name << endl;
+		cdebug_i(OTAUPDATE, "ApplicationOTA::savePartitionTable: " ANSI_COLOR_BLUE "Adding Partition " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RESET, partition.name);
 
 		// Add the partition entry
 		Storage::esp_partition_info_t entry;
 		entry.magic = 0x50AA;
 		// TODO(#138): strncpy does not guarantee null-termination — see same issue in getEditablePartitionTable.
-		strncpy(entry.name, partition.name, sizeof(entry.name));
+		strncpy(entry.name, partition.name, sizeof(entry.name)-1);
+		entry.name[sizeof(entry.name)-1] = '\0';
 		entry.type = partition.type;
 		entry.subtype = partition.subtype;
 		entry.offset = partition.offset;
@@ -810,7 +816,7 @@ bool ApplicationOTA::savePartitionTable(std::vector<Storage::esp_partition_info_
 	crypto_md5_update(&md5Context, entries.data(), entries.size());
 	uint8_t md5sum[MD5_SIZE];
 	crypto_md5_final(md5sum, &md5Context);
-
+	cdebug_i(APPLICATIONOTA, "ApplicationOTA::savePartitionTable: " ANSI_COLOR_BLUE "MD5 sum computed" ANSI_COLOR_RESET);
 	// Add the MD5 sum entry
 	entries.push_back(0xEB); // Magic number
 	entries.push_back(0xEB);
