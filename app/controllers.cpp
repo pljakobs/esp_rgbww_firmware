@@ -148,6 +148,7 @@ void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char*
     size_t index = findVisibleControllerIndex(id);
 
     if (index != INVALID_INDEX) {
+        cdebug_i(CONTROLLERS, "Controllers::addOrUpdate: " ANSI_COLOR_BLUE "Updating existing controller " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RESET, hostname);
         // Update existing: record the advertised TTL and stamp "last heard" now.
         // State is derived live, so we never clobber the sticky LOCALHOST marker.
         visibleControllers[index].ttl = ttl;
@@ -156,6 +157,7 @@ void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char*
             visibleControllers[index].hostType = hostType;
         }
     } else {
+        cdebug_i(CONTROLLERS, "Controllers::addOrUpdate: " ANSI_COLOR_BLUE "Adding new controller " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RESET, hostname);
         // Brand-new controller: admit only while we stay within the inventory
         // ceiling and above the free-heap floor. Existing controllers (handled
         // above) always keep updating; we never drop what we already track.
