@@ -138,8 +138,12 @@ void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char*
     #ifdef DEBUG_MDNS
         cdebug_i(CONTROLLERS, "Controllers::addOrUpdate: " ANSI_COLOR_BLUE "Controllers::addOrUpdate id=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE ", hostname=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ", ip=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ", ttl=" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, id, hostname, ipAddress, ttl);
     #endif
-    if(hostname == nullptr || hostname[0] == '\0' || ipAddress == nullptr || ipAddress[0] == '\0' || hostType == HOST_TYPE_CONTROLLER || hostType == HOST_TYPE_WALLPANEL) {
-        cdebug_w(CONTROLLERS, "Controllers::addOrUpdate: " ANSI_COLOR_YELLOW "Empty hostname or IP address provided, skipping addOrUpdate" ANSI_COLOR_RESET);
+    if (hostType == HOST_TYPE_ALIAS || hostType == HOST_TYPE_UNKNOWN) {
+        cdebug_w(CONTROLLERS, "Controllers::addOrUpdate: " ANSI_COLOR_YELLOW "virtual host type provided, skipping addOrUpdate" ANSI_COLOR_RESET);
+        return;
+    }
+    if(hostname == nullptr || hostname[0] == '\0' || ipAddress == nullptr || ipAddress[0] == '\0') {
+        cdebug_w(CONTROLLERS, "Controllers::addOrUpdate: " ANSI_COLOR_YELLOW "virtual host type, empty hostname or no IP address provided, skipping addOrUpdate" ANSI_COLOR_RESET);
         return;
     }
     // Find existing visible controller
