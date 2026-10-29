@@ -1,5 +1,20 @@
 # Release Notes
 
+## 2026-10-28
+
+- fixed a few errors in mDNS / Controller handling that lead to ALIAS updates 
+(which are the group leaders, not real controllers) overwriting the real controller
+names. Now, ALIAS and UNKNOWN types are filtered from updating the stored controller
+database.
+- fixed 
+  - https://github.com/pljakobs/esp_rgbww_firmware/issues/138
+  - https://github.com/pljakobs/esp_rgbww_firmware/issues/137
+  and
+  - https://github.com/pljakobs/esp_rgbww_firmware/issues/136
+Those bugs were never really expressed, because they would only have exposed if the 
+values to rewrite the partition table would have been wrong. Fixing them is more to
+the beneift of others who might to want to use this code to do similar things themselves.
+
 ## 2026-10-14
 
 ### Reliability and discovery
