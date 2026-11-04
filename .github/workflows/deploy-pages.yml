@@ -124,6 +124,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: get-version
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    env:
+      DISTRIBUTION_PUBLISHER_SHA: ${{ vars.DISTRIBUTION_PUBLISHER_SHA }}
     
     steps:
       # Setup branch variables once at the beginning
@@ -144,11 +146,30 @@ jobs:
           echo "supported_socs=${{ needs.get-version.outputs.supported_socs }}" >> $GITHUB_ENV
           echo "deploy_run_key=${{ github.run_id }}-${{ github.run_attempt }}" >> $GITHUB_ENV
    
-      # Checkout main repository to get manage_version.py
-      - name: Checkout main repository
+      - name: Validate publisher pin
+        run: |
+          [[ "$DISTRIBUTION_PUBLISHER_SHA" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "Set DISTRIBUTION_PUBLISHER_SHA to a reviewed distribution-server commit SHA"
+            exit 1
+          }
+
+      - name: Checkout pinned distribution publisher
         uses: actions/checkout@v6
         with:
-          path: esp_firmware_repo
+          repository: pljakobs/lightinator_server
+          ref: ${{ env.DISTRIBUTION_PUBLISHER_SHA }}
+          path: distribution_publisher
+          persist-credentials: false
+
+      - name: Test pinned distribution publisher
+        run: |
+          set -euo pipefail
+          test "$(git -C distribution_publisher rev-parse HEAD)" = "$DISTRIBUTION_PUBLISHER_SHA"
+          test "$(python3 distribution_publisher/manage_version.py --publisher-contract)" = "lightinator-sqlite-v1"
+          python3 -m venv "$RUNNER_TEMP/publisher-venv"
+          "$RUNNER_TEMP/publisher-venv/bin/pip" install -r distribution_publisher/requirements-test.txt
+          cd distribution_publisher
+          "$RUNNER_TEMP/publisher-venv/bin/python" -m unittest discover -s tests -v
               
       - name: Create directories
         run: |
@@ -269,10 +290,15 @@ jobs:
           
           # Move download directory to staging
           mv download staging/
+          PUBLISHER_DIR="publisher-firmware-${{ env.deploy_run_key }}"
+          mkdir -p "staging/$PUBLISHER_DIR"
+          cp distribution_publisher/manage_version.py "staging/$PUBLISHER_DIR/manage_version-${{ env.deploy_run_key }}.py"
+          cp distribution_publisher/version_api.py distribution_publisher/migrate_to_sqlite.py "staging/$PUBLISHER_DIR/"
+          cp -r distribution_publisher/images "staging/$PUBLISHER_DIR/"
+          printf '%s\n' "$DISTRIBUTION_PUBLISHER_SHA" > "staging/$PUBLISHER_DIR/SOURCE_REVISION"
           
           # Use run-specific names so concurrent publishes cannot overwrite
           # files before they acquire the remote deployment lock.
-          cp esp_firmware_repo/manage_version.py "staging/manage_version-${{ env.deploy_run_key }}.py"
           
           # Create the remote script that will orchestrate the update on the server
           # This script handles:
@@ -290,19 +316,23 @@ jobs:
           COMMENT_B64="${{ env.version_comment_b64 }}"
           DEPLOY_SERVER="${{ env.deploy_server }}"
           SUPPORTED_SOCS="${{ env.supported_socs }}"
-          MANAGE_SCRIPT="manage_version-${{ env.deploy_run_key }}.py"
+          PUBLISHER_DIR="publisher-firmware-${{ env.deploy_run_key }}"
+          MANAGE_SCRIPT="$PUBLISHER_DIR/manage_version-${{ env.deploy_run_key }}.py"
+          MANAGE_PYTHON="/home/github-deploy/lightinator-server/.venv/bin/python"
+          export VERSION_DB_PATH="${VERSION_DB_PATH:-/home/github-deploy/lightinator-server/firmware.db}"
           REMOTE_SCRIPT="remote_update-${{ env.deploy_run_key }}.sh"
           
           cd "$DEPLOY_PATH"
+          export VERSION_ASSET_ROOT="$DEPLOY_PATH"
+          test -f "$MANAGE_SCRIPT" && test -x "$MANAGE_PYTHON"
+          test "$(cat "$PUBLISHER_DIR/SOURCE_REVISION")" = "${{ env.DISTRIBUTION_PUBLISHER_SHA }}"
+          test "$("$MANAGE_PYTHON" "$MANAGE_SCRIPT" --publisher-contract)" = "lightinator-sqlite-v1"
 
           # Ensure new firmware path layout exists
           mkdir -p "download/firmware/$TARGET_BRANCH/$VERSION"
           mkdir -p "download/firmware/$TARGET_BRANCH/latest"
           
-          echo "Updating version.json on remote..."
-          
-          # Make the uploaded script executable
-          chmod +x "$MANAGE_SCRIPT"
+          echo "Publishing firmware to SQLite on remote..."
           
           # Update version.json for each uploaded artifact
           IFS=',' read -ra soc_list <<< "$SUPPORTED_SOCS"
@@ -320,7 +350,7 @@ jobs:
               fi
               
               url="http://$DEPLOY_SERVER/download/firmware/$TARGET_BRANCH/$VERSION/$soc/$type/$bin_file"
-              python3 "$MANAGE_SCRIPT" version.json add $soc $type $TARGET_BRANCH "$VERSION" "$url" --comment-b64 "$COMMENT_B64"
+              "$MANAGE_PYTHON" "$MANAGE_SCRIPT" version.json add "$soc" "$type" "$TARGET_BRANCH" "$VERSION" "$url" --comment-b64 "$COMMENT_B64"
               
               # ELF and map are sibling files — URL predictable by replacing bin filename.
               echo "ELF deployed at: http://$DEPLOY_SERVER/download/firmware/$TARGET_BRANCH/$VERSION/$soc/$type/$elf_file"
@@ -356,7 +386,7 @@ jobs:
           done
 
           echo "Culling old versions..."
-          python3 "$MANAGE_SCRIPT" version.json cull
+          "$MANAGE_PYTHON" "$MANAGE_SCRIPT" version.json cull
           
           echo "Fixing permissions..."
           # Set ownership to deploy user:nginx group
@@ -364,9 +394,8 @@ jobs:
           # Ensure directories are 755 and files are 644
           find download/firmware -type d -exec chmod 755 {} \;
           find download -type f -exec chmod 644 {} \;
-          chmod +x "$MANAGE_SCRIPT"
-          
-          rm "$MANAGE_SCRIPT" "$REMOTE_SCRIPT"
+          rm -r -- "$PUBLISHER_DIR"
+          rm "$REMOTE_SCRIPT"
           EOF
           
           chmod +x "staging/remote_update-${{ env.deploy_run_key }}.sh"
