@@ -743,35 +743,23 @@ bool ApplicationOTA::savePartitionTable(std::vector<Storage::esp_partition_info_
 	std::sort(partitionTable.begin(), partitionTable.end(),
 			  [](const auto& a, const auto& b) { return a.offset < b.offset; });
 
-	// TODO(#136): overlap check condition is inverted — checks (B.offset + B.size) < A.end
-	// instead of (B.offset < A.end).  A partition that starts inside A but extends past it
-	// will not be detected.  Fix: replace the condition with `partition.offset < partitionEnd`.
-	// TODO(#137): no upper-bound check — a partition whose end exceeds the flash size
-	// (hardcoded 0x400000) is silently accepted.  Fix: add
-	//   if (partition.offset + partition.size > FLASH_SIZE) return false;
-	// before the overlap test.
-	// Check for overlaps
+	constexpr uint32_t flashSize = 0x00400000;
 	bool isFirst = true;
-	uint32_t partitionEnd;
+	uint32_t partitionEnd = 0;
 	for(const auto& partition : partitionTable) {
-		cdebug_i(OTAUPDATE, "ApplicationOTA::savePartitionTable: " ANSI_COLOR_BLUE "Partition: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " start: " ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE " end: " ANSI_COLOR_CYAN "%u" ANSI_COLOR_RESET,
-			   partition.name, partition.offset, partition.offset + partition.size);
-		if(!isFirst) {
-			if((partition.offset + partition.size) > partitionEnd) { // TODO(#136): condition is inverted, see above
-				// Overlap detected, handle error
-				cdebug_e(OTAUPDATE, "ApplicationOTA::savePartitionTable: " ANSI_COLOR_RED "Error: Overlapping partitions detected " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RESET, partition.name);
-				return false;
-			} else {
-				partitionEnd = partition.offset + partition.size;
-				if (partition.offset + partition.size > 0x00400000) { // TODO(#137): upper-bound check
-					cdebug_e(OTAUPDATE, "ApplicationOTA::savePartitionTable: " ANSI_COLOR_RED "Error: Partition exceeds flash size " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RESET, partition.name);
-					return false;
-				}
-			}
-		} else {
-			partitionEnd = partition.offset + partition.size;
-			isFirst = false;
+		if(partition.offset > flashSize || partition.size > flashSize - partition.offset) {
+			cdebug_e(OTAUPDATE, "ApplicationOTA::savePartitionTable: " ANSI_COLOR_RED "Error: Partition exceeds flash size " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RESET, partition.name);
+			return false;
 		}
+		const uint32_t end = partition.offset + partition.size;
+		if(!isFirst && partition.offset < partitionEnd) {
+			cdebug_e(OTAUPDATE, "ApplicationOTA::savePartitionTable: " ANSI_COLOR_RED "Error: Overlapping partitions detected " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RESET, partition.name);
+			return false;
+		}
+		cdebug_i(OTAUPDATE, "ApplicationOTA::savePartitionTable: " ANSI_COLOR_BLUE "Partition: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " start: " ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE " end: " ANSI_COLOR_CYAN "%u" ANSI_COLOR_RESET,
+			   partition.name, partition.offset, end);
+		partitionEnd = end;
+		isFirst = false;
 	}
 
 	// Write partition table to flash
