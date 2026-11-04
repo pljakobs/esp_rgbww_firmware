@@ -357,6 +357,66 @@ raise SystemExit('Forbidden git operation in policy test: ' + repr(arguments))
         options = events["workflow_dispatch"]["inputs"]["branch"]["options"]
         self.assertEqual(options[:6], ["5.0/develop", "5.0/testing", "5.0/prod", "5.1/develop", "5.1/testing", "5.1/prod"])
 
+    def test_publisher_resolves_refs_without_checkout_of_triggering_source(self):
+        document = workflow("deploy-pages.yml")
+        resolve = step(document, "get-version", "Get Branch and Artifact Branch")
+        self.assertNotIn("Checkout release metadata helper", [
+            selected.get("name") for selected in document["jobs"]["get-version"]["steps"]
+        ])
+        cases = [
+            ("workflow_run", "", "5.1/develop", "5.1/develop", "5.1-develop"),
+            ("workflow_dispatch", "stable", "", "5.0/prod", "5.0-prod"),
+            ("workflow_dispatch", "experimental", "", "5.1/develop", "5.1-develop"),
+        ]
+        for event_name, input_branch, run_branch, release_ref, artifact_branch in cases:
+            with self.subTest(event=event_name, branch=input_branch or run_branch):
+                result = self.execute(resolve, {
+                    "github.event_name": event_name,
+                    "inputs.branch": input_branch,
+                    "github.event.inputs.branch": input_branch,
+                    "github.event.workflow_run.head_branch": run_branch,
+                })
+                self.assertEqual(result["release_ref"], release_ref)
+                self.assertEqual(result["artifact_branch"], artifact_branch)
+        with self.subTest(event="workflow_run", branch="feature/untrusted"):
+            self.execute(resolve, {
+                "github.event_name": "workflow_run", "inputs.branch": "",
+                "github.event.inputs.branch": "",
+                "github.event.workflow_run.head_branch": "feature/untrusted",
+            }, success=False)
+
+    def test_version_info_artifact_is_validated_as_data_not_sourced(self):
+        document = workflow("deploy-pages.yml")
+        load_info = step(document, "get-version", "Load version info")
+        version_directory = self.directory / "version-info"
+        version_directory.mkdir()
+        cases = [
+            ("5.0/develop", "V5.0.2-7-develop", "esp8266,esp32,esp32c3", "0.10.1"),
+            ("5.1/develop", "V5.1.0-2-develop", "esp32,esp32c3", "0.11.0"),
+        ]
+        for release_ref, version, socs, component_version in cases:
+            with self.subTest(release_ref=release_ref):
+                (version_directory / "version-info.txt").write_text(
+                    f"fw_version={version}\nfw_branch={release_ref}\nfw_comment_b64=\nsupported_socs={socs}\nrgbwwled_version={component_version}\n"
+                )
+                result = self.execute(load_info, {
+                    "steps.get_branch.outputs.release_ref": release_ref,
+                })
+                self.assertEqual(result["fw_version"], version)
+                self.assertEqual(result["fw_branch"], release_ref)
+                self.assertEqual(result["supported_socs"], socs)
+
+        marker = self.directory / "artifact-command-ran"
+        (version_directory / "version-info.txt").write_text(
+            "fw_version=V5.1.0-2-develop\nfw_branch=5.1/develop\n"
+            f"fw_comment_b64=$(touch {marker})\nsupported_socs=esp32,esp32c3\n"
+            "rgbwwled_version=0.11.0\n"
+        )
+        self.execute(load_info, {
+            "steps.get_branch.outputs.release_ref": "5.1/develop",
+        }, success=False)
+        self.assertFalse(marker.exists())
+
     def test_only_intended_current_branches_trigger_firmware_build(self):
         events = workflow("build_firmware.yml")["on"]
         expected = ["stable", "testing", "develop", "experimental"]
