@@ -7,14 +7,27 @@ on:
   workflow_run:
     workflows: ["firmwareBuild"]
     types: [completed]
+    branches:
+      - stable
+      - testing
+      - develop
+      - experimental
+      - '5.0/**'
+      - '5.1/**'
   workflow_dispatch:
     inputs:
       branch:
         description: 'Branch to deploy'
         required: true
-        default: 'develop'
+        default: '5.0/develop'
         type: choice
         options:
+          - 5.0/develop
+          - 5.0/testing
+          - 5.0/prod
+          - 5.1/develop
+          - 5.1/testing
+          - 5.1/prod
           - stable
           - testing
           - develop
@@ -23,13 +36,14 @@ on:
 jobs:
   get-version:
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository) }}
     outputs:
       fw_version: ${{ steps.version.outputs.fw_version }}
       fw_branch: ${{ steps.version.outputs.fw_branch }}
       fw_comment_b64: ${{ steps.version.outputs.fw_comment_b64 }}
       latest_run_id: ${{ steps.get_run.outputs.latest_run_id }}  
       supported_socs: ${{ steps.version.outputs.supported_socs }}
+      artifact_branch: ${{ steps.get_branch.outputs.artifact_branch }}
       
     steps:
       - name: Disable Jekyll processing
@@ -37,55 +51,41 @@ jobs:
 
       - name: Get Branch and Artifact Branch
         id: get_branch
+        env:
+          CI_EVENT_NAME: ${{ github.event_name }}
+          CI_INPUT_BRANCH: ${{ inputs.branch }}
+          CI_RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            triggering_branch="${{ github.event.inputs.branch }}"
-            artifact_branch="${{ github.event.inputs.branch }}"
+          if [[ "$CI_EVENT_NAME" == "workflow_dispatch" ]]; then
+            source_branch="$CI_INPUT_BRANCH"
           else
-            # For workflow_run events
-            echo "Workflow run ID: ${{ github.event.workflow_run.id }}"
-            echo "Workflow run head branch: ${{ github.event.workflow_run.head_branch }}"
-            echo "Current GitHub ref: ${{ github.ref }}"
-            
-            # Get complete details from the API
-            api_response=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-              "https://api.github.com/repos/pljakobs/esp_rgbww_firmware/actions/runs/${{ github.event.workflow_run.id }}")
-            
-            echo "API Response details:"
-            echo "$api_response" | jq '{id, head_branch, head_sha, event, pull_requests}'
-            
-            # Determine the branch where the workflow ran (for artifacts)
-            if [ -n "${{ github.event.workflow_run.head_branch }}" ]; then
-              artifact_branch="${{ github.event.workflow_run.head_branch }}"
-            else  
-              artifact_branch=$(echo "$api_response" | jq -r '.head_branch')
-            fi
-            
-            # Check if this was triggered from a PR
-            pr_info=$(echo "$api_response" | jq -r '.pull_requests[0].head.ref // empty')
-            if [ -n "$pr_info" ]; then
-              echo "This appears to be from a PR. Original branch: $pr_info"
-              # Use the PR source branch for artifacts
-              artifact_branch="$pr_info"
-            fi
-            
-            # For target branch (deployment), use current branch
-            triggering_branch="${{ github.ref_name }}"
+            source_branch="$CI_RUN_BRANCH"
           fi
-          
-          echo "Determined branch for deployment: $triggering_branch"
-          echo "Determined branch for artifacts: $artifact_branch"
-          echo "branch=$triggering_branch" >> $GITHUB_OUTPUT
-          echo "source_branch=$artifact_branch" >> $GITHUB_ENV
+
+          case "$source_branch" in
+            5.0/develop|develop) release_ref="5.0/develop" ;;
+            5.0/testing|testing) release_ref="5.0/testing" ;;
+            5.0/prod|stable) release_ref="5.0/prod" ;;
+            5.1/develop|experimental) release_ref="5.1/develop" ;;
+            5.1/testing) release_ref="5.1/testing" ;;
+            5.1/prod) release_ref="5.1/prod" ;;
+            *) echo "Unsupported firmware release ref: $source_branch" >&2; exit 1 ;;
+          esac
+          artifact_branch="${release_ref//\//-}"
+          echo "release_ref=$release_ref" >> "$GITHUB_OUTPUT"
+          echo "artifact_branch=$artifact_branch" >> "$GITHUB_OUTPUT"
 
       - name: Get Latest Successful Workflow Run
         id: get_run
+        env:
+          CI_EVENT_NAME: ${{ github.event_name }}
+          CI_INPUT_BRANCH: ${{ inputs.branch }}
+          CI_WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
         run: |
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            # For manual dispatch, get the latest successful firmware build
-            # for the selected branch, regardless of how that build started.
+          if [[ "$CI_EVENT_NAME" == "workflow_dispatch" ]]; then
+            encoded_branch=$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$CI_INPUT_BRANCH")
             latest_run_id=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-              "https://api.github.com/repos/pljakobs/esp_rgbww_firmware/actions/workflows/build_firmware.yml/runs?branch=${{ github.event.inputs.branch }}&status=success&per_page=1" \
+              "https://api.github.com/repos/pljakobs/esp_rgbww_firmware/actions/workflows/build_firmware.yml/runs?branch=${encoded_branch}&status=success&event=push&per_page=1" \
               | jq -r '.workflow_runs[0].id // empty')
             
             if [ -z "$latest_run_id" ] || [ "$latest_run_id" == "null" ]; then
@@ -93,8 +93,7 @@ jobs:
               exit 1
             fi
           else
-            # For workflow_run trigger, use the run that triggered this workflow
-            latest_run_id="${{ github.event.workflow_run.id }}"
+            latest_run_id="$CI_WORKFLOW_RUN_ID"
           fi
           
           echo "Latest successful run ID: $latest_run_id"
@@ -104,7 +103,7 @@ jobs:
       - name: Download version info
         uses: actions/download-artifact@v8
         with:
-          name: version-info-${{ env.source_branch }}
+          name: version-info-${{ steps.get_branch.outputs.artifact_branch }}
           path: ./version-info
           github-token: ${{ secrets.GITHUB_TOKEN }}
           repository: pljakobs/esp_rgbww_firmware
@@ -112,18 +111,52 @@ jobs:
           
       - name: Load version info
         id: version
+        env:
+          EXPECTED_RELEASE_REF: ${{ steps.get_branch.outputs.release_ref }}
         run: |
-          source ./version-info/version-info.txt
-          echo "fw_version=$fw_version" >> $GITHUB_OUTPUT
-          echo "fw_branch=$fw_branch" >> $GITHUB_OUTPUT
-          echo "fw_comment_b64=${fw_comment_b64:-}" >> $GITHUB_OUTPUT
-          # Fall back to current known list for artifacts built before this change
-          echo "supported_socs=${supported_socs:-esp8266,esp32,esp32c3}" >> $GITHUB_OUTPUT
+          python3 - <<'PY'
+          import base64
+          import os
+          import re
+          from pathlib import Path
+
+          allowed = {"fw_version", "fw_branch", "fw_comment_b64", "supported_socs", "rgbwwled_version"}
+          metadata = {}
+          for line in Path("version-info/version-info.txt").read_text().splitlines():
+            key, separator, value = line.partition("=")
+            if not separator or key not in allowed or key in metadata:
+              raise SystemExit(f"Invalid version-info field: {key!r}")
+            metadata[key] = value
+
+          expected_ref = os.environ["EXPECTED_RELEASE_REF"]
+          release_line, stage = expected_ref.split("/", 1)
+          expected_socs = {"5.0": "esp8266,esp32,esp32c3", "5.1": "esp32,esp32c3"}[release_line]
+          expected_component = {"5.0": "0.10.1", "5.1": "0.11.0"}[release_line]
+          required = {"fw_version", "fw_branch", "fw_comment_b64", "supported_socs", "rgbwwled_version"}
+          if not required.issubset(metadata):
+            raise SystemExit("Version info is missing required metadata")
+          if metadata["fw_branch"] != expected_ref:
+            raise SystemExit("Firmware branch metadata does not match the selected release ref")
+          if not re.fullmatch(rf"V{re.escape(release_line)}\.\d+-\d+-{re.escape(stage)}", metadata["fw_version"]):
+            raise SystemExit("Firmware version does not match the selected release line and stage")
+          if metadata["supported_socs"] != expected_socs:
+            raise SystemExit("Supported SoCs do not match the selected release line")
+          if metadata["rgbwwled_version"] != expected_component:
+            raise SystemExit("RGBWWLed version does not match the selected release line")
+          try:
+            base64.b64decode(metadata["fw_comment_b64"], validate=True)
+          except ValueError as error:
+            raise SystemExit("Invalid release comment encoding") from error
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+            for key in ("fw_version", "fw_branch", "fw_comment_b64", "supported_socs"):
+              output.write(f"{key}={metadata[key]}\n")
+          PY
 
   publish:
     runs-on: ubuntu-latest
     needs: get-version
-    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository) }}
     env:
       DISTRIBUTION_PUBLISHER_SHA: ${{ vars.DISTRIBUTION_PUBLISHER_SHA }}
     
@@ -131,11 +164,11 @@ jobs:
       # Setup branch variables once at the beginning
       - name: Setup branch variables
         run: |
-          source_branch="${{ needs.get-version.outputs.fw_branch }}"
-          target_branch="$source_branch"
+          source_branch="${{ needs.get-version.outputs.artifact_branch }}"
+          target_branch="${{ needs.get-version.outputs.fw_branch }}"
           
-          echo "Source branch (for artifact names): $source_branch"
-          echo "Target branch (for deployment): $target_branch"
+          echo "Artifact key: $source_branch"
+          echo "Canonical release ref: $target_branch"
           echo "Version: ${{ needs.get-version.outputs.fw_version }}"
           
           # Export to environment variables for later steps

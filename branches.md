@@ -41,38 +41,18 @@ Rename existing branches only after CI, branch protections, webapp branches and
 release consumers understand the versioned names. During migration, accept old
 names as aliases where needed, but make versioned names canonical.
 
-### CI Changes Required
+### CI Implementation Status
 
-The current CI still assumes unversioned branches and one shared 5.x release
-stream. Update these paths before renaming branches:
+Versioned firmware/webapp CI preparation is on `ci/versioned-firmware-publishing`
+and `ci/versioned-webapp-publishing`. The detailed operator procedure, current
+workflow behavior, manual dispatch rules, publisher contract, reproducibility
+status, and remaining gaps are documented in
+[CI_RELEASE_PROCESS.md](CI_RELEASE_PROCESS.md).
 
-- `.github/workflows/build_firmware.yml`: change push/PR filters and manual
-    branch choices; parse the version line and stage; choose the SoC matrix by
-    line (`5.0`: all three SoCs, `5.1`: ESP32 and ESP32-C3); and calculate release
-    tags/prerelease counters independently for `5.0` and `5.1`.
-- The same build workflow gates version-info upload, release tagging and webapp
-    schema dispatch on `matrix.soc == 'esp8266'`. Those once-per-build steps would
-    never run for 5.1. Use a representative SoC present in both matrices, such as
-    ESP32, while keeping the partition-map step ESP8266-only.
-- `.github/workflows/deploy-pages.yml`: update manual branch choices and ensure
-    `supported_socs` comes from the selected line. Its legacy fallback currently
-    advertises ESP8266, which is invalid for 5.1. Keep artifact names and source
-    branch identity consistent; GitHub artifact names sanitize `/` to `-`, while
-    published firmware paths use the branch as a directory path.
-- `.github/workflows/swarm_test.yml`: update branch filters and dispatch choices.
-    Its Host-only test does not need a SoC matrix, but it still needs to run for
-    the versioned branches.
-- Webapp `.github/workflows/test.yml` and `deploy.yml`: update branch filters and
-    dispatch choices, derive the webapp version line from the selected branch
-    instead of hard-coding `V5.0`, and keep firmware-to-webapp branch mapping in
-    sync with the versioned branches. Nested branch paths on `gh-pages` are
-    supported by the current publish layout.
-- Keep legacy `stable` handling only as a migration alias for the 5.0 production
-    line, then remove it after its refs and deployed artifacts are accounted for.
-
-The build workflow's current unconditional matrix and ESP8266-only one-time
-guards are the main correctness risks: without changing them, 5.1 either wastes
-jobs on an unsupported SoC or skips release metadata and tagging entirely.
+The workflows accept canonical `5.0/*` and `5.1/*` refs while retaining legacy
+aliases for migration. The canonical release branches have not yet been cut over;
+do not retire `develop`, `testing`, `stable`, or `experimental` until branch
+protections, dependency pins, webapp feeds, and consumers have been migrated.
 
 ## Proposed Architecture: Independent Releases, Shared API Contract
 
