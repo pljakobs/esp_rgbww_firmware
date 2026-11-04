@@ -49,15 +49,20 @@ jobs:
     steps:
       - name: Determine branch
         id: get_branch
+        env:
+          CI_EVENT_NAME: ${{ github.event_name }}
+          CI_INPUT_BRANCH: ${{ inputs.branch }}
+          CI_REF_NAME: ${{ github.ref_name }}
+          CI_HEAD_REF: ${{ github.head_ref }}
         run: |
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            echo "branch=${{ inputs.branch }}" >> $GITHUB_OUTPUT
-          elif [ "${{ github.event_name }}" == "push" ]; then
-            echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
-          elif [ "${{ github.event_name }}" == "pull_request" ]; then
-            echo "branch=${{ github.head_ref }}" >> $GITHUB_OUTPUT
+          if [[ "$CI_EVENT_NAME" == "workflow_dispatch" ]]; then
+            echo "branch=$CI_INPUT_BRANCH" >> "$GITHUB_OUTPUT"
+          elif [[ "$CI_EVENT_NAME" == "push" ]]; then
+            echo "branch=$CI_REF_NAME" >> "$GITHUB_OUTPUT"
+          elif [[ "$CI_EVENT_NAME" == "pull_request" ]]; then
+            echo "branch=$CI_HEAD_REF" >> "$GITHUB_OUTPUT"
           else
-            echo "branch=develop" >> $GITHUB_OUTPUT
+            echo "branch=develop" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Map firmware branch to webapp branch
@@ -428,15 +433,20 @@ jobs:
     steps:
       - name: Determine branch
         id: get_branch
+        env:
+          CI_EVENT_NAME: ${{ github.event_name }}
+          CI_INPUT_BRANCH: ${{ inputs.branch }}
+          CI_REF_NAME: ${{ github.ref_name }}
+          CI_HEAD_REF: ${{ github.head_ref }}
         run: |
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            echo "branch=${{ inputs.branch }}" >> $GITHUB_OUTPUT
-          elif [ "${{ github.event_name }}" == "push" ]; then
-            echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
-          elif [ "${{ github.event_name }}" == "pull_request" ]; then
-            echo "branch=${{ github.head_ref }}" >> $GITHUB_OUTPUT
+          if [[ "$CI_EVENT_NAME" == "workflow_dispatch" ]]; then
+            echo "branch=$CI_INPUT_BRANCH" >> "$GITHUB_OUTPUT"
+          elif [[ "$CI_EVENT_NAME" == "push" ]]; then
+            echo "branch=$CI_REF_NAME" >> "$GITHUB_OUTPUT"
+          elif [[ "$CI_EVENT_NAME" == "pull_request" ]]; then
+            echo "branch=$CI_HEAD_REF" >> "$GITHUB_OUTPUT"
           else
-            echo "branch=develop" >> $GITHUB_OUTPUT
+            echo "branch=develop" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Map firmware branch to webapp branch
