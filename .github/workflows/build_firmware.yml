@@ -220,7 +220,7 @@ jobs:
             echo "⚠️  Test summary not found"
           fi
           echo "::endgroup::"
-          
+
           echo "::group::Host Emulator Application Log"
           if [ -f out/host-ci/host-smoke.log ]; then
             tail -n 50 out/host-ci/host-smoke.log
@@ -290,7 +290,7 @@ jobs:
               printf '| %s | n/a | n/a | n/a | n/a |\n' "$phase" >> "$GITHUB_STEP_SUMMARY"
             fi
           }
-          
+
           # Include pytest-md formatted results if available
           if [ -f out/host-ci/test-results.md ]; then
             cat out/host-ci/test-results.md >> $GITHUB_STEP_SUMMARY
@@ -299,7 +299,7 @@ jobs:
           else
             echo "⚠️  Test results not found" >> $GITHUB_STEP_SUMMARY
           fi
-          
+
           # Extract and display failure details
           if [ -f out/host-ci/test-output.txt ] && grep -q "FAILED\|AssertionError" out/host-ci/test-output.txt; then
             echo "" >> $GITHUB_STEP_SUMMARY
@@ -379,7 +379,7 @@ jobs:
           echo "| --- | ---: | ---: | ---: | ---: |" >> "$GITHUB_STEP_SUMMARY"
           print_runtime_delta_row "Smoke" "$VALGRIND_RUNTIME_SMOKE_START_LOG" "$VALGRIND_RUNTIME_SMOKE_LOG"
           print_runtime_delta_row "RGBWW" "$VALGRIND_RUNTIME_RGBWW_START_LOG" "$VALGRIND_RUNTIME_RGBWW_LOG"
-          
+
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "### Artifacts 📦" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
@@ -479,7 +479,7 @@ jobs:
           MQTT_PASS: ${{ secrets.MQTT_PASS }}
           MQTT_USER: ${{ secrets.MQTT_USER }}
         run: |
-          if [ "${{ matrix.single }}" = "0" ]; then 
+          if [ "${{ matrix.single }}" = "0" ]; then
             docker run --rm --privileged -v ${{ github.workspace }}:/workspace -w /workspace \
               -e GITHUB_RUN_NUMBER=${{ github.run_number }} \
               -e MQTT_PASS=${{ secrets.MQTT_PASS }} \
@@ -488,8 +488,8 @@ jobs:
               bash -c "git config --global --add safe.directory /workspace && \
               source /opt/Sming/Tools/export.sh && \
               make configdb-rebuild && \
-              make GIT_VERSION='${{ steps.get_fw_info.outputs.fw_version }}' SMING_SOC=${{ matrix.soc }} SMING_RELEASE=${{ matrix.release }} DISABLE_WERROR=1 COM_SPEED=115200" 
-          else 
+              make GIT_VERSION='${{ steps.get_fw_info.outputs.fw_version }}' SMING_SOC=${{ matrix.soc }} SMING_RELEASE=${{ matrix.release }} DISABLE_WERROR=1 COM_SPEED=115200"
+          else
             docker run --rm --privileged -v ${{ github.workspace }}:/workspace -w /workspace \
               -e GITHUB_RUN_NUMBER=${{ github.run_number }} \
               -e MQTT_PASS=${{ secrets.MQTT_PASS }} \
@@ -498,7 +498,7 @@ jobs:
               bash -c "git config --global --add safe.directory /workspace && \
               source /opt/Sming/Tools/export.sh && \
               make configdb-rebuild && \
-              make mergeflash GIT_VERSION='${{ steps.get_fw_info.outputs.fw_version }}' SMING_SOC=${{ matrix.soc }} SMING_RELEASE=${{ matrix.release }} DISABLE_WERROR=1 COM_SPEED=115200" 
+              make mergeflash GIT_VERSION='${{ steps.get_fw_info.outputs.fw_version }}' SMING_SOC=${{ matrix.soc }} SMING_RELEASE=${{ matrix.release }} DISABLE_WERROR=1 COM_SPEED=115200"
           fi
 
       - name: Set firmware path
@@ -588,7 +588,7 @@ jobs:
         with:
           name: ${{ steps.set_artifact_name.outputs.artifact_name }}
           path: _upload/
-          
+
       - name: Create version info file
         run: |
           echo "fw_version=${{ steps.get_fw_info.outputs.fw_version }}" > version-info.txt
@@ -596,7 +596,7 @@ jobs:
           echo "fw_comment_b64=${{ steps.pr_notes.outputs.fw_comment_b64 }}" >> version-info.txt
           echo "supported_socs=${{ needs.generate-matrix.outputs.soc_csv }}" >> version-info.txt
           echo "rgbwwled_version=${{ needs.generate-matrix.outputs.rgbwwled_version }}" >> version-info.txt
-        
+
       - name: Save version info
         # Only upload version info from one specific matrix combination to avoid conflicts
         if: ${{ matrix.soc == 'esp32' && matrix.release == 0 && matrix.single == 0 }}
@@ -670,14 +670,15 @@ jobs:
           fi
 
   host-smoke-test:
+    needs: generate-matrix
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'push' && (startsWith(github.ref_name, '5.0/') || startsWith(github.ref_name, '5.1/') || github.ref_name == 'develop' || github.ref_name == 'experimental') }}
-    
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.ref_name }}
+          ref: ${{ needs.generate-matrix.outputs.checkout_ref }}
           fetch-depth: 0
 
       - name: Synchronize submodules
@@ -698,14 +699,13 @@ jobs:
             make SMING_ARCH=Host -j\$(nproc) >/tmp/host_build.log 2>&1 && \
             echo 'Host emulator build successful' && \
             cat /tmp/host_build.log | tail -20"
-      
+
       - name: Test HTTP API via Host Emulator
         run: |
           docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace \
             docker.io/pjakobs/sming:latest \
             bash -c "git config --global --add safe.directory /workspace && \
-            source /opt/Sning/Tools/export.sh && \
+            source /opt/Sming/Tools/export.sh && \
             make configdb-rebuild SMING_ARCH=Host && \
             make SMING_ARCH=Host flash >/dev/null 2>&1 && \
             timeout 10 make SMING_ARCH=Host run 2>&1 | head -100 || true"
-

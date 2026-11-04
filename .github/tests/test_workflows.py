@@ -139,6 +139,16 @@ raise SystemExit('Forbidden git operation in policy test: ' + repr(arguments))
         self.assertEqual(manual_checkout["ref"], "${{ inputs.branch }}")
         self.assertFalse(manual_checkout["persist-credentials"])
 
+    def test_standalone_host_smoke_uses_resolved_sha_and_valid_toolchain_path(self):
+        document = workflow("build_firmware.yml")
+        job = document["jobs"]["host-smoke-test"]
+        self.assertIn("generate-matrix", job["needs"])
+        checkout = step(document, "host-smoke-test", "Checkout Repository")["with"]
+        self.assertEqual(checkout["ref"], "${{ needs.generate-matrix.outputs.checkout_ref }}")
+        source = step(document, "host-smoke-test", "Test HTTP API via Host Emulator")["run"]
+        self.assertIn("/opt/Sming/Tools/export.sh", source)
+        self.assertNotIn("/opt/Sning/Tools/export.sh", source)
+
     def test_pr_branch_is_data_not_shell_code(self):
         document = workflow("build_firmware.yml")
         payload = 'feature/$(touch should-not-exist)'
