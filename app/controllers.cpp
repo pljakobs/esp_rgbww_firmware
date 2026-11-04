@@ -141,7 +141,7 @@ void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char*
         return;
     }
     if(hostname == nullptr || hostname[0] == '\0' || ipAddress == nullptr || ipAddress[0] == '\0') {
-        cdebug_w(CONTROLLERS, "Controllers::addOrUpdate: " ANSI_COLOR_YELLOW "Empty hostname or IP address provided, skipping addOrUpdate" ANSI_COLOR_RESET);
+        cdebug_w(CONTROLLERS, "Controllers::addOrUpdate: " ANSI_COLOR_YELLOW "virtual host type, empty hostname or no IP address provided, skipping addOrUpdate" ANSI_COLOR_RESET);
         return;
     }
     // Find existing visible controller
