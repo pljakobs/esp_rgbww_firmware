@@ -47,6 +47,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       source_ref: ${{ steps.resolve.outputs.source_ref }}
+      checkout_ref: ${{ steps.resolve.outputs.checkout_ref }}
       release_ref: ${{ steps.resolve.outputs.release_ref }}
       release_line: ${{ steps.resolve.outputs.release_line }}
       stage: ${{ steps.resolve.outputs.stage }}
@@ -61,6 +62,20 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Checkout selected manual source
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.branch }}
+          path: .selected-source
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Resolve manual source SHA
+        id: manual_source
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: echo "sha=$(git -C .selected-source rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Resolve release matrix
         id: resolve
         env:
@@ -69,21 +84,27 @@ jobs:
           CI_REF_NAME: ${{ github.ref_name }}
           CI_HEAD_REF: ${{ github.head_ref }}
           CI_BASE_REF: ${{ github.base_ref }}
+          CI_SHA: ${{ github.sha }}
+          CI_MANUAL_SHA: ${{ steps.manual_source.outputs.sha }}
         run: |
           if [[ "$CI_EVENT_NAME" == "workflow_dispatch" ]]; then
             source_ref="$CI_INPUT_BRANCH"
             release_ref="$source_ref"
+            checkout_ref="$CI_MANUAL_SHA"
           elif [[ "$CI_EVENT_NAME" == "push" ]]; then
             source_ref="$CI_REF_NAME"
             release_ref="$source_ref"
+            checkout_ref="$CI_SHA"
           elif [[ "$CI_EVENT_NAME" == "pull_request" ]]; then
             source_ref="$CI_HEAD_REF"
             release_ref="$CI_BASE_REF"
+            checkout_ref="$CI_SHA"
           else
             echo "Unsupported event: $CI_EVENT_NAME" >&2
             exit 1
           fi
           echo "source_ref=$source_ref" >> "$GITHUB_OUTPUT"
+          echo "checkout_ref=$checkout_ref" >> "$GITHUB_OUTPUT"
           python3 .github/scripts/release_metadata.py resolve "$release_ref" >> "$GITHUB_OUTPUT"
 
   host-smoke:
@@ -96,7 +117,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v6
         with:
-          ref: ${{ needs.generate-matrix.outputs.source_ref }}
+          ref: ${{ needs.generate-matrix.outputs.checkout_ref }}
           fetch-depth: 0
 
       - name: Synchronize submodules
@@ -388,7 +409,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v6
         with:
-          ref: ${{ needs.generate-matrix.outputs.source_ref }}
+          ref: ${{ needs.generate-matrix.outputs.checkout_ref }}
           fetch-depth: 0
 
       - name: Resolve PR body for release notes

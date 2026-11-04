@@ -112,18 +112,32 @@ raise SystemExit('Forbidden git operation in policy test: ' + repr(arguments))
         selected = step(document, "generate-matrix", "Resolve release matrix")
         cases = [
             ({"github.event_name": "push", "inputs.branch": "", "github.ref_name": "5.1/develop",
-              "github.head_ref": "", "github.base_ref": ""}, "5.1/develop", "5.1/develop"),
+              "github.head_ref": "", "github.base_ref": "", "github.sha": "push-sha",
+              "steps.manual_source.outputs.sha": ""}, "5.1/develop", "5.1/develop", "push-sha"),
             ({"github.event_name": "workflow_dispatch", "inputs.branch": "5.0/testing", "github.ref_name": "",
-              "github.head_ref": "", "github.base_ref": ""}, "5.0/testing", "5.0/testing"),
+              "github.head_ref": "", "github.base_ref": "", "github.sha": "workflow-sha",
+              "steps.manual_source.outputs.sha": "selected-sha"}, "5.0/testing", "5.0/testing", "selected-sha"),
             ({"github.event_name": "pull_request", "inputs.branch": "", "github.ref_name": "feature/policy",
-              "github.head_ref": "feature/policy", "github.base_ref": "5.1/develop"}, "feature/policy", "5.1/develop"),
+              "github.head_ref": "feature/policy", "github.base_ref": "5.1/develop",
+              "github.sha": "pr-merge-sha", "steps.manual_source.outputs.sha": ""},
+             "feature/policy", "5.1/develop", "pr-merge-sha"),
         ]
-        for values, source_ref, release_ref in cases:
+        for values, source_ref, release_ref, checkout_ref in cases:
             with self.subTest(event=values["github.event_name"]):
                 result = self.execute(selected, values)
                 self.assertEqual(result["source_ref"], source_ref)
                 self.assertEqual(result["release_ref"], release_ref)
+                self.assertEqual(result["checkout_ref"], checkout_ref)
                 self.assertEqual(result["release_line"], release_ref[:3])
+
+    def test_build_jobs_checkout_the_resolved_immutable_sha(self):
+        document = workflow("build_firmware.yml")
+        expected = "${{ needs.generate-matrix.outputs.checkout_ref }}"
+        self.assertEqual(step(document, "host-smoke", "Checkout Repository")["with"]["ref"], expected)
+        self.assertEqual(step(document, "build", "Checkout Repository")["with"]["ref"], expected)
+        manual_checkout = step(document, "generate-matrix", "Checkout selected manual source")["with"]
+        self.assertEqual(manual_checkout["ref"], "${{ inputs.branch }}")
+        self.assertFalse(manual_checkout["persist-credentials"])
 
     def test_pr_branch_is_data_not_shell_code(self):
         document = workflow("build_firmware.yml")
@@ -131,7 +145,8 @@ raise SystemExit('Forbidden git operation in policy test: ' + repr(arguments))
         result = self.execute(step(document, "generate-matrix", "Resolve release matrix"), {
             "github.event_name": "pull_request", "inputs.branch": "",
             "github.ref_name": "123/merge", "github.head_ref": payload,
-            "github.base_ref": "5.0/develop",
+            "github.base_ref": "5.0/develop", "github.sha": "pr-merge-sha",
+            "steps.manual_source.outputs.sha": "",
         })
         self.assertEqual(result["source_ref"], payload)
         self.assertEqual(result["release_ref"], "5.0/develop")
@@ -155,7 +170,8 @@ raise SystemExit('Forbidden git operation in policy test: ' + repr(arguments))
         selected = step(document, "generate-matrix", "Resolve release matrix")
         outputs = self.execute(selected, {
             "github.event_name": "push", "inputs.branch": "", "github.ref_name": "5.1/develop",
-            "github.head_ref": "", "github.base_ref": "",
+            "github.head_ref": "", "github.base_ref": "", "github.sha": "push-sha",
+            "steps.manual_source.outputs.sha": "",
         })
         self.assertEqual(json.loads(outputs["soc_json"]), ["esp32", "esp32c3"])
         self.assertEqual(outputs["soc_csv"], "esp32,esp32c3")
@@ -180,7 +196,8 @@ raise SystemExit('Forbidden git operation in policy test: ' + repr(arguments))
             with self.subTest(branch=branch):
                 result = self.execute(resolver, {
                     "github.event_name": "push", "inputs.branch": "", "github.ref_name": branch,
-                    "github.head_ref": "", "github.base_ref": "",
+                    "github.head_ref": "", "github.base_ref": "", "github.sha": "push-sha",
+                    "steps.manual_source.outputs.sha": "",
                 })
                 self.assertEqual(result["rgbwwled_version"], version)
 
@@ -307,7 +324,8 @@ raise SystemExit('Forbidden git operation in policy test: ' + repr(arguments))
         deploy = workflow("deploy-pages.yml")
         resolved = self.execute(step(build, "generate-matrix", "Resolve release matrix"), {
             "github.event_name": "push", "inputs.branch": "", "github.ref_name": "5.1/testing",
-            "github.head_ref": "", "github.base_ref": "",
+            "github.head_ref": "", "github.base_ref": "", "github.sha": "push-sha",
+            "steps.manual_source.outputs.sha": "",
         })
         self.assertEqual(resolved["release_ref"], "5.1/testing")
         self.assertEqual(resolved["artifact_branch"], "5.1-testing")
@@ -350,6 +368,8 @@ raise SystemExit('Forbidden git operation in policy test: ' + repr(arguments))
         self.assertEqual(document["on"]["pull_request"]["branches"], expected_legacy + expected_lines)
         self.assertEqual(document["on"]["workflow_dispatch"]["inputs"]["branch"]["options"][:6],
                          ["5.0/develop", "5.0/testing", "5.0/prod", "5.1/develop", "5.1/testing", "5.1/prod"])
+        checkout = step(document, "swarm-mdns", "Checkout Repository")["with"]
+        self.assertEqual(checkout["ref"], "${{ inputs.branch || github.ref }}")
 
 
 if __name__ == "__main__":
