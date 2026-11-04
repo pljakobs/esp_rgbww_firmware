@@ -8,17 +8,35 @@ env:
 
 on:
   push:
-    branches: [stable, testing, develop, experimental]
+    branches:
+      - stable
+      - testing
+      - develop
+      - experimental
+      - '5.0/**'
+      - '5.1/**'
   pull_request:
-    branches: [stable, testing, develop, experimental]
+    branches:
+      - stable
+      - testing
+      - develop
+      - experimental
+      - '5.0/**'
+      - '5.1/**'
   workflow_dispatch:
     inputs:
       branch:
         description: 'Branch to build'
         required: true
-        default: 'develop'
+        default: '5.0/develop'
         type: choice
         options:
+          - 5.0/develop
+          - 5.0/testing
+          - 5.0/prod
+          - 5.1/develop
+          - 5.1/testing
+          - 5.1/prod
           - stable
           - testing
           - develop
