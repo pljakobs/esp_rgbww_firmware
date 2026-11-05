@@ -418,6 +418,10 @@ jobs:
             done
           done
           
+          latest_file="download/firmware/$TARGET_BRANCH/latest/version.txt"
+          if [[ -f "$latest_file" ]] && [[ "$(printf '%s\n' "$VERSION" "$(cat "$latest_file")" | sort -V | tail -n 1)" != "$VERSION" ]]; then
+            echo "Keeping newer latest release $(cat "$latest_file"); republished $VERSION remains available by version."
+          else
           # Update 'latest' pointer
           mkdir -p download/firmware/$TARGET_BRANCH/latest
           # We need to make sure the target directory structure exists before writing to it
@@ -444,6 +448,8 @@ jobs:
               echo "Symlink: $symlink_dir/app-merged.bin -> $relative_target"
             done
           done
+
+          fi
 
           echo "Culling old versions..."
           "$MANAGE_PYTHON" "$MANAGE_SCRIPT" version.json cull

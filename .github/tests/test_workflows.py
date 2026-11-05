@@ -412,7 +412,7 @@ raise SystemExit('Forbidden git operation in policy test: ' + repr(arguments))
     def test_merged_image_aliases_resolve_for_legacy_and_versioned_branches(self):
         document = workflow("deploy-pages.yml")
         remote = step(document, "publish", "Deploy to External Server (rsync)")["run"]
-        script = remote.split('echo "Updating direct download symlinks..."', 1)[1].split('echo "Culling old versions..."', 1)[0]
+        script = "latest_file=" + remote.split("latest_file=", 1)[1].split('echo "Culling old versions..."', 1)[0]
         for branch in ("develop", "5.0/develop", "5.1/develop"):
             version = "V5.1.0-1-develop" if branch.startswith("5.1") else "V5.0.0-1-develop"
             for soc in ("esp32", "esp32c3"):
@@ -428,6 +428,24 @@ raise SystemExit('Forbidden git operation in policy test: ' + repr(arguments))
                     self.assertTrue(alias.is_symlink())
                     self.assertEqual(alias.resolve(), target.resolve())
                     self.assertEqual(alias.read_bytes(), b"merged image")
+
+    def test_republishing_older_firmware_preserves_newer_latest_and_aliases(self):
+        document = workflow("deploy-pages.yml")
+        remote = step(document, "publish", "Deploy to External Server (rsync)")["run"]
+        script = "latest_file=" + remote.split("latest_file=", 1)[1].split('echo "Culling old versions..."', 1)[0]
+        root = self.directory / "download/firmware"
+        branch = "5.0/develop"
+        for version in ("V5.0.0-1023-develop", "V5.0.0-1023-develop", "V5.0.0-1020-develop", "V5.0.0-1024-develop"):
+            for build_type in ("debug", "release"):
+                artifact = root / branch / version / "esp32" / build_type / "single_image/app-merged.bin"
+                artifact.parent.mkdir(parents=True, exist_ok=True)
+                artifact.write_text(version)
+            self.execute({"run": script}, environment={"TARGET_BRANCH": branch, "VERSION": version, "SUPPORTED_SOCS": "esp32"})
+            expected = "V5.0.0-1023-develop" if "1024" not in version else version
+            self.assertEqual((root / branch / "latest/version.txt").read_text().strip(), expected)
+            for build_type in ("debug", "release"):
+                alias = root / "esp32" / branch / build_type / "app-merged.bin"
+                self.assertEqual(alias.read_text(), expected)
 
     def test_firmware_publisher_never_publishes_pr_builds(self):
         document = workflow("deploy-pages.yml")
