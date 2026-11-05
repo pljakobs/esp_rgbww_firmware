@@ -40,7 +40,6 @@ def resolve_branch(branch):
         "soc_json": json.dumps(release["socs"], separators=(",", ":")),
         "soc_csv": ",".join(release["socs"]),
         "rgbwwled_version": release["rgbwwled_version"],
-        "upgrade_from_lines": "5.0" if release_line == "5.1" else "",
     }
 
 
