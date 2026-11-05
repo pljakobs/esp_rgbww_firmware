@@ -215,11 +215,6 @@ jobs:
             mkdir -p download/firmware/${{ env.target_branch }}/${{ env.version }}/$soc/release/single_image
           done
           
-          # Create version.txt file instead of symlink
-          mkdir -p download/firmware/${{ env.target_branch }}/latest
-          echo "${{ env.version }}" > download/firmware/${{ env.target_branch }}/latest/version.txt
-          echo "<html><head><meta http-equiv=\"refresh\" content=\"0; URL=../${{ env.version }}/\"></head></html>" > download/firmware/${{ env.target_branch }}/latest/index.html
-          
       # Download artifacts for the current branch
       - name: Download artifacts
         run: |
@@ -284,6 +279,33 @@ jobs:
             fi
           done
       
+      - name: Validate complete firmware artifacts
+        env:
+          RELEASE_REF: ${{ needs.get-version.outputs.fw_branch }}
+          RELEASE_VERSION: ${{ needs.get-version.outputs.fw_version }}
+          SUPPORTED_SOCS: ${{ needs.get-version.outputs.supported_socs }}
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import os
+          from pathlib import Path
+
+          root = Path("download/firmware") / os.environ["RELEASE_REF"] / os.environ["RELEASE_VERSION"]
+          expected = []
+          for soc in os.environ["SUPPORTED_SOCS"].split(","):
+            names = ("rom0.bin", "app_0.out", "app_0.map") if soc == "esp8266" else ("app.bin", "app.out", "app.map")
+            for build_type in ("debug", "release"):
+              directory = root / soc / build_type
+              expected.extend(directory / name for name in names)
+              expected.append(directory / "single_image/app-merged.bin")
+          missing = [str(artifact) for artifact in expected if not artifact.is_file() or artifact.stat().st_size == 0]
+          if missing:
+            raise SystemExit("Missing or empty firmware artifacts:\n" + "\n".join(missing))
+          manifest = "".join(f"{hashlib.sha256(artifact.read_bytes()).hexdigest()}  {artifact.relative_to(root).as_posix()}\n" for artifact in expected)
+          (root / "artifacts.sha256").write_text(manifest)
+          print(f"Validated {len(expected)} firmware artifacts for {os.environ['RELEASE_REF']}")
+          PY
+
       # Download version.json from lightinator.de into staging if it exists, to ensure we have a base
       # But actually, we will be updating the one ON the server, so we don't strictly need to download it 
       # unless we want to validate something locally.
@@ -361,6 +383,10 @@ jobs:
           test "$(cat "$PUBLISHER_DIR/SOURCE_REVISION")" = "${{ env.DISTRIBUTION_PUBLISHER_SHA }}"
           test "$("$MANAGE_PYTHON" "$MANAGE_SCRIPT" --publisher-contract)" = "lightinator-sqlite-v1"
 
+          pushd "download/firmware/$TARGET_BRANCH/$VERSION"
+          sha256sum --check artifacts.sha256
+          popd
+
           # Ensure new firmware path layout exists
           mkdir -p "download/firmware/$TARGET_BRANCH/$VERSION"
           mkdir -p "download/firmware/$TARGET_BRANCH/latest"
@@ -412,10 +438,10 @@ jobs:
             for type in debug release; do
               symlink_dir="download/firmware/$soc/$TARGET_BRANCH/$type"
               mkdir -p "$symlink_dir"
-              # Relative path from download/firmware/<soc>/<branch>/<type>/ up to download/firmware/ then into versioned path
-              ln -sf "../../../../firmware/$TARGET_BRANCH/$VERSION/$soc/$type/single_image/app-merged.bin" \
-                "$symlink_dir/app-merged.bin"
-              echo "Symlink: $symlink_dir/app-merged.bin -> ../../../../firmware/$TARGET_BRANCH/$VERSION/$soc/$type/single_image/app-merged.bin"
+              image_path="download/firmware/$TARGET_BRANCH/$VERSION/$soc/$type/single_image/app-merged.bin"
+              relative_target=$(realpath --relative-to="$symlink_dir" "$image_path")
+              ln -sf "$relative_target" "$symlink_dir/app-merged.bin"
+              echo "Symlink: $symlink_dir/app-merged.bin -> $relative_target"
             done
           done
 

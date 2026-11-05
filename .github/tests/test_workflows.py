@@ -195,6 +195,25 @@ raise SystemExit('Forbidden git operation in policy test: ' + repr(arguments))
         self.assertEqual(matrix["release"], [0, 1])
         self.assertEqual(matrix["single"], [0, 1])
 
+    def test_build_artifact_staging_requires_binary_and_symbols(self):
+        document = workflow("build_firmware.yml")
+        selected = step(document, "build", "Stage artifacts for upload")
+        files = ("app.bin", "app.out", "app.map")
+        for filename in files:
+            (self.directory / filename).write_bytes(b"artifact")
+        values = {"steps.set_firmware_path.outputs.path": "app.bin", "matrix.single": "0",
+                  "steps.set_elf_path.outputs.elf": "app.out", "steps.set_elf_path.outputs.map": "app.map"}
+        self.execute(selected, values)
+        for filename in files:
+            with self.subTest(missing=filename):
+                artifact = self.directory / filename
+                artifact.unlink()
+                self.execute(selected, values, success=False)
+                artifact.write_bytes(b"")
+                self.execute(selected, values, success=False)
+                artifact.write_bytes(b"artifact")
+        self.assertEqual(step(document, "build", "Upload firmware artifact")["with"]["if-no-files-found"], "error")
+
     def test_build_verifies_the_line_specific_rgbwwled_source_version(self):
         document = workflow("build_firmware.yml")
         resolver = step(document, "generate-matrix", "Resolve release matrix")
@@ -352,6 +371,63 @@ raise SystemExit('Forbidden git operation in policy test: ' + repr(arguments))
         remote_script = step(deploy, "publish", "Deploy to External Server (rsync)")["run"]
         self.assertIn('version.json add "$soc" "$type" "$TARGET_BRANCH" "$VERSION"', remote_script)
         self.assertNotIn("--upgrade-from-lines", remote_script)
+
+    def test_incomplete_firmware_artifacts_never_reach_publication(self):
+        document = workflow("deploy-pages.yml")
+        selected = step(document, "publish", "Validate complete firmware artifacts")
+        for line, socs in (("5.0", ("esp8266", "esp32", "esp32c3")), ("5.1", ("esp32", "esp32c3"))):
+            values = {"needs.get-version.outputs.fw_branch": f"{line}/develop",
+                      "needs.get-version.outputs.fw_version": f"V{line}.0-1-develop",
+                      "needs.get-version.outputs.supported_socs": ",".join(socs)}
+            root = self.directory / "download/firmware" / f"{line}/develop/V{line}.0-1-develop"
+            for soc in socs:
+                names = ("rom0.bin", "app_0.out", "app_0.map") if soc == "esp8266" else ("app.bin", "app.out", "app.map")
+                for build_type in ("debug", "release"):
+                    for filename in (*names, "single_image/app-merged.bin"):
+                        artifact = root / soc / build_type / filename
+                        artifact.parent.mkdir(parents=True, exist_ok=True)
+                        artifact.write_bytes(b"artifact")
+            self.execute(selected, values)
+            self.assertEqual(len((root / "artifacts.sha256").read_text().splitlines()), len(socs) * 8)
+            verified = subprocess.run(["sha256sum", "--check", "artifacts.sha256"], cwd=root, capture_output=True)
+            self.assertEqual(verified.returncode, 0)
+            for filename in ("app.bin", "app.out", "app.map", "single_image/app-merged.bin"):
+                with self.subTest(line=line, missing=filename):
+                    artifact = root / "esp32/release" / filename
+                    artifact.unlink()
+                    self.execute(selected, values, success=False)
+                    artifact.write_bytes(b"")
+                    self.execute(selected, values, success=False)
+                    artifact.write_bytes(b"artifact")
+            (root / "esp32/release/app.map").write_bytes(b"corrupt transfer")
+            corrupted = subprocess.run(["sha256sum", "--check", "artifacts.sha256"], cwd=root, capture_output=True)
+            self.assertNotEqual(corrupted.returncode, 0)
+            self.assertFalse((root.parent / "latest").exists())
+        names = [entry.get("name") for entry in document["jobs"]["publish"]["steps"]]
+        self.assertLess(names.index("Validate complete firmware artifacts"), names.index("Setup SSH and deploy"))
+        self.assertNotIn("/latest", step(document, "publish", "Create directories")["run"])
+        remote = step(document, "publish", "Deploy to External Server (rsync)")["run"]
+        self.assertLess(remote.index("sha256sum --check artifacts.sha256"), remote.index('version.json add "$soc"'))
+
+    def test_merged_image_aliases_resolve_for_legacy_and_versioned_branches(self):
+        document = workflow("deploy-pages.yml")
+        remote = step(document, "publish", "Deploy to External Server (rsync)")["run"]
+        script = remote.split('echo "Updating direct download symlinks..."', 1)[1].split('echo "Culling old versions..."', 1)[0]
+        for branch in ("develop", "5.0/develop", "5.1/develop"):
+            version = "V5.1.0-1-develop" if branch.startswith("5.1") else "V5.0.0-1-develop"
+            for soc in ("esp32", "esp32c3"):
+                for build_type in ("debug", "release"):
+                    artifact = self.directory / "download/firmware" / branch / version / soc / build_type / "single_image/app-merged.bin"
+                    artifact.parent.mkdir(parents=True, exist_ok=True)
+                    artifact.write_bytes(b"merged image")
+            self.execute({"run": script}, environment={"TARGET_BRANCH": branch, "VERSION": version, "SUPPORTED_SOCS": "esp32,esp32c3"})
+            for soc in ("esp32", "esp32c3"):
+                for build_type in ("debug", "release"):
+                    alias = self.directory / "download/firmware" / soc / branch / build_type / "app-merged.bin"
+                    target = self.directory / "download/firmware" / branch / version / soc / build_type / "single_image/app-merged.bin"
+                    self.assertTrue(alias.is_symlink())
+                    self.assertEqual(alias.resolve(), target.resolve())
+                    self.assertEqual(alias.read_bytes(), b"merged image")
 
     def test_firmware_publisher_never_publishes_pr_builds(self):
         document = workflow("deploy-pages.yml")
