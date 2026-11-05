@@ -117,6 +117,7 @@
 #define VERSIONLISTENER_DEBUG 1
 #define WEBAPPOTA_DEBUG 1
 #define OTAUPDATE_DEBUG 1
+#define STATUSDISPLAY_DEBUG 1
 #
 // Verbose mDNS packet tracing (mdnsHandler, Controllers)
 //#define DEBUG_MDNS

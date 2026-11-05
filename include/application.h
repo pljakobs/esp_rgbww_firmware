@@ -25,6 +25,9 @@
 #include <webappota.h>
 #include <controllers.h>
 #include <mdnsHandler.h>
+#if STATUS_DISPLAY
+#include <statusDisplay.h>
+#endif
 #ifndef SMING_RELEASE
 #include <udpSyslogStream.h>
 #endif
@@ -171,6 +174,11 @@ private:
     Timer _sendTelemetryTimer;
     Timer _resetPinTimer;
     Timer _crashHealthyTimer;
+
+#if STATUS_DISPLAY
+    std::unique_ptr<StatusDisplay> statusDisplay;
+    Timer statusDisplayTimer;
+#endif
 
     uint32_t _uptimeSeconds   = 0;
     size_t _minimumHeapUptime = 0x80000;

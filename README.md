@@ -56,6 +56,43 @@ and can be overridden in the configuration.
 
 ## Features
 
+### Optional Status Display
+
+An I2C SSD1306 128x64 OLED can show the controller name and IP address.
+Enable it for the target SoC, for example:
+
+```sh
+make -j8 SMING_ARCH=Esp32 SMING_SOC=esp32c3 STATUS_DISPLAY=1
+```
+
+Until M2 device templates provide pin configuration, the temporary QuinLED An MINI
+defaults are SDA GPIO6 / SCL GPIO7 on ESP32-C3 and SDA GPIO15 / SCL GPIO16 on
+ESP32. Override either pin with `STATUS_DISPLAY_SDA` or `STATUS_DISPLAY_SCL`.
+Other SoCs require explicit values for both pins. These defaults will be replaced
+by device-template configuration later.
+
+Check your board's PWM, button, boot-strapping and other pin assignments before
+using these GPIOs on other hardware. Connect the display to 3.3V and GND, with I2C pull-ups to 3.3V.
+The default 7-bit address is `0x3c`; override it with
+`STATUS_DISPLAY_ADDRESS=0x3d` if needed. No reset GPIO is required.
+
+The firmware probes the address at boot before constructing `StatusDisplay`,
+which derives from `Adafruit_SSD1306`. If no device acknowledges, no display
+object is allocated and no refresh timer is started. An acknowledgement detects
+presence, not the device model; the configured address must belong to the OLED.
+Connecting a display after boot requires a restart.
+
+The screen updates within one second of name or network changes, and is only
+redrawn when values change. Whenever the local AP is enabled, an `AP ON` screen
+takes priority, even if the station is also connected. It shows the AP IP,
+active SSID and password in plain text, or `(open network)` for an unsecured AP.
+The SSID wraps over two lines and passwords over up to four lines, accommodating
+a full 64-character password. Anyone with physical access can read these credentials.
+When the AP is disabled, the screen shows the controller name and station IP,
+or `Not connected`. Names use the built-in ASCII font and occupy up to three
+21-character lines; longer names are truncated.
+Display support is disabled by default and is not available in Host builds.
+
 ### Core
 - Up to 5 independent PWM output channels (RGB, RGBWW, RGBCW, RGBWWCW)
 - Smooth, programmable on-board fades and animations
