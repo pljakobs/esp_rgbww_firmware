@@ -6,6 +6,13 @@ ifeq ($(STATUS_DISPLAY),1)
 ifeq ($(SMING_ARCH),Host)
 $(error STATUS_DISPLAY requires physical hardware)
 endif
+ifeq ($(SMING_SOC),esp32c3)
+STATUS_DISPLAY_SDA ?= 6
+STATUS_DISPLAY_SCL ?= 7
+else ifeq ($(SMING_SOC),esp32)
+STATUS_DISPLAY_SDA ?= 15
+STATUS_DISPLAY_SCL ?= 16
+endif
 ifeq ($(strip $(STATUS_DISPLAY_SDA)),)
 $(error Set STATUS_DISPLAY_SDA to an unused GPIO)
 endif

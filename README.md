@@ -59,14 +59,20 @@ and can be overridden in the configuration.
 ### Optional Status Display
 
 An I2C SSD1306 128x64 OLED can show the controller name and IP address.
-Enable it with explicit, unused GPIOs, for example:
+Enable it for the target SoC, for example:
 
 ```sh
-make -j8 STATUS_DISPLAY=1 STATUS_DISPLAY_SDA=2 STATUS_DISPLAY_SCL=0
+make -j8 SMING_ARCH=Esp32 SMING_SOC=esp32c3 STATUS_DISPLAY=1
 ```
 
+Until M2 device templates provide pin configuration, the temporary QuinLED An MINI
+defaults are SDA GPIO6 / SCL GPIO7 on ESP32-C3 and SDA GPIO15 / SCL GPIO16 on
+ESP32. Override either pin with `STATUS_DISPLAY_SDA` or `STATUS_DISPLAY_SCL`.
+Other SoCs require explicit values for both pins. These defaults will be replaced
+by device-template configuration later.
+
 Check your board's PWM, button, boot-strapping and other pin assignments before
-choosing GPIOs. Connect the display to 3.3V and GND, with I2C pull-ups to 3.3V.
+using these GPIOs on other hardware. Connect the display to 3.3V and GND, with I2C pull-ups to 3.3V.
 The default 7-bit address is `0x3c`; override it with
 `STATUS_DISPLAY_ADDRESS=0x3d` if needed. No reset GPIO is required.
 
