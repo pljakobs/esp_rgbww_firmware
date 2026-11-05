@@ -1,0 +1,995 @@
+{
+  "schema_version": 2,
+  "version": 1,
+  "available_pins": [
+    {
+      "soc": "esp32",
+      "pins": [
+        {
+          "gpio": 0,
+          "input": true,
+          "output": true,
+          "pwm": true,
+          "strapping": true,
+          "pull_up": true,
+          "pull_down": true
+        },
+        {
+          "gpio": 1,
+          "input": true,
+          "output": true,
+          "pwm": true,
+          "reserved": true
+        },
+        {
+          "gpio": 2,
+          "input": true,
+          "output": true,
+          "pwm": true,
+          "strapping": true,
+          "pull_up": true,
+          "pull_down": true
+        },
+        {
+          "gpio": 3,
+          "input": true,
+          "output": true,
+          "pwm": true,
+          "reserved": true
+        },
+        {
+          "gpio": 4,
+          "input": true,
+          "output": true,
+          "pwm": true,
+          "pull_up": true,
+          "pull_down": true
+        },
+        {
+          "gpio": 5,
+          "input": true,
+          "output": true,
+          "pwm": true,
+          "strapping": true,
+          "pull_up": true,
+          "pull_down": true
+        },
+        {
+          "gpio": 6,
+          "reserved": true
+        },
+        {
+          "gpio": 7,
+          "reserved": true
+        },
+        {
+          "gpio": 8,
+          "reserved": true
+        },
+        {
+          "gpio": 9,
+          "reserved": true
+        },
+        {
+          "gpio": 10,
+          "reserved": true
+        },
+        {
+          "gpio": 11,
+          "reserved": true
+        },
+        {
+          "gpio": 12,
+          "input": true,
+          "output": true,
+          "pwm": true,
+          "strapping": true,
+          "pull_up": true,
+          "pull_down": true
+        },
+        {
+          "gpio": 13,
+          "input": true,
+          "output": true,
+          "pwm": true,
+          "pull_up": true,
+          "pull_down": true
+        },
+        {
+          "gpio": 14,
+          "input": true,
+          "output": true,
+          "pwm": true,
+          "pull_up": true,
+          "pull_down": true
+        },
+        {
+          "gpio": 15,
+          "input": true,
+          "output": true,
+          "pwm": true,
+          "strapping": true,
+          "pull_up": true,
+          "pull_down": true
+        },
+        {
+          "gpio": 16,
+          "input": true,
+          "output": true,
+          "pwm": true,
+          "pull_up": true,
+          "pull_down": true
+        },
+        {
+          "gpio": 17,
+          "input": true,
+          "output": true,
+          "pwm": true,
+          "pull_up": true,
+          "pull_down": true
+        },
+        {
+          "gpio": 18,
+          "input": true,
+          "output": true,
+          "pwm": true,
+          "pull_up": true,
+          "pull_down": true
+        },
+        {
+          "gpio": 19,
+          "input": true,
+          "output": true,
+          "pwm": true,
+          "pull_up": true,
+          "pull_down": true
+        },
+        {
+          "gpio": 21,
+          "input": true,
+          "output": true,
+          "pwm": true,
+          "pull_up": true,
+          "pull_down": true
+        },
+        {
+          "gpio": 22,
+          "input": true,
+          "output": true,
+          "pwm": true,
+          "pull_up": true,
+          "pull_down": true
+        },
+        {
+          "gpio": 23,
+          "input": true,
+          "output": true,
+          "pwm": true,
+          "pull_up": true,
+          "pull_down": true
+        },
+        {
+          "gpio": 25,
+          "input": true,
+          "output": true,
+          "pwm": true,
+          "pull_up": true,
+          "pull_down": true
+        },
+        {
+          "gpio": 26,
+          "input": true,
+          "output": true,
+          "pwm": true,
+          "pull_up": true,
+          "pull_down": true
+        },
+        {
+          "gpio": 27,
+          "input": true,
+          "output": true,
+          "pwm": true,
+          "pull_up": true,
+          "pull_down": true
+        },
+        {
+          "gpio": 32,
+          "input": true,
+          "output": true,
+          "pwm": true,
+          "pull_up": true,
+          "pull_down": true
+        },
+        {
+          "gpio": 33,
+          "input": true,
+          "output": true,
+          "pwm": true,
+          "pull_up": true,
+          "pull_down": true
+        },
+        {
+          "gpio": 34,
+          "input": true
+        },
+        {
+          "gpio": 35,
+          "input": true
+        },
+        {
+          "gpio": 36,
+          "input": true
+        },
+        {
+          "gpio": 37,
+          "input": true
+        },
+        {
+          "gpio": 38,
+          "input": true
+        },
+        {
+          "gpio": 39,
+          "input": true
+        }
+      ]
+    },
+    {
+      "soc": "esp32c3",
+      "pins": [
+        {
+          "gpio": 0,
+          "input": true,
+          "output": true,
+          "pwm": true,
+          "pull_up": true,
+          "pull_down": true
+        },
+        {
+          "gpio": 1,
+          "input": true,
+          "output": true,
+          "pwm": true,
+          "pull_up": true,
+          "pull_down": true
+        },
+        {
+          "gpio": 2,
+          "input": true,
+          "output": true,
+          "pwm": true,
+          "strapping": true,
+          "pull_up": true,
+          "pull_down": true
+        },
+        {
+          "gpio": 3,
+          "input": true,
+          "output": true,
+          "pwm": true,
+          "pull_up": true,
+          "pull_down": true
+        },
+        {
+          "gpio": 4,
+          "input": true,
+          "output": true,
+          "pwm": true,
+          "pull_up": true,
+          "pull_down": true
+        },
+        {
+          "gpio": 5,
+          "input": true,
+          "output": true,
+          "pwm": true,
+          "pull_up": true,
+          "pull_down": true
+        },
+        {
+          "gpio": 6,
+          "input": true,
+          "output": true,
+          "pwm": true,
+          "pull_up": true,
+          "pull_down": true
+        },
+        {
+          "gpio": 7,
+          "input": true,
+          "output": true,
+          "pwm": true,
+          "pull_up": true,
+          "pull_down": true
+        },
+        {
+          "gpio": 8,
+          "input": true,
+          "output": true,
+          "pwm": true,
+          "strapping": true,
+          "pull_up": true,
+          "pull_down": true
+        },
+        {
+          "gpio": 9,
+          "input": true,
+          "output": true,
+          "pwm": true,
+          "strapping": true,
+          "pull_up": true,
+          "pull_down": true
+        },
+        {
+          "gpio": 10,
+          "input": true,
+          "output": true,
+          "pwm": true,
+          "pull_up": true,
+          "pull_down": true
+        },
+        {
+          "gpio": 11,
+          "reserved": true
+        },
+        {
+          "gpio": 12,
+          "reserved": true
+        },
+        {
+          "gpio": 13,
+          "reserved": true
+        },
+        {
+          "gpio": 14,
+          "reserved": true
+        },
+        {
+          "gpio": 15,
+          "reserved": true
+        },
+        {
+          "gpio": 16,
+          "reserved": true
+        },
+        {
+          "gpio": 17,
+          "reserved": true
+        },
+        {
+          "gpio": 18,
+          "input": true,
+          "output": true,
+          "pwm": true,
+          "reserved": true
+        },
+        {
+          "gpio": 19,
+          "input": true,
+          "output": true,
+          "pwm": true,
+          "reserved": true
+        },
+        {
+          "gpio": 20,
+          "input": true,
+          "output": true,
+          "pwm": true,
+          "reserved": true
+        },
+        {
+          "gpio": 21,
+          "input": true,
+          "output": true,
+          "pwm": true,
+          "reserved": true
+        }
+      ]
+    }
+  ],
+  "boards": [
+    {
+      "id": "quinled-an-penta-mini",
+      "revision": 1,
+      "name": "QuinLED An-Penta-Mini",
+      "soc": "esp32c3",
+      "implemented_pins": [
+        {
+          "id": "L1",
+          "gpio": 5,
+          "label": "L1",
+          "allowed_functions": [
+            "light.pwm"
+          ]
+        },
+        {
+          "id": "L2",
+          "gpio": 4,
+          "label": "L2",
+          "allowed_functions": [
+            "light.pwm"
+          ]
+        },
+        {
+          "id": "L3",
+          "gpio": 1,
+          "label": "L3",
+          "allowed_functions": [
+            "light.pwm"
+          ]
+        },
+        {
+          "id": "L4",
+          "gpio": 0,
+          "label": "L4",
+          "allowed_functions": [
+            "light.pwm"
+          ]
+        },
+        {
+          "id": "L5",
+          "gpio": 3,
+          "label": "L5",
+          "allowed_functions": [
+            "light.pwm"
+          ]
+        },
+        {
+          "id": "Button_1",
+          "gpio": 2,
+          "label": "Button 1",
+          "allowed_functions": [
+            "button.input",
+            "system.clear_config"
+          ],
+          "active_low": true,
+          "external_pull": "up",
+          "hardware_debounce": true,
+          "restrictions": [
+            "strapping"
+          ]
+        },
+        {
+          "id": "Button_2",
+          "gpio": 8,
+          "label": "Button 2",
+          "allowed_functions": [
+            "button.input",
+            "system.clear_config"
+          ],
+          "active_low": true,
+          "external_pull": "up",
+          "hardware_debounce": true,
+          "restrictions": [
+            "strapping"
+          ]
+        },
+        {
+          "id": "Button_3",
+          "gpio": 9,
+          "label": "Button 3",
+          "allowed_functions": [
+            "button.input",
+            "system.clear_config"
+          ],
+          "active_low": true,
+          "external_pull": "up",
+          "hardware_debounce": true,
+          "restrictions": [
+            "strapping",
+            "low_at_boot_enters_bootloader"
+          ]
+        },
+        {
+          "id": "I2C_SDA",
+          "gpio": 6,
+          "label": "I2C SDA",
+          "allowed_functions": [
+            "i2c.sda"
+          ]
+        },
+        {
+          "id": "I2C_SCL",
+          "gpio": 7,
+          "label": "I2C SCL",
+          "allowed_functions": [
+            "i2c.scl"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "quinled-an-penta-deca",
+      "revision": 1,
+      "name": "QuinLED An-Penta-Deca",
+      "soc": "esp32",
+      "implemented_pins": [
+        {
+          "id": "L1",
+          "gpio": 27,
+          "label": "LED_1",
+          "aliases": [
+            "LED_1"
+          ],
+          "allowed_functions": [
+            "light.pwm"
+          ]
+        },
+        {
+          "id": "L2",
+          "gpio": 26,
+          "label": "LED_2",
+          "aliases": [
+            "LED_2"
+          ],
+          "allowed_functions": [
+            "light.pwm"
+          ]
+        },
+        {
+          "id": "L3",
+          "gpio": 25,
+          "label": "LED_3",
+          "aliases": [
+            "LED_3"
+          ],
+          "allowed_functions": [
+            "light.pwm"
+          ]
+        },
+        {
+          "id": "L4",
+          "gpio": 23,
+          "label": "LED_4",
+          "aliases": [
+            "LED_4"
+          ],
+          "allowed_functions": [
+            "light.pwm"
+          ]
+        },
+        {
+          "id": "L5",
+          "gpio": 22,
+          "label": "LED_5",
+          "aliases": [
+            "LED_5"
+          ],
+          "allowed_functions": [
+            "light.pwm"
+          ]
+        },
+        {
+          "id": "L6",
+          "gpio": 21,
+          "label": "LED_6",
+          "aliases": [
+            "LED_6"
+          ],
+          "allowed_functions": [
+            "light.pwm"
+          ]
+        },
+        {
+          "id": "L7",
+          "gpio": 19,
+          "label": "LED_7",
+          "aliases": [
+            "LED_7"
+          ],
+          "allowed_functions": [
+            "light.pwm"
+          ]
+        },
+        {
+          "id": "L8",
+          "gpio": 18,
+          "label": "LED_8",
+          "aliases": [
+            "LED_8"
+          ],
+          "allowed_functions": [
+            "light.pwm"
+          ]
+        },
+        {
+          "id": "L9",
+          "gpio": 17,
+          "label": "LED_9",
+          "aliases": [
+            "LED_9"
+          ],
+          "allowed_functions": [
+            "light.pwm"
+          ]
+        },
+        {
+          "id": "L10",
+          "gpio": 14,
+          "label": "LED_10",
+          "aliases": [
+            "LED_10"
+          ],
+          "allowed_functions": [
+            "light.pwm"
+          ]
+        },
+        {
+          "id": "L11",
+          "gpio": 13,
+          "label": "LED_11",
+          "aliases": [
+            "LED_11"
+          ],
+          "allowed_functions": [
+            "light.pwm"
+          ]
+        },
+        {
+          "id": "L12",
+          "gpio": 12,
+          "label": "LED_12",
+          "aliases": [
+            "LED_12"
+          ],
+          "allowed_functions": [
+            "light.pwm"
+          ],
+          "restrictions": [
+            "strapping"
+          ]
+        },
+        {
+          "id": "L13",
+          "gpio": 5,
+          "label": "LED_13",
+          "aliases": [
+            "LED_13"
+          ],
+          "allowed_functions": [
+            "light.pwm"
+          ],
+          "restrictions": [
+            "strapping"
+          ]
+        },
+        {
+          "id": "L14",
+          "gpio": 4,
+          "label": "LED_14",
+          "aliases": [
+            "LED_14"
+          ],
+          "allowed_functions": [
+            "light.pwm"
+          ]
+        },
+        {
+          "id": "L15",
+          "gpio": 2,
+          "label": "LED_15",
+          "aliases": [
+            "LED_15"
+          ],
+          "allowed_functions": [
+            "light.pwm"
+          ],
+          "restrictions": [
+            "strapping"
+          ]
+        },
+        {
+          "id": "Button_1",
+          "gpio": 36,
+          "label": "Button 1",
+          "allowed_functions": [
+            "button.input",
+            "system.clear_config"
+          ],
+          "active_low": true,
+          "external_pull": "up",
+          "hardware_debounce": true
+        },
+        {
+          "id": "Button_2",
+          "gpio": 39,
+          "label": "Button 2",
+          "allowed_functions": [
+            "button.input",
+            "system.clear_config"
+          ],
+          "active_low": true,
+          "external_pull": "up",
+          "hardware_debounce": true
+        },
+        {
+          "id": "Button_3",
+          "gpio": 34,
+          "label": "Button 3",
+          "allowed_functions": [
+            "button.input",
+            "system.clear_config"
+          ],
+          "active_low": true,
+          "external_pull": "up",
+          "hardware_debounce": true
+        },
+        {
+          "id": "Button_4",
+          "gpio": 33,
+          "label": "Button 4",
+          "allowed_functions": [
+            "button.input"
+          ],
+          "restrictions": [
+            "electrical_behavior_unqualified"
+          ]
+        },
+        {
+          "id": "I2C_SDA",
+          "gpio": 15,
+          "label": "I2C SDA",
+          "allowed_functions": [
+            "i2c.sda"
+          ],
+          "restrictions": [
+            "strapping"
+          ]
+        },
+        {
+          "id": "I2C_SCL",
+          "gpio": 16,
+          "label": "I2C SCL",
+          "allowed_functions": [
+            "i2c.scl"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "quinled-an-penta-plus",
+      "revision": 1,
+      "name": "QuinLED An-Penta-Plus",
+      "soc": "esp32",
+      "reserved_gpios": [
+        0,
+        17,
+        18,
+        19,
+        21,
+        22,
+        23,
+        25,
+        26,
+        27
+      ],
+      "implemented_pins": [
+        {
+          "id": "L1",
+          "gpio": 33,
+          "label": "L1",
+          "allowed_functions": [
+            "light.pwm"
+          ]
+        },
+        {
+          "id": "L2",
+          "gpio": 32,
+          "label": "L2",
+          "allowed_functions": [
+            "light.pwm"
+          ]
+        },
+        {
+          "id": "L3",
+          "gpio": 12,
+          "label": "L3",
+          "allowed_functions": [
+            "light.pwm"
+          ],
+          "restrictions": [
+            "strapping"
+          ]
+        },
+        {
+          "id": "L4",
+          "gpio": 4,
+          "label": "L4",
+          "allowed_functions": [
+            "light.pwm"
+          ]
+        },
+        {
+          "id": "L5",
+          "gpio": 2,
+          "label": "L5",
+          "allowed_functions": [
+            "light.pwm"
+          ],
+          "restrictions": [
+            "strapping"
+          ]
+        },
+        {
+          "id": "Button_1",
+          "gpio": 36,
+          "label": "Button 1",
+          "allowed_functions": [
+            "button.input",
+            "system.clear_config"
+          ],
+          "active_low": true,
+          "external_pull": "up",
+          "hardware_debounce": true
+        },
+        {
+          "id": "Button_2",
+          "gpio": 39,
+          "label": "Button 2",
+          "allowed_functions": [
+            "button.input",
+            "system.clear_config"
+          ],
+          "active_low": true,
+          "external_pull": "up",
+          "hardware_debounce": true
+        },
+        {
+          "id": "Button_3",
+          "gpio": 34,
+          "label": "Button 3",
+          "allowed_functions": [
+            "button.input",
+            "system.clear_config"
+          ],
+          "active_low": true,
+          "external_pull": "up",
+          "hardware_debounce": true
+        },
+        {
+          "id": "I2C_SDA",
+          "gpio": 15,
+          "label": "I2C SDA",
+          "allowed_functions": [
+            "i2c.sda"
+          ],
+          "restrictions": [
+            "strapping"
+          ]
+        },
+        {
+          "id": "I2C_SCL",
+          "gpio": 16,
+          "label": "I2C SCL",
+          "allowed_functions": [
+            "i2c.scl"
+          ]
+        },
+        {
+          "id": "Digital_Data",
+          "gpio": 5,
+          "label": "Digital LED Data",
+          "allowed_functions": [
+            "digital.data"
+          ],
+          "restrictions": [
+            "strapping",
+            "driver_unimplemented"
+          ]
+        },
+        {
+          "id": "Digital_Relay",
+          "gpio": 13,
+          "label": "Digital LED Relay",
+          "allowed_functions": [
+            "digital.relay"
+          ],
+          "restrictions": [
+            "driver_unimplemented"
+          ]
+        }
+      ]
+    }
+  ],
+  "templates": [
+    {
+      "id": "quinled-mini-rgbww",
+      "revision": 1,
+      "name": "Mini RGBWW",
+      "board_id": "quinled-an-penta-mini",
+      "board_revision": 1,
+      "lights": [
+        {
+          "id": "light0",
+          "name": "Main",
+          "type": "rgbww",
+          "outputs": {
+            "red": "L5",
+            "green": "L4",
+            "blue": "L3",
+            "warmwhite": "L2",
+            "coldwhite": "L1"
+          }
+        }
+      ],
+      "system": {
+        "clear_config_pin": ""
+      },
+      "buses": [
+        {
+          "id": "i2c0",
+          "type": "i2c",
+          "sda": "I2C_SDA",
+          "scl": "I2C_SCL",
+          "enabled": false
+        }
+      ]
+    },
+    {
+      "id": "quinled-deca-rgbww",
+      "revision": 1,
+      "name": "Deca RGBWW on LED 1-5",
+      "board_id": "quinled-an-penta-deca",
+      "board_revision": 1,
+      "lights": [
+        {
+          "id": "light0",
+          "name": "Main",
+          "type": "rgbww",
+          "outputs": {
+            "red": "L1",
+            "green": "L2",
+            "blue": "L3",
+            "warmwhite": "L4",
+            "coldwhite": "L5"
+          }
+        }
+      ],
+      "system": {
+        "clear_config_pin": ""
+      },
+      "buses": [
+        {
+          "id": "i2c0",
+          "type": "i2c",
+          "sda": "I2C_SDA",
+          "scl": "I2C_SCL",
+          "enabled": false
+        }
+      ]
+    },
+    {
+      "id": "quinled-plus-rgbww",
+      "revision": 1,
+      "name": "Plus RGBWW",
+      "board_id": "quinled-an-penta-plus",
+      "board_revision": 1,
+      "lights": [
+        {
+          "id": "light0",
+          "name": "Main",
+          "type": "rgbww",
+          "outputs": {
+            "red": "L5",
+            "green": "L4",
+            "blue": "L3",
+            "warmwhite": "L2",
+            "coldwhite": "L1"
+          }
+        }
+      ],
+      "system": {
+        "clear_config_pin": ""
+      },
+      "buses": [
+        {
+          "id": "i2c0",
+          "type": "i2c",
+          "sda": "I2C_SDA",
+          "scl": "I2C_SCL",
+          "enabled": false
+        }
+      ]
+    }
+  ]
+}

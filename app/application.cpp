@@ -59,7 +59,7 @@ extern "C" {
 #define PART0 "factory"
 #endif
 
-//IMPORT_FSTR_LOCAL(default_config, PROJECT_DIR "/default_config.json");
+IMPORT_FSTR_LOCAL(hardware_defaults, PROJECT_DIR "/hardware-defaults.json");
 
 #if defined(ARCH_ESP8266) && !defined(SMING_RELEASE)
 #include <Platform/OsMessageInterceptor.h>
@@ -733,45 +733,59 @@ cdebug_i(APPLICATION, "Application::init: " ANSI_COLOR_BLUE "running partition "
 	controllers = std::make_unique<Controllers>();
 	(void)getFreeHeapSize(); // sample heap after ConfigDB + Controllers construction
 
-	// verify if there is a new version of the hardware config
-	
-
 	{
-		// check if the pinconfig json provided with the frontend is newer than the pinconfig array in the configdb
-		// this allows to simply add new pin configs to running controllers
 		AppConfig::Hardware hardware(*cfg);
-		uint32_t currentVersion=hardware.getVersion();
-
-		cdebug_i(APPLICATION, "Application::init: " ANSI_COLOR_BLUE "make pinconfig stream" ANSI_COLOR_RESET);
-		FSTR::Stream fs(fileMap["config/pinconfig.json"]);	
-		//Serial.println(fileMap["config/pinconfig.json"]);
-		cdebug_i(APPLICATION, "Application::init: " ANSI_COLOR_BLUE "get file Version" ANSI_COLOR_RESET);
-		uint32_t fileVersion=getVersion(fs);
-		cdebug_i(APPLICATION, "Application::init: " ANSI_COLOR_BLUE "fileVersion " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, fileVersion);	
-		if(fileVersion == -1){
-			cdebug_i(APPLICATION, "Application::init: " ANSI_COLOR_BLUE "no version found in pinconfig" ANSI_COLOR_RESET);
-		}
-		cdebug_i(APPLICATION, "Application::init: " ANSI_COLOR_BLUE "hardware version: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE ", file version: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, currentVersion, fileVersion);
-		if(fileVersion>currentVersion){
-			if(auto hardwareUpdate = hardware.update()){
-				hardwareUpdate.importFromStream(ConfigDB::Json::format, fs);
+		FSTR::Stream versionStream(hardware_defaults);
+		const uint32_t defaultsVersion = getVersion(versionStream);
+		const uint32_t currentVersion = hardware.getVersion();
+		if(defaultsVersion != uint32_t(-1) && defaultsVersion > currentVersion) {
+			if(auto hardwareUpdate = hardware.update()) {
+				cdebug_i(APPLICATION, "Importing hardware catalogue revision %u (stored %u)", defaultsVersion,
+						 currentVersion);
+				FSTR::Stream defaultsStream(hardware_defaults);
+				const auto status = hardwareUpdate.importFromStream(ConfigDB::Json::format, defaultsStream);
+				if(!status) {
+					cdebug_e(APPLICATION, "Hardware catalogue import failed: %s", status.toString().c_str());
+				}
 			}
 		}
 	}
 	{
     	int clearPin = -1;
 		{
-			AppConfig::General general(*cfg);
 			AppConfig::Hardware hardware(*cfg);
-
-			String pinConfigName = general.getCurrentPinConfigName();
-			String SoC = SOC;
-
-			if (hardware.pinconfigs.getItemCount() > 0) {
-				for (auto pinconfig : hardware.pinconfigs) {
-					if (pinconfig.getName() == pinConfigName && pinconfig.getSoc() == SoC) {
-						clearPin = pinconfig.getClearPin();
-						break;
+			const auto& configuration = hardware.configuration;
+			const String clearPinId = configuration.system.getClearConfigPin();
+			for(auto board : hardware.boards) {
+				if(!clearPinId.length() || board.getId() != configuration.getBoardId() ||
+				   board.getRevision() != configuration.getBoardRevision() || board.getSoc() != String(SOC)) {
+					continue;
+				}
+				for(auto pin : board.implementedPins) {
+					if(pin.getId() != clearPinId) {
+						continue;
+					}
+					bool allowed = false;
+					for(auto function : pin.allowedFunctions) {
+						allowed = allowed || function == F("system.clear_config");
+					}
+					for(auto reserved : board.reservedGpios) {
+						if(reserved == pin.getGpio()) {
+							allowed = false;
+						}
+					}
+					if(!allowed) {
+						continue;
+					}
+					for(auto available : hardware.availablePins) {
+						if(available.getSoc() != String(SOC)) {
+							continue;
+						}
+						for(auto capability : available.pins) {
+							if(capability.getGpio() == pin.getGpio() && capability.getInput() && !capability.getReserved()) {
+								clearPin = pin.getGpio();
+							}
+						}
 					}
 				}
 			}
@@ -826,16 +840,10 @@ cdebug_i(APPLICATION, "Application::init: " ANSI_COLOR_BLUE "running partition "
 			}
 
 		} else {
-			cdebug_i(APPLICATION, "Application::init: " ANSI_COLOR_BLUE "ConfigDB already initialized. resetting hardware definition" ANSI_COLOR_RESET);
+			cdebug_i(APPLICATION, "Application::init: " ANSI_COLOR_BLUE "ConfigDB already initialized. retaining hardware catalogue" ANSI_COLOR_RESET);
 			{
 			if (auto generalUpdate= general.update()){
 				generalUpdate.supportedColorModels.loadArrayDefaults();
-				}
-			}
-			{
-				AppConfig::Hardware hardware(*app.cfg);
-				if(auto hardwareUpdate=hardware.update()){
-					hardwareUpdate.availablePins.loadArrayDefaults();
 				}
 			}
 		}

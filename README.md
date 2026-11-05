@@ -52,6 +52,52 @@ Pin configurations are fetched at runtime from a remote JSON file (default:
 `https://raw.githubusercontent.com/pljakobs/esp_rgb_webapp2/develop/public/config/pinconfig.json`)
 and can be overridden in the configuration.
 
+### M3 hardware schema (5.1 feature branch)
+
+The M3 schema replaces `hardware.pinconfigs` with three separate fields:
+
+- `hardware.available_pins`: SoC GPIO records describing input/output, PWM,
+  strapping, internal pull capabilities and reserved resources.
+- `hardware.boards`: versioned board inventories with labeled `implemented_pins`,
+  including lighting outputs, button inputs and SDA/SCL.
+- `hardware.templates`: versioned board-specific suggested configurations.
+- `hardware.configuration`: the selected board and actual stable-ID lights,
+  role-to-pin assignments, per-light color settings, clear input, buttons and buses.
+
+The existing `hardware.version` remains the catalogue revision;
+`hardware.schema_version` identifies the new format. Active configuration and
+board/template revisions are separate. Templates never become active implicitly.
+The empty string means an unassigned optional clear pin; GPIO0 remains a valid
+physical pin. Runtime validation must enforce required light roles, ownership,
+SoC/board restrictions and actual PWM capacity, beyond JSON Schema shape checks.
+
+Built-in Mini, Deca and Plus definitions and single-light templates live in
+`hardware-defaults.json`, separately from the typed schema. Firmware embeds this
+file with `IMPORT_FSTR_LOCAL` and imports an `FSTR::Stream` into the typed hardware
+store, following the existing pinconfig priming mechanism. It imports only a
+valid newer revision (the initial stored revision is zero), without a filesystem asset or
+upstream download. The JSON contains catalogue data only, never active
+configuration or PWM settings. No custom schema extension or ConfigDB generator
+change is required.
+
+The M3 loader validates configured lights and initializes the firmware-owned
+vector of library instances. Reset setup resolves the configured board input;
+legacy MQTT channel discovery uses library channels only when one light exists.
+Multilight command/state routing, synchronization and per-light restore state
+are not complete. Existing installations must be migrated using schema identity, not
+just the catalogue revision comparison; preserve their actual wiring and color
+settings rather than auto-applying a new template. The legacy global color and
+general pin-selector fields remain migration inputs until that work is complete.
+Do not advertise the new capability or ship this branch before the linked runtime
+and migration implementation passes its checks. No 5.0 schema is changed.
+
+Schema fixture tests:
+
+```sh
+node tools/generate-api-schemas.mjs
+node --test .github/tests/test_hardware_schema.mjs .github/tests/test_virtual_light.mjs .github/tests/test_ledctrl.mjs
+```
+
 ---
 
 ## Features
