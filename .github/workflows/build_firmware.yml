@@ -54,7 +54,6 @@ jobs:
       artifact_branch: ${{ steps.resolve.outputs.artifact_branch }}
       webapp_branch: ${{ steps.resolve.outputs.webapp_branch }}
       rgbwwled_version: ${{ steps.resolve.outputs.rgbwwled_version }}
-      upgrade_from_lines: ${{ steps.resolve.outputs.upgrade_from_lines }}
       soc_json: ${{ steps.resolve.outputs.soc_json }}
       soc_csv: ${{ steps.resolve.outputs.soc_csv }}
     steps:
@@ -597,7 +596,6 @@ jobs:
           echo "fw_comment_b64=${{ steps.pr_notes.outputs.fw_comment_b64 }}" >> version-info.txt
           echo "supported_socs=${{ needs.generate-matrix.outputs.soc_csv }}" >> version-info.txt
           echo "rgbwwled_version=${{ needs.generate-matrix.outputs.rgbwwled_version }}" >> version-info.txt
-          echo "upgrade_from_lines=${{ needs.generate-matrix.outputs.upgrade_from_lines }}" >> version-info.txt
 
       - name: Save version info
         # Only upload version info from one specific matrix combination to avoid conflicts
