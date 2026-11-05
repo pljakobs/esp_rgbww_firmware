@@ -575,11 +575,15 @@ jobs:
         id: stage
         if: ${{ steps.set_firmware_path.outputs.path != '' }}
         run: |
+          set -euo pipefail
           mkdir -p _upload
+          test -s "${{ steps.set_firmware_path.outputs.path }}"
           cp "${{ steps.set_firmware_path.outputs.path }}" _upload/
           if [ "${{ matrix.single }}" = "0" ]; then
-            [ -f "${{ steps.set_elf_path.outputs.elf }}" ] && cp "${{ steps.set_elf_path.outputs.elf }}" _upload/ || true
-            [ -f "${{ steps.set_elf_path.outputs.map }}" ] && cp "${{ steps.set_elf_path.outputs.map }}" _upload/ || true
+            test -s "${{ steps.set_elf_path.outputs.elf }}"
+            test -s "${{ steps.set_elf_path.outputs.map }}"
+            cp "${{ steps.set_elf_path.outputs.elf }}" _upload/
+            cp "${{ steps.set_elf_path.outputs.map }}" _upload/
           fi
 
       - name: Upload firmware artifact
@@ -588,6 +592,7 @@ jobs:
         with:
           name: ${{ steps.set_artifact_name.outputs.artifact_name }}
           path: _upload/
+          if-no-files-found: error
 
       - name: Create version info file
         run: |
