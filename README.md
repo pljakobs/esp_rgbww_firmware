@@ -56,6 +56,37 @@ and can be overridden in the configuration.
 
 ## Features
 
+### Optional Status Display
+
+An I2C SSD1306 128x64 OLED can show the controller name and IP address.
+Enable it with explicit, unused GPIOs, for example:
+
+```sh
+make -j8 STATUS_DISPLAY=1 STATUS_DISPLAY_SDA=2 STATUS_DISPLAY_SCL=0
+```
+
+Check your board's PWM, button, boot-strapping and other pin assignments before
+choosing GPIOs. Connect the display to 3.3V and GND, with I2C pull-ups to 3.3V.
+The default 7-bit address is `0x3c`; override it with
+`STATUS_DISPLAY_ADDRESS=0x3d` if needed. No reset GPIO is required.
+
+The firmware probes the address at boot before constructing `StatusDisplay`,
+which derives from `Adafruit_SSD1306`. If no device acknowledges, no display
+object is allocated and no refresh timer is started. An acknowledgement detects
+presence, not the device model; the configured address must belong to the OLED.
+Connecting a display after boot requires a restart.
+
+The screen updates within one second of name or network changes, and is only
+redrawn when values change. Whenever the local AP is enabled, an `AP ON` screen
+takes priority, even if the station is also connected. It shows the AP IP,
+active SSID and password in plain text, or `(open network)` for an unsecured AP.
+The SSID wraps over two lines and passwords over up to four lines, accommodating
+a full 64-character password. Anyone with physical access can read these credentials.
+When the AP is disabled, the screen shows the controller name and station IP,
+or `Not connected`. Names use the built-in ASCII font and occupy up to three
+21-character lines; longer names are truncated.
+Display support is disabled by default and is not available in Host builds.
+
 ### Core
 - Up to 5 independent PWM output channels (RGB, RGBWW, RGBCW, RGBWWCW)
 - Smooth, programmable on-board fades and animations
