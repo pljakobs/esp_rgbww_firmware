@@ -47,3 +47,14 @@ jobs:
 
       - name: Test workflow syntax and policies
         run: python -m unittest discover -s .github/tests -v
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Test M3 hardware schema and light ownership
+        run: |
+          node tools/generate-api-schemas.mjs
+          node --test .github/tests/test_hardware_schema.mjs .github/tests/test_virtual_light.mjs .github/tests/test_ledctrl.mjs
+          git diff --exit-code -- api-version.json schema/app-config.schema.json schema/app-data.schema.json json-rpc-api.schema.json

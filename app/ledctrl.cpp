@@ -30,6 +30,187 @@
 
 #include <cstdlib>
 #include <algorithm>
+#include <array>
+#include <utility>
+#include <vector>
+
+namespace
+{
+bool selectLightType(const String& type, const std::array<String, 6>& outputs, LightType& lightType)
+{
+	const bool red = outputs[0].length() != 0;
+	const bool green = outputs[1].length() != 0;
+	const bool blue = outputs[2].length() != 0;
+	const bool warm = outputs[3].length() != 0;
+	const bool cold = outputs[4].length() != 0;
+	const bool brightness = outputs[5].length() != 0;
+	if(type == F("dimmer") && !red && !green && !blue && !warm && !cold && brightness) {
+		lightType = LightType::SINGLE;
+	} else if(type == F("tunable_white") && !red && !green && !blue && warm && cold && !brightness) {
+		lightType = LightType::WWCW;
+	} else if(type == F("rgb") && red && green && blue && !warm && !cold && !brightness) {
+		lightType = LightType::RGB;
+	} else if(type == F("rgbw") && red && green && blue && warm != cold && !brightness) {
+		lightType = warm ? LightType::RGBWW : LightType::RGBCW;
+	} else if(type == F("rgbww") && red && green && blue && warm && cold && !brightness) {
+		lightType = LightType::RGBWWCW;
+	} else {
+		return false;
+	}
+	return true;
+}
+
+struct ResolvedLight {
+	String id;
+	String name;
+	LightType type;
+	std::array<int, 5> pins{{-1, -1, -1, -1, -1}};
+};
+template <typename Hardware, typename Board>
+bool claimBoardPin(const Hardware& hardware, const Board& board, const String& soc, const String& id,
+				   const String& function, std::array<bool, 256>& claimed, int& gpio)
+{
+	for(auto pin : board.implementedPins) {
+		if(pin.getId() != id) {
+			continue;
+		}
+		bool allowed = false;
+		for(auto supported : pin.allowedFunctions) {
+			allowed = allowed || supported == function;
+		}
+		for(auto restriction : pin.restrictions) {
+			if(restriction == F("electrical_behavior_unqualified") || restriction == F("driver_unimplemented")) {
+				return false;
+			}
+		}
+		gpio = pin.getGpio();
+		if(!allowed || claimed[gpio]) {
+			return false;
+		}
+		for(auto reserved : board.reservedGpios) {
+			if(reserved == gpio) {
+				return false;
+			}
+		}
+		for(auto available : hardware.availablePins) {
+			if(available.getSoc() != soc) {
+				continue;
+			}
+			for(auto capability : available.pins) {
+				if(capability.getGpio() != gpio) {
+					continue;
+				}
+				if(capability.getReserved()) {
+					return false;
+				}
+				if(function == F("light.pwm")) {
+					if(!capability.getOutput() || !capability.getPwm()) {
+						return false;
+					}
+				} else if(!capability.getInput() ||
+						  ((function == F("i2c.sda") || function == F("i2c.scl")) && !capability.getOutput())) {
+					return false;
+				}
+				claimed[gpio] = true;
+				return true;
+			}
+		}
+		return false;
+	}
+	return false;
+}
+
+template <typename Hardware>
+bool resolveConfiguredLights(const Hardware& hardware, const String& soc, unsigned capacity,
+							 std::vector<ResolvedLight>& result, String& error)
+{
+	result.clear();
+	const auto& configuration = hardware.configuration;
+	if(configuration.lights.getItemCount() == 0) {
+		return true;
+	}
+	unsigned boardIndex = hardware.boards.getItemCount();
+	for(unsigned index = 0; index < hardware.boards.getItemCount(); ++index) {
+		auto candidate = hardware.boards[index];
+		if(candidate.getId() == configuration.getBoardId() &&
+		   candidate.getRevision() == configuration.getBoardRevision() && candidate.getSoc() == soc) {
+			boardIndex = index;
+			break;
+		}
+	}
+	if(boardIndex == hardware.boards.getItemCount()) {
+		error = F("Configured board/revision is unavailable for this SoC");
+		return false;
+	}
+	auto board = hardware.boards[boardIndex];
+	std::array<bool, 256> claimed{};
+	int gpio = -1;
+	const String clearPin = configuration.system.getClearConfigPin();
+	if(clearPin.length() && !claimBoardPin(hardware, board, soc, clearPin, F("system.clear_config"), claimed, gpio)) {
+		error = F("Invalid or conflicting clear input");
+		return false;
+	}
+	for(auto button : configuration.buttons) {
+		if(!claimBoardPin(hardware, board, soc, button.getPin(), F("button.input"), claimed, gpio)) {
+			error = F("Invalid or conflicting button input");
+			return false;
+		}
+	}
+	for(auto bus : configuration.buses) {
+		if(!claimBoardPin(hardware, board, soc, bus.getSda(), F("i2c.sda"), claimed, gpio) ||
+		   !claimBoardPin(hardware, board, soc, bus.getScl(), F("i2c.scl"), claimed, gpio)) {
+			error = F("Invalid or conflicting I2C pins");
+			return false;
+		}
+	}
+	unsigned channelCount = 0;
+	for(auto configured : configuration.lights) {
+		ResolvedLight resolved;
+		resolved.id = configured.getId();
+		resolved.name = configured.getName();
+		if(!resolved.id.length() || std::any_of(result.begin(), result.end(), [&](const ResolvedLight& other) {
+			   return other.id == resolved.id;
+		   })) {
+			error = F("Duplicate or empty virtual-light ID");
+			return false;
+		}
+		const auto& outputs = configured.outputs;
+		const std::array<String, 6> roles{{outputs.getRed(), outputs.getGreen(), outputs.getBlue(),
+										 outputs.getWarmwhite(), outputs.getColdwhite(), outputs.getBrightness()}};
+		if(!selectLightType(configured.getType(), roles, resolved.type)) {
+			error = F("Invalid light type or required output roles");
+			return false;
+		}
+		for(unsigned role = 0; role < roles.size(); ++role) {
+			if(!roles[role].length()) {
+				continue;
+			}
+			if(!claimBoardPin(hardware, board, soc, roles[role], F("light.pwm"), claimed, gpio)) {
+				error = F("Unknown, unavailable or conflicting PWM output");
+				return false;
+			}
+			resolved.pins[role == 5 ? 3 : role] = gpio;
+			if(++channelCount > capacity) {
+				error = F("PWM channel capacity exceeded");
+				return false;
+			}
+		}
+		result.push_back(std::move(resolved));
+	}
+	return true;
+}
+
+template <typename Color>
+void configureLightColor(RGBWWLed& light, const Color& color)
+{
+	light.colorutils.setBrightnessCorrection(color.brightness.getRed(), color.brightness.getGreen(),
+											color.brightness.getBlue(), color.brightness.getWw(), color.brightness.getCw());
+	light.colorutils.setHSVcorrection(color.hsv.getRed(), color.hsv.getYellow(), color.hsv.getGreen(),
+									 color.hsv.getCyan(), color.hsv.getBlue(), color.hsv.getMagenta());
+	light.colorutils.setHSVmodel((RGBWW_HSVMODEL)color.hsv.getModel());
+	light.colorutils.setWhiteTemperature(color.colortemp.getWw(), color.colortemp.getCw());
+}
+}
 
 APPLedCtrl::~APPLedCtrl()
 {
@@ -38,190 +219,91 @@ APPLedCtrl::~APPLedCtrl()
 }
 
 
-/**
- * @brief Initializes the APPLedCtrl class.
- *
- * This function initializes the APPLedCtrl class by creating a StepSync object,
- * parsing the pin configuration string, initializing the RGBWWLed, setting up
- * the LED controller, and setting the startup color.
- * 
- * ToDo:
- * in the future, this should be expanded to be able to use more pins than just five (some platforms make 12 or more pwm pins available)
- * the idea is to introduce a layer of abstraction above the pins that can be configured as lights. This way, the user can define a light
- * to be RGB, RGBW, RGBWW, WW or just a single channel and use one controller to drive multiple "virtual" lights.
- * For now, however, we will stick to the current implementation. 
- * 
- * ToDo:
- * a nearer term feature I'm, thinking about is named channels. Currently, the channels are named for the RGBWW colors the drive in the HSV 
- * color model. Named channels would be an extension of the RAW API and allow the user to a) name a channel and b) use that name in the API
- * to set the intensity for that channel. This will not require a change of the underlying code, but will necessitate a change to the PinConfig 
- * structure, namely rather than having the color names hardcoded there, I'll switch to channel numbers. 
- * Once named mode has been fully implemented and a controller has been configured with channel names other than [ red, green, blue, warmwhite, 
- * coldwhite ], I believe the controller shall not allow calls to the /color api with the HSV or RAW structure but with a new, yet to define
- * CHANNELS structure that will provide the channel name and the channel brightness.
- */
-
 void APPLedCtrl::init()
 {
-	cdebug_i(APPLEDCTRL, "APPLedCtrl::init: " ANSI_COLOR_BLUE "APPLedCtrl::init" ANSI_COLOR_RESET);
-
+	if(!app.lights.empty()) {
+		cdebug_e(APPLEDCTRL, "Lights are already initialized; restart to apply new assignments");
+		return;
+	}
+	delete _stepSync;
 	_stepSync = new StepSync();
-
 	reconfigure();
-
-	PinConfig pins;
-	pins.isValid=true;
-	String SoC=SOC;
-	String PinConfigName;
-	
-	{
-		cdebug_i(APPLEDCTRL, "APPLedCtrl::init: " ANSI_COLOR_BLUE "read PinConfig" ANSI_COLOR_RESET);
-		AppConfig::General general(*app.cfg);
-		AppConfig::Hardware hardware(*app.cfg);
-	
-		PinConfigName=general.getCurrentPinConfigName();
-		if(hardware.pinconfigs.getItemCount()>0){
-			bool found=false;
-			for(auto pinconfig : hardware.pinconfigs){
-				if(pinconfig.getName()==PinConfigName && pinconfig.getSoc()==SoC){
-					cdebug_i(APPLEDCTRL, "APPLedCtrl::init: " ANSI_COLOR_BLUE "found pin config " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, PinConfigName.c_str());
-					found=true;
-					for (auto channel : pinconfig.channels) {
-						int pin=channel.getPin();
-						if (isPinValid(pin)){
-							if(channel.getName() == F("red")) {
-								pins.red = channel.getPin();
-							} else if(channel.getName() == F("green")) {
-								pins.green = channel.getPin();
-							} else if(channel.getName() == F("blue")) {
-								pins.blue = channel.getPin();
-							} else if(channel.getName() == F("warmwhite")) {
-								pins.warmwhite = channel.getPin();
-							} else if(channel.getName() == F("coldwhite")) {
-								pins.coldwhite = channel.getPin();
-							}
-						}else{
-							cdebug_e(APPLEDCTRL, "APPLedCtrl::init: " ANSI_COLOR_RED "invalid pin " ANSI_COLOR_CYAN "%i" ANSI_COLOR_RED " for SoC " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED "" ANSI_COLOR_RESET, pin, SOC);
-							pins.isValid=false;
-							if(auto generalUpdate = general.update()) {
-								generalUpdate.setCurrentPinConfigName(F("unconfigured"));
-							} // end AppConfig::General::update context
-						}
-					}
-					if(!pins.isValid){
-						cdebug_e(APPLEDCTRL, "APPLedCtrl::init: " ANSI_COLOR_RED "pin config " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED " is invalid" ANSI_COLOR_RESET, PinConfigName.c_str());
-					}
-					break;
-				}
-			}
-			if(!found){
-				cdebug_e(APPLEDCTRL, "APPLedCtrl::init: " ANSI_COLOR_RED "pin config " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED " not found" ANSI_COLOR_RESET, PinConfigName.c_str());
-				pins.isValid=false;
-			}
-		} else {
-			cdebug_e(APPLEDCTRL, "APPLedCtrl::init: " ANSI_COLOR_RED "no pin configs defined" ANSI_COLOR_RESET);
-			pins.isValid=false;
-		}
-	}
-
-	
-		
-	cdebug_i(APPLEDCTRL, 
-		"APPLedCtrl::init: " ANSI_COLOR_BLUE "initializing RGBWWLed\n   red: " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE " | green: " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE " | blue: " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE " | warmwhite: " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE " | coldwhite: " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE ", valid: [" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "]" ANSI_COLOR_RESET,
-		pins.red, pins.green, pins.blue, pins.warmwhite, pins.coldwhite, pins.isValid?"true":"false");
-
-	if(pins.isValid)
-		{
-		#ifdef ARCH_ESP32
-		{
-			AppConfig::Hardware::Pwm pwmconfig(*app.cfg);
-			Esp32HardwarePwm::Config config;
-			config.timer.frequency = pwmconfig.timer.getFrequency();
-			config.timer.resolution = (ledc_timer_bit_t)pwmconfig.timer.getResolution();
-
-				
-			auto speedMode = pwmconfig.timer.getSpeedMode();
-			
-			#ifdef SOC_ESP32 // a bit ugly, but LEDC_HIGH_SPEED_MODE is not defined for anything but the ESP32 so using the constant directly would throw an error at compile time
-			if(speedMode == AppConfig::ContainedHardware::ContainedPwm::TimerSpeedMode::HIGHSPEED)
-				config.timer.speed_mode = LEDC_HIGH_SPEED_MODE;
-			#endif
-			
-			if(speedMode == AppConfig::ContainedHardware::ContainedPwm::TimerSpeedMode::LOWSPEED){
-				config.timer.speed_mode = LEDC_LOW_SPEED_MODE;
-			} else{
-				cdebug_e(APPLEDCTRL, "APPLedCtrl::init: " ANSI_COLOR_RED "invalid speed mode for SoC " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED ", using default low_speed" ANSI_COLOR_RESET, SOC);
-				config.timer.speed_mode = LEDC_LOW_SPEED_MODE;
-			}
-
-			config.timer.timer_num = (ledc_timer_t)pwmconfig.timer.getNumber();
-
-			auto spreadMode = pwmconfig.spreadSpectrum.getMode();
-			if (spreadMode == AppConfig::ContainedHardware::ContainedPwm::SpreadSpectrumMode::ON) {
-				config.spreadSpectrum.mode = Esp32HardwarePwm::SpreadSpectrumMode::ON;
-			} else if (spreadMode == AppConfig::ContainedHardware::ContainedPwm::SpreadSpectrumMode::OFF) {
-				config.spreadSpectrum.mode = Esp32HardwarePwm::SpreadSpectrumMode::OFF;
-			}
-
-			config.spreadSpectrum.WidthPercent = pwmconfig.spreadSpectrum.getWidth();
-			config.spreadSpectrum.Subsampling = pwmconfig.spreadSpectrum.getSubsampling();
-
-			// ✅ Use PhaseShiftMode enum  directly
-			(pwmconfig.phaseShift.getMode()==AppConfig::ContainedHardware::ContainedPwm::PhaseShiftMode::ON)?config.phaseShift.mode=Esp32HardwarePwm::PhaseShiftMode::AUTO:config.phaseShift.mode=Esp32HardwarePwm::PhaseShiftMode::OFF;
-
-			RGBWWLed::init(pins.red, pins.green, pins.blue, pins.warmwhite, pins.coldwhite, config);
-		}
-		#else
-		RGBWWLed::init(pins.red, pins.green, pins.blue, pins.warmwhite, pins.coldwhite, PWM_FREQUENCY);
-		#endif
-		cdebug_i(APPLEDCTRL, "APPLedCtrl::init: " ANSI_COLOR_BLUE "finished setting up RGBWWLed" ANSI_COLOR_RESET);
-		setup();
-		}
-
-	HSVCT startupColor;
-	{
-		cdebug_i(APPLEDCTRL, "APPLedCtrl::init: " ANSI_COLOR_BLUE "reading startup color" ANSI_COLOR_RESET);
-		AppConfig::Color color(*app.cfg);
-		if(color.getStartupColor() == "last") {
-			AppData::Root data(*app.data);
-			cdebug_i(APPLEDCTRL, "APPLedCtrl::init: " ANSI_COLOR_BLUE "H: " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE " | s: " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE " | v: " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE " | ct: " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, data.lastColor.getH(), data.lastColor.getS(),
-					data.lastColor.getV(), data.lastColor.getCt());
-
-			startupColor.h = data.lastColor.getH();
-			startupColor.s = data.lastColor.getS();
-			startupColor.v = data.lastColor.getV();
-			startupColor.ct = data.lastColor.getCt();
-		} else {
-			// interpret as color string
-			String tempStartupColor = color.getStartupColor();
-			startupColor = tempStartupColor;
-		}
-	}
-	// boot from off to startup color
-	HSVCT startupColorDark = startupColor;
-	startupColorDark.v = 0;
-	fadeHSV(startupColorDark, startupColor, 700); //fade to color in 700ms 
-}
-
-bool APPLedCtrl::isPinValid(int currentPin)
-{
-	if (currentPin==-1) return true; // if clear pin is not configured, it will be set to -1, the config is still valid
-			
 	AppConfig::Hardware hardware(*app.cfg);
-	for (auto pinconfig : hardware.availablePins){
-		if (strcmp(pinconfig.getSoc().c_str(),SOC)==0){
-			for (auto pin : pinconfig.pins){
-				if(pin==currentPin){
-					return true;
-				}
-			}
-		cdebug_e(APPLEDCTRL, "APPLedCtrl::isPinValid: " ANSI_COLOR_RED "invalid pin " ANSI_COLOR_CYAN "%i" ANSI_COLOR_RED " for SoC " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED "" ANSI_COLOR_RESET, currentPin, SOC);
-		return false;
-		}
+	unsigned capacity = 16;
+#ifdef ARCH_ESP32
+	capacity = LEDC_CHANNEL_MAX;
+#endif
+	std::vector<ResolvedLight> resolved;
+	String error;
+	if(!resolveConfiguredLights(hardware, String(SOC), capacity, resolved, error)) {
+		cdebug_e(APPLEDCTRL, "Light configuration rejected: %s", error.c_str());
+		return;
 	}
-	cdebug_e(APPLEDCTRL, "APPLedCtrl::isPinValid: " ANSI_COLOR_RED "invalid SoC " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED "" ANSI_COLOR_RESET, SOC);
-	return false;
+	if(resolved.empty()) {
+		cdebug_i(APPLEDCTRL, "No virtual lights configured");
+		return;
+	}
+#ifdef ARCH_ESP32
+	const auto& pwm = hardware.pwm;
+	if(pwm.timer.getFrequency() <= 0) {
+		cdebug_e(APPLEDCTRL, "Invalid PWM frequency");
+		return;
+	}
+	Esp32HardwarePwm::Config pwmConfig;
+	pwmConfig.timer.frequency = pwm.timer.getFrequency();
+	pwmConfig.timer.resolution = (ledc_timer_bit_t)pwm.timer.getResolution();
+	pwmConfig.timer.timer_num = (ledc_timer_t)pwm.timer.getNumber();
+	const auto speedMode = pwm.timer.getSpeedMode();
+#ifdef SOC_ESP32
+	if(speedMode == AppConfig::ContainedHardware::ContainedPwm::TimerSpeedMode::HIGHSPEED) {
+		pwmConfig.timer.speed_mode = LEDC_HIGH_SPEED_MODE;
+	} else
+#endif
+	if(speedMode == AppConfig::ContainedHardware::ContainedPwm::TimerSpeedMode::LOWSPEED) {
+		pwmConfig.timer.speed_mode = LEDC_LOW_SPEED_MODE;
+	} else {
+		cdebug_e(APPLEDCTRL, "Unsupported PWM speed mode");
+		return;
+	}
+	pwmConfig.spreadSpectrum.mode = pwm.spreadSpectrum.getMode() ==
+		AppConfig::ContainedHardware::ContainedPwm::SpreadSpectrumMode::ON
+		? Esp32HardwarePwm::SpreadSpectrumMode::ON : Esp32HardwarePwm::SpreadSpectrumMode::OFF;
+	pwmConfig.spreadSpectrum.WidthPercent = pwm.spreadSpectrum.getWidth();
+	pwmConfig.spreadSpectrum.Subsampling = pwm.spreadSpectrum.getSubsampling();
+	pwmConfig.phaseShift.mode = pwm.phaseShift.getMode() ==
+		AppConfig::ContainedHardware::ContainedPwm::PhaseShiftMode::ON
+		? Esp32HardwarePwm::PhaseShiftMode::AUTO : Esp32HardwarePwm::PhaseShiftMode::OFF;
+#endif
+	std::vector<VirtualLight> staged;
+	staged.reserve(resolved.size());
+	for(const auto& light : resolved) {
+		std::unique_ptr<RGBWWLed> instance(new RGBWWLed());
+		if(!instance) {
+			cdebug_e(APPLEDCTRL, "Unable to allocate virtual light");
+			return;
+		}
+		staged.push_back({light.id, light.name, std::move(instance)});
+	}
+#ifdef ARCH_ESP32
+	unsigned channelStart = 0;
+#endif
+	for(unsigned index = 0; index < resolved.size(); ++index) {
+		const auto& light = resolved[index];
+		const auto& pins = light.pins;
+#ifdef ARCH_ESP32
+		pwmConfig.channelStart = (ledc_channel_t)channelStart;
+		staged[index].led->init(pins[0], pins[1], pins[2], pins[3], pins[4], light.type, pwmConfig);
+		channelStart += std::count_if(pins.begin(), pins.end(), [](int gpio) { return gpio >= 0; });
+#else
+		staged[index].led->init(pins[0], pins[1], pins[2], pins[3], pins[4], light.type, PWM_FREQUENCY);
+#endif
+	}
+	app.lights.swap(staged);
+	setup();
+	cdebug_i(APPLEDCTRL, "Initialized %u virtual lights", unsigned(app.lights.size()));
 }
+
+
 /**
  * @brief read local configuration from ConfigDB
  * 
@@ -256,24 +338,15 @@ void APPLedCtrl::reconfigure()
  */
 void APPLedCtrl::setup()
 {
-	cdebug_i(APPLEDCTRL, "APPLedCtrl::setup: " ANSI_COLOR_BLUE "APPLedCtrl::setup" ANSI_COLOR_RESET);
-
-	{
-		cdebug_i(APPLEDCTRL, "APPLedCtrl::setup: " ANSI_COLOR_BLUE "reading color config" ANSI_COLOR_RESET);
-		AppConfig::Color color(*app.cfg);
-
-		colorutils.setBrightnessCorrection(color.brightness.getRed(), color.brightness.getGreen(),
-										   color.brightness.getBlue(), color.brightness.getWw(),
-										   color.brightness.getCw());
-		colorutils.setHSVcorrection(color.hsv.getRed(), color.hsv.getYellow(), color.hsv.getGreen(),
-									color.hsv.getCyan(), color.hsv.getBlue(), color.hsv.getMagenta());
-
-		colorutils.setColorMode((RGBWW_COLORMODE)color.getColorMode());
-		colorutils.setHSVmodel((RGBWW_HSVMODEL)color.hsv.getModel());
-		cdebug_i(APPLEDCTRL, "APPLedCtrl::setup: " ANSI_COLOR_BLUE "set RGBWW_COLORMOD " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE " and RGBWW_HSVMODEL " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, color.getColorMode(), color.hsv.getModel());
-
-		colorutils.setWhiteTemperature(color.colortemp.getWw(), color.colortemp.getCw());
-	} // end configdb context for color
+	AppConfig::Hardware hardware(*app.cfg);
+	for(auto configured : hardware.configuration.lights) {
+		for(auto& light : app.lights) {
+			if(light.id == configured.getId()) {
+				configureLightColor(*light.led, configured.color);
+				break;
+			}
+		}
+	}
 }
 
 /**
@@ -346,50 +419,11 @@ void APPLedCtrl::updateLedCb(void* pTimerArg)
  */
 void APPLedCtrl::updateLed()
 {
-	// arm next timer
 	_ledTimer.startOnce();
-
-	/************************** 
-     * those rely on the mqtt master/secodary toggles to be set
-     * but really, they should also look at the main mqtt enable flag
-     **************************/
-	const bool animFinished = show();
-
+	for(auto& light : app.lights) {
+		light.led->show();
+	}
 	++_stepCounter;
-
-	// publish _stepCounter if this is the clockMaster
-	if(clockMaster) {
-		if((_stepCounter % clockMasterInterval * RGBWW_UPDATEFREQUENCY) == 0) {
-			app.mqttclient.publishClock(_stepCounter);
-		}
-	}
-
-	const static uint32_t stepLenMs = 1000 / RGBWW_UPDATEFREQUENCY;
-
-	if(colorMasterInterval >= 0) {
-		if(animFinished || colorMasterInterval == 0 || ((stepLenMs * _stepCounter) % colorMasterInterval) < stepLenMs) {
-			uint32_t now = millis();
-			if(now - _lastColorEvent >= (uint32_t)colorMinInterval) {
-				// debug_i(ANSI_COLOR_BLUE "APPLedCtrl::updateLed - publishing color event" ANSI_COLOR_RESET);
-				_lastColorEvent = now;
-				publishToEventServer();
-			}
-		}
-	}
-
-	if(colorMaster) {
-		if(animFinished || colorMasterInterval == 0 || ((stepLenMs * _stepCounter) % colorMasterInterval) < stepLenMs) {
-			publishToMqtt();
-		}
-	}
-
-	checkStableColorState();
-	
-	if(transFinInterval >= 0) {
-		if(transFinInterval == 0 || ((stepLenMs * _stepCounter) % transFinInterval) < stepLenMs) {
-			publishFinishedStepAnimations();
-		}
-	}
 }
 
 /**

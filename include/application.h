@@ -25,6 +25,8 @@
 #include <webappota.h>
 #include <controllers.h>
 #include <mdnsHandler.h>
+#include <virtuallight.h>
+#include <vector>
 #ifndef SMING_RELEASE
 #include <udpSyslogStream.h>
 #endif
@@ -113,6 +115,7 @@ public:
     UdpSyslogStream udpSyslogStream;
 #endif
     APPLedCtrl rgbwwctrl;
+    std::vector<VirtualLight> lights;
     std::unique_ptr<Api> api;
     std::unique_ptr<Controllers> controllers;
     
