@@ -886,6 +886,30 @@ cdebug_i(APPLICATION, "Application::init: " ANSI_COLOR_BLUE "running partition "
 	cdebug_i(APPLICATION, "Application::init: " ANSI_COLOR_BLUE "start network init" ANSI_COLOR_RESET);
 	// initialize networking
 	network.init();
+#if STATUS_DISPLAY
+	statusDisplay = StatusDisplay::createIfConnected(STATUS_DISPLAY_SDA, STATUS_DISPLAY_SCL, STATUS_DISPLAY_ADDRESS);
+	if(statusDisplay) {
+		auto refreshDisplay = [this]() {
+				if(network.isApActive()) {
+					statusDisplay->refreshAccessPoint(WifiAccessPoint.getIP().toString(),
+						WifiAccessPoint.getSSID(), WifiAccessPoint.getPassword());
+					return;
+				}
+			AppConfig::General general(*cfg);
+			String name = general.getDeviceName();
+			if(name.length() == 0) {
+				name = F("rgbww-") + String(system_get_chip_id(), HEX);
+			}
+			String address = F("Not connected");
+			if(WifiStation.isConnected()) {
+				address = WifiStation.getIP().toString();
+			}
+			statusDisplay->refresh(name, address);
+		};
+		refreshDisplay();
+		statusDisplayTimer.initializeMs(1000, refreshDisplay).start();
+	}
+#endif
 	cdebug_i(APPLICATION, "Application::init: " ANSI_COLOR_BLUE "network initizalized, ssid: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, WifiStation.getSSID().c_str());
 	(void)getFreeHeapSize(); // sample heap after WiFi init
 	{
