@@ -43,15 +43,10 @@ jobs:
       fw_comment_b64: ${{ steps.version.outputs.fw_comment_b64 }}
       latest_run_id: ${{ steps.get_run.outputs.latest_run_id }}  
       supported_socs: ${{ steps.version.outputs.supported_socs }}
+      upgrade_from_lines: ${{ steps.version.outputs.upgrade_from_lines }}
       artifact_branch: ${{ steps.get_branch.outputs.artifact_branch }}
       
     steps:
-      - name: Checkout release metadata helper
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || inputs.branch }}
-          persist-credentials: false
-
       - name: Disable Jekyll processing
         run: touch .nojekyll
 
@@ -63,11 +58,23 @@ jobs:
           CI_RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
           if [[ "$CI_EVENT_NAME" == "workflow_dispatch" ]]; then
-            source_ref="$CI_INPUT_BRANCH"
+            source_branch="$CI_INPUT_BRANCH"
           else
-            source_ref="$CI_RUN_BRANCH"
+            source_branch="$CI_RUN_BRANCH"
           fi
-          python3 .github/scripts/release_metadata.py resolve "$source_ref" >> "$GITHUB_OUTPUT"
+
+          case "$source_branch" in
+            5.0/develop|develop) release_ref="5.0/develop" ;;
+            5.0/testing|testing) release_ref="5.0/testing" ;;
+            5.0/prod|stable) release_ref="5.0/prod" ;;
+            5.1/develop|experimental) release_ref="5.1/develop" ;;
+            5.1/testing) release_ref="5.1/testing" ;;
+            5.1/prod) release_ref="5.1/prod" ;;
+            *) echo "Unsupported firmware release ref: $source_branch" >&2; exit 1 ;;
+          esac
+          artifact_branch="${release_ref//\//-}"
+          echo "release_ref=$release_ref" >> "$GITHUB_OUTPUT"
+          echo "artifact_branch=$artifact_branch" >> "$GITHUB_OUTPUT"
 
       - name: Get Latest Successful Workflow Run
         id: get_run
@@ -105,13 +112,50 @@ jobs:
           
       - name: Load version info
         id: version
+        env:
+          EXPECTED_RELEASE_REF: ${{ steps.get_branch.outputs.release_ref }}
         run: |
-          source ./version-info/version-info.txt
-          echo "fw_version=$fw_version" >> $GITHUB_OUTPUT
-          echo "fw_branch=$fw_branch" >> $GITHUB_OUTPUT
-          echo "fw_comment_b64=${fw_comment_b64:-}" >> $GITHUB_OUTPUT
-          test -n "${supported_socs:-}"
-          echo "supported_socs=$supported_socs" >> $GITHUB_OUTPUT
+          python3 - <<'PY'
+          import base64
+          import os
+          import re
+          from pathlib import Path
+
+          allowed = {"fw_version", "fw_branch", "fw_comment_b64", "supported_socs", "rgbwwled_version", "upgrade_from_lines"}
+          metadata = {}
+          for line in Path("version-info/version-info.txt").read_text().splitlines():
+            key, separator, value = line.partition("=")
+            if not separator or key not in allowed or key in metadata:
+              raise SystemExit(f"Invalid version-info field: {key!r}")
+            metadata[key] = value
+
+          expected_ref = os.environ["EXPECTED_RELEASE_REF"]
+          release_line, stage = expected_ref.split("/", 1)
+          expected_socs = {"5.0": "esp8266,esp32,esp32c3", "5.1": "esp32,esp32c3"}[release_line]
+          expected_component = {"5.0": "0.10.1", "5.1": "0.11.0"}[release_line]
+          expected_upgrade_from_lines = "5.0" if release_line == "5.1" else ""
+          required = {"fw_version", "fw_branch", "fw_comment_b64", "supported_socs", "rgbwwled_version", "upgrade_from_lines"}
+          if not required.issubset(metadata):
+            raise SystemExit("Version info is missing required metadata")
+          if metadata["fw_branch"] != expected_ref:
+            raise SystemExit("Firmware branch metadata does not match the selected release ref")
+          if not re.fullmatch(rf"V{re.escape(release_line)}\.\d+-\d+-{re.escape(stage)}", metadata["fw_version"]):
+            raise SystemExit("Firmware version does not match the selected release line and stage")
+          if metadata["supported_socs"] != expected_socs:
+            raise SystemExit("Supported SoCs do not match the selected release line")
+          if metadata["rgbwwled_version"] != expected_component:
+            raise SystemExit("RGBWWLed version does not match the selected release line")
+          if metadata["upgrade_from_lines"] != expected_upgrade_from_lines:
+            raise SystemExit("Qualified source lines do not match the selected release policy")
+          try:
+            base64.b64decode(metadata["fw_comment_b64"], validate=True)
+          except ValueError as error:
+            raise SystemExit("Invalid release comment encoding") from error
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+            for key in ("fw_version", "fw_branch", "fw_comment_b64", "supported_socs", "upgrade_from_lines"):
+              output.write(f"{key}={metadata[key]}\n")
+          PY
 
   publish:
     runs-on: ubuntu-latest
@@ -137,6 +181,7 @@ jobs:
           echo "version=${{ needs.get-version.outputs.fw_version }}" >> $GITHUB_ENV
           echo "version_comment_b64=${{ needs.get-version.outputs.fw_comment_b64 }}" >> $GITHUB_ENV
           echo "supported_socs=${{ needs.get-version.outputs.supported_socs }}" >> $GITHUB_ENV
+          echo "upgrade_from_lines=${{ needs.get-version.outputs.upgrade_from_lines }}" >> $GITHUB_ENV
           echo "deploy_run_key=${{ github.run_id }}-${{ github.run_attempt }}" >> $GITHUB_ENV
    
       - name: Validate publisher pin
@@ -309,6 +354,7 @@ jobs:
           COMMENT_B64="${{ env.version_comment_b64 }}"
           DEPLOY_SERVER="${{ env.deploy_server }}"
           SUPPORTED_SOCS="${{ env.supported_socs }}"
+          UPGRADE_FROM_LINES="${{ env.upgrade_from_lines }}"
           PUBLISHER_DIR="publisher-firmware-${{ env.deploy_run_key }}"
           MANAGE_SCRIPT="$PUBLISHER_DIR/manage_version-${{ env.deploy_run_key }}.py"
           MANAGE_PYTHON="/home/github-deploy/lightinator-server/.venv/bin/python"
@@ -343,7 +389,13 @@ jobs:
               fi
               
               url="http://$DEPLOY_SERVER/download/firmware/$TARGET_BRANCH/$VERSION/$soc/$type/$bin_file"
-              "$MANAGE_PYTHON" "$MANAGE_SCRIPT" version.json add "$soc" "$type" "$TARGET_BRANCH" "$VERSION" "$url" --comment-b64 "$COMMENT_B64"
+              if [[ -n "$UPGRADE_FROM_LINES" ]]; then
+                "$MANAGE_PYTHON" "$MANAGE_SCRIPT" version.json add "$soc" "$type" "$TARGET_BRANCH" "$VERSION" "$url" \
+                  --comment-b64 "$COMMENT_B64" --upgrade-from-lines "$UPGRADE_FROM_LINES"
+              else
+                "$MANAGE_PYTHON" "$MANAGE_SCRIPT" version.json add "$soc" "$type" "$TARGET_BRANCH" "$VERSION" "$url" \
+                  --comment-b64 "$COMMENT_B64"
+              fi
               
               # ELF and map are sibling files — URL predictable by replacing bin filename.
               echo "ELF deployed at: http://$DEPLOY_SERVER/download/firmware/$TARGET_BRANCH/$VERSION/$soc/$type/$elf_file"
