@@ -43,7 +43,6 @@ jobs:
       fw_comment_b64: ${{ steps.version.outputs.fw_comment_b64 }}
       latest_run_id: ${{ steps.get_run.outputs.latest_run_id }}  
       supported_socs: ${{ steps.version.outputs.supported_socs }}
-      upgrade_from_lines: ${{ steps.version.outputs.upgrade_from_lines }}
       artifact_branch: ${{ steps.get_branch.outputs.artifact_branch }}
       
     steps:
@@ -133,8 +132,7 @@ jobs:
           release_line, stage = expected_ref.split("/", 1)
           expected_socs = {"5.0": "esp8266,esp32,esp32c3", "5.1": "esp32,esp32c3"}[release_line]
           expected_component = {"5.0": "0.10.1", "5.1": "0.11.0"}[release_line]
-          expected_upgrade_from_lines = "5.0" if release_line == "5.1" else ""
-          required = {"fw_version", "fw_branch", "fw_comment_b64", "supported_socs", "rgbwwled_version", "upgrade_from_lines"}
+          required = {"fw_version", "fw_branch", "fw_comment_b64", "supported_socs", "rgbwwled_version"}
           if not required.issubset(metadata):
             raise SystemExit("Version info is missing required metadata")
           if metadata["fw_branch"] != expected_ref:
@@ -145,15 +143,13 @@ jobs:
             raise SystemExit("Supported SoCs do not match the selected release line")
           if metadata["rgbwwled_version"] != expected_component:
             raise SystemExit("RGBWWLed version does not match the selected release line")
-          if metadata["upgrade_from_lines"] != expected_upgrade_from_lines:
-            raise SystemExit("Qualified source lines do not match the selected release policy")
           try:
             base64.b64decode(metadata["fw_comment_b64"], validate=True)
           except ValueError as error:
             raise SystemExit("Invalid release comment encoding") from error
 
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-            for key in ("fw_version", "fw_branch", "fw_comment_b64", "supported_socs", "upgrade_from_lines"):
+            for key in ("fw_version", "fw_branch", "fw_comment_b64", "supported_socs"):
               output.write(f"{key}={metadata[key]}\n")
           PY
 
@@ -181,7 +177,6 @@ jobs:
           echo "version=${{ needs.get-version.outputs.fw_version }}" >> $GITHUB_ENV
           echo "version_comment_b64=${{ needs.get-version.outputs.fw_comment_b64 }}" >> $GITHUB_ENV
           echo "supported_socs=${{ needs.get-version.outputs.supported_socs }}" >> $GITHUB_ENV
-          echo "upgrade_from_lines=${{ needs.get-version.outputs.upgrade_from_lines }}" >> $GITHUB_ENV
           echo "deploy_run_key=${{ github.run_id }}-${{ github.run_attempt }}" >> $GITHUB_ENV
    
       - name: Validate publisher pin
@@ -354,7 +349,6 @@ jobs:
           COMMENT_B64="${{ env.version_comment_b64 }}"
           DEPLOY_SERVER="${{ env.deploy_server }}"
           SUPPORTED_SOCS="${{ env.supported_socs }}"
-          UPGRADE_FROM_LINES="${{ env.upgrade_from_lines }}"
           PUBLISHER_DIR="publisher-firmware-${{ env.deploy_run_key }}"
           MANAGE_SCRIPT="$PUBLISHER_DIR/manage_version-${{ env.deploy_run_key }}.py"
           MANAGE_PYTHON="/home/github-deploy/lightinator-server/.venv/bin/python"
@@ -389,13 +383,8 @@ jobs:
               fi
               
               url="http://$DEPLOY_SERVER/download/firmware/$TARGET_BRANCH/$VERSION/$soc/$type/$bin_file"
-              if [[ -n "$UPGRADE_FROM_LINES" ]]; then
-                "$MANAGE_PYTHON" "$MANAGE_SCRIPT" version.json add "$soc" "$type" "$TARGET_BRANCH" "$VERSION" "$url" \
-                  --comment-b64 "$COMMENT_B64" --upgrade-from-lines "$UPGRADE_FROM_LINES"
-              else
-                "$MANAGE_PYTHON" "$MANAGE_SCRIPT" version.json add "$soc" "$type" "$TARGET_BRANCH" "$VERSION" "$url" \
-                  --comment-b64 "$COMMENT_B64"
-              fi
+              "$MANAGE_PYTHON" "$MANAGE_SCRIPT" version.json add "$soc" "$type" "$TARGET_BRANCH" "$VERSION" "$url" \
+                --comment-b64 "$COMMENT_B64"
               
               # ELF and map are sibling files — URL predictable by replacing bin filename.
               echo "ELF deployed at: http://$DEPLOY_SERVER/download/firmware/$TARGET_BRANCH/$VERSION/$soc/$type/$elf_file"
