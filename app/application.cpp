@@ -1357,25 +1357,6 @@ bool Application::mountfs(int slot)
 
 void Application::listFiles()
 {
-	if(FileHandle file = fileOpen(F("VERSION"), IFS::OpenFlag::Read)) {
-		cdebug_i(APPLICATION, "Application::listFiles: " ANSI_COLOR_BLUE "found VERSION file" ANSI_COLOR_RESET);
-		char buffer[64];
-		int bytesRead = fileRead(file, buffer, sizeof(buffer));
-		if(bytesRead < 0) {
-			cdebug_e(APPLICATION, "Application::listFiles: " ANSI_COLOR_RED "Failed reading VERSION file" ANSI_COLOR_RESET);
-			fileClose(file);
-			return;
-		}
-		if(bytesRead >= static_cast<int>(sizeof(buffer))) {
-			bytesRead = sizeof(buffer) - 1;
-		}
-		buffer[bytesRead] = '\0';
-		cdebug_i(APPLICATION, "Application::listFiles: " ANSI_COLOR_BLUE "\nweb app version String: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, buffer);
-		fileClose(file);
-	} else {
-		cdebug_i(APPLICATION, "Application::listFiles: " ANSI_COLOR_BLUE "Partition has no version file\n" ANSI_COLOR_RESET);
-	}
-
 	Directory dir;
 	if(dir.open()) {
 		while(dir.next()) {

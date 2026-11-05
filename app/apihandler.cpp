@@ -665,7 +665,7 @@ bool Api::renderDataImpl(const String& method, bool sparse, String* out,
 			value.app.setGitDate(fw_git_date);
 			AppConfig::Webapp webappCfg(*app.cfg);
 			String installedVer = webappCfg.getInstalledVersion();
-			value.app.setWebappVersion(installedVer.length() > 0 ? installedVer : String(WEBAPP_VERSION));
+			value.app.setWebappVersion(installedVer.length() > 0 ? installedVer : String("unknown"));
 			value.sming.setVersion(SMING_VERSION);
 			IFS::FileSystem::Info fsInfo;
 			if(fileGetSystemInfo(fsInfo) == FS_OK) {
