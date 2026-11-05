@@ -866,6 +866,25 @@
         "outputs"
       ],
       "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "default": 65535
+        },
+        "is_default": {
+          "type": "boolean",
+          "default": false
+        },
+        "template_id": {
+          "type": "string",
+          "default": ""
+        },
+        "template_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0
+        },
         "id": {
           "type": "string",
           "minLength": 1,

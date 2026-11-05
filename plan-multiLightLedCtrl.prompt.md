@@ -1,4 +1,67 @@
-# prerequisite:
+# M3 API Contract (2026-11-05)
+
+This section supersedes conflicting proposals below. Implementation is exclusive
+to the 5.1 ESP32/ESP32-C3 firmware line; 5.0 schemas and runtime are unchanged.
+The older architecture sketch is retained as historical context, not a second
+contract.
+
+## Configuration Through /config
+
+Use the existing `GET /config` and partial-update `POST /config` contract. Do not
+add `/light` or `/lights` CRUD endpoints or `create_light`, `modify_light` and
+`delete_light` methods. The historical CRUD proposal below is superseded.
+
+Clients read board definitions, templates and `hardware.configuration` from
+`/config`. Creating, modifying, listing and deleting lights are ordinary
+configuration operations on `hardware.configuration.lights`. Existing ConfigDB
+array replacement/selector semantics apply; a partial update is not implicitly
+a merge-by-light-ID operation. Client-assigned indexes and IDs must be unique.
+
+Applying a template is client-side: copy its light type, assignments and supported
+settings into the configuration update. Assign device-specific IDs/indexes and
+optionally retain template ID/revision as provenance. Do not store a live link
+to changing template defaults or introduce a template-application command.
+
+Merge each partial update with the current configuration for validation before
+committing. Validate the complete candidate graph, board/SoC, required roles,
+unique IDs/indexes, at most one default, resource ownership and backend capacity.
+Invalid updates leave persisted configuration and running outputs unchanged.
+Changing topology is boot-time configuration: persist it and require restart,
+without reallocating live PWM resources. Distinguish pending configuration from
+running lights until restart. Client-supplied catalogue metadata cannot override
+firmware GPIO restrictions. Deleting the last light remains valid.
+
+## Light Addressing and Defaults
+
+- Every light has a persistent numeric `index` and stable string `id`. The index
+  is an API identifier, not the current vector position; deletion never renumbers
+  survivors. Clients assign unused indexes when adding configured lights.
+- Existing light-specific HTTP GET requests use `?light=N`. POST accepts
+  `light` in JSON or the query. If both are supplied they must match.
+- WebSocket and MQTT carry `light` in JSON operation parameters. Commands,
+  readback, queue operations and per-light events use the same identifier.
+- An explicit selector wins. An omitted selector resolves only the configured
+  `is_default` light, never implicitly index 0. No matching/default light returns
+  an explicit error, including when there are zero configured lights.
+- `is_default` defaults to false. At most one light may have it set. Switching it
+  requires clearing the old flag and setting the new flag in one configuration
+  update; candidates containing multiple defaults are rejected. Deleting
+  the default leaves none unless a replacement is explicitly selected.
+- Controller-wide info, networking, OTA and discovery remain controller-wide.
+  Preserve old single-light response shapes for unaddressed default-light calls;
+  new addressed/event surfaces identify the selected light.
+
+## Delivery and Verification
+
+Use the existing HTTP, WebSocket and MQTT dispatchers and schema/manifest/OpenAPI
+sources. Share validation and light resolution across transports. Do not create
+a second configuration authority. Host behavior tests explicitly configure a
+default light; fresh firmware with no lights must remain valid and must not
+auto-create one merely to satisfy legacy tests. Test CRUD, persistence/restart,
+template selection, duplicate resources/defaults/indexes, selector conflicts,
+unknown/deleted indexes, missing defaults and independent per-light commands.
+
+# Historical Prerequisites (Superseded Where Inconsistent)
 - Implement the new light types and shared API behavior on all supported architectures. ESP8266 remains single-light, but its one light may use the new `SINGLE`, `WW`, or `WWCW` profiles; ESP32 supports multiple configured lights.
 - Preserve the existing API contract: legacy unindexed calls continue to address the default light with unchanged request/response shapes. The optional light selector and multi-light enumeration are additive; ESP8266 resolves only its single configured light and rejects other selectors.
 - The firmware must still build across supported architectures. Keep architecture-specific behavior behind the existing build/source selection model, rather than scattering `#ifdef` conditionals through shared application code.
