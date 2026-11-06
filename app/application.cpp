@@ -33,6 +33,10 @@
 #include <FlashString/Stream.hpp>
 #include <fileMap.h>
 #include <apihandler.h>
+#include <Wire.h>
+#ifdef ARCH_ESP32
+#include <driver/gpio.h>
+#endif
 #if defined(ESP8266)
   #include <osapi.h>
 #endif
@@ -307,33 +311,8 @@ extern "C" __attribute__((noinline)) void allocateHeapHog(size_t take) {
 void onReady()
 {
 	#ifdef ARCH_HOST
-	// Consume all but ~20kB of the (tracked) heap so the emulator runs close to
-	// the low-memory conditions seen on the device.
-	//	
-	// Getting the compiler to actually perform (and keep) the allocation needs
-	// two tricks:
-	//   1. A compiler barrier on the returned pointer, so the escaped value is
-	//      considered "used" and the malloc call can't be dead-code eliminated.
-	//   2. memset with a NON-zero value; memset-to-zero right after malloc gets
-	//      folded into calloc and then dropped as a dead store, which is why the
-	//      tracked free heap previously never moved.
-	/*
-	static uint8_t* heapHog = nullptr;
-	auto free = system_get_free_heap_size();
-	if (free>HOST_FREE_TARGET){
-		size_t take = free - HOST_FREE_TARGET;
-		debug_i(ANSI_COLOR_BLUE "onReady: free heap %d, allocating %d bytes to squeeze heap to ~%i" ANSI_COLOR_RESET, free, (int)take, HOST_FREE_TARGET);
-		heapHog = static_cast<uint8_t*>(malloc(take));
-		allocateHeapHog(take);
-		debug_i(ANSI_COLOR_BLUE "onReady: heapHog allocated %d bytes, free heap now %d" ANSI_COLOR_RESET, (int)take, system_get_free_heap_size());
-	}
-	*/
-	//use MallocCount to limit heap usage on the host (needs c0911d21a31b43b21ec35c6210fdabbb5b2c10c9)
-	//MallocCount::enableLogging(true);
-	cdebug_i(APPLICATION, "onReady: " ANSI_COLOR_YELLOW "setting malloc limit to %i bytes" ANSI_COLOR_RESET, HOST_FREE_TARGET);
-	cdebug_i(APPLICATION, "onReady: " ANSI_COLOR_YELLOW "free heap before malloc limit: %d" ANSI_COLOR_RESET, system_get_free_heap_size());
-	MallocCount::setAllocLimit(HOST_FREE_TARGET);
-	cdebug_i(APPLICATION, "onReady: " ANSI_COLOR_YELLOW "free heap after malloc limit: %d" ANSI_COLOR_RESET, system_get_free_heap_size());
+	cdebug_i(APPLICATION, "onReady: Host heap is not capped to the ESP8266 allocation budget; free heap: %u",
+			 unsigned(system_get_free_heap_size()));
 	#endif
 	//System.setCpuFrequencye(CF_160MHz);
 	cdebug_i(APPLICATION, "onReady: " ANSI_COLOR_BLUE "getting reset info from rtc" ANSI_COLOR_RESET);
@@ -406,6 +385,9 @@ int32_t getVersion(IDataSourceStream& input)
 
 Application::~Application()
 {
+	_inputsLifetime.reset();
+	_buttonPollTimer.stop();
+	_resetPinTimer.stop();
 	if(pNtpclient != nullptr) {
 		delete pNtpclient;
 		pNtpclient = nullptr;
@@ -751,64 +733,16 @@ cdebug_i(APPLICATION, "Application::init: " ANSI_COLOR_BLUE "running partition "
 		}
 	}
 	{
-    	int clearPin = -1;
-		{
-			AppConfig::Hardware hardware(*cfg);
-			const auto& configuration = hardware.configuration;
-			const String clearPinId = configuration.system.getClearConfigPin();
-			for(auto board : hardware.boards) {
-				if(!clearPinId.length() || board.getId() != configuration.getBoardId() ||
-				   board.getRevision() != configuration.getBoardRevision() || board.getSoc() != String(SOC)) {
-					continue;
-				}
-				for(auto pin : board.implementedPins) {
-					if(pin.getId() != clearPinId) {
-						continue;
-					}
-					bool allowed = false;
-					for(auto function : pin.allowedFunctions) {
-						allowed = allowed || function == F("system.clear_config");
-					}
-					for(auto reserved : board.reservedGpios) {
-						if(reserved == pin.getGpio()) {
-							allowed = false;
-						}
-					}
-					if(!allowed) {
-						continue;
-					}
-					for(auto available : hardware.availablePins) {
-						if(available.getSoc() != String(SOC)) {
-							continue;
-						}
-						for(auto capability : available.pins) {
-							if(capability.getGpio() == pin.getGpio() && capability.getInput() && !capability.getReserved()) {
-								clearPin = pin.getGpio();
-							}
-						}
-					}
-				}
-			}
+		String error;
+		if(!configureHardwareInputs(error)) {
+			cdebug_e(APPLICATION, "Startup input configuration rejected: %s", error.c_str());
 		}
-		cdebug_i(APPLICATION, "Application::init: " ANSI_COLOR_BLUE "clear pin " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, clearPin);
-		if(clearPin >= 0) {
-			pinMode(clearPin, INPUT);
-			cdebug_i(APPLICATION, "Application::init: " ANSI_COLOR_BLUE "clear pin set to input" ANSI_COLOR_RESET);
-		
-			_clearPin = clearPin;
-            _resetPinTimer.initializeMs(100, TimerDelegate(&Application::pollResetButton, this)).start();
-        }
-		#if !defined(ARCH_HOST)
-
-			if(clearPin >=0 && digitalRead(clearPin) < 1) {
-				cdebug_i(APPLICATION, "Application::init: " ANSI_COLOR_BLUE "CLR button low - resetting settings" ANSI_COLOR_RESET);
-				// ConfigDB - decide if to reload defaults or load a specific saved version
-				// perhaps by holding the clear pin low for a certain time along with blink codes?
-				// cfg.reset();
-				network.forgetWifi();
-			}
-
-		#endif
+#ifndef ARCH_HOST
+		if(_clearPin >= 0 && digitalRead(_clearPin) == (_clearActiveLow ? LOW : HIGH)) {
+			cdebug_i(APPLICATION, "Clear input held at boot; forgetting WiFi settings");
+			network.forgetWifi();
+		}
+#endif
 	}
 
 	cdebug_i(APPLICATION, "Application::init: " ANSI_COLOR_BLUE "hardware config loaded" ANSI_COLOR_RESET);
@@ -932,36 +866,155 @@ cdebug_i(APPLICATION, "Application::init: " ANSI_COLOR_BLUE "running partition "
 }
 void Application::initButtons()
 {
-	Vector<String> buttons;
-	{
-		cdebug_i(APPLICATION, "Application::initButtons: " ANSI_COLOR_BLUE "Application::initButtons" ANSI_COLOR_RESET);
-		AppConfig::General general(*cfg);
+	String error;
+	if(!configureHardwareInputs(error)) {
+		cdebug_e(APPLICATION, "Hardware input configuration rejected: %s", error.c_str());
+	}
+	if(!_watchingInputs) {
+		_watchingInputs = true;
+		std::weak_ptr<uint8_t> lifetime = _inputsLifetime;
+		AppConfig::Hardware::onCommit(*cfg, [this, lifetime](AppConfig::HardwareUpdater) {
+			if(!lifetime.expired()) {
+				requestInputsReload();
+			}
+		});
+	}
+}
 
-		if(general.getButtonsConfig().length() <= 0)
-			return;
-
-		String buttonsConfig = general.getButtonsConfig();
-
-		cdebug_i(APPLICATION, "Application::initButtons: " ANSI_COLOR_BLUE "Configuring buttons using string: '" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "'" ANSI_COLOR_RESET, buttonsConfig.c_str());
-
-		splitString(buttonsConfig, ',', buttons);
-	} // end of ConfigDB general context
-
-	for(uint32_t i = 0; i < buttons.count(); ++i) {
-		if(buttons[i].length() == 0)
-			continue;
-
-		uint32_t pin = buttons[i].toInt();
-		if(pin >= _lastToggles.size()) {
-			cdebug_i(APPLICATION, "Application::initButtons: " ANSI_COLOR_BLUE "Pin " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " is invalid. Max is " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, pin, _lastToggles.size() - 1);
-			continue;
+String Application::inputsSignature() const
+{
+	AppConfig::Hardware hardware(*cfg);
+	MemoryDataStream stream;
+	hardware.configuration.system.exportToStream(ConfigDB::Json::format, stream);
+	hardware.configuration.buttons.exportToStream(ConfigDB::Json::format, stream);
+	hardware.configuration.buses.exportToStream(ConfigDB::Json::format, stream);
+	for(auto board : hardware.boards) {
+		if(board.getId() == hardware.configuration.getBoardId() &&
+		   board.getRevision() == hardware.configuration.getBoardRevision()) {
+			board.exportToStream(ConfigDB::Json::format, stream);
+			break;
 		}
-		cdebug_i(APPLICATION, "Application::initButtons: " ANSI_COLOR_BLUE "Configuring button: '" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "'" ANSI_COLOR_RESET, buttons[i].c_str());
+	}
+	return stream.readString(stream.available());
+}
 
-		_lastToggles[pin] = 0ul;
+void Application::requestInputsReload()
+{
+	if(_inputsReloadQueued) {
+		return;
+	}
+	_inputsReloadQueued = true;
+	std::weak_ptr<uint8_t> lifetime = _inputsLifetime;
+	System.queueCallback([this, lifetime]() {
+		if(lifetime.expired()) {
+			return;
+		}
+		_inputsReloadQueued = false;
+		String error;
+		if(!configureHardwareInputs(error)) {
+			cdebug_e(APPLICATION, "Hardware input reload rejected: %s", error.c_str());
+		}
+	});
+}
 
-		attachInterrupt(pin, std::bind(&Application::onButtonTogglePressed, this, pin), FALLING);
-		pinMode(pin, INPUT_PULLUP);
+bool Application::configureHardwareInputs(String& error)
+{
+	const String signature = inputsSignature();
+	if(signature == _inputsSignature) {
+		return true;
+	}
+	HardwareInputs next;
+	if(!rgbwwctrl.resolveInputs(next, error)) {
+		return false;
+	}
+	const bool busChanged = next.i2cEnabled != _hardwareInputs.i2cEnabled || next.sda != _hardwareInputs.sda ||
+		next.scl != _hardwareInputs.scl || next.frequency != _hardwareInputs.frequency;
+#if STATUS_DISPLAY
+	if(statusDisplay && _hardwareInputs.i2cEnabled && !next.i2cEnabled) {
+		error = F("Cannot disable I2C while the status display is active");
+		return false;
+	}
+#endif
+	std::vector<InputState> states(next.buttons.size());
+	_buttonPollTimer.stop();
+	_resetPinTimer.stop();
+	for(const auto& button : _hardwareInputs.buttons) {
+		pinMode(button.gpio, INPUT);
+	}
+	if(_clearPin >= 0) {
+		pinMode(_clearPin, INPUT);
+	}
+	if(busChanged) {
+#if STATUS_DISPLAY
+		if(!statusDisplay) {
+#endif
+			if(_hardwareInputs.i2cEnabled) {
+				Wire.end();
+			}
+			if(next.i2cEnabled) {
+				Wire.begin(next.sda, next.scl);
+				Wire.setClock(next.frequency);
+			}
+#if STATUS_DISPLAY
+		}
+#endif
+	}
+	auto applyPin = [](const ConfiguredInput& input) {
+		pinMode(input.gpio, input.internalPullUp ? INPUT_PULLUP : INPUT);
+#ifdef ARCH_ESP32
+		if(input.internalPullDown) {
+			gpio_set_pull_mode((gpio_num_t)input.gpio, GPIO_PULLDOWN_ONLY);
+		}
+#endif
+	};
+	for(unsigned index = 0; index < next.buttons.size(); ++index) {
+		const auto& button = next.buttons[index];
+		applyPin(button);
+		states[index].sample = states[index].pressed = digitalRead(button.gpio) == (button.activeLow ? LOW : HIGH);
+		states[index].changedAt = millis();
+		cdebug_i(APPLICATION, "Button %s: GPIO%d, active %s, debounce %u ms, internal pulls %u/%u", button.id.c_str(),
+			button.gpio, button.activeLow ? "low" : "high", unsigned(button.debounceMs), unsigned(button.internalPullUp),
+			unsigned(button.internalPullDown));
+	}
+	_clearPin = next.clear.gpio;
+	_clearActiveLow = next.clear.activeLow;
+	_clearHoldCounter = 0;
+	if(_clearPin >= 0) {
+		applyPin(next.clear);
+#ifndef ARCH_HOST
+		_resetPinTimer.initializeMs(100, TimerDelegate(&Application::pollResetButton, this)).start();
+#endif
+	}
+	_hardwareInputs = std::move(next);
+	_buttonStates.swap(states);
+	if(!_hardwareInputs.buttons.empty()) {
+		_buttonPollTimer.initializeMs(10, TimerDelegate(&Application::pollButtons, this)).start();
+	}
+	_inputsSignature = signature;
+	cdebug_i(APPLICATION, "Hardware inputs applied: %u buttons, clear GPIO%d, I2C %s SDA%d SCL%d %u Hz",
+		unsigned(_hardwareInputs.buttons.size()), _clearPin, _hardwareInputs.i2cEnabled ? "enabled" : "disabled",
+		_hardwareInputs.sda, _hardwareInputs.scl, unsigned(_hardwareInputs.frequency));
+	return true;
+}
+
+void Application::pollButtons()
+{
+	const uint32_t now = millis();
+	for(unsigned index = 0; index < _hardwareInputs.buttons.size(); ++index) {
+		const auto& button = _hardwareInputs.buttons[index];
+		auto& state = _buttonStates[index];
+		const bool pressed = digitalRead(button.gpio) == (button.activeLow ? LOW : HIGH);
+		if(pressed != state.sample) {
+			state.sample = pressed;
+			state.changedAt = now;
+		}
+		if(state.pressed != state.sample && uint32_t(now - state.changedAt) >= button.debounceMs) {
+			state.pressed = state.sample;
+			cdebug_i(APPLICATION, "Button %s: %s", button.id.c_str(), state.pressed ? "pressed" : "released");
+			if(state.pressed) {
+				onButtonTogglePressed(button.gpio);
+			}
+		}
 	}
 }
 
@@ -1623,21 +1676,17 @@ void Application::onButtonTogglePressed(int pin)
 
 void Application::pollResetButton()
 {
-    // Static counter to keep track of hold duration across function calls
-    static int holdCounter = 0;
-
     if (_clearPin < 0) return;
 
-    // Check if button is pressed (Active LOW)
-    if (digitalRead(_clearPin) == LOW) {
-        holdCounter++;
+	if (digitalRead(_clearPin) == (_clearActiveLow ? LOW : HIGH)) {
+		_clearHoldCounter++;
         
         // 30 ticks * 100ms = 3000ms (3 seconds)
-        if (holdCounter >= 30) {
+		if (_clearHoldCounter >= 30) {
             cdebug_w(APPLICATION, "Application::pollResetButton: " ANSI_COLOR_YELLOW "Emergency ROM Switch triggered via Reset Pin!" ANSI_COLOR_RESET);
 
             // Reset counter to prevent multiple triggers (though we reboot anyway)
-            holdCounter = 0;
+			_clearHoldCounter = 0;
 
             // Visual feedback
             for(int i = 0; i < 4; i++) {
@@ -1650,7 +1699,7 @@ void Application::pollResetButton()
         }
     } else {
         // Button released, reset counter
-        holdCounter = 0;
+		_clearHoldCounter = 0;
     }
 }
 

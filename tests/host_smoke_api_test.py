@@ -22,6 +22,111 @@ import pytest
 GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
 
+def post_config_update(smoke_config: SmokeConfig, update: dict[str, Any]) -> None:
+    response = http_request(
+        "POST",
+        f"{smoke_config.base_url}/config",
+        body=json.dumps(update, separators=(",", ":")).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+    )
+    trace = {"request": {"method": "POST", "path": "/config", "body": update}, "response": response}
+    payload = decode_json_response(response, trace, failure_message="Configuration update failed")
+    if response["status"] != 200 or payload.get("success") is not True:
+        fail_with_trace("Configuration update was rejected", trace)
+
+
+@pytest.mark.skipif(
+    os.environ.get("HOST_SMOKE_REAL_DEVICE") == "1",
+    reason="creates and removes virtual lights on the Host emulator only",
+)
+@pytest.mark.parametrize(
+    ("light_type", "outputs"),
+    [
+        ("dimmer", {"brightness": "L1"}),
+        ("tunable_white", {"warmwhite": "L1", "coldwhite": "L2"}),
+        ("rgb", {"red": "L1", "green": "L2", "blue": "L3"}),
+        ("rgbw", {"red": "L1", "green": "L2", "blue": "L3", "warmwhite": "L4"}),
+        ("rgbw", {"red": "L1", "green": "L2", "blue": "L3", "coldwhite": "L4"}),
+        ("rgbww", {"red": "L1", "green": "L2", "blue": "L3", "warmwhite": "L4", "coldwhite": "L5"}),
+    ],
+)
+def test_virtual_light_create_delete_reloads_runtime(
+    smoke_config: SmokeConfig, api_secured: bool, light_type: str, outputs: dict[str, str]
+) -> None:
+    if api_secured:
+        pytest.skip("configuration mutation requires an unsecured Host instance")
+    log_name = os.environ.get("HOST_SMOKE_APP_LOG")
+    if not log_name:
+        pytest.skip("set HOST_SMOKE_APP_LOG to the testnet/emulator output log")
+    app_log = Path(log_name)
+    if not app_log.is_file():
+        pytest.fail(f"Host runtime log does not exist: {app_log}")
+
+    response = http_request("GET", f"{smoke_config.base_url}/config")
+    original = decode_json_response(
+        response, {"request": {"path": "/config"}, "response": response}, failure_message="Config snapshot failed"
+    )["hardware"]["configuration"]
+
+    def debug(enabled: bool) -> None:
+        result = http_request(
+            "POST", f"{smoke_config.base_url}/system",
+            body=json.dumps({"cmd": "debug", "enable": enabled}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+        if result["error"] or result["status"] != 200:
+            fail_with_trace("Could not set Host diagnostic output", {"response": result})
+
+    def wait_for_runtime(message: str, offset: int) -> None:
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline:
+            text = app_log.read_bytes()[offset:].decode("utf-8", errors="replace")
+            if message in text:
+                return
+            time.sleep(0.02)
+        pytest.fail(f"Runtime did not report {message!r}; log: {app_log}")
+
+    debug(True)
+    try:
+        configuration = {
+            "board_id": "quinled-an-penta-mini",
+            "board_revision": 1,
+            "system": {"clear_config_pin": ""},
+            "buttons": [],
+            "buses": [],
+            "lights": [{"id": "host-create-delete", "index": 23, "name": "Host test", "is_default": True,
+                        "type": light_type, "outputs": outputs}],
+        }
+        offset = app_log.stat().st_size
+        post_config_update(smoke_config, {"hardware": {"configuration": configuration}})
+        wait_for_runtime("Initialized 1 virtual lights", offset)
+        response = http_request("GET", f"{smoke_config.base_url}/config")
+        stored = decode_json_response(
+            response, {"response": response}, failure_message="Created light readback failed"
+        )["hardware"]["configuration"]["lights"]
+        assert len(stored) == 1
+        assert stored[0]["id"] == "host-create-delete"
+        assert stored[0]["index"] == 23
+        assert stored[0]["is_default"] is True
+        assert stored[0]["type"] == light_type
+        for role, pin in outputs.items():
+            assert stored[0]["outputs"][role] == pin
+
+        offset = app_log.stat().st_size
+        post_config_update(smoke_config, {"hardware": {"configuration": {"lights": []}}})
+        wait_for_runtime("No virtual lights configured", offset)
+        response = http_request("GET", f"{smoke_config.base_url}/config")
+        stored = decode_json_response(
+            response, {"response": response}, failure_message="Deleted light readback failed"
+        )["hardware"]["configuration"]["lights"]
+        assert stored == []
+        assert http_request("GET", f"{smoke_config.base_url}/ping")["status"] == 200
+    finally:
+        try:
+            post_config_update(smoke_config, {"hardware": {"configuration": original}})
+        finally:
+            debug(False)
+
+
 @dataclass(frozen=True)
 class SmokeConfig:
     app_ip: str
