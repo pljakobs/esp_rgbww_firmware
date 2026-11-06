@@ -10,15 +10,21 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const schema = JSON.parse(readFileSync(resolve(root, "app-config.cfgdb"), "utf8"));
 const hardware = schema.properties.hardware;
 const defaults = JSON.parse(readFileSync(resolve(root, "hardware-defaults.json"), "utf8"));
+const CAPA = { input: 1, output: 2, pwm: 4, strapping: 8, pull_up: 16, pull_down: 32, reserved: 64 };
 
 test("5.1 extends available_pins and replaces fixed pinconfigs", () => {
-  assert.equal(hardware.properties.schema_version.default, 2);
+  assert.equal(hardware.properties.schema_version.default, 3);
   assert.equal(hardware.properties.available_pins.items.properties.pins.items.type, "object");
   assert.ok(hardware.properties.templates);
   assert.ok(hardware.properties.boards);
   assert.ok(hardware.properties.configuration);
   assert.equal(hardware.properties.pinconfigs, undefined);
   assert.deepEqual(defaults.available_pins.map(entry => entry.soc), ["esp32", "esp32c3"]);
+  assert.equal(defaults.schema_version, 3);
+  assert.equal(defaults.version, 2);
+  const capability = hardware.properties.available_pins.items.properties.pins.items.properties.capability;
+  assert.equal(capability.type, "integer");
+  assert.equal(capability.maximum, 127);
 });
 
 test("built-in board output mappings match the vendor pinouts", () => {
@@ -35,9 +41,9 @@ test("built-in board output mappings match the vendor pinouts", () => {
     const capabilities = new Map(defaults.available_pins.find(entry => entry.soc === board.soc).pins.map(pin => [pin.gpio, pin]));
     for (const pin of board.implemented_pins) {
       assert.ok(capabilities.has(pin.gpio));
-      assert.ok(!capabilities.get(pin.gpio).reserved);
+      assert.equal(capabilities.get(pin.gpio).capability & CAPA.reserved, 0);
       if (pin.allowed_functions.includes("light.pwm")) {
-        assert.equal(capabilities.get(pin.gpio).pwm, true);
+        assert.equal(capabilities.get(pin.gpio).capability & (CAPA.output | CAPA.pwm), CAPA.output | CAPA.pwm);
         assert.ok(!board.reserved_gpios?.includes(pin.gpio));
       }
     }
@@ -59,15 +65,24 @@ test("SDA/SCL and buttons are physical board resources", () => {
 });
 
 test("templates resolve to unique PWM outputs without enabling peripherals", () => {
+  const lightDefinition = schema.$defs.light_configuration;
+  const colorDefinitions = JSON.parse(readFileSync(resolve(root, "defs.cfgdb"), "utf8"));
+  assert.deepEqual(lightDefinition.required, ["id", "name", "type", "pins"]);
+  assert.equal(lightDefinition.properties.outputs, undefined);
+  assert.match(lightDefinition.properties.type.pattern, /RGBWWCW.*RGBWW.*RGBCW.*RGB.*WWCW.*WW.*CW.*SINGLE/);
+  assert.equal(lightDefinition.properties.pins.type, "array");
+  assert.equal(colorDefinitions.$defs.color_settings.properties.color_mode, undefined);
   for (const template of defaults.templates) {
     const board = defaults.boards.find(entry => entry.id === template.board_id);
     assert.equal(template.board_revision, board.revision);
     assert.equal(template.lights.length, 1);
     const pins = new Map(board.implemented_pins.map(pin => [pin.id, pin]));
-    const outputs = template.lights[0].outputs;
-    assert.deepEqual(Object.keys(outputs), ["red", "green", "blue", "warmwhite", "coldwhite"]);
-    assert.equal(new Set(Object.values(outputs)).size, 5);
-    for (const id of Object.values(outputs)) {
+    const light = template.lights[0];
+    const pinsInOrder = light.pins;
+    assert.equal(light.type, "RGBWWCW");
+    assert.equal(pinsInOrder.length, 5);
+    assert.equal(new Set(pinsInOrder).size, 5);
+    for (const id of pinsInOrder) {
       assert.ok(pins.get(id).allowed_functions.includes("light.pwm"));
     }
     assert.equal(template.system.clear_config_pin, "");
@@ -77,8 +92,8 @@ test("templates resolve to unique PWM outputs without enabling peripherals", () 
       assert.ok(pins.get(bus.scl).allowed_functions.includes("i2c.scl"));
     }
     const miniOrPlus = board.id !== "quinled-an-penta-deca";
-    assert.equal(outputs.red, miniOrPlus ? "L5" : "L1");
-    assert.equal(outputs.coldwhite, miniOrPlus ? "L1" : "L5");
+    assert.equal(pinsInOrder[0], miniOrPlus ? "L5" : "L1");
+    assert.equal(pinsInOrder[4], miniOrPlus ? "L1" : "L5");
   }
 });
 
@@ -86,10 +101,8 @@ test("input-only GPIOs have no output, PWM or internal pull capabilities", () =>
   const pins = defaults.available_pins.find(entry => entry.soc === "esp32").pins;
   for (const gpio of [34, 35, 36, 37, 38, 39]) {
     const pin = pins.find(entry => entry.gpio === gpio);
-    assert.equal(pin.input, true);
-    for (const capability of ["output", "pwm", "pull_up", "pull_down"]) {
-      assert.ok(!pin[capability]);
-    }
+    assert.ok(pin.capability & CAPA.input);
+    assert.equal(pin.capability & (CAPA.output | CAPA.pwm | CAPA.pull_up | CAPA.pull_down), 0);
   }
 });
 

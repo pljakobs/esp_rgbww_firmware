@@ -23,7 +23,7 @@ function compileAndRun(source) {
   }
 }
 
-test("configured light roles select library modes without silent fallback", () => {
+test("configured light types require the library's exact pin count", () => {
   const text = readFileSync(join(root, "app/ledctrl.cpp"), "utf8");
   const begin = text.indexOf("bool selectLightType(");
   const end = text.indexOf("\n}\n", begin) + 2;
@@ -34,27 +34,29 @@ test("configured light roles select library modes without silent fallback", () =
 #include <string>
 using String = std::string;
 #define F(value) value
-enum class LightType { SINGLE, WWCW, RGB, RGBWW, RGBCW, RGBWWCW };
+enum class LightType { SINGLE, WWCW, WW, CW, RGB, RGBWW, RGBCW, RGBWWCW };
 ${text.slice(begin, end)}
 int main()
 {
     LightType mode{};
-    assert(selectLightType("dimmer", {"", "", "", "", "", "L1"}, mode));
+  assert(selectLightType("SINGLE", 1, mode));
     assert(mode == LightType::SINGLE);
-    assert(selectLightType("tunable_white", {"", "", "", "L1", "L2", ""}, mode));
+  assert(selectLightType("WWCW", 2, mode));
     assert(mode == LightType::WWCW);
-    assert(selectLightType("rgb", {"L1", "L2", "L3", "", "", ""}, mode));
+  assert(selectLightType("WW", 1, mode) && mode == LightType::WW);
+  assert(selectLightType("CW", 1, mode) && mode == LightType::CW);
+  assert(selectLightType("RGB", 3, mode));
     assert(mode == LightType::RGB);
-    assert(selectLightType("rgbw", {"L1", "L2", "L3", "L4", "", ""}, mode));
+  assert(selectLightType("RGBWW", 4, mode));
     assert(mode == LightType::RGBWW);
-    assert(selectLightType("rgbw", {"L1", "L2", "L3", "", "L4", ""}, mode));
+  assert(selectLightType("RGBCW", 4, mode));
     assert(mode == LightType::RGBCW);
-    assert(selectLightType("rgbww", {"L1", "L2", "L3", "L4", "L5", ""}, mode));
+  assert(selectLightType("RGBWWCW", 5, mode));
     assert(mode == LightType::RGBWWCW);
-    assert(!selectLightType("rgb", {"L1", "", "L3", "", "", ""}, mode));
-    assert(!selectLightType("rgbw", {"L1", "L2", "L3", "L4", "L5", ""}, mode));
-    assert(!selectLightType("dimmer", {"L1", "", "", "", "", "L2"}, mode));
-    assert(!selectLightType("unknown", {}, mode));
+  assert(!selectLightType("RGB", 2, mode));
+  assert(!selectLightType("RGBCW", 5, mode));
+  assert(!selectLightType("SINGLE", 2, mode));
+  assert(!selectLightType("unknown", 0, mode));
 }
 `;
     compileAndRun(source);
@@ -69,12 +71,17 @@ int main()
   #include <algorithm>
   #include <array>
   #include <cassert>
+#include <cstdint>
   #include <string>
   #include <utility>
   #include <vector>
   using String = std::string;
   #define F(value) value
-  enum class LightType { SINGLE, WWCW, RGB, RGBWW, RGBCW, RGBWWCW };
+  enum PinCapability : uint8_t {
+    CAPA_INPUT = 1u << 0, CAPA_OUTPUT = 1u << 1, CAPA_PWM = 1u << 2,
+    CAPA_STRAPPING = 1u << 3, CAPA_PULL_UP = 1u << 4, CAPA_PULL_DOWN = 1u << 5, CAPA_RESERVED = 1u << 6
+  };
+  enum class LightType { SINGLE, WWCW, WW, CW, RGB, RGBWW, RGBCW, RGBWWCW };
   template<class Item> struct Items : std::vector<Item> {
     using std::vector<Item>::vector;
     unsigned getItemCount() const { return this->size(); }
@@ -89,13 +96,9 @@ int main()
   };
   struct Capability {
     int gpio = 0;
-    bool pwm = true;
-    bool reserved = false;
+    uint8_t capability = CAPA_INPUT | CAPA_OUTPUT | CAPA_PWM | CAPA_PULL_UP | CAPA_PULL_DOWN;
     int getGpio() const { return gpio; }
-    bool getOutput() const { return pwm; }
-    bool getInput() const { return true; }
-    bool getPwm() const { return pwm; }
-    bool getReserved() const { return reserved; }
+    uint8_t getCapability() const { return capability; }
   };
   struct Available {
     Items<Capability> pins;
@@ -108,19 +111,10 @@ int main()
     unsigned getRevision() const { return 1; }
     String getSoc() const { return "esp32"; }
   };
-  struct Outputs {
-    std::array<String,6> roles{};
-    String getRed() const { return roles[0]; }
-    String getGreen() const { return roles[1]; }
-    String getBlue() const { return roles[2]; }
-    String getWarmwhite() const { return roles[3]; }
-    String getColdwhite() const { return roles[4]; }
-    String getBrightness() const { return roles[5]; }
-  };
   struct Light {
     String id;
     String type;
-    Outputs outputs;
+    Items<String> pins;
     String getId() const { return id; }
     String getName() const { return id; }
     String getType() const { return type; }
@@ -155,34 +149,35 @@ int main()
     Available available;
     for(int index = 0; index < 5; ++index) {
       board.implementedPins.push_back({"L" + std::to_string(index + 1), index, {"light.pwm"}, {}});
-      available.pins.push_back({index, true, false});
+      available.pins.push_back({index});
     }
     hardware.boards.push_back(board);
     hardware.availablePins.push_back(available);
-    hardware.configuration.lights.push_back({"rgb0", "rgb", {{{"L1", "L2", "L3", "", "", ""}}}});
-    hardware.configuration.lights.push_back({"white0", "tunable_white", {{{"", "", "", "L4", "L5", ""}}}});
+    hardware.configuration.lights.push_back({"rgb0", "RGB", {"L1", "L2", "L3"}});
+    hardware.configuration.lights.push_back({"white0", "WWCW", {"L4", "L5"}});
     std::vector<ResolvedLight> resolved;
     String error;
     assert(resolveConfiguredLights(hardware, "esp32", 5, resolved, error));
-    assert(resolved.size() == 2 && resolved[0].pins[0] == 0 && resolved[1].pins[3] == 3);
+    assert(resolved.size() == 2 && resolved[0].type == LightType::RGB && resolved[0].pins[0] == 0);
+    assert(resolved[1].type == LightType::WWCW && resolved[1].pins[3] == 3 && resolved[1].pins[4] == 4);
     assert(!resolveConfiguredLights(hardware, "esp32", 4, resolved, error));
     auto invalid = hardware;
-    invalid.configuration.lights[1].outputs.roles[3] = "L1";
+    invalid.configuration.lights[1].pins[0] = "L1";
     assert(!resolveConfiguredLights(invalid, "esp32", 5, resolved, error));
     invalid = hardware;
     invalid.configuration.lights[1].id = "rgb0";
     assert(!resolveConfiguredLights(invalid, "esp32", 5, resolved, error));
     invalid = hardware;
-    invalid.availablePins[0].pins[0].pwm = false;
+    invalid.availablePins[0].pins[0].capability &= ~CAPA_PWM;
     assert(!resolveConfiguredLights(invalid, "esp32", 5, resolved, error));
     invalid = hardware;
-    invalid.availablePins[0].pins[0].reserved = true;
+    invalid.availablePins[0].pins[0].capability |= CAPA_RESERVED;
     assert(!resolveConfiguredLights(invalid, "esp32", 5, resolved, error));
     invalid = hardware;
     invalid.boards[0].reservedGpios.push_back(0);
     assert(!resolveConfiguredLights(invalid, "esp32", 5, resolved, error));
     invalid = hardware;
-    invalid.configuration.lights[0].outputs.roles[0] = "unknown";
+    invalid.configuration.lights[0].pins[0] = "unknown";
     assert(!resolveConfiguredLights(invalid, "esp32", 5, resolved, error));
     invalid = hardware;
     invalid.boards[0].implementedPins[0].allowedFunctions.push_back("system.clear_config");

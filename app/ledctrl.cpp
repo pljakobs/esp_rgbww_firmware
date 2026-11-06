@@ -36,28 +36,37 @@
 
 namespace
 {
-bool selectLightType(const String& type, const std::array<String, 6>& outputs, LightType& lightType)
+bool selectLightType(const String& type, unsigned pinCount, LightType& lightType)
 {
-	const bool red = outputs[0].length() != 0;
-	const bool green = outputs[1].length() != 0;
-	const bool blue = outputs[2].length() != 0;
-	const bool warm = outputs[3].length() != 0;
-	const bool cold = outputs[4].length() != 0;
-	const bool brightness = outputs[5].length() != 0;
-	if(type == F("dimmer") && !red && !green && !blue && !warm && !cold && brightness) {
-		lightType = LightType::SINGLE;
-	} else if(type == F("tunable_white") && !red && !green && !blue && warm && cold && !brightness) {
-		lightType = LightType::WWCW;
-	} else if(type == F("rgb") && red && green && blue && !warm && !cold && !brightness) {
-		lightType = LightType::RGB;
-	} else if(type == F("rgbw") && red && green && blue && warm != cold && !brightness) {
-		lightType = warm ? LightType::RGBWW : LightType::RGBCW;
-	} else if(type == F("rgbww") && red && green && blue && warm && cold && !brightness) {
+	unsigned expectedPins = 0;
+	if(type == F("RGBWWCW")) {
 		lightType = LightType::RGBWWCW;
+		expectedPins = 5;
+	} else if(type == F("RGBWW")) {
+		lightType = LightType::RGBWW;
+		expectedPins = 4;
+	} else if(type == F("RGBCW")) {
+		lightType = LightType::RGBCW;
+		expectedPins = 4;
+	} else if(type == F("RGB")) {
+		lightType = LightType::RGB;
+		expectedPins = 3;
+	} else if(type == F("WWCW")) {
+		lightType = LightType::WWCW;
+		expectedPins = 2;
+	} else if(type == F("WW")) {
+		lightType = LightType::WW;
+		expectedPins = 1;
+	} else if(type == F("CW")) {
+		lightType = LightType::CW;
+		expectedPins = 1;
+	} else if(type == F("SINGLE")) {
+		lightType = LightType::SINGLE;
+		expectedPins = 1;
 	} else {
 		return false;
 	}
-	return true;
+	return pinCount == expectedPins;
 }
 
 struct ResolvedLight {
@@ -100,15 +109,16 @@ bool claimBoardPin(const Hardware& hardware, const Board& board, const String& s
 				if(capability.getGpio() != gpio) {
 					continue;
 				}
-				if(capability.getReserved()) {
+				const uint8_t capabilities = capability.getCapability();
+				if(capabilities & CAPA_RESERVED) {
 					return false;
 				}
 				if(function == F("light.pwm")) {
-					if(!capability.getOutput() || !capability.getPwm()) {
+					if(!(capabilities & CAPA_OUTPUT) || !(capabilities & CAPA_PWM)) {
 						return false;
 					}
-				} else if(!capability.getInput() ||
-						  ((function == F("i2c.sda") || function == F("i2c.scl")) && !capability.getOutput())) {
+				} else if(!(capabilities & CAPA_INPUT) ||
+						  ((function == F("i2c.sda") || function == F("i2c.scl")) && !(capabilities & CAPA_OUTPUT))) {
 					return false;
 				}
 				claimed[gpio] = true;
@@ -192,27 +202,52 @@ bool resolveConfiguredLights(const Hardware& hardware, const String& soc, unsign
 			error = F("Duplicate or empty virtual-light ID");
 			return false;
 		}
-		const auto& outputs = configured.outputs;
-		const std::array<String, 6> roles{{outputs.getRed(), outputs.getGreen(), outputs.getBlue(),
-										 outputs.getWarmwhite(), outputs.getColdwhite(), outputs.getBrightness()}};
-		if(!selectLightType(configured.getType(), roles, resolved.type)) {
-			error = F("Invalid light type or required output roles");
+		const unsigned pinCount = configured.pins.getItemCount();
+		if(pinCount > 5 || !selectLightType(configured.getType(), pinCount, resolved.type)) {
+			error = F("Invalid light type or pin count");
 			return false;
 		}
-		for(unsigned role = 0; role < roles.size(); ++role) {
-			if(!roles[role].length()) {
-				continue;
-			}
-			if(!claimBoardPin(hardware, board, boardSoc, roles[role], F("light.pwm"), claimed, gpio)) {
+		std::array<int, 5> channelPins{};
+		channelPins.fill(-1);
+		std::array<unsigned, 5> channelOrder{{0, 1, 2, 3, 4}};
+		switch(resolved.type) {
+		case LightType::RGB:
+			break;
+		case LightType::RGBWW:
+			break;
+		case LightType::RGBCW:
+			channelOrder = {{0, 1, 2, 4, 0}};
+			break;
+		case LightType::RGBWWCW:
+			break;
+		case LightType::WWCW:
+			channelOrder = {{3, 4, 0, 0, 0}};
+			break;
+		case LightType::WW:
+		case LightType::SINGLE:
+			channelOrder = {{3, 0, 0, 0, 0}};
+			break;
+		case LightType::CW:
+			channelOrder = {{4, 0, 0, 0, 0}};
+			break;
+		}
+		for(unsigned pinIndex = 0; pinIndex < pinCount; ++pinIndex) {
+			if(!claimBoardPin(hardware, board, boardSoc, configured.pins[pinIndex], F("light.pwm"), claimed, gpio)) {
 				error = F("Unknown, unavailable or conflicting PWM output");
 				return false;
 			}
-			resolved.pins[role == 5 ? 3 : role] = gpio;
+			const unsigned channel = channelOrder[pinIndex];
+			if(channelPins[channel] >= 0) {
+				error = F("Duplicate light channel assignment");
+				return false;
+			}
+			channelPins[channel] = gpio;
 			if(++channelCount > capacity) {
 				error = F("PWM channel capacity exceeded");
 				return false;
 			}
 		}
+		resolved.pins = channelPins;
 		result.push_back(std::move(resolved));
 	}
 	return true;
@@ -288,8 +323,9 @@ bool APPLedCtrl::resolveInputs(HardwareInputs& inputs, String& error) const
 					}
 					for(auto capability : available.pins) {
 						if(capability.getGpio() == input.gpio) {
-							input.internalPullUp = input.activeLow && capability.getPullUp();
-							input.internalPullDown = !input.activeLow && capability.getPullDown();
+								const uint8_t capabilities = capability.getCapability();
+								input.internalPullUp = input.activeLow && (capabilities & CAPA_PULL_UP);
+								input.internalPullDown = !input.activeLow && (capabilities & CAPA_PULL_DOWN);
 						}
 					}
 				}
