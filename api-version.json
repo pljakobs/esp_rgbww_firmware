@@ -2,13 +2,13 @@
   "apiVersion": "1.0.0-inferred.1",
   "status": "inferred",
   "schemaHashAlgorithm": "sha256",
-  "schemaHash": "4590ffe918ce56cce896e9dae2f965068892e3d0b0722bad550b22aa8792a5b2",
+  "schemaHash": "e2ef7aa14acaceb5ffc581c64af6744a002d7c1f03cb2e3c4d7bcd8590e60b4f",
   "sourceSchemas": [
     {
       "database": "Definitions",
       "source": "defs.cfgdb",
       "persistent": false,
-      "sourceHash": "7157d502d93eae2880f888dfa4d1cb0010dce0cabf80c918497db5481115f280"
+      "sourceHash": "7e681336eab026c1c3bba6cf085051a26627398715a04f76b0d295b268865f37"
     },
     {
       "database": "Api",
@@ -23,8 +23,8 @@
       "source": "app-config.cfgdb",
       "projection": "schema/app-config.schema.json",
       "persistent": true,
-      "sourceHash": "c2dbd64fd8657bcf83cfdd92ee42ff9f095a0242afcbd9b03e34c6375002eb83",
-      "projectionHash": "4b46738fe51a596dced4d7130b7019efaca6e62e1d3f88c91943726a91f90dc8"
+      "sourceHash": "2cb3404a5437182dec8c742cc48b94aae1385384be041bf5e15613fa6499389f",
+      "projectionHash": "0de3a163affc90e13b7571fefbce12f54be82b21a6b5b9303cf774ff9cab8f25"
     },
     {
       "database": "AppData",
@@ -32,7 +32,7 @@
       "projection": "schema/app-data.schema.json",
       "persistent": true,
       "sourceHash": "d7f6dbb03ad17e4fe58a608b5febc86640fb0a9fd78a6cacf729c81d1d9aa049",
-      "projectionHash": "dbbc839463114557d9f78fe7749c6093b0adcea7e4ebc9f10fb7a2c2a5af2cee"
+      "projectionHash": "5085fd2d7f19568ec8ccfb6f49a071a442e04bdf334cdd7a4af2e96b6ce520e7"
     }
   ],
   "artifacts": [

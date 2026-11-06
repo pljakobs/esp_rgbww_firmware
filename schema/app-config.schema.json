@@ -535,8 +535,8 @@
       "properties": {
         "schema_version": {
           "type": "integer",
-          "minimum": 2,
-          "default": 2
+          "minimum": 3,
+          "default": 3
         },
         "version": {
           "type": "integer",
@@ -632,39 +632,18 @@
                   "type": "object",
                   "additionalProperties": false,
                   "required": [
-                    "gpio"
+                    "gpio",
+                    "capability"
                   ],
                   "properties": {
                     "gpio": {
                       "$ref": "#/definitions/pin"
                     },
-                    "input": {
-                      "type": "boolean",
-                      "default": false
-                    },
-                    "output": {
-                      "type": "boolean",
-                      "default": false
-                    },
-                    "pwm": {
-                      "type": "boolean",
-                      "default": false
-                    },
-                    "strapping": {
-                      "type": "boolean",
-                      "default": false
-                    },
-                    "pull_up": {
-                      "type": "boolean",
-                      "default": false
-                    },
-                    "pull_down": {
-                      "type": "boolean",
-                      "default": false
-                    },
-                    "reserved": {
-                      "type": "boolean",
-                      "default": false
+                    "capability": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 127,
+                      "description": "Bit mask: input=1, output=2, pwm=4, strapping=8, pull_up=16, pull_down=32, reserved=64."
                     }
                   }
                 }
@@ -708,10 +687,6 @@
         },
         "colortemp": {
           "$ref": "#/definitions/light_color_colortemp"
-        },
-        "color_mode": {
-          "type": "integer",
-          "default": 0
         },
         "hsv": {
           "$ref": "#/definitions/light_color_hsv"
@@ -1113,44 +1088,14 @@
         }
       }
     },
-    "light_outputs": {
-      "type": "object",
-      "additionalProperties": false,
-      "description": "Each populated role references an implemented pin ID. Required roles depend on light type and are validated by firmware.",
-      "properties": {
-        "red": {
-          "type": "string",
-          "maxLength": 32
-        },
-        "green": {
-          "type": "string",
-          "maxLength": 32
-        },
-        "blue": {
-          "type": "string",
-          "maxLength": 32
-        },
-        "warmwhite": {
-          "type": "string",
-          "maxLength": 32
-        },
-        "coldwhite": {
-          "type": "string",
-          "maxLength": 32
-        },
-        "brightness": {
-          "type": "string",
-          "maxLength": 32
-        }
-      }
-    },
     "light_configuration": {
       "type": "object",
       "additionalProperties": false,
       "required": [
         "id",
+        "name",
         "type",
-        "outputs"
+        "pins"
       ],
       "properties": {
         "index": {
@@ -1183,10 +1128,20 @@
         },
         "type": {
           "type": "string",
-          "pattern": "^(dimmer|tunable_white|rgb|rgbw|rgbww)$"
+          "pattern": "^(RGBWWCW|RGBWW|RGBCW|RGB|WWCW|WW|CW|SINGLE)$",
+          "description": "RGBWWCW, RGBWW, RGBCW, RGB, WWCW, WW, CW or SINGLE, matching RGBWWLed::LightType."
         },
-        "outputs": {
-          "$ref": "#/definitions/light_outputs"
+        "pins": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 5,
+          "uniqueItems": true,
+          "description": "Implemented pin IDs in type order: RGBWWCW=[R,G,B,WW,CW], RGBWW=[R,G,B,WW], RGBCW=[R,G,B,CW], RGB=[R,G,B], WWCW=[WW,CW], WW=[WW], CW=[CW], SINGLE=[single output]. Exact count is validated by firmware.",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32
+          }
         },
         "color": {
           "$ref": "#/definitions/color_settings"
