@@ -1,0 +1,240 @@
+{
+  "schema_version": 1,
+  "version": 2,
+  "available_pins": [
+    {
+      "soc": "esp32",
+      "pins": [
+        {
+          "gpio": 0,
+          "capability": 63
+        },
+        {
+          "gpio": 1,
+          "capability": 71
+        },
+        {
+          "gpio": 2,
+          "capability": 63
+        },
+        {
+          "gpio": 3,
+          "capability": 71
+        },
+        {
+          "gpio": 4,
+          "capability": 55
+        },
+        {
+          "gpio": 5,
+          "capability": 63
+        },
+        {
+          "gpio": 6,
+          "capability": 64
+        },
+        {
+          "gpio": 7,
+          "capability": 64
+        },
+        {
+          "gpio": 8,
+          "capability": 64
+        },
+        {
+          "gpio": 9,
+          "capability": 64
+        },
+        {
+          "gpio": 10,
+          "capability": 64
+        },
+        {
+          "gpio": 11,
+          "capability": 64
+        },
+        {
+          "gpio": 12,
+          "capability": 63
+        },
+        {
+          "gpio": 13,
+          "capability": 55
+        },
+        {
+          "gpio": 14,
+          "capability": 55
+        },
+        {
+          "gpio": 15,
+          "capability": 63
+        },
+        {
+          "gpio": 16,
+          "capability": 55
+        },
+        {
+          "gpio": 17,
+          "capability": 55
+        },
+        {
+          "gpio": 18,
+          "capability": 55
+        },
+        {
+          "gpio": 19,
+          "capability": 55
+        },
+        {
+          "gpio": 21,
+          "capability": 55
+        },
+        {
+          "gpio": 22,
+          "capability": 55
+        },
+        {
+          "gpio": 23,
+          "capability": 55
+        },
+        {
+          "gpio": 25,
+          "capability": 55
+        },
+        {
+          "gpio": 26,
+          "capability": 55
+        },
+        {
+          "gpio": 27,
+          "capability": 55
+        },
+        {
+          "gpio": 32,
+          "capability": 55
+        },
+        {
+          "gpio": 33,
+          "capability": 55
+        },
+        {
+          "gpio": 34,
+          "capability": 1
+        },
+        {
+          "gpio": 35,
+          "capability": 1
+        },
+        {
+          "gpio": 36,
+          "capability": 1
+        },
+        {
+          "gpio": 37,
+          "capability": 1
+        },
+        {
+          "gpio": 38,
+          "capability": 1
+        },
+        {
+          "gpio": 39,
+          "capability": 1
+        }
+      ]
+    },
+    {
+      "soc": "esp32c3",
+      "pins": [
+        {
+          "gpio": 0,
+          "capability": 55
+        },
+        {
+          "gpio": 1,
+          "capability": 55
+        },
+        {
+          "gpio": 2,
+          "capability": 63
+        },
+        {
+          "gpio": 3,
+          "capability": 55
+        },
+        {
+          "gpio": 4,
+          "capability": 55
+        },
+        {
+          "gpio": 5,
+          "capability": 55
+        },
+        {
+          "gpio": 6,
+          "capability": 55
+        },
+        {
+          "gpio": 7,
+          "capability": 55
+        },
+        {
+          "gpio": 8,
+          "capability": 63
+        },
+        {
+          "gpio": 9,
+          "capability": 63
+        },
+        {
+          "gpio": 10,
+          "capability": 55
+        },
+        {
+          "gpio": 11,
+          "capability": 64
+        },
+        {
+          "gpio": 12,
+          "capability": 64
+        },
+        {
+          "gpio": 13,
+          "capability": 64
+        },
+        {
+          "gpio": 14,
+          "capability": 64
+        },
+        {
+          "gpio": 15,
+          "capability": 64
+        },
+        {
+          "gpio": 16,
+          "capability": 64
+        },
+        {
+          "gpio": 17,
+          "capability": 64
+        },
+        {
+          "gpio": 18,
+          "capability": 71
+        },
+        {
+          "gpio": 19,
+          "capability": 71
+        },
+        {
+          "gpio": 20,
+          "capability": 71
+        },
+        {
+          "gpio": 21,
+          "capability": 71
+        }
+      ]
+    }
+  ]
+}

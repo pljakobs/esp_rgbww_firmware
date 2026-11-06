@@ -280,5 +280,6 @@
 
 #define configDB_PATH "app-config"
 #define dataDB_PATH "app-data"
+#define pinsDB_PATH "soc-pins"
 
 #define RSYSLOG 1

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import gzip
 import hashlib
 import http.client
 import json
@@ -35,6 +36,30 @@ def post_config_update(smoke_config: SmokeConfig, update: dict[str, Any]) -> Non
         fail_with_trace("Configuration update was rejected", trace)
 
 
+def test_catalog_endpoint_streams_gzip(smoke_config: SmokeConfig, api_secured: bool) -> None:
+    if api_secured:
+        pytest.skip("catalog endpoint check requires an unsecured Host instance")
+    with request.urlopen(f"{smoke_config.base_url}/catalog", timeout=5.0) as response:
+        assert response.status == 200
+        assert response.headers.get("Content-Encoding") == "gzip"
+        assert response.headers.get_content_type() == "application/json"
+        catalog = json.loads(gzip.decompress(response.read()))
+    assert catalog["version"] == 2
+    assert len(catalog["boards"]) == 3
+    assert len(catalog["templates"]) == 3
+    assert "available_pins" not in catalog
+
+    response = http_request("GET", f"{smoke_config.base_url}/config")
+    config = decode_json_response(
+        response, {"request": {"path": "/config"}, "response": response},
+        failure_message="Config read failed while checking catalog separation",
+    )
+    hardware = config["hardware"]
+    assert hardware["available_pins"] == []
+    assert hardware["boards"] == []
+    assert hardware["templates"] == []
+
+
 @pytest.mark.skipif(
     os.environ.get("HOST_SMOKE_REAL_DEVICE") == "1",
     reason="creates and removes virtual lights on the Host emulator only",
@@ -42,16 +67,16 @@ def post_config_update(smoke_config: SmokeConfig, update: dict[str, Any]) -> Non
 @pytest.mark.parametrize(
     ("light_type", "pins"),
     [
-        ("SINGLE", ["L1"]),
-        ("WWCW", ["L1", "L2"]),
-        ("RGB", ["L1", "L2", "L3"]),
-        ("RGBWW", ["L1", "L2", "L3", "L4"]),
-        ("RGBCW", ["L1", "L2", "L3", "L4"]),
-        ("RGBWWCW", ["L1", "L2", "L3", "L4", "L5"]),
+        ("SINGLE", [5]),
+        ("WWCW", [5, 4]),
+        ("RGB", [5, 4, 1]),
+        ("RGBWW", [5, 4, 1, 0]),
+        ("RGBCW", [5, 4, 1, 3]),
+        ("RGBWWCW", [5, 4, 1, 0, 3]),
     ],
 )
 def test_virtual_light_create_delete_reloads_runtime(
-    smoke_config: SmokeConfig, api_secured: bool, light_type: str, pins: list[str]
+    smoke_config: SmokeConfig, api_secured: bool, light_type: str, pins: list[int]
 ) -> None:
     if api_secured:
         pytest.skip("configuration mutation requires an unsecured Host instance")
@@ -90,7 +115,14 @@ def test_virtual_light_create_delete_reloads_runtime(
         configuration = {
             "board_id": "quinled-an-penta-mini",
             "board_revision": 1,
-            "system": {"clear_config_pin": ""},
+            "soc": "esp32c3",
+            "system": {
+                "clear_config_enabled": False,
+                "clear_config_pin": 0,
+                "clear_config_active_low": True,
+                "clear_config_external_pull_up": False,
+                "clear_config_external_pull_down": False,
+            },
             "buttons": [],
             "buses": [],
             "lights": [{"id": "host-create-delete", "index": 23, "name": "Host test", "is_default": True,

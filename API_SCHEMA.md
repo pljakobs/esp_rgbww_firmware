@@ -6,10 +6,12 @@ This bundle is inferred from the current firmware and `esp_rgb_webapp2` implemen
 
 - `app-config.cfgdb` defines the persistent `/config` object.
 - `app-data.cfgdb` defines the persistent `/data` object.
+- `pins.cfgdb` defines the separate SoC GPIO capability ConfigDB.
 - `defs.cfgdb` defines reusable ConfigDB values.
 - `json-rpc-api.cfgdb` defines the transient HTTP payload, JSON-RPC envelope, result, and server-event ConfigDB classes.
 - `api.json` maps HTTP operations and JSON-RPC methods/events to payload definitions.
 - `openapi.json` defines HTTP paths, methods, query parameters, authentication, statuses, and payload references.
+- `hardware-catalog.json.gz` is the versioned board/template catalog served by `GET /catalog`; `soc-pins.json` seeds the firmware-only pin capability DB.
 
 `AppConfig`, `AppData`, and the transient `Api` workspace are separate ConfigDB databases. The API schema references the two persistent cfgdb roots; it does not copy their properties into `json-rpc-api.cfgdb` and does not generate one combined database.
 

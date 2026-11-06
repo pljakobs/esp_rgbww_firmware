@@ -263,6 +263,7 @@ void ApplicationWebserver::init()
 	paths.set("/", HttpPathDelegate(&ApplicationWebserver::onIndex, this));
 	paths.set(F("/webapp"), HttpPathDelegate(&ApplicationWebserver::onWebapp, this));
 	paths.set(F("/config"), HttpPathDelegate(&ApplicationWebserver::onConfig, this));
+	paths.set(F("/catalog"), HttpPathDelegate(&ApplicationWebserver::onCatalog, this));
 	paths.set(F("/info"), HttpPathDelegate(&ApplicationWebserver::onInfo, this));
 	paths.set(F("/color"), HttpPathDelegate(&ApplicationWebserver::onColor, this));
 	paths.set(F("/networks"), HttpPathDelegate(&ApplicationWebserver::onNetworks, this));
@@ -1491,6 +1492,21 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 		auto configStream = app.cfg->createExportStream(ConfigDB::Json::format);
 		response.sendDataStream(configStream.release(), MIME_JSON);
 	}
+}
+
+void ApplicationWebserver::onCatalog(HttpRequest& request, HttpResponse& response)
+{
+	if(!preflightRequest(request, response, {HttpMethod::GET, HttpMethod::HEAD})) {
+		return;
+	}
+	response.setHeader(F("Cache-Control"), F("no-cache"));
+	if(fileExist(F("hardware-catalog.json.gz"))) {
+		response.sendFile(F("hardware-catalog.json"), true);
+		return;
+	}
+	response.headers[HTTP_HEADER_CONTENT_ENCODING] = F("gzip");
+	auto stream = app.hardwareCatalogSeedStream();
+	response.sendDataStream(stream.release(), MIME_JSON);
 }
 
 void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response){
