@@ -535,8 +535,8 @@
       "properties": {
         "schema_version": {
           "type": "integer",
-          "minimum": 3,
-          "default": 3
+          "minimum": 4,
+          "default": 4
         },
         "version": {
           "type": "integer",
