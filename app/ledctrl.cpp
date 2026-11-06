@@ -126,14 +126,16 @@ bool resolveConfiguredLights(const Hardware& hardware, const String& soc, unsign
 {
 	result.clear();
 	const auto& configuration = hardware.configuration;
-	if(configuration.lights.getItemCount() == 0) {
+	if(configuration.lights.getItemCount() == 0 && configuration.buttons.getItemCount() == 0 &&
+	   configuration.buses.getItemCount() == 0 && configuration.system.getClearConfigPin().length() == 0) {
 		return true;
 	}
 	unsigned boardIndex = hardware.boards.getItemCount();
 	for(unsigned index = 0; index < hardware.boards.getItemCount(); ++index) {
 		auto candidate = hardware.boards[index];
 		if(candidate.getId() == configuration.getBoardId() &&
-		   candidate.getRevision() == configuration.getBoardRevision() && candidate.getSoc() == soc) {
+		   candidate.getRevision() == configuration.getBoardRevision() &&
+		   (candidate.getSoc() == soc || soc == F("host"))) {
 			boardIndex = index;
 			break;
 		}
@@ -143,26 +145,42 @@ bool resolveConfiguredLights(const Hardware& hardware, const String& soc, unsign
 		return false;
 	}
 	auto board = hardware.boards[boardIndex];
+	const String boardSoc = board.getSoc();
 	std::array<bool, 256> claimed{};
 	int gpio = -1;
 	const String clearPin = configuration.system.getClearConfigPin();
-	if(clearPin.length() && !claimBoardPin(hardware, board, soc, clearPin, F("system.clear_config"), claimed, gpio)) {
+	if(clearPin.length() && !claimBoardPin(hardware, board, boardSoc, clearPin, F("system.clear_config"), claimed, gpio)) {
 		error = F("Invalid or conflicting clear input");
 		return false;
 	}
 	for(auto button : configuration.buttons) {
-		if(!claimBoardPin(hardware, board, soc, button.getPin(), F("button.input"), claimed, gpio)) {
+		if(!claimBoardPin(hardware, board, boardSoc, button.getPin(), F("button.input"), claimed, gpio)) {
 			error = F("Invalid or conflicting button input");
 			return false;
 		}
 	}
+	bool displayBusConfigured = false;
 	for(auto bus : configuration.buses) {
-		if(!claimBoardPin(hardware, board, soc, bus.getSda(), F("i2c.sda"), claimed, gpio) ||
-		   !claimBoardPin(hardware, board, soc, bus.getScl(), F("i2c.scl"), claimed, gpio)) {
+		const bool usesDisplayBus = bus.getSda() == F("I2C_SDA") && bus.getScl() == F("I2C_SCL");
+		displayBusConfigured = displayBusConfigured || usesDisplayBus;
+		if(!claimBoardPin(hardware, board, boardSoc, bus.getSda(), F("i2c.sda"), claimed, gpio) ||
+		   !claimBoardPin(hardware, board, boardSoc, bus.getScl(), F("i2c.scl"), claimed, gpio)) {
 			error = F("Invalid or conflicting I2C pins");
 			return false;
 		}
 	}
+#if STATUS_DISPLAY
+	if(!displayBusConfigured) {
+		int displaySda = -1;
+		int displayScl = -1;
+		if(!claimBoardPin(hardware, board, boardSoc, F("I2C_SDA"), F("i2c.sda"), claimed, displaySda) ||
+		   !claimBoardPin(hardware, board, boardSoc, F("I2C_SCL"), F("i2c.scl"), claimed, displayScl) ||
+		   displaySda != STATUS_DISPLAY_SDA || displayScl != STATUS_DISPLAY_SCL) {
+			error = F("Compiled display I2C pins are unavailable or conflicting");
+			return false;
+		}
+	}
+#endif
 	unsigned channelCount = 0;
 	for(auto configured : configuration.lights) {
 		ResolvedLight resolved;
@@ -185,7 +203,7 @@ bool resolveConfiguredLights(const Hardware& hardware, const String& soc, unsign
 			if(!roles[role].length()) {
 				continue;
 			}
-			if(!claimBoardPin(hardware, board, soc, roles[role], F("light.pwm"), claimed, gpio)) {
+			if(!claimBoardPin(hardware, board, boardSoc, roles[role], F("light.pwm"), claimed, gpio)) {
 				error = F("Unknown, unavailable or conflicting PWM output");
 				return false;
 			}
@@ -214,40 +232,229 @@ void configureLightColor(RGBWWLed& light, const Color& color)
 
 APPLedCtrl::~APPLedCtrl()
 {
+	_reloadLifetime.reset();
 	delete _stepSync;
 	_stepSync = nullptr;
 }
 
 
+bool APPLedCtrl::resolveInputs(HardwareInputs& inputs, String& error) const
+{
+	inputs = HardwareInputs{};
+	AppConfig::Hardware hardware(*app.cfg);
+	unsigned capacity = 16;
+#ifdef ARCH_ESP32
+	capacity = LEDC_CHANNEL_MAX;
+#endif
+	std::vector<ResolvedLight> lights;
+	if(!resolveConfiguredLights(hardware, String(SOC), capacity, lights, error)) {
+		return false;
+	}
+	const auto& configuration = hardware.configuration;
+	if(configuration.buttons.getItemCount() == 0 && configuration.buses.getItemCount() == 0 &&
+	   configuration.system.getClearConfigPin().length() == 0) {
+#if STATUS_DISPLAY
+		inputs.i2cEnabled = true;
+		inputs.sda = STATUS_DISPLAY_SDA;
+		inputs.scl = STATUS_DISPLAY_SCL;
+		inputs.frequency = 100000;
+#endif
+		return true;
+	}
+	unsigned boardIndex = hardware.boards.getItemCount();
+	for(unsigned index = 0; index < hardware.boards.getItemCount(); ++index) {
+		auto board = hardware.boards[index];
+		if(board.getId() == configuration.getBoardId() && board.getRevision() == configuration.getBoardRevision()) {
+			boardIndex = index;
+			break;
+		}
+	}
+	if(boardIndex == hardware.boards.getItemCount()) {
+		error = F("Configured input board is unavailable");
+		return false;
+	}
+	auto board = hardware.boards[boardIndex];
+	auto resolveInput = [&](const String& pinId, ConfiguredInput& input) {
+		for(auto pin : board.implementedPins) {
+			if(pin.getId() != pinId) {
+				continue;
+			}
+			input.gpio = pin.getGpio();
+			input.activeLow = pin.getActiveLow();
+			if(pin.getExternalPull() == 0) {
+				for(auto available : hardware.availablePins) {
+					if(available.getSoc() != board.getSoc()) {
+						continue;
+					}
+					for(auto capability : available.pins) {
+						if(capability.getGpio() == input.gpio) {
+							input.internalPullUp = input.activeLow && capability.getPullUp();
+							input.internalPullDown = !input.activeLow && capability.getPullDown();
+						}
+					}
+				}
+			}
+			return true;
+		}
+		return false;
+	};
+	const String clearId = configuration.system.getClearConfigPin();
+	if(clearId.length()) {
+		inputs.clear.id = clearId;
+		if(!resolveInput(clearId, inputs.clear)) {
+			error = F("Clear input is unavailable");
+			return false;
+		}
+	}
+	for(auto button : configuration.buttons) {
+		if(!button.getEnabled()) {
+			continue;
+		}
+		ConfiguredInput input;
+		input.id = button.getId();
+		input.debounceMs = button.getDebounceMs();
+		if(!input.id.length() || std::any_of(inputs.buttons.begin(), inputs.buttons.end(), [&](const ConfiguredInput& other) {
+			   return other.id == input.id;
+		   }) || !resolveInput(button.getPin(), input)) {
+			error = F("Duplicate or invalid configured button");
+			return false;
+		}
+		inputs.buttons.push_back(std::move(input));
+	}
+	for(auto bus : configuration.buses) {
+		if(!bus.getEnabled()) {
+			continue;
+		}
+		if(inputs.i2cEnabled || bus.getType() != F("i2c") || !bus.getId().length() ||
+		   bus.getFrequency() < 10000 || bus.getFrequency() > 400000) {
+			error = F("Only one valid I2C bus may be enabled");
+			return false;
+		}
+		ConfiguredInput sda, scl;
+		if(!resolveInput(bus.getSda(), sda) || !resolveInput(bus.getScl(), scl)) {
+			error = F("I2C pin mapping is unavailable");
+			return false;
+		}
+		inputs.i2cEnabled = true;
+		inputs.sda = sda.gpio;
+		inputs.scl = scl.gpio;
+		inputs.frequency = bus.getFrequency();
+	}
+#if STATUS_DISPLAY
+	if(!inputs.i2cEnabled) {
+		inputs.i2cEnabled = true;
+		inputs.sda = STATUS_DISPLAY_SDA;
+		inputs.scl = STATUS_DISPLAY_SCL;
+		inputs.frequency = 100000;
+	}
+	if(inputs.i2cEnabled && (inputs.sda != STATUS_DISPLAY_SDA || inputs.scl != STATUS_DISPLAY_SCL || inputs.frequency != 100000)) {
+		error = F("I2C settings conflict with the compiled status display");
+		return false;
+	}
+#endif
+	return true;
+}
+
 void APPLedCtrl::init()
 {
-	if(!app.lights.empty()) {
-		cdebug_e(APPLEDCTRL, "Lights are already initialized; restart to apply new assignments");
-		return;
-	}
 	delete _stepSync;
 	_stepSync = new StepSync();
 	reconfigure();
+	String error;
+	if(!reload(error)) {
+		cdebug_e(APPLEDCTRL, "Light initialization failed: %s", error.c_str());
+	}
+	if(!_watchingConfiguration) {
+		_watchingConfiguration = true;
+		std::weak_ptr<uint8_t> lifetime = _reloadLifetime;
+		AppConfig::Hardware::onCommit(*app.cfg, [this, lifetime](AppConfig::HardwareUpdater) {
+			if(!lifetime.expired()) {
+				requestReload();
+			}
+		});
+	}
+}
+
+String APPLedCtrl::configurationSignature() const
+{
+	AppConfig::Hardware hardware(*app.cfg);
+	MemoryDataStream stream;
+	hardware.configuration.exportToStream(ConfigDB::Json::format, stream);
+	hardware.pwm.exportToStream(ConfigDB::Json::format, stream);
+	for(auto board : hardware.boards) {
+		if(board.getId() == hardware.configuration.getBoardId() &&
+		   board.getRevision() == hardware.configuration.getBoardRevision()) {
+			board.exportToStream(ConfigDB::Json::format, stream);
+			break;
+		}
+	}
+	return stream.readString(stream.available());
+}
+
+void APPLedCtrl::requestReload()
+{
+	if(_reloadQueued) {
+		return;
+	}
+	_reloadQueued = true;
+	std::weak_ptr<uint8_t> lifetime = _reloadLifetime;
+	System.queueCallback([this, lifetime]() {
+		if(lifetime.expired()) {
+			return;
+		}
+		_reloadQueued = false;
+		if(configurationSignature() == _activeConfiguration) {
+			return;
+		}
+		String error;
+		if(!reload(error)) {
+			if(error == F("PWM callbacks pending")) {
+				requestReload();
+			} else {
+				cdebug_e(APPLEDCTRL, "Light reload rejected: %s", error.c_str());
+			}
+		}
+	});
+}
+
+bool APPLedCtrl::reload(String& error)
+{
+	HardwareInputs inputs;
+	if(!resolveInputs(inputs, error)) {
+		return false;
+	}
 	AppConfig::Hardware hardware(*app.cfg);
 	unsigned capacity = 16;
 #ifdef ARCH_ESP32
 	capacity = LEDC_CHANNEL_MAX;
 #endif
 	std::vector<ResolvedLight> resolved;
-	String error;
 	if(!resolveConfiguredLights(hardware, String(SOC), capacity, resolved, error)) {
-		cdebug_e(APPLEDCTRL, "Light configuration rejected: %s", error.c_str());
-		return;
+		return false;
 	}
+#ifdef ARCH_ESP32
+	for(auto& light : app.lights) {
+		if(light.led->getPwmOutput() != nullptr && light.led->getPwmOutput()->hasPendingCallbacks()) {
+			error = F("PWM callbacks pending");
+			return false;
+		}
+	}
+#endif
 	if(resolved.empty()) {
+		for(auto& light : app.lights) {
+			light.led->clearAnimationQueue();
+			light.led->getPwmOutput()->setOutput(0, 0, 0, 0, 0);
+		}
+		app.lights.clear();
+		_activeConfiguration = configurationSignature();
 		cdebug_i(APPLEDCTRL, "No virtual lights configured");
-		return;
+		return true;
 	}
 #ifdef ARCH_ESP32
 	const auto& pwm = hardware.pwm;
 	if(pwm.timer.getFrequency() <= 0) {
-		cdebug_e(APPLEDCTRL, "Invalid PWM frequency");
-		return;
+		error = F("Invalid PWM frequency");
+		return false;
 	}
 	Esp32HardwarePwm::Config pwmConfig;
 	pwmConfig.timer.frequency = pwm.timer.getFrequency();
@@ -262,8 +469,8 @@ void APPLedCtrl::init()
 	if(speedMode == AppConfig::ContainedHardware::ContainedPwm::TimerSpeedMode::LOWSPEED) {
 		pwmConfig.timer.speed_mode = LEDC_LOW_SPEED_MODE;
 	} else {
-		cdebug_e(APPLEDCTRL, "Unsupported PWM speed mode");
-		return;
+		error = F("Unsupported PWM speed mode");
+		return false;
 	}
 	pwmConfig.spreadSpectrum.mode = pwm.spreadSpectrum.getMode() ==
 		AppConfig::ContainedHardware::ContainedPwm::SpreadSpectrumMode::ON
@@ -279,11 +486,16 @@ void APPLedCtrl::init()
 	for(const auto& light : resolved) {
 		std::unique_ptr<RGBWWLed> instance(new RGBWWLed());
 		if(!instance) {
-			cdebug_e(APPLEDCTRL, "Unable to allocate virtual light");
-			return;
+			error = F("Unable to allocate virtual light");
+			return false;
 		}
 		staged.push_back({light.id, light.name, std::move(instance)});
 	}
+	for(auto& light : app.lights) {
+		light.led->clearAnimationQueue();
+		light.led->getPwmOutput()->setOutput(0, 0, 0, 0, 0);
+	}
+	app.lights.clear();
 #ifdef ARCH_ESP32
 	unsigned channelStart = 0;
 #endif
@@ -300,7 +512,9 @@ void APPLedCtrl::init()
 	}
 	app.lights.swap(staged);
 	setup();
+	_activeConfiguration = configurationSignature();
 	cdebug_i(APPLEDCTRL, "Initialized %u virtual lights", unsigned(app.lights.size()));
+	return true;
 }
 
 

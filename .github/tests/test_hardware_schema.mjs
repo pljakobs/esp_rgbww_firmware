@@ -138,3 +138,23 @@ int main()
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("5.1 Host startup does not impose the legacy ESP8266 allocation cap", () => {
+  const application = readFileSync(resolve(root, "app/application.cpp"), "utf8");
+  const header = readFileSync(resolve(root, "include/RGBWWCtrl.h"), "utf8");
+  const start = application.indexOf("void onReady()");
+  const end = application.indexOf("app.rtc_info =", start);
+  assert.ok(start >= 0 && end > start);
+  assert.ok(!application.slice(start, end).includes("setAllocLimit("));
+  assert.ok(!header.includes("HOST_FREE_TARGET"));
+});
+
+test("ESP32-C3 enables the optional display by default and probes before allocation", () => {
+  const component = readFileSync(resolve(root, "component.mk"), "utf8");
+  const driver = readFileSync(resolve(root, "app/statusDisplay.cpp"), "utf8");
+  assert.match(component, /ifeq \(\$\(SMING_SOC\),esp32c3\)\s+STATUS_DISPLAY \?= 1/);
+  const probe = driver.indexOf("Wire.endTransmission()");
+  const allocate = driver.indexOf("new StatusDisplay");
+  const reject = driver.indexOf("return nullptr", probe);
+  assert.ok(probe >= 0 && reject > probe && allocate > reject);
+});

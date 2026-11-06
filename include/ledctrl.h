@@ -26,6 +26,8 @@
 #include "mqtt.h"
 #include "stepsync.h"
 #include "jsonprocessor.h"
+#include <memory>
+#include <vector>
 
 #define APP_COLOR_FILE ".color"
 
@@ -40,6 +42,23 @@ struct PinConfig {
     bool isValid;
 };
 
+struct ConfiguredInput {
+    String id;
+    int gpio = -1;
+    bool activeLow = true;
+    bool internalPullUp = false;
+    bool internalPullDown = false;
+    uint16_t debounceMs = 50;
+};
+
+struct HardwareInputs {
+    std::vector<ConfiguredInput> buttons;
+    ConfiguredInput clear;
+    bool i2cEnabled = false;
+    int sda = -1;
+    int scl = -1;
+    uint32_t frequency = 100000;
+};
 
 class APPLedCtrl: public RGBWWLed {
 
@@ -47,6 +66,8 @@ public:
     virtual ~APPLedCtrl();
 
     void init();
+    bool reload(String& error);
+    bool resolveInputs(HardwareInputs& inputs, String& error) const;
     void setup();
 
     void start();
@@ -86,6 +107,12 @@ public:
     };
     void reconfigure();
 private:
+    void requestReload();
+    String configurationSignature() const;
+    bool _reloadQueued = false;
+    bool _watchingConfiguration = false;
+    std::shared_ptr<uint8_t> _reloadLifetime = std::make_shared<uint8_t>(0);
+    String _activeConfiguration;
     static PinConfig parsePinConfigString(String& pinStr);
     static PinConfig parsePinConfigString(const String& pinStr);
     static void updateLedCb(void* pTimerArg);

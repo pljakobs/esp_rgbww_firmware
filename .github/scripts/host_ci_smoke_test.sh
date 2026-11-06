@@ -412,7 +412,7 @@ run_smoke_phase() {
   if [[ "$PYTEST_MD_AVAILABLE" == "1" ]]; then
     SMOKE_PYTEST_ARGS+=(--md "$SMOKE_TEST_REPORT")
   fi
-  "${SMOKE_PYTEST_ARGS[@]}" 2>&1 | tee "$SMOKE_TEST_OUTPUT"
+  HOST_SMOKE_APP_LOG="$APP_LOG_SMOKE" "${SMOKE_PYTEST_ARGS[@]}" 2>&1 | tee "$SMOKE_TEST_OUTPUT"
   SMOKE_PYTEST_EXIT=${PIPESTATUS[0]}
   set -e
 

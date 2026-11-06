@@ -51,6 +51,7 @@ public:
 
     void init();
     void initButtons();
+    bool configureHardwareInputs(String& error);
 
     void startServices();
     void startNetworkServices();
@@ -157,6 +158,23 @@ public:
     }
 
 private:
+    void requestInputsReload();
+    String inputsSignature() const;
+    void pollButtons();
+    struct InputState {
+        bool sample = false;
+        bool pressed = false;
+        uint32_t changedAt = 0;
+    };
+    HardwareInputs _hardwareInputs;
+    std::vector<InputState> _buttonStates;
+    String _inputsSignature;
+    bool _inputsReloadQueued = false;
+    bool _watchingInputs = false;
+    std::shared_ptr<uint8_t> _inputsLifetime = std::make_shared<uint8_t>(0);
+    Timer _buttonPollTimer;
+    unsigned _clearHoldCounter = 0;
+    bool _clearActiveLow = true;
     void loadbootinfo();
     void listFiles();
     void logRestart();
@@ -190,10 +208,7 @@ private:
     size_t _HeapLowErr10min   = 0;
     size_t _minMaxFreeBlock   = 0x80000;
 
-    std::array<int, 17> _lastToggles;
-
-    int8_t clearPin  = 16; //  GPIO16 is the default for the old mrpj boards, newer boards will load from pinconfig 
-    int8_t _clearPin = -1;
+    int _clearPin = -1;
 
     bool _reboot_reported=false;
 };

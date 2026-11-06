@@ -1,7 +1,15 @@
 COMPONENT_SEARCH_DIRS := $(PROJECT_DIR)/Components
 COMPONENT_DEPENDS += MDNS RGBWWLed LittleFS ConfigDB ArduinoJson6 OtaNetwork 
 
+ifeq ($(SMING_ARCH),Esp32)
+ifeq ($(SMING_SOC),esp32c3)
+STATUS_DISPLAY ?= 1
+else
 STATUS_DISPLAY ?= 0
+endif
+else
+STATUS_DISPLAY ?= 0
+endif
 ifeq ($(STATUS_DISPLAY),1)
 ifeq ($(SMING_ARCH),Host)
 $(error STATUS_DISPLAY requires physical hardware)
