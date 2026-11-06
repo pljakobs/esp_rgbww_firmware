@@ -244,10 +244,6 @@
         "colortemp": {
           "$ref": "#/definitions/light_color_colortemp"
         },
-        "color_mode": {
-          "type": "integer",
-          "default": 0
-        },
         "hsv": {
           "$ref": "#/definitions/light_color_hsv"
         },
