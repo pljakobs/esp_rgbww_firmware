@@ -40,18 +40,18 @@ def post_config_update(smoke_config: SmokeConfig, update: dict[str, Any]) -> Non
     reason="creates and removes virtual lights on the Host emulator only",
 )
 @pytest.mark.parametrize(
-    ("light_type", "outputs"),
+    ("light_type", "pins"),
     [
-        ("dimmer", {"brightness": "L1"}),
-        ("tunable_white", {"warmwhite": "L1", "coldwhite": "L2"}),
-        ("rgb", {"red": "L1", "green": "L2", "blue": "L3"}),
-        ("rgbw", {"red": "L1", "green": "L2", "blue": "L3", "warmwhite": "L4"}),
-        ("rgbw", {"red": "L1", "green": "L2", "blue": "L3", "coldwhite": "L4"}),
-        ("rgbww", {"red": "L1", "green": "L2", "blue": "L3", "warmwhite": "L4", "coldwhite": "L5"}),
+        ("SINGLE", ["L1"]),
+        ("WWCW", ["L1", "L2"]),
+        ("RGB", ["L1", "L2", "L3"]),
+        ("RGBWW", ["L1", "L2", "L3", "L4"]),
+        ("RGBCW", ["L1", "L2", "L3", "L4"]),
+        ("RGBWWCW", ["L1", "L2", "L3", "L4", "L5"]),
     ],
 )
 def test_virtual_light_create_delete_reloads_runtime(
-    smoke_config: SmokeConfig, api_secured: bool, light_type: str, outputs: dict[str, str]
+    smoke_config: SmokeConfig, api_secured: bool, light_type: str, pins: list[str]
 ) -> None:
     if api_secured:
         pytest.skip("configuration mutation requires an unsecured Host instance")
@@ -94,7 +94,7 @@ def test_virtual_light_create_delete_reloads_runtime(
             "buttons": [],
             "buses": [],
             "lights": [{"id": "host-create-delete", "index": 23, "name": "Host test", "is_default": True,
-                        "type": light_type, "outputs": outputs}],
+                        "type": light_type, "pins": pins}],
         }
         offset = app_log.stat().st_size
         post_config_update(smoke_config, {"hardware": {"configuration": configuration}})
@@ -108,8 +108,7 @@ def test_virtual_light_create_delete_reloads_runtime(
         assert stored[0]["index"] == 23
         assert stored[0]["is_default"] is True
         assert stored[0]["type"] == light_type
-        for role, pin in outputs.items():
-            assert stored[0]["outputs"][role] == pin
+        assert stored[0]["pins"] == pins
 
         offset = app_log.stat().st_size
         post_config_update(smoke_config, {"hardware": {"configuration": {"lights": []}}})

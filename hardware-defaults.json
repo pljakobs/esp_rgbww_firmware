@@ -1,236 +1,145 @@
 {
-  "schema_version": 2,
-  "version": 1,
+  "schema_version": 3,
+  "version": 2,
   "available_pins": [
     {
       "soc": "esp32",
       "pins": [
         {
           "gpio": 0,
-          "input": true,
-          "output": true,
-          "pwm": true,
-          "strapping": true,
-          "pull_up": true,
-          "pull_down": true
+          "capability": 63
         },
         {
           "gpio": 1,
-          "input": true,
-          "output": true,
-          "pwm": true,
-          "reserved": true
+          "capability": 71
         },
         {
           "gpio": 2,
-          "input": true,
-          "output": true,
-          "pwm": true,
-          "strapping": true,
-          "pull_up": true,
-          "pull_down": true
+          "capability": 63
         },
         {
           "gpio": 3,
-          "input": true,
-          "output": true,
-          "pwm": true,
-          "reserved": true
+          "capability": 71
         },
         {
           "gpio": 4,
-          "input": true,
-          "output": true,
-          "pwm": true,
-          "pull_up": true,
-          "pull_down": true
+          "capability": 55
         },
         {
           "gpio": 5,
-          "input": true,
-          "output": true,
-          "pwm": true,
-          "strapping": true,
-          "pull_up": true,
-          "pull_down": true
+          "capability": 63
         },
         {
           "gpio": 6,
-          "reserved": true
+          "capability": 64
         },
         {
           "gpio": 7,
-          "reserved": true
+          "capability": 64
         },
         {
           "gpio": 8,
-          "reserved": true
+          "capability": 64
         },
         {
           "gpio": 9,
-          "reserved": true
+          "capability": 64
         },
         {
           "gpio": 10,
-          "reserved": true
+          "capability": 64
         },
         {
           "gpio": 11,
-          "reserved": true
+          "capability": 64
         },
         {
           "gpio": 12,
-          "input": true,
-          "output": true,
-          "pwm": true,
-          "strapping": true,
-          "pull_up": true,
-          "pull_down": true
+          "capability": 63
         },
         {
           "gpio": 13,
-          "input": true,
-          "output": true,
-          "pwm": true,
-          "pull_up": true,
-          "pull_down": true
+          "capability": 55
         },
         {
           "gpio": 14,
-          "input": true,
-          "output": true,
-          "pwm": true,
-          "pull_up": true,
-          "pull_down": true
+          "capability": 55
         },
         {
           "gpio": 15,
-          "input": true,
-          "output": true,
-          "pwm": true,
-          "strapping": true,
-          "pull_up": true,
-          "pull_down": true
+          "capability": 63
         },
         {
           "gpio": 16,
-          "input": true,
-          "output": true,
-          "pwm": true,
-          "pull_up": true,
-          "pull_down": true
+          "capability": 55
         },
         {
           "gpio": 17,
-          "input": true,
-          "output": true,
-          "pwm": true,
-          "pull_up": true,
-          "pull_down": true
+          "capability": 55
         },
         {
           "gpio": 18,
-          "input": true,
-          "output": true,
-          "pwm": true,
-          "pull_up": true,
-          "pull_down": true
+          "capability": 55
         },
         {
           "gpio": 19,
-          "input": true,
-          "output": true,
-          "pwm": true,
-          "pull_up": true,
-          "pull_down": true
+          "capability": 55
         },
         {
           "gpio": 21,
-          "input": true,
-          "output": true,
-          "pwm": true,
-          "pull_up": true,
-          "pull_down": true
+          "capability": 55
         },
         {
           "gpio": 22,
-          "input": true,
-          "output": true,
-          "pwm": true,
-          "pull_up": true,
-          "pull_down": true
+          "capability": 55
         },
         {
           "gpio": 23,
-          "input": true,
-          "output": true,
-          "pwm": true,
-          "pull_up": true,
-          "pull_down": true
+          "capability": 55
         },
         {
           "gpio": 25,
-          "input": true,
-          "output": true,
-          "pwm": true,
-          "pull_up": true,
-          "pull_down": true
+          "capability": 55
         },
         {
           "gpio": 26,
-          "input": true,
-          "output": true,
-          "pwm": true,
-          "pull_up": true,
-          "pull_down": true
+          "capability": 55
         },
         {
           "gpio": 27,
-          "input": true,
-          "output": true,
-          "pwm": true,
-          "pull_up": true,
-          "pull_down": true
+          "capability": 55
         },
         {
           "gpio": 32,
-          "input": true,
-          "output": true,
-          "pwm": true,
-          "pull_up": true,
-          "pull_down": true
+          "capability": 55
         },
         {
           "gpio": 33,
-          "input": true,
-          "output": true,
-          "pwm": true,
-          "pull_up": true,
-          "pull_down": true
+          "capability": 55
         },
         {
           "gpio": 34,
-          "input": true
+          "capability": 1
         },
         {
           "gpio": 35,
-          "input": true
+          "capability": 1
         },
         {
           "gpio": 36,
-          "input": true
+          "capability": 1
         },
         {
           "gpio": 37,
-          "input": true
+          "capability": 1
         },
         {
           "gpio": 38,
-          "input": true
+          "capability": 1
         },
         {
           "gpio": 39,
-          "input": true
+          "capability": 1
         }
       ]
     },
@@ -239,150 +148,91 @@
       "pins": [
         {
           "gpio": 0,
-          "input": true,
-          "output": true,
-          "pwm": true,
-          "pull_up": true,
-          "pull_down": true
+          "capability": 55
         },
         {
           "gpio": 1,
-          "input": true,
-          "output": true,
-          "pwm": true,
-          "pull_up": true,
-          "pull_down": true
+          "capability": 55
         },
         {
           "gpio": 2,
-          "input": true,
-          "output": true,
-          "pwm": true,
-          "strapping": true,
-          "pull_up": true,
-          "pull_down": true
+          "capability": 63
         },
         {
           "gpio": 3,
-          "input": true,
-          "output": true,
-          "pwm": true,
-          "pull_up": true,
-          "pull_down": true
+          "capability": 55
         },
         {
           "gpio": 4,
-          "input": true,
-          "output": true,
-          "pwm": true,
-          "pull_up": true,
-          "pull_down": true
+          "capability": 55
         },
         {
           "gpio": 5,
-          "input": true,
-          "output": true,
-          "pwm": true,
-          "pull_up": true,
-          "pull_down": true
+          "capability": 55
         },
         {
           "gpio": 6,
-          "input": true,
-          "output": true,
-          "pwm": true,
-          "pull_up": true,
-          "pull_down": true
+          "capability": 55
         },
         {
           "gpio": 7,
-          "input": true,
-          "output": true,
-          "pwm": true,
-          "pull_up": true,
-          "pull_down": true
+          "capability": 55
         },
         {
           "gpio": 8,
-          "input": true,
-          "output": true,
-          "pwm": true,
-          "strapping": true,
-          "pull_up": true,
-          "pull_down": true
+          "capability": 63
         },
         {
           "gpio": 9,
-          "input": true,
-          "output": true,
-          "pwm": true,
-          "strapping": true,
-          "pull_up": true,
-          "pull_down": true
+          "capability": 63
         },
         {
           "gpio": 10,
-          "input": true,
-          "output": true,
-          "pwm": true,
-          "pull_up": true,
-          "pull_down": true
+          "capability": 55
         },
         {
           "gpio": 11,
-          "reserved": true
+          "capability": 64
         },
         {
           "gpio": 12,
-          "reserved": true
+          "capability": 64
         },
         {
           "gpio": 13,
-          "reserved": true
+          "capability": 64
         },
         {
           "gpio": 14,
-          "reserved": true
+          "capability": 64
         },
         {
           "gpio": 15,
-          "reserved": true
+          "capability": 64
         },
         {
           "gpio": 16,
-          "reserved": true
+          "capability": 64
         },
         {
           "gpio": 17,
-          "reserved": true
+          "capability": 64
         },
         {
           "gpio": 18,
-          "input": true,
-          "output": true,
-          "pwm": true,
-          "reserved": true
+          "capability": 71
         },
         {
           "gpio": 19,
-          "input": true,
-          "output": true,
-          "pwm": true,
-          "reserved": true
+          "capability": 71
         },
         {
           "gpio": 20,
-          "input": true,
-          "output": true,
-          "pwm": true,
-          "reserved": true
+          "capability": 71
         },
         {
           "gpio": 21,
-          "input": true,
-          "output": true,
-          "pwm": true,
-          "reserved": true
+          "capability": 71
         }
       ]
     }
@@ -902,14 +752,14 @@
         {
           "id": "light0",
           "name": "Main",
-          "type": "rgbww",
-          "outputs": {
-            "red": "L5",
-            "green": "L4",
-            "blue": "L3",
-            "warmwhite": "L2",
-            "coldwhite": "L1"
-          }
+          "type": "RGBWWCW",
+          "pins": [
+            "L5",
+            "L4",
+            "L3",
+            "L2",
+            "L1"
+          ]
         }
       ],
       "system": {
@@ -935,14 +785,14 @@
         {
           "id": "light0",
           "name": "Main",
-          "type": "rgbww",
-          "outputs": {
-            "red": "L1",
-            "green": "L2",
-            "blue": "L3",
-            "warmwhite": "L4",
-            "coldwhite": "L5"
-          }
+          "type": "RGBWWCW",
+          "pins": [
+            "L1",
+            "L2",
+            "L3",
+            "L4",
+            "L5"
+          ]
         }
       ],
       "system": {
@@ -968,14 +818,14 @@
         {
           "id": "light0",
           "name": "Main",
-          "type": "rgbww",
-          "outputs": {
-            "red": "L5",
-            "green": "L4",
-            "blue": "L3",
-            "warmwhite": "L2",
-            "coldwhite": "L1"
-          }
+          "type": "RGBWWCW",
+          "pins": [
+            "L5",
+            "L4",
+            "L3",
+            "L2",
+            "L1"
+          ]
         }
       ],
       "system": {

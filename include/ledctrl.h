@@ -31,6 +31,16 @@
 
 #define APP_COLOR_FILE ".color"
 
+enum PinCapability : uint8_t {
+    CAPA_INPUT = 1u << 0,
+    CAPA_OUTPUT = 1u << 1,
+    CAPA_PWM = 1u << 2,
+    CAPA_STRAPPING = 1u << 3,
+    CAPA_PULL_UP = 1u << 4,
+    CAPA_PULL_DOWN = 1u << 5,
+    CAPA_RESERVED = 1u << 6,
+};
+
 struct PinConfig {
     PinConfig() : red(13), green(12), blue(14), warmwhite(5), coldwhite(4) {}
 

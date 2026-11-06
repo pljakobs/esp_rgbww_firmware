@@ -20,14 +20,6 @@
         "colortemp": {
           "$ref": "#/$defs/light_color_colortemp"
         },
-        "color_mode": {
-          "type": "integer",
-          "default": 0,
-          "alias": [
-            "outputmode",
-            "colormode"
-          ]
-        },
         "hsv": {
           "$ref": "#/$defs/light_color_hsv"
         },
