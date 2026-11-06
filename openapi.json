@@ -9,6 +9,46 @@
   "servers": [{ "url": "http://{controller}", "variables": { "controller": { "default": "lightinator.local" } } }],
   "security": [{ "basicAuth": [] }],
   "paths": {
+    "/catalog": {
+      "get": {
+        "operationId": "getHardwareCatalog",
+        "summary": "Get board and template catalog",
+        "description": "Returns the complete board/template catalog as gzip-compressed JSON. The HTTP client should transparently decode Content-Encoding.",
+        "responses": {
+          "200": {
+            "description": "Board profiles and templates",
+            "headers": {
+              "Content-Encoding": {
+                "description": "The response body is gzip-compressed.",
+                "schema": { "type": "string", "enum": ["gzip"] }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["schema_version", "version", "boards", "templates"],
+                  "properties": {
+                    "schema_version": { "type": "integer" },
+                    "version": { "type": "integer" },
+                    "boards": {
+                      "type": "array",
+                      "items": { "$ref": "schema/app-config.schema.json#/definitions/board_profile" }
+                    },
+                    "templates": {
+                      "type": "array",
+                      "items": { "$ref": "schema/app-config.schema.json#/definitions/hardware_template" }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/Busy" }
+        }
+      }
+    },
     "/config": {
       "get": {
         "operationId": "getConfig",

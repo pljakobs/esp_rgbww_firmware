@@ -549,8 +549,8 @@
       "properties": {
         "schema_version": {
           "type": "integer",
-          "minimum": 3,
-          "default": 3
+          "minimum": 4,
+          "default": 4
         },
         "version": {
           "type": "integer",
@@ -853,7 +853,45 @@
           "minItems": 1,
           "maxItems": 5,
           "uniqueItems": true,
-          "description": "Implemented pin IDs in type order: RGBWWCW=[R,G,B,WW,CW], RGBWW=[R,G,B,WW], RGBCW=[R,G,B,CW], RGB=[R,G,B], WWCW=[WW,CW], WW=[WW], CW=[CW], SINGLE=[single output]. Exact count is validated by firmware.",
+          "description": "Physical GPIO numbers in type order: RGBWWCW=[R,G,B,WW,CW], RGBWW=[R,G,B,WW], RGBCW=[R,G,B,CW], RGB=[R,G,B], WWCW=[WW,CW], WW=[WW], CW=[CW], SINGLE=[single output].",
+          "items": {
+            "$ref": "defs/$defs/pin"
+          }
+        },
+        "color": {
+          "$ref": "defs/$defs/color_settings"
+        }
+      }
+    },
+    "template_light_configuration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "type",
+        "pins"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "type": {
+          "type": "string",
+          "pattern": "^(RGBWWCW|RGBWW|RGBCW|RGB|WWCW|WW|CW|SINGLE)$"
+        },
+        "pins": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 5,
+          "uniqueItems": true,
+          "description": "Board pin IDs in the channel order defined by type; frontend resolves IDs to GPIO numbers before activation.",
           "items": {
             "type": "string",
             "minLength": 1,
@@ -870,10 +908,25 @@
       "additionalProperties": false,
       "properties": {
         "clear_config_pin": {
-          "type": "string",
-          "maxLength": 32,
-          "default": "",
-          "description": "Implemented input pin ID; empty disables configuration clear. Never defaults to a board button."
+          "$ref": "defs/$defs/pin",
+          "default": 0,
+          "description": "Physical GPIO used for configuration clear when enabled."
+        },
+        "clear_config_enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "clear_config_active_low": {
+          "type": "boolean",
+          "default": true
+        },
+        "clear_config_external_pull_up": {
+          "type": "boolean",
+          "default": false
+        },
+        "clear_config_external_pull_down": {
+          "type": "boolean",
+          "default": false
         }
       }
     },
@@ -891,9 +944,19 @@
           "maxLength": 64
         },
         "pin": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 32
+          "$ref": "defs/$defs/pin"
+        },
+        "active_low": {
+          "type": "boolean",
+          "default": true
+        },
+        "external_pull_up": {
+          "type": "boolean",
+          "default": false
+        },
+        "external_pull_down": {
+          "type": "boolean",
+          "default": false
         },
         "enabled": {
           "type": "boolean",
@@ -927,14 +990,10 @@
           "default": "i2c"
         },
         "sda": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 32
+          "$ref": "defs/$defs/pin"
         },
         "scl": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 32
+          "$ref": "defs/$defs/pin"
         },
         "enabled": {
           "type": "boolean",
@@ -990,7 +1049,7 @@
           "minItems": 1,
           "maxItems": 16,
           "items": {
-            "$ref": "#/$defs/light_configuration"
+            "$ref": "#/$defs/template_light_configuration"
           }
         },
         "system": {
@@ -1025,6 +1084,11 @@
           "type": "string",
           "maxLength": 64,
           "default": ""
+        },
+        "soc": {
+          "type": "string",
+          "pattern": "^(esp32|esp32c3)$",
+          "default": "esp32c3"
         },
         "board_revision": {
           "type": "integer",

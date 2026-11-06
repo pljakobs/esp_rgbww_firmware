@@ -269,6 +269,7 @@ void ApplicationWebserver::init()
 	paths.set(F("/api/docs"), HttpPathDelegate(&ApplicationWebserver::onApiDocs, this));
 	paths.set(F("/api/docs/"), HttpPathDelegate(&ApplicationWebserver::onApiDocs, this));
 	paths.set(F("/api/openapi.json"), HttpPathDelegate(&ApplicationWebserver::onOpenApi, this));
+	paths.set(F("/catalog"), HttpPathDelegate(&ApplicationWebserver::onCatalog, this));
 	paths.set(F("/info"), HttpPathDelegate(&ApplicationWebserver::onInfo, this));
 	paths.set(F("/color"), HttpPathDelegate(&ApplicationWebserver::onColor, this));
 	paths.set(F("/networks"), HttpPathDelegate(&ApplicationWebserver::onNetworks, this));
@@ -1516,6 +1517,21 @@ void ApplicationWebserver::onOpenApi(HttpRequest& request, HttpResponse& respons
 	response.setHeader(F("Cache-Control"), F("no-cache"));
 	response.headers[HTTP_HEADER_CONTENT_ENCODING] = F("gzip");
 	response.sendDataStream(new FSTR::Stream(api_openapi), MIME_JSON);
+}
+
+void ApplicationWebserver::onCatalog(HttpRequest& request, HttpResponse& response)
+{
+	if(!preflightRequest(request, response, {HttpMethod::GET, HttpMethod::HEAD})) {
+		return;
+	}
+	response.setHeader(F("Cache-Control"), F("no-cache"));
+	if(fileExist(F("hardware-catalog.json.gz"))) {
+		response.sendFile(F("hardware-catalog.json"), true);
+		return;
+	}
+	response.headers[HTTP_HEADER_CONTENT_ENCODING] = F("gzip");
+	auto stream = app.hardwareCatalogSeedStream();
+	response.sendDataStream(stream.release(), MIME_JSON);
 }
 
 void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response){

@@ -142,6 +142,7 @@ private:
     void onConfig(HttpRequest &request, HttpResponse &response);
     void onApiDocs(HttpRequest &request, HttpResponse &response);
     void onOpenApi(HttpRequest &request, HttpResponse &response);
+    void onCatalog(HttpRequest &request, HttpResponse &response);
     void onInfo(HttpRequest &request, HttpResponse &response);
     void onColor(HttpRequest &request, HttpResponse &response);
     void onNetworks(HttpRequest &request, HttpResponse &response);

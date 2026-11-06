@@ -28,6 +28,7 @@
 #include <Storage/SysMem.h>
 #include <Storage/ProgMem.h>
 #include <Storage/Debug.h>
+#include <Data/Stream/FileStream.h>
 #include <JSON/StreamingParser.h>
 #include <VersionListener.h>
 #include <FlashString/Stream.hpp>
@@ -63,7 +64,9 @@ extern "C" {
 #define PART0 "factory"
 #endif
 
-IMPORT_FSTR_LOCAL(hardware_defaults, PROJECT_DIR "/hardware-defaults.json");
+IMPORT_FSTR_LOCAL(soc_pins_defaults, PROJECT_DIR "/soc-pins.json");
+IMPORT_FSTR_LOCAL(hardware_catalog, PROJECT_DIR "/hardware-catalog.json.gz");
+IMPORT_FSTR_LOCAL(hardware_catalog_version, PROJECT_DIR "/hardware-catalog.version");
 
 #if defined(ARCH_ESP8266) && !defined(SMING_RELEASE)
 #include <Platform/OsMessageInterceptor.h>
@@ -583,6 +586,66 @@ bool Application::checkHeap( uint32_t minHeap)
 
 namespace
 {
+bool copyFstrToFile(FSTR::Stream& source, const String& destinationPath)
+{
+	File destination;
+	if(!destination.open(destinationPath, File::CreateNewAlways | File::WriteOnly)) {
+		return false;
+	}
+	char buffer[256];
+	bool success = true;
+	while(source.available()) {
+		const int count = source.readBytes(buffer, sizeof(buffer));
+		if(count <= 0 || destination.write(buffer, count) != size_t(count)) {
+			success = false;
+			break;
+		}
+	}
+	destination.close();
+	return success;
+}
+
+uint32_t getCatalogSeedVersion()
+{
+	FSTR::Stream versionStream(hardware_catalog_version);
+	char version[16]{};
+	versionStream.readBytes(version, sizeof(version) - 1);
+	return String(version).toInt();
+}
+
+bool isGzipFile(const String& path)
+{
+	FileStream file;
+	if(!file.open(path, File::ReadOnly)) {
+		return false;
+	}
+	uint8_t header[2]{};
+	const bool valid = file.readBytes(reinterpret_cast<char*>(header), sizeof(header)) == sizeof(header) &&
+		header[0] == 0x1f && header[1] == 0x8b;
+	file.close();
+	return valid;
+}
+
+bool seedHardwareCatalog()
+{
+	static const String catalogPath = F("hardware-catalog.json.gz");
+	static const String versionPath = F("hardware-catalog.version");
+	const uint32_t seedVersion = getCatalogSeedVersion();
+	const String installedVersionText = fileGetContent(versionPath);
+	const uint32_t installedVersion = installedVersionText.toInt();
+	if(seedVersion == 0) {
+		return false;
+	}
+	if(fileExist(catalogPath) && installedVersion >= seedVersion && isGzipFile(catalogPath)) {
+		return true;
+	}
+	FSTR::Stream catalogStream(hardware_catalog);
+	if(!copyFstrToFile(catalogStream, catalogPath)) {
+		return false;
+	}
+	return fileSetContent(versionPath, String(seedVersion)) >= 0;
+}
+
 /*
  * webapp used to live in the root app-config store; it is now its own store.
  * ConfigDB resets a whole store to defaults on any unknown key, so the old
@@ -711,26 +774,41 @@ cdebug_i(APPLICATION, "Application::init: " ANSI_COLOR_BLUE "running partition "
 	migrateWebappStore();
 	cfg =  std::make_unique<AppConfig>(configDB_PATH);
 	data = std::make_unique<AppData>(dataDB_PATH);
+	socPins = std::make_unique<Pins>(pinsDB_PATH);
 	api = std::make_unique<Api>();
 	controllers = std::make_unique<Controllers>();
 	(void)getFreeHeapSize(); // sample heap after ConfigDB + Controllers construction
 
 	{
-		AppConfig::Hardware hardware(*cfg);
-		FSTR::Stream versionStream(hardware_defaults);
+		Pins::Root pins(*socPins);
+		FSTR::Stream versionStream(soc_pins_defaults);
 		const uint32_t defaultsVersion = getVersion(versionStream);
-		const uint32_t currentVersion = hardware.getVersion();
+		const uint32_t currentVersion = pins.getVersion();
 		if(defaultsVersion != uint32_t(-1) && defaultsVersion > currentVersion) {
-			if(auto hardwareUpdate = hardware.update()) {
-				cdebug_i(APPLICATION, "Importing hardware catalogue revision %u (stored %u)", defaultsVersion,
+			if(auto pinsUpdate = pins.update()) {
+				cdebug_i(APPLICATION, "Importing SoC pin capability revision %u (stored %u)", defaultsVersion,
 						 currentVersion);
-				FSTR::Stream defaultsStream(hardware_defaults);
-				const auto status = hardwareUpdate.importFromStream(ConfigDB::Json::format, defaultsStream);
+				FSTR::Stream defaultsStream(soc_pins_defaults);
+				const auto status = pinsUpdate.importFromStream(ConfigDB::Json::format, defaultsStream);
 				if(!status) {
-					cdebug_e(APPLICATION, "Hardware catalogue import failed: %s", status.toString().c_str());
+					cdebug_e(APPLICATION, "SoC pin capability import failed: %s", status.toString().c_str());
 				}
 			}
 		}
+	}
+	{
+		AppConfig::Hardware hardware(*cfg);
+		if(hardware.availablePins.getItemCount() || hardware.boards.getItemCount() || hardware.templates.getItemCount()) {
+			if(auto hardwareUpdate = hardware.update()) {
+				hardwareUpdate.availablePins.clear();
+				hardwareUpdate.boards.clear();
+				hardwareUpdate.templates.clear();
+				hardwareUpdate.setVersion(0);
+			}
+		}
+	}
+	if(!seedHardwareCatalog()) {
+		cdebug_w(APPLICATION, "Could not seed the hardware catalog working copy");
 	}
 	{
 		String error;
@@ -774,7 +852,7 @@ cdebug_i(APPLICATION, "Application::init: " ANSI_COLOR_BLUE "running partition "
 			}
 
 		} else {
-			cdebug_i(APPLICATION, "Application::init: " ANSI_COLOR_BLUE "ConfigDB already initialized. retaining hardware catalogue" ANSI_COLOR_RESET);
+			cdebug_i(APPLICATION, "Application::init: " ANSI_COLOR_BLUE "ConfigDB already initialized. retaining active hardware configuration" ANSI_COLOR_RESET);
 			{
 			if (auto generalUpdate= general.update()){
 				generalUpdate.supportedColorModels.loadArrayDefaults();
@@ -995,6 +1073,11 @@ bool Application::configureHardwareInputs(String& error)
 		unsigned(_hardwareInputs.buttons.size()), _clearPin, _hardwareInputs.i2cEnabled ? "enabled" : "disabled",
 		_hardwareInputs.sda, _hardwareInputs.scl, unsigned(_hardwareInputs.frequency));
 	return true;
+}
+
+std::unique_ptr<FSTR::Stream> Application::hardwareCatalogSeedStream() const
+{
+	return std::make_unique<FSTR::Stream>(hardware_catalog);
 }
 
 void Application::pollButtons()

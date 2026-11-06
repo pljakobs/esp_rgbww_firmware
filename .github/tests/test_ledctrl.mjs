@@ -86,14 +86,6 @@ int main()
     using std::vector<Item>::vector;
     unsigned getItemCount() const { return this->size(); }
   };
-  struct Pin {
-    String id;
-    int gpio = 0;
-    std::vector<String> allowedFunctions{"light.pwm"};
-    std::vector<String> restrictions;
-    String getId() const { return id; }
-    int getGpio() const { return gpio; }
-  };
   struct Capability {
     int gpio = 0;
     uint8_t capability = CAPA_INPUT | CAPA_OUTPUT | CAPA_PWM | CAPA_PULL_UP | CAPA_PULL_DOWN;
@@ -102,90 +94,73 @@ int main()
   };
   struct Available {
     Items<Capability> pins;
-    String getSoc() const { return "esp32"; }
-  };
-  struct Board {
-    Items<Pin> implementedPins;
-    std::vector<int> reservedGpios;
-    String getId() const { return "board"; }
-    unsigned getRevision() const { return 1; }
-    String getSoc() const { return "esp32"; }
+    String soc = "esp32";
+    String getSoc() const { return soc; }
   };
   struct Light {
     String id;
     String type;
-    Items<String> pins;
+    Items<int> pins;
     String getId() const { return id; }
     String getName() const { return id; }
     String getType() const { return type; }
   };
-  struct System {
-    String pin;
-    String getClearConfigPin() const { return pin; }
-  };
-  struct Button { String getPin() const { return "L1"; } };
+  struct System { bool getClearConfigEnabled() const { return false; } int getClearConfigPin() const { return 0; } };
+  struct Button { int getPin() const { return 0; } };
   struct Bus {
-    String getSda() const { return "SDA"; }
-    String getScl() const { return "SCL"; }
+    int getSda() const { return 0; }
+    int getScl() const { return 1; }
   };
   struct Configuration {
     Items<Light> lights;
     Items<Button> buttons;
     Items<Bus> buses;
     System system;
-    String getBoardId() const { return "board"; }
-    unsigned getBoardRevision() const { return 1; }
+    String soc = "esp32";
+    String getSoc() const { return soc; }
   };
   struct Hardware {
     Configuration configuration;
-    Items<Board> boards;
+  };
+  struct PinDatabase {
     Items<Available> availablePins;
   };
   ${text.slice(begin, end)}
   int main()
   {
     Hardware hardware;
-    Board board;
+    PinDatabase pinDatabase;
     Available available;
     for(int index = 0; index < 5; ++index) {
-      board.implementedPins.push_back({"L" + std::to_string(index + 1), index, {"light.pwm"}, {}});
       available.pins.push_back({index});
     }
-    hardware.boards.push_back(board);
-    hardware.availablePins.push_back(available);
-    hardware.configuration.lights.push_back({"rgb0", "RGB", {"L1", "L2", "L3"}});
-    hardware.configuration.lights.push_back({"white0", "WWCW", {"L4", "L5"}});
+    pinDatabase.availablePins.push_back(available);
+    hardware.configuration.lights.push_back({"rgb0", "RGB", {0, 1, 2}});
+    hardware.configuration.lights.push_back({"white0", "WWCW", {3, 4}});
     std::vector<ResolvedLight> resolved;
     String error;
-    assert(resolveConfiguredLights(hardware, "esp32", 5, resolved, error));
+    assert(resolveConfiguredLights(hardware, pinDatabase, "esp32", 5, resolved, error));
     assert(resolved.size() == 2 && resolved[0].type == LightType::RGB && resolved[0].pins[0] == 0);
     assert(resolved[1].type == LightType::WWCW && resolved[1].pins[3] == 3 && resolved[1].pins[4] == 4);
-    assert(!resolveConfiguredLights(hardware, "esp32", 4, resolved, error));
+    assert(!resolveConfiguredLights(hardware, pinDatabase, "esp32", 4, resolved, error));
     auto invalid = hardware;
-    invalid.configuration.lights[1].pins[0] = "L1";
-    assert(!resolveConfiguredLights(invalid, "esp32", 5, resolved, error));
+    invalid.configuration.lights[1].pins[0] = 0;
+    assert(!resolveConfiguredLights(invalid, pinDatabase, "esp32", 5, resolved, error));
     invalid = hardware;
     invalid.configuration.lights[1].id = "rgb0";
-    assert(!resolveConfiguredLights(invalid, "esp32", 5, resolved, error));
+    assert(!resolveConfiguredLights(invalid, pinDatabase, "esp32", 5, resolved, error));
+    auto invalidPins = pinDatabase;
+    invalidPins.availablePins[0].pins[0].capability &= ~CAPA_PWM;
+    assert(!resolveConfiguredLights(hardware, invalidPins, "esp32", 5, resolved, error));
+    invalidPins = pinDatabase;
+    invalidPins.availablePins[0].pins[0].capability |= CAPA_RESERVED;
+    assert(!resolveConfiguredLights(hardware, invalidPins, "esp32", 5, resolved, error));
     invalid = hardware;
-    invalid.availablePins[0].pins[0].capability &= ~CAPA_PWM;
-    assert(!resolveConfiguredLights(invalid, "esp32", 5, resolved, error));
-    invalid = hardware;
-    invalid.availablePins[0].pins[0].capability |= CAPA_RESERVED;
-    assert(!resolveConfiguredLights(invalid, "esp32", 5, resolved, error));
-    invalid = hardware;
-    invalid.boards[0].reservedGpios.push_back(0);
-    assert(!resolveConfiguredLights(invalid, "esp32", 5, resolved, error));
-    invalid = hardware;
-    invalid.configuration.lights[0].pins[0] = "unknown";
-    assert(!resolveConfiguredLights(invalid, "esp32", 5, resolved, error));
-    invalid = hardware;
-    invalid.boards[0].implementedPins[0].allowedFunctions.push_back("system.clear_config");
-    invalid.configuration.system.pin = "L1";
-    assert(!resolveConfiguredLights(invalid, "esp32", 5, resolved, error));
-    assert(!resolveConfiguredLights(hardware, "esp32c3", 5, resolved, error));
+    invalid.configuration.lights[0].pins[0] = 99;
+    assert(!resolveConfiguredLights(invalid, pinDatabase, "esp32", 5, resolved, error));
+    assert(!resolveConfiguredLights(hardware, pinDatabase, "esp32c3", 5, resolved, error));
     hardware.configuration.lights.clear();
-    assert(resolveConfiguredLights(hardware, "esp32", 5, resolved, error) && resolved.empty());
+    assert(resolveConfiguredLights(hardware, pinDatabase, "esp32", 5, resolved, error) && resolved.empty());
   }
   `);
   });

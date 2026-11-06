@@ -54,34 +54,29 @@ and can be overridden in the configuration.
 
 ### M3 hardware schema (5.1 feature branch)
 
-The M3 schema replaces `hardware.pinconfigs` with three separate fields:
+The M3 schema replaces `hardware.pinconfigs` with a separation between SoC
+capabilities, frontend catalog data and the active device configuration:
 
-- `hardware.available_pins`: SoC GPIO records describing input/output, PWM,
-  strapping, internal pull capabilities and reserved resources.
-- `hardware.boards`: versioned board inventories with labeled `implemented_pins`,
-  including lighting outputs, button inputs and SDA/SCL.
-- `hardware.templates`: versioned board-specific suggested configurations.
-- `hardware.configuration`: the selected board and actual stable-ID lights,
-  role-to-pin assignments, per-light color settings, clear input, buttons and buses.
+- `pins.cfgdb`: SoC GPIO records describing input/output, PWM, strapping,
+  internal pull capabilities and reserved resources, stored in a separate ConfigDB.
+- `hardware-catalog.json.gz`: frontend-only board inventories and templates,
+  kept as a filesystem working copy and streamed by `GET /catalog`.
+- `hardware.configuration`: active light types with GPIO-number pin arrays,
+  per-light color settings, clear input, buttons and buses.
 
-The existing `hardware.version` remains the catalogue revision;
-`hardware.schema_version` identifies the new format. Active configuration and
-board/template revisions are separate. Templates never become active implicitly.
-The empty string means an unassigned optional clear pin; GPIO0 remains a valid
-physical pin. Runtime validation must enforce required light roles, ownership,
-SoC/board restrictions and actual PWM capacity, beyond JSON Schema shape checks.
+The frontend resolves template board-pin IDs to physical GPIOs before writing
+active configuration. Firmware validates GPIO assignments against the selected
+SoC's capability mask; it does not need board maps or templates. Templates never
+become active implicitly, and GPIO0 remains a valid physical pin.
 
-Built-in Mini, Deca and Plus definitions and single-light templates live in
-`hardware-defaults.json`, separately from the typed schema. Firmware embeds this
-file with `IMPORT_FSTR_LOCAL` and imports an `FSTR::Stream` into the typed hardware
-store, following the existing pinconfig priming mechanism. It imports only a
-valid newer revision (the initial stored revision is zero), without a filesystem asset or
-upstream download. The JSON contains catalogue data only, never active
-configuration or PWM settings. No custom schema extension or ConfigDB generator
-change is required.
+The SoC pin seed lives in `soc-pins.json`. Board/template defaults are embedded
+as FSTR resources, copied to LittleFS when missing, and upgraded only when the
+filesystem catalog revision is older than the firmware seed. A version sidecar
+allows that comparison without decompressing or parsing the catalog.
 
 The M3 loader validates configured lights and initializes the firmware-owned
-vector of library instances. Reset setup resolves the configured board input;
+vector of library instances. Reset setup uses the configured GPIO and electrical
+input properties;
 legacy MQTT channel discovery uses library channels only when one light exists.
 Multilight command/state routing, synchronization and per-light restore state
 are not complete. Existing installations must be migrated using schema identity, not

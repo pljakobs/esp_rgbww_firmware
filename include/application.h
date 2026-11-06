@@ -21,6 +21,8 @@
  */
 #pragma once
 #include <RGBWWCtrl.h>
+#include <FlashString/Stream.hpp>
+#include <pins.h>
 #include <otaupdate.h>
 #include <webappota.h>
 #include <controllers.h>
@@ -52,6 +54,7 @@ public:
     void init();
     void initButtons();
     bool configureHardwareInputs(String& error);
+    std::unique_ptr<FSTR::Stream> hardwareCatalogSeedStream() const;
 
     void startServices();
     void startNetworkServices();
@@ -127,6 +130,7 @@ public:
     WebappOta webappOta;
     std::unique_ptr<AppConfig> cfg;
     std::unique_ptr<AppData> data;
+    std::unique_ptr<Pins> socPins;
 
 
     
