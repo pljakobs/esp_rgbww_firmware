@@ -5,6 +5,8 @@ Created on 02.04.2017
 
 Converted to pytest format integrated with host_smoke_api_test.py harness by pjakobs
 """
+from __future__ import annotations
+
 import json
 import os
 import socket
