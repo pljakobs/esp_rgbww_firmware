@@ -74,17 +74,21 @@ as FSTR resources, copied to LittleFS when missing, and upgraded only when the
 filesystem catalog revision is older than the firmware seed. A version sidecar
 allows that comparison without decompressing or parsing the catalog.
 
-The M3 loader validates configured lights and initializes the firmware-owned
-vector of library instances. Reset setup uses the configured GPIO and electrical
-input properties;
-legacy MQTT channel discovery uses library channels only when one light exists.
-Multilight command/state routing, synchronization and per-light restore state
-are not complete. Existing installations must be migrated using schema identity, not
-just the catalogue revision comparison; preserve their actual wiring and color
-settings rather than auto-applying a new template. The legacy global color and
-general pin-selector fields remain migration inputs until that work is complete.
-Do not advertise the new capability or ship this branch before the linked runtime
-and migration implementation passes its checks. No 5.0 schema is changed.
+The virtual-light runtime foundation is implemented. Each configured light is
+validated by type and numeric GPIO against the SoC capability ConfigDB, then
+owns a `std::unique_ptr<RGBWWLed>` in the application light vector. A hardware
+ConfigDB commit queues a runtime reload; PWM callback drain and new resource
+validation are checked before replacing running instances. Button, clear and
+I2C setup also consume the numeric GPIO and electrical properties from active
+configuration.
+
+Public command routing is still the legacy singleton path through
+`app.rgbwwctrl`; the `light` selector is not yet routed to individual instances.
+Per-light readback, events, MQTT topics and last-color restore remain follow-up
+work. The interim M3 string-ID pin schema was never released and does not need
+migration. Any 5.0-to-5.1 migration is a separate compatibility task. The 5.0
+schema/runtime are unchanged, and this PR remains draft until API routing and
+supported upgrade behavior are complete.
 
 An earlier, unreleased M3 schema stored board labels such as `L1` in light
 `pins`, button `pin`, clear-pin and I2C SDA/SCL fields. It is not a released
