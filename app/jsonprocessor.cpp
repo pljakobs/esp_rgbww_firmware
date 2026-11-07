@@ -147,10 +147,15 @@ bool JsonProcessor::onStop(JsonObject root, String& msg, bool relay)
 {
 	RequestParameters params;
 	parseRequestParams(root, params);
-	runStop(params, msg);
+	if(!runStop(params, msg)) {
+		return false;
+	}
 
 	if(relay) {
-		addChannelStatesToCmd(root, params.channels);
+		String error;
+		if(auto light = resolveLight(params, error)) {
+			addChannelStatesToCmd(root, params.channels, *light);
+		}
 		app.onCommandRelay(F("stop"), root);
 	}
 
@@ -174,10 +179,15 @@ bool JsonProcessor::onSkip(JsonObject root, String& msg, bool relay)
 {
 	RequestParameters params;
 	parseRequestParams(root, params);
-	runSkip(params, msg);
+	if(!runSkip(params, msg)) {
+		return false;
+	}
 
 	if(relay) {
-		addChannelStatesToCmd(root, params.channels);
+		String error;
+		if(auto light = resolveLight(params, error)) {
+			addChannelStatesToCmd(root, params.channels, *light);
+		}
 		app.onCommandRelay(F("skip"), root);
 	}
 
@@ -202,10 +212,15 @@ bool JsonProcessor::onPause(JsonObject root, String& msg, bool relay)
 {
 	RequestParameters params;
 	parseRequestParams(root, params);
-	runPause(params, msg);
+	if(!runPause(params, msg)) {
+		return false;
+	}
 
 	if(relay) {
-		addChannelStatesToCmd(root, params.channels);
+		String error;
+		if(auto light = resolveLight(params, error)) {
+			addChannelStatesToCmd(root, params.channels, *light);
+		}
 		app.onCommandRelay(F("pause"), root);
 	}
 
@@ -227,7 +242,9 @@ bool JsonProcessor::onContinue(JsonObject root, String& msg, bool relay)
 {
 	RequestParameters params;
 	parseRequestParams(root, params);
-	runContinue(params);
+	if(!runContinue(params, msg)) {
+		return false;
+	}
 
 	if(relay)
 		app.onCommandRelay(F("continue"), root);
@@ -253,7 +270,9 @@ bool JsonProcessor::onBlink(JsonObject root, String& msg, bool relay)
 	params.ramp.value = 500; //default
 
 	parseRequestParams(root, params);
-	runBlink(params);
+	if(!runBlink(params, msg)) {
+		return false;
+	}
 
 	if(relay)
 		app.onCommandRelay(F("blink"), root);
@@ -271,7 +290,11 @@ bool JsonProcessor::onBlink(JsonObject root, String& msg, bool relay)
  */
 bool JsonProcessor::onToggle(JsonObject root, String& msg, bool relay)
 {
-	runToggle();
+	RequestParameters params;
+	parseRequestParams(root, params);
+	if(!runToggle(params, msg)) {
+		return false;
+	}
 
 	if(relay)
 		app.onCommandRelay(F("toggle"), root);
@@ -279,38 +302,84 @@ bool JsonProcessor::onToggle(JsonObject root, String& msg, bool relay)
 	return true;
 }
 
-void JsonProcessor::runStop(const RequestParameters& params, String& msg)
+bool JsonProcessor::runStop(const RequestParameters& params, String& msg)
 {
-	app.rgbwwctrl.clearAnimationQueue(params.channels);
-	app.rgbwwctrl.skipAnimation(params.channels);
-	runDirect(params, msg);
+	auto light = resolveLight(params, msg);
+	if(light == nullptr) {
+		return false;
+	}
+	light->clearAnimationQueue(params.channels);
+	light->skipAnimation(params.channels);
+	return params.mode == RequestParameters::Mode::Undefined || runDirect(params, msg);
 }
 
-void JsonProcessor::runSkip(const RequestParameters& params, String& msg)
+bool JsonProcessor::runSkip(const RequestParameters& params, String& msg)
 {
-	app.rgbwwctrl.skipAnimation(params.channels);
-	runDirect(params, msg);
+	auto light = resolveLight(params, msg);
+	if(light == nullptr) {
+		return false;
+	}
+	light->skipAnimation(params.channels);
+	return params.mode == RequestParameters::Mode::Undefined || runDirect(params, msg);
 }
 
-void JsonProcessor::runPause(const RequestParameters& params, String& msg)
+bool JsonProcessor::runPause(const RequestParameters& params, String& msg)
 {
-	app.rgbwwctrl.pauseAnimation(params.channels);
-	runDirect(params, msg);
+	auto light = resolveLight(params, msg);
+	if(light == nullptr) {
+		return false;
+	}
+	light->pauseAnimation(params.channels);
+	return params.mode == RequestParameters::Mode::Undefined || runDirect(params, msg);
 }
 
-void JsonProcessor::runContinue(const RequestParameters& params)
+bool JsonProcessor::runContinue(const RequestParameters& params, String& msg)
 {
-	app.rgbwwctrl.continueAnimation(params.channels);
+	auto light = resolveLight(params, msg);
+	if(light == nullptr) {
+		return false;
+	}
+	light->continueAnimation(params.channels);
+	return true;
 }
 
-void JsonProcessor::runBlink(const RequestParameters& params)
+bool JsonProcessor::runBlink(const RequestParameters& params, String& msg)
 {
-	app.rgbwwctrl.blink(params.channels, params.ramp.value, params.queue, params.requeue, params.name);
+	auto light = resolveLight(params, msg);
+	if(light == nullptr) {
+		return false;
+	}
+	light->blink(params.channels, params.ramp.value, params.queue, params.requeue, params.name);
+	return true;
 }
 
-void JsonProcessor::runToggle()
+bool JsonProcessor::runToggle(const RequestParameters& params, String& msg)
 {
-	app.rgbwwctrl.toggle();
+	auto light = resolveLight(params, msg);
+	if(light == nullptr) {
+		return false;
+	}
+	if(light->getMode() == RGBWWLed::ColorMode::Hsv) {
+		const HSVCT& current = light->getCurrentColor();
+		float hue, saturation, value;
+		int colorTemperature;
+		current.asRadian(hue, saturation, value, colorTemperature);
+		RequestHSVCT target;
+		target.h = AbsOrRelValue(hue, AbsOrRelValue::Type::Hue);
+		target.s = AbsOrRelValue(saturation, AbsOrRelValue::Type::Percent);
+		target.v = AbsOrRelValue(value > 0 ? 0 : 100, AbsOrRelValue::Type::Percent);
+		target.ct = AbsOrRelValue(colorTemperature, AbsOrRelValue::Type::Ct);
+		return light->fadeHSV(target, RampTimeOrSpeed(300), 1, params.queue, params.requeue, params.name);
+	}
+	ChannelOutput current = light->getCurrentOutput();
+	const bool turnOn = !current.isOn();
+	RequestChannelOutput target;
+	target.r = AbsOrRelValue(turnOn ? 255 : 0, AbsOrRelValue::Type::Raw);
+	target.g = AbsOrRelValue(turnOn ? 255 : 0, AbsOrRelValue::Type::Raw);
+	target.b = AbsOrRelValue(turnOn ? 255 : 0, AbsOrRelValue::Type::Raw);
+	target.ww = AbsOrRelValue(turnOn ? 255 : 0, AbsOrRelValue::Type::Raw);
+	target.cw = AbsOrRelValue(turnOn ? 255 : 0, AbsOrRelValue::Type::Raw);
+	return light->fadeRAW(target, RampTimeOrSpeed(300), params.queue, params.requeue, params.name);
 }
 
 /**
@@ -318,8 +387,16 @@ void JsonProcessor::runToggle()
  */
 bool JsonProcessor::runColorCommand(RequestParameters& params, String& errorMsg)
 {
+	RGBWWLed* light = resolveLight(params, errorMsg);
+	if(light == nullptr) {
+		return false;
+	}
 	if(params.checkParams(errorMsg) != 0) {
 		cdebug_i(JSONPROCESSOR, "JsonProcessor::runColorCommand: " ANSI_COLOR_BLUE "checkParams failed:" ANSI_COLOR_RESET,errorMsg.c_str());
+		return false;
+	}
+	RequestChannelOutput raw;
+	if(params.mode == RequestParameters::Mode::Raw && !resolveRawChannels(params, *light, raw, errorMsg)) {
 		return false;
 	}
 
@@ -327,24 +404,24 @@ bool JsonProcessor::runColorCommand(RequestParameters& params, String& errorMsg)
 	if(params.mode == RequestParameters::Mode::Hsv) {
 		if(!params.hasHsvFrom) {
 			if(params.cmd == F("fade")) {
-				queueOk = app.rgbwwctrl.fadeHSV(params.hsv, params.ramp, params.direction, params.queue, params.requeue,
+				queueOk = light->fadeHSV(params.hsv, params.ramp, params.direction, params.queue, params.requeue,
 											params.name);
 			} else {
 				queueOk =
-					app.rgbwwctrl.setHSV(params.hsv, params.ramp.value, params.queue, params.requeue, params.name);
+					light->setHSV(params.hsv, params.ramp.value, params.queue, params.requeue, params.name);
 			}
 		} else {
-			app.rgbwwctrl.fadeHSV(params.hsvFrom, params.hsv, params.ramp, params.direction, params.queue);
+			light->fadeHSV(params.hsvFrom, params.hsv, params.ramp, params.direction, params.queue);
 		}
 	} else if(params.mode == RequestParameters::Mode::Raw) {
 		if(!params.hasRawFrom) {
 			if(params.cmd == F("fade")) {
-				queueOk = app.rgbwwctrl.fadeRAW(params.raw, params.ramp, params.queue);
+				queueOk = light->fadeRAW(raw, params.ramp, params.queue);
 			} else {
-				queueOk = app.rgbwwctrl.setRAW(params.raw, params.ramp.value, params.queue);
+				queueOk = light->setRAW(raw, params.ramp.value, params.queue);
 			}
 		} else {
-			app.rgbwwctrl.fadeRAW(params.rawFrom, params.raw, params.ramp, params.queue);
+			light->fadeRAW(params.rawFrom, raw, params.ramp, params.queue);
 		}
 	} else {
 		errorMsg = F("No color object!");
@@ -374,7 +451,9 @@ bool JsonProcessor::onDirect(JsonObject root, String& msg, bool relay)
 {
 	RequestParameters params;
 	parseRequestParams(root, params);
-	runDirect(params, msg);
+	if(!runDirect(params, msg)) {
+		return false;
+	}
 
 	if(relay)
 		app.onCommandRelay(F("direct"), root);
@@ -382,15 +461,75 @@ bool JsonProcessor::onDirect(JsonObject root, String& msg, bool relay)
 	return true;
 }
 
-void JsonProcessor::runDirect(const RequestParameters& params, String& msg)
+bool JsonProcessor::runDirect(const RequestParameters& params, String& msg)
 {
+	RGBWWLed* light = resolveLight(params, msg);
+	if(light == nullptr) {
+		return false;
+	}
 	if(params.mode == RequestParameters::Mode::Hsv) {
-		app.rgbwwctrl.colorDirectHSV(params.hsv);
+		light->colorDirectHSV(params.hsv);
 	} else if(params.mode == RequestParameters::Mode::Raw) {
-		app.rgbwwctrl.colorDirectRAW(params.raw);
+		RequestChannelOutput raw;
+		if(!resolveRawChannels(params, *light, raw, msg)) {
+			return false;
+		}
+		light->colorDirectRAW(raw);
 	} else {
 		msg = F("No color object!");
+		return false;
 	}
+	return true;
+}
+
+RGBWWLed* JsonProcessor::resolveLight(const RequestParameters& params, String& errorMsg) const
+{
+	if(params.light < -1 || params.light > 65535) {
+		errorMsg = F("light must be an index from 0 to 65535");
+		return nullptr;
+	}
+	return app.getLight(params.light, errorMsg);
+}
+
+bool JsonProcessor::resolveRawChannels(const RequestParameters& params, const RGBWWLed& light,
+									   RequestChannelOutput& raw, String& errorMsg) const
+{
+	if(!params.rawIndexed) {
+		if(!light.usesNamedRawChannels()) {
+			errorMsg = F("Non-RGB lights require indexed raw channel values");
+			return false;
+		}
+		raw = params.raw;
+		return true;
+	}
+	if(light.usesNamedRawChannels()) {
+		errorMsg = F("RGB-based lights require named raw channels");
+		return false;
+	}
+
+	RGBWWLed::ChannelList channels;
+	light.getChannels(channels);
+	if(params.rawIndexedValues.size() > channels.count()) {
+		errorMsg = F("raw array has more values than the selected light has channels");
+		return false;
+	}
+	for(size_t index = 0; index < params.rawIndexedValues.size(); ++index) {
+		const auto& value = params.rawIndexedValues[index];
+		if(!value.hasValue()) {
+			continue;
+		}
+		switch(channels[index]) {
+		case CtrlChannel::Red: raw.r = value.getValue(); break;
+		case CtrlChannel::Green: raw.g = value.getValue(); break;
+		case CtrlChannel::Blue: raw.b = value.getValue(); break;
+		case CtrlChannel::WarmWhite: raw.ww = value.getValue(); break;
+		case CtrlChannel::ColdWhite: raw.cw = value.getValue(); break;
+		default:
+			errorMsg = F("selected light exposes a non-raw channel");
+			return false;
+		}
+	}
+	return true;
 }
 
 /**
@@ -404,6 +543,15 @@ void JsonProcessor::runDirect(const RequestParameters& params, String& msg)
  */
 void JsonProcessor::parseRequestParams(JsonObject root, RequestParameters& params)
 {
+	if(!root[F("light")].isNull()) {
+		const JsonVariant light = root[F("light")];
+		if(light.is<int>() || light.is<unsigned>()) {
+			params.light = light.as<int32_t>();
+		} else {
+			params.light = -2;
+		}
+	}
+
 	JsonObject hsv = root[F("hsv")];
 	if(!hsv.isNull()) {
 		params.mode = RequestParameters::Mode::Hsv;
@@ -421,22 +569,34 @@ void JsonProcessor::parseRequestParams(JsonObject root, RequestParameters& param
 			parseAbsOrRelValue(from[F("ct")], params.hsvFrom.ct, AbsOrRelValue::Type::Ct);
 		}
 	} else if(!root[F("raw")].isNull()) {
-		JsonObject raw = root[F("raw")];
 		params.mode = RequestParameters::Mode::Raw;
-		parseAbsOrRelValue(raw[F("r")], params.raw.r, AbsOrRelValue::Type::Raw);
-		parseAbsOrRelValue(raw[F("g")], params.raw.g, AbsOrRelValue::Type::Raw);
-		parseAbsOrRelValue(raw[F("b")], params.raw.b, AbsOrRelValue::Type::Raw);
-		parseAbsOrRelValue(raw[F("ww")], params.raw.ww, AbsOrRelValue::Type::Raw);
-		parseAbsOrRelValue(raw[F("cw")], params.raw.cw, AbsOrRelValue::Type::Raw);
+		JsonVariant rawValue = root[F("raw")];
+		if(rawValue.is<JsonArray>()) {
+			params.rawIndexed = true;
+			for(JsonVariant value : rawValue.as<JsonArray>()) {
+				Optional<AbsOrRelValue> channelValue;
+				if(!value.isNull() && !(value.is<const char*>() && value.as<const char*>()[0] == '\0')) {
+					parseAbsOrRelValue(value, channelValue, AbsOrRelValue::Type::Raw);
+				}
+				params.rawIndexedValues.push_back(channelValue);
+			}
+		} else {
+			JsonObject raw = rawValue.as<JsonObject>();
+			parseAbsOrRelValue(raw[F("r")], params.raw.r, AbsOrRelValue::Type::Raw);
+			parseAbsOrRelValue(raw[F("g")], params.raw.g, AbsOrRelValue::Type::Raw);
+			parseAbsOrRelValue(raw[F("b")], params.raw.b, AbsOrRelValue::Type::Raw);
+			parseAbsOrRelValue(raw[F("ww")], params.raw.ww, AbsOrRelValue::Type::Raw);
+			parseAbsOrRelValue(raw[F("cw")], params.raw.cw, AbsOrRelValue::Type::Raw);
 
-		JsonObject from = raw[F("from")];
-		if(!from.isNull()) {
-			params.hasRawFrom = true;
-			parseAbsOrRelValue(from[F("r")], params.rawFrom.r, AbsOrRelValue::Type::Raw);
-			parseAbsOrRelValue(from[F("g")], params.rawFrom.g, AbsOrRelValue::Type::Raw);
-			parseAbsOrRelValue(from[F("b")], params.rawFrom.b, AbsOrRelValue::Type::Raw);
-			parseAbsOrRelValue(from[F("ww")], params.rawFrom.ww, AbsOrRelValue::Type::Raw);
-			parseAbsOrRelValue(from[F("cw")], params.rawFrom.cw, AbsOrRelValue::Type::Raw);
+			JsonObject from = raw[F("from")];
+			if(!from.isNull()) {
+				params.hasRawFrom = true;
+				parseAbsOrRelValue(from[F("r")], params.rawFrom.r, AbsOrRelValue::Type::Raw);
+				parseAbsOrRelValue(from[F("g")], params.rawFrom.g, AbsOrRelValue::Type::Raw);
+				parseAbsOrRelValue(from[F("b")], params.rawFrom.b, AbsOrRelValue::Type::Raw);
+				parseAbsOrRelValue(from[F("ww")], params.rawFrom.ww, AbsOrRelValue::Type::Raw);
+				parseAbsOrRelValue(from[F("cw")], params.rawFrom.cw, AbsOrRelValue::Type::Raw);
+			}
 		}
 	}
 
@@ -510,6 +670,7 @@ void JsonProcessor::parseRequestParams(JsonObject root, RequestParameters& param
 template <typename Fields> void parseCommandRequestFields(Fields root, JsonProcessor::RequestParameters& params)
 {
 	using RequestParameters = JsonProcessor::RequestParameters;
+	params.light = root.getLight();
 	auto parseField = [](const String& value, Optional<AbsOrRelValue>& target,
 						  AbsOrRelValue::Type type = AbsOrRelValue::Type::Percent) {
 		if(value.length() > 0) {
@@ -540,32 +701,44 @@ template <typename Fields> void parseCommandRequestFields(Fields root, JsonProce
 			parseField(fromCt, params.hsvFrom.ct, AbsOrRelValue::Type::Ct);
 		}
 	} else {
-		String rawR = root.raw.getR();
-		String rawG = root.raw.getG();
-		String rawB = root.raw.getB();
-		String rawWw = root.raw.getWw();
-		String rawCw = root.raw.getCw();
-		if(rawR.length() > 0 || rawG.length() > 0 || rawB.length() > 0 || rawWw.length() > 0 || rawCw.length() > 0) {
+		using RawTag = decltype(root.raw.getTag());
+		if(root.raw.getTag() == RawTag::Indexed) {
 			params.mode = RequestParameters::Mode::Raw;
-			parseField(rawR, params.raw.r, AbsOrRelValue::Type::Raw);
-			parseField(rawG, params.raw.g, AbsOrRelValue::Type::Raw);
-			parseField(rawB, params.raw.b, AbsOrRelValue::Type::Raw);
-			parseField(rawWw, params.raw.ww, AbsOrRelValue::Type::Raw);
-			parseField(rawCw, params.raw.cw, AbsOrRelValue::Type::Raw);
+			params.rawIndexed = true;
+			for(const auto& value : root.raw.asRawInputIndexed()) {
+				Optional<AbsOrRelValue> channelValue;
+				parseField(value, channelValue, AbsOrRelValue::Type::Raw);
+				params.rawIndexedValues.push_back(channelValue);
+			}
+		} else {
+			auto raw = root.raw.asRawInputNamed();
+			String rawR = raw.getR();
+			String rawG = raw.getG();
+			String rawB = raw.getB();
+			String rawWw = raw.getWw();
+			String rawCw = raw.getCw();
+			if(rawR.length() > 0 || rawG.length() > 0 || rawB.length() > 0 || rawWw.length() > 0 || rawCw.length() > 0) {
+				params.mode = RequestParameters::Mode::Raw;
+				parseField(rawR, params.raw.r, AbsOrRelValue::Type::Raw);
+				parseField(rawG, params.raw.g, AbsOrRelValue::Type::Raw);
+				parseField(rawB, params.raw.b, AbsOrRelValue::Type::Raw);
+				parseField(rawWw, params.raw.ww, AbsOrRelValue::Type::Raw);
+				parseField(rawCw, params.raw.cw, AbsOrRelValue::Type::Raw);
 
-			String fromR = root.raw.from.getR();
-			String fromG = root.raw.from.getG();
-			String fromB = root.raw.from.getB();
-			String fromWw = root.raw.from.getWw();
-			String fromCw = root.raw.from.getCw();
-			if(fromR.length() > 0 || fromG.length() > 0 || fromB.length() > 0 || fromWw.length() > 0 ||
-			   fromCw.length() > 0) {
-				params.hasRawFrom = true;
-				parseField(fromR, params.rawFrom.r, AbsOrRelValue::Type::Raw);
-				parseField(fromG, params.rawFrom.g, AbsOrRelValue::Type::Raw);
-				parseField(fromB, params.rawFrom.b, AbsOrRelValue::Type::Raw);
-				parseField(fromWw, params.rawFrom.ww, AbsOrRelValue::Type::Raw);
-				parseField(fromCw, params.rawFrom.cw, AbsOrRelValue::Type::Raw);
+				String fromR = raw.from.getR();
+				String fromG = raw.from.getG();
+				String fromB = raw.from.getB();
+				String fromWw = raw.from.getWw();
+				String fromCw = raw.from.getCw();
+				if(fromR.length() > 0 || fromG.length() > 0 || fromB.length() > 0 || fromWw.length() > 0 ||
+				   fromCw.length() > 0) {
+					params.hasRawFrom = true;
+					parseField(fromR, params.rawFrom.r, AbsOrRelValue::Type::Raw);
+					parseField(fromG, params.rawFrom.g, AbsOrRelValue::Type::Raw);
+					parseField(fromB, params.rawFrom.b, AbsOrRelValue::Type::Raw);
+					parseField(fromWw, params.rawFrom.ww, AbsOrRelValue::Type::Raw);
+					parseField(fromCw, params.rawFrom.cw, AbsOrRelValue::Type::Raw);
+				}
 			}
 		}
 	}
@@ -668,6 +841,9 @@ bool JsonProcessor::parseRequest(Stream& body, RequestParameters& params, std::v
 		for(unsigned i = 0; i < fields.cmds.getItemCount(); ++i) {
 			batch->emplace_back();
 			parseCommandRequestFields(fields.cmds[i], batch->back());
+			if(batch->back().light < 0 && params.light >= 0) {
+				batch->back().light = params.light;
+			}
 		}
 	}
 	return true;
@@ -683,6 +859,10 @@ bool JsonProcessor::parseRequest(Stream& body, RequestParameters& params, std::v
  */
 int JsonProcessor::RequestParameters::checkParams(String& errorMsg) const
 {
+	if(light < -1 || light > 65535) {
+		errorMsg = F("light must be an index from 0 to 65535");
+		return 1;
+	}
 	if(mode == Mode::Hsv) {
 		if(hsv.ct.hasValue()) {
 			if(hsv.ct != 0 && (hsv.ct < 100 || hsv.ct > 10000 || (hsv.ct > 500 && hsv.ct < 2000))) {
@@ -696,7 +876,11 @@ int JsonProcessor::RequestParameters::checkParams(String& errorMsg) const
 			return 1;
 		}
 	} else if(mode == Mode::Raw) {
-		if(!raw.r.hasValue() && !raw.g.hasValue() && !raw.b.hasValue() && !raw.ww.hasValue() && !raw.cw.hasValue()) {
+		bool hasRaw = raw.r.hasValue() || raw.g.hasValue() || raw.b.hasValue() || raw.ww.hasValue() || raw.cw.hasValue();
+		for(const auto& value : rawIndexedValues) {
+			hasRaw = hasRaw || value.hasValue();
+		}
+		if(!hasRaw) {
 			errorMsg = F("Need at least one RAW component!");
 			return 1;
 		}
@@ -754,11 +938,11 @@ bool JsonProcessor::onJsonRpc(const String& json)
  * @param root The root JSON object to which the channel states will be added.
  * @param channels The list of channels for which the states will be added.
  */
-void JsonProcessor::addChannelStatesToCmd(JsonObject root, const RGBWWLed::ChannelList& channels)
+void JsonProcessor::addChannelStatesToCmd(JsonObject root, const RGBWWLed::ChannelList& channels, const RGBWWLed& light)
 {
-	switch(app.rgbwwctrl.getMode()) {
+	switch(light.getMode()) {
 	case RGBWWLed::ColorMode::Hsv: {
-		const HSVCT& c = app.rgbwwctrl.getCurrentColor();
+		const HSVCT& c = light.getCurrentColor();
 		JsonObject obj = root.createNestedObject(F("hsv"));
 		if(channels.count() == 0 || channels.contains(CtrlChannel::Hue))
 			obj[F("h")] = (float(c.h) / float(RGBWW_CALC_HUEWHEELMAX)) * 360.0;
@@ -771,7 +955,7 @@ void JsonProcessor::addChannelStatesToCmd(JsonObject root, const RGBWWLed::Chann
 		break;
 	}
 	case RGBWWLed::ColorMode::Raw: {
-		const ChannelOutput& c = app.rgbwwctrl.getCurrentOutput();
+		const ChannelOutput& c = light.getCurrentOutput();
 		JsonObject obj = root.createNestedObject(F("raw"));
 		if(channels.count() == 0 || channels.contains(CtrlChannel::Red))
 			obj[F("r")] = c.r;
@@ -791,48 +975,69 @@ void JsonProcessor::addChannelStatesToCmd(JsonObject root, const RGBWWLed::Chann
 bool JsonProcessor::onSetOn(JsonObject root, String& msg, bool relay) {
 	RequestParameters params;
 	parseRequestParams(root, params);
-	runSetOn(params);
-	return true;
+	return runSetOn(params, msg);
 }
 
-void JsonProcessor::runSetOn(const RequestParameters& params)
+bool JsonProcessor::runSetOn(const RequestParameters& params, String& msg)
 {
-	app.rgbwwctrl.setOn(
-		params.channels,
-		params.direction,
-		params.ramp,
-		params.queue,
-		params.requeue,
-		params.name
-	);
+	auto light = resolveLight(params, msg);
+	if(light == nullptr) {
+		return false;
+	}
+	if(light->getMode() == RGBWWLed::ColorMode::Hsv) {
+		HSVCT target = light->getCurrentColor();
+		target.v = RGBWW_CALC_MAXVAL;
+		return light->fadeHSV(RequestHSVCT(target), params.ramp, params.direction, params.queue, params.requeue, params.name);
+	}
+	ChannelOutput target = light->getCurrentOutput();
+	if(params.channels.isEmpty()) {
+		target = ChannelOutput(255, 255, 255, 255, 255);
+	} else {
+		for(auto channel : params.channels) {
+			switch(channel) {
+			case CtrlChannel::Red: target.r = 255; break;
+			case CtrlChannel::Green: target.g = 255; break;
+			case CtrlChannel::Blue: target.b = 255; break;
+			case CtrlChannel::WarmWhite: target.ww = 255; break;
+			case CtrlChannel::ColdWhite: target.cw = 255; break;
+			default: break;
+			}
+		}
+	}
+	return light->fadeRAW(RequestChannelOutput(target), params.ramp, params.queue, params.requeue, params.name);
 }
 
 bool JsonProcessor::onSetOff(JsonObject root, String& msg, bool relay) {
 	RequestParameters params;
 	parseRequestParams(root, params);
-	runSetOff(params);
-	return true;
+	return runSetOff(params, msg);
 }
 
-void JsonProcessor::runSetOff(RequestParameters& params)
+bool JsonProcessor::runSetOff(const RequestParameters& params, String& msg)
 {
-	// If no color specified and mode is HSV, use current HSV but set v=0
-	bool hasColor = params.mode == RequestParameters::Mode::Hsv &&
-		(params.hsv.h.hasValue() || params.hsv.s.hasValue() || params.hsv.v.hasValue() || params.hsv.ct.hasValue());
-
-	if (!hasColor && app.rgbwwctrl.getMode() == RGBWWLed::ColorMode::Hsv) {
-		HSVCT current = app.rgbwwctrl.getCurrentColor();
-		params.hsv = current;
-		params.mode = RequestParameters::Mode::Hsv;
-		params.hsv.v = 0;
+	auto light = resolveLight(params, msg);
+	if(light == nullptr) {
+		return false;
 	}
-
-	app.rgbwwctrl.setOff(
-		params.channels,
-		params.direction,
-		params.ramp,
-		params.queue,
-		params.requeue,
-		params.name
-	);
+	if(light->getMode() == RGBWWLed::ColorMode::Hsv) {
+		HSVCT target = light->getCurrentColor();
+		target.v = 0;
+		return light->fadeHSV(RequestHSVCT(target), params.ramp, params.direction, params.queue, params.requeue, params.name);
+	}
+	ChannelOutput target = light->getCurrentOutput();
+	if(params.channels.isEmpty()) {
+		target = ChannelOutput(0, 0, 0, 0, 0);
+	} else {
+		for(auto channel : params.channels) {
+			switch(channel) {
+			case CtrlChannel::Red: target.r = 0; break;
+			case CtrlChannel::Green: target.g = 0; break;
+			case CtrlChannel::Blue: target.b = 0; break;
+			case CtrlChannel::WarmWhite: target.ww = 0; break;
+			case CtrlChannel::ColdWhite: target.cw = 0; break;
+			default: break;
+			}
+		}
+	}
+	return light->fadeRAW(RequestChannelOutput(target), params.ramp, params.queue, params.requeue, params.name);
 }

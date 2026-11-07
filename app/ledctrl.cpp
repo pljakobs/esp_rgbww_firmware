@@ -72,6 +72,8 @@ bool selectLightType(const String& type, unsigned pinCount, LightType& lightType
 struct ResolvedLight {
 	String id;
 	String name;
+	uint16_t index = 0;
+	bool isDefault = false;
 	LightType type;
 	std::array<int, 5> pins{{-1, -1, -1, -1, -1}};
 };
@@ -160,12 +162,16 @@ bool resolveConfiguredLights(const Hardware& hardware, const PinDatabase& pinDat
 	}
 #endif
 	unsigned channelCount = 0;
+	unsigned defaultCount = 0;
 	for(auto configured : configuration.lights) {
 		ResolvedLight resolved;
 		resolved.id = configured.getId();
 		resolved.name = configured.getName();
+		resolved.index = configured.getIndex();
+		resolved.isDefault = configured.getIsDefault();
+		defaultCount += resolved.isDefault;
 		if(!resolved.id.length() || std::any_of(result.begin(), result.end(), [&](const ResolvedLight& other) {
-			   return other.id == resolved.id;
+			   return other.id == resolved.id || other.index == resolved.index;
 		   })) {
 			error = F("Duplicate or empty virtual-light ID");
 			return false;
@@ -217,6 +223,10 @@ bool resolveConfiguredLights(const Hardware& hardware, const PinDatabase& pinDat
 		}
 		resolved.pins = channelPins;
 		result.push_back(std::move(resolved));
+	}
+	if(!result.empty() && defaultCount != 1) {
+		error = F("Exactly one configured light must be the default");
+		return false;
 	}
 	return true;
 }
@@ -469,7 +479,7 @@ bool APPLedCtrl::reload(String& error)
 			error = F("Unable to allocate virtual light");
 			return false;
 		}
-		staged.push_back({light.id, light.name, std::move(instance)});
+		staged.push_back({light.id, light.name, std::move(instance), light.index, light.isDefault});
 	}
 	for(auto& light : app.lights) {
 		light.led->clearAnimationQueue();
@@ -614,10 +624,31 @@ void APPLedCtrl::updateLedCb(void* pTimerArg)
 void APPLedCtrl::updateLed()
 {
 	_ledTimer.startOnce();
+	bool animFinished = false;
+	VirtualLight* defaultLight = nullptr;
 	for(auto& light : app.lights) {
-		light.led->show();
+		animFinished |= light.led->show();
+		if(light.isDefault) {
+			defaultLight = &light;
+		}
 	}
 	++_stepCounter;
+
+	const static uint32_t stepLenMs = 1000 / RGBWW_UPDATEFREQUENCY;
+	if(defaultLight != nullptr && colorMasterInterval >= 0 &&
+	   (animFinished || colorMasterInterval == 0 || ((stepLenMs * _stepCounter) % colorMasterInterval) < stepLenMs)) {
+		const uint32_t now = millis();
+		if(now - _lastColorEvent >= static_cast<uint32_t>(colorMinInterval)) {
+			_lastColorEvent = now;
+			HSVCT currentHsv;
+			const HSVCT* hsv = nullptr;
+			if(defaultLight->led->getMode() == RGBWWLed::ColorMode::Hsv) {
+				currentHsv = defaultLight->led->getCurrentColor();
+				hsv = &currentHsv;
+			}
+			app.eventserver.publishCurrentState(defaultLight->led->getCurrentOutput(), hsv);
+		}
+	}
 }
 
 /**

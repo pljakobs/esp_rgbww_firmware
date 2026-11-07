@@ -41,7 +41,8 @@ The implemented runtime applies topology changes through a queued ConfigDB
 commit reload rather than requiring restart. The callback drains pending PWM
 work, validates the numeric GPIO resources, builds replacement instances and
 then swaps them into the application-owned vector. Deleting the last light is
-valid. Public command/readback/event/MQTT routing remains a follow-up.
+valid. Public command/readback and native MQTT sync routing use persistent light
+indexes; spontaneous color events still publish the default light only.
 
 ## Catalog and SoC Pin Database
 
@@ -75,8 +76,28 @@ valid. Public command/readback/event/MQTT routing remains a follow-up.
   update; candidates containing multiple defaults are rejected. Deleting
   the default leaves none unless a replacement is explicitly selected.
 - Controller-wide info, networking, OTA and discovery remain controller-wide.
-  Preserve old single-light response shapes for unaddressed default-light calls;
-  new addressed/event surfaces identify the selected light.
+  Preserve old single-light request shapes where compatible. Addressed reads and
+  commands identify the selected light; spontaneous color events remain tied to
+  the configured default light for compatibility.
+
+## Color and Raw Channel Wire Contract
+
+- Every color command may carry HSVCT; each `RGBWWLed::LightType` consumes only
+  its meaningful HSVCT channels. RGB-family profiles use `h/s/v`, RGBWWCW also
+  uses `ct`, WWCW uses `v/ct`, and WW/CW/SINGLE use `v`.
+- RGBWWCW, RGBWW, RGBCW and RGB retain named raw objects (`r/g/b/ww/cw` as
+  available on the profile). WWCW, WW, CW and SINGLE use a raw array ordered by
+  configured physical pin/channel order. Missing entries and `null` leave a
+  channel unchanged; zero turns it off.
+- ConfigDB represents the input as a tagged union internally. The transport
+  adapter accepts and emits the public direct object/array forms, so the
+  `named`/`indexed` discriminator is not part of the public raw payload.
+- Color readback uses the requested/default light and publishes only its active
+  HSVCT or raw representation. Spontaneous WebSocket color events currently
+  publish the default light for legacy compatibility; per-light event IDs remain
+  a follow-up. MQTT sync commands carry the same `light` JSON field. The
+  Home-Assistant-specific MQTT topic handler remains legacy/single-light and
+  is intentionally deferred pending the native HA integration decision.
 
 ## Delivery and Verification
 
@@ -93,22 +114,20 @@ unknown/deleted indexes, missing defaults and independent per-light commands.
 - Implemented in commits `8c7a16e` and `ec6b912`: separate `Pins` ConfigDB,
   versioned gzip catalog seed/working-copy flow, streamed `/catalog`, numeric
   GPIO active configuration, and legacy static catalog-array cleanup.
-- The internal virtual-light lifecycle is implemented: typed numeric-GPIO
-  records map to one owned `RGBWWLed` instance each, per-light color settings
-  are applied during setup, and hardware commits queue reloads. Public command
-  dispatch still targets the legacy singleton; selector-based per-light API
-  routing is the next phase.
-- Verification: ESP32-C3 and Host builds pass; 13 focused Node tests and 25
-  workflow-policy tests pass; the full Host `testnet.sh` suite passes (60 passed,
-  1 skipped). The raw `/catalog` response was verified as gzip with three boards
-  and three templates.
-- The latest GitHub `Workflow Validation` and matrix checks pass. In Host CI, the
-  61-case HTTP/API smoke phase passes (60 passed, 1 skipped). The separate legacy
-  RGBWW behavior phase fails 11 tests because per-light command/control routing
-  is unfinished and those operations do not yet drive the configured virtual
-  light instances. Its subsequent restart cleanup also hits lwIP's
-  `invalid socket state for poll` assertion; this is separate from the test
-  failures.
+- The internal virtual-light lifecycle and public selector routing are
+  implemented: typed numeric-GPIO records map to owned `RGBWWLed` instances;
+  HTTP accepts `?light=N` and JSON `light`, while WebSocket/MQTT JSON commands
+  use the same persistent index. Omitted selectors resolve through the unique
+  `is_default` light.
+- Verification (2026-11-07): Host and ESP32-C3 builds pass; 12 focused Node
+  schema/controller tests pass; OpenAPI lint passes with only existing
+  unused-definition warnings. The full 84-case Host API/RGBWW suite passes 83
+  with one intentional Webapp-check skip at real-time scale. Its per-test table
+  is written to `out/testnet-pytest/final-full-suite-results.md`. All eight
+  profiles have type-correct HSVCT/raw/control coverage, and mixed RGB + WWCW
+  selector isolation is covered over HTTP and WebSocket.
+- PR CI has not yet been rerun with these changes; pushing this update will
+  trigger the GitHub checks.
 - The earlier M3 schema used string board IDs such as `"L1"` in active light,
   button, clear and I2C assignments. That schema was never released, so no
   migration path is required for it. The current contract uses numeric GPIOs. Any

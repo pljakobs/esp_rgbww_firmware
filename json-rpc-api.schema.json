@@ -194,6 +194,25 @@
       },
       "additionalProperties": false
     },
+    "indexedRawPoint": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 1023
+      },
+      "maxItems": 5
+    },
+    "rawState": {
+      "oneOf": [
+        {
+          "$ref": "#/definitions/rawPoint"
+        },
+        {
+          "$ref": "#/definitions/indexedRawPoint"
+        }
+      ]
+    },
     "hsvPoint": {
       "type": "object",
       "properties": {
@@ -220,7 +239,7 @@
       },
       "additionalProperties": false
     },
-    "relativeRawPoint": {
+    "relativeNamedRawPoint": {
       "type": "object",
       "properties": {
         "r": {
@@ -241,6 +260,30 @@
       },
       "additionalProperties": false
     },
+    "relativeIndexedRawPoint": {
+      "type": "array",
+      "items": {
+        "anyOf": [
+          {
+            "$ref": "#/definitions/absoluteOrRelativeValue"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "maxItems": 5
+    },
+    "relativeRawPoint": {
+      "oneOf": [
+        {
+          "$ref": "#/definitions/relativeNamedRawPoint"
+        },
+        {
+          "$ref": "#/definitions/relativeIndexedRawPoint"
+        }
+      ]
+    },
     "relativeHsvPoint": {
       "type": "object",
       "properties": {
@@ -260,43 +303,35 @@
       "additionalProperties": false
     },
     "colorState": {
-      "type": "object",
-      "required": [
-        "raw",
-        "hsv"
-      ],
-      "properties": {
-        "raw": {
-          "$ref": "#/definitions/rawPoint"
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "raw"
+          ],
+          "properties": {
+            "raw": {
+              "$ref": "#/definitions/rawState"
+            }
+          },
+          "additionalProperties": false
         },
-        "hsv": {
-          "$ref": "#/definitions/hsvPoint"
+        {
+          "type": "object",
+          "required": [
+            "hsv"
+          ],
+          "properties": {
+            "hsv": {
+              "$ref": "#/definitions/hsvPoint"
+            }
+          },
+          "additionalProperties": false
         }
-      },
-      "additionalProperties": false
+      ]
     },
     "colorEventParams": {
-      "type": "object",
-      "required": [
-        "mode",
-        "raw"
-      ],
-      "properties": {
-        "mode": {
-          "type": "string",
-          "enum": [
-            "raw",
-            "hsv"
-          ]
-        },
-        "raw": {
-          "$ref": "#/definitions/rawPoint"
-        },
-        "hsv": {
-          "$ref": "#/definitions/hsvPoint"
-        }
-      },
-      "additionalProperties": false
+      "$ref": "#/definitions/colorState"
     },
     "commandFields": {
       "type": "object",
@@ -331,6 +366,11 @@
         },
         "q": {
           "$ref": "#/definitions/queuePosition"
+        },
+        "light": {
+          "type": "integer",
+          "minimum": -1,
+          "maximum": 65535
         },
         "channels": {
           "type": "array",
@@ -386,6 +426,11 @@
         },
         "q": {
           "$ref": "#/definitions/queuePosition"
+        },
+        "light": {
+          "type": "integer",
+          "minimum": -1,
+          "maximum": 65535
         },
         "channels": {
           "type": "array",
@@ -465,6 +510,11 @@
         "q": {
           "$ref": "#/definitions/queuePosition"
         },
+        "light": {
+          "type": "integer",
+          "minimum": -1,
+          "maximum": 65535
+        },
         "channels": {
           "type": "array",
           "items": {
@@ -508,6 +558,11 @@
         "ramp": {
           "type": "integer",
           "minimum": 0
+        },
+        "light": {
+          "type": "integer",
+          "minimum": -1,
+          "maximum": 65535
         },
         "q": {
           "$ref": "#/definitions/queuePosition"

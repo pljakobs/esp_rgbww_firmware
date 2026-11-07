@@ -4,6 +4,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$REPO_ROOT/testlib.sh"
+cd "$REPO_ROOT"
 
 TAP_IF="$TL_TAP_IF"
 HOST_CIDR="$TL_HOST_CIDR"
