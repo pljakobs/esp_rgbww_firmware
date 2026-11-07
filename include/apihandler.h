@@ -51,7 +51,7 @@ public:
 
 	// ConfigDB-backed command dispatch for HTTP request bodies (see CONFIGDB_JSON_INBOUND_PLAN.md Phase B)
 	bool dispatchCommandFromStream(const String& method, Stream& body, String& errorMsg, bool relay = true,
-									   int32_t lightSelector = -1);
+									   int32_t lightSelector = -1, bool rawUnionNormalized = false);
 
 private:
 	bool renderDataImpl(const String& method, bool sparse, String* out,

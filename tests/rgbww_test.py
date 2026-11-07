@@ -436,6 +436,75 @@ def test_mixed_light_http_and_websocket_selection(smoke_config: SmokeConfig) -> 
         _configure_lights(smoke_config, [_light("RGBWW", [5, 4, 1, 0], 10, True)])
 
 
+@pytest.mark.parametrize(
+    "light_type,pins,raw,channel",
+    [
+        ("RGB", [5, 4, 1], {"r": "440"}, "r"),
+        ("WWCW", [0, 3], ["440", None], 0),
+    ],
+)
+def test_raw_normalization_small_and_batched(smoke_config: SmokeConfig, light_type: str, pins: list[int], raw, channel) -> None:
+    """Small and batched raw commands retain their channel values on HTTP and WebSocket."""
+    if os.environ.get("HOST_SMOKE_REAL_DEVICE") == "1":
+        pytest.skip("creates virtual lights on the Host emulator only")
+    index = 40
+    _configure_lights(smoke_config, [_light(light_type, pins, index, True)])
+    try:
+        result = post_json(smoke_config.base_url, "color", {"light": index, "raw": raw, "cmd": "solid"})
+        assert result["status"] == 200, result
+        wait_for_fade_complete(0)
+        assert_eventually_close(
+            lambda: float(get_raw_channels(get_selected_color(smoke_config, index))[channel]),
+            440,
+            ASSERT_TOLERANCE,
+            f"{light_type} small raw command",
+        )
+
+        batch = {"light": index, "cmds": [{"raw": raw, "cmd": "solid"} for _ in range(12)]}
+        result = post_json(smoke_config.base_url, "color", batch)
+        assert result["status"] == 200, result
+
+        sock, _ = websocket_handshake(smoke_config, os.urandom(16))
+        try:
+            ws_send_text(sock, json.dumps({"jsonrpc": "2.0", "id": "41", "method": "color", "params": batch}))
+            response = ws_recv_response(sock, "41")
+            assert "error" not in response, response
+        finally:
+            sock.close()
+        wait_for_fade_complete(0)
+        assert_eventually_close(
+            lambda: float(get_raw_channels(get_selected_color(smoke_config, index))[channel]),
+            440,
+            ASSERT_TOLERANCE,
+            f"{light_type} batched raw command",
+        )
+    finally:
+        _configure_lights(smoke_config, [_light("RGBWW", [5, 4, 1, 0], 10, True)])
+
+
+def test_raw_normalization_rejects_oversized_batch(smoke_config: SmokeConfig) -> None:
+    """Oversized raw batches fail explicitly without applying any command."""
+    if os.environ.get("HOST_SMOKE_REAL_DEVICE") == "1":
+        pytest.skip("exercises normalization limits on the Host emulator only")
+    initial = post_json(smoke_config.base_url, "color", {"raw": {"r": "440"}, "cmd": "solid"})
+    assert initial["status"] == 200, initial
+    wait_for_fade_complete(0)
+    batch = {"cmds": [{"raw": {"r": "100"}, "cmd": "solid"} for _ in range(80)]}
+    assert len(json.dumps(batch, separators=(",", ":"))) < 4096
+    result = post_json(smoke_config.base_url, "color", batch)
+    assert result["status"] == 400, result
+    assert "normalization capacity" in result["body"], result
+    oversized_raw = post_json(smoke_config.base_url, "color", {"raw": {"r": "1" * 1200}, "cmd": "solid"})
+    assert oversized_raw["status"] == 400, oversized_raw
+    assert "normalization capacity" in oversized_raw["body"], oversized_raw
+    assert_eventually_close(
+        lambda: float(get_raw_channels(get_color(smoke_config.color_url))["r"]),
+        440,
+        ASSERT_TOLERANCE,
+        "oversized batch must not change the active light",
+    )
+
+
 # Pytest tests
 
 def test_simple_fade(smoke_config: SmokeConfig) -> None:
