@@ -45,6 +45,9 @@ extern "C" {
 
 #include <fileMap.h>
 
+IMPORT_FSTR_LOCAL(api_docs, PROJECT_DIR "/api-docs.html");
+IMPORT_FSTR_LOCAL(api_openapi, PROJECT_DIR "/openapi.generated.json.gz");
+
 //#define NOCACHE
 
 namespace {
@@ -263,6 +266,9 @@ void ApplicationWebserver::init()
 	paths.set("/", HttpPathDelegate(&ApplicationWebserver::onIndex, this));
 	paths.set(F("/webapp"), HttpPathDelegate(&ApplicationWebserver::onWebapp, this));
 	paths.set(F("/config"), HttpPathDelegate(&ApplicationWebserver::onConfig, this));
+	paths.set(F("/api/docs"), HttpPathDelegate(&ApplicationWebserver::onApiDocs, this));
+	paths.set(F("/api/docs/"), HttpPathDelegate(&ApplicationWebserver::onApiDocs, this));
+	paths.set(F("/api/openapi.json"), HttpPathDelegate(&ApplicationWebserver::onOpenApi, this));
 	paths.set(F("/info"), HttpPathDelegate(&ApplicationWebserver::onInfo, this));
 	paths.set(F("/color"), HttpPathDelegate(&ApplicationWebserver::onColor, this));
 	paths.set(F("/networks"), HttpPathDelegate(&ApplicationWebserver::onNetworks, this));
@@ -1491,6 +1497,25 @@ void ApplicationWebserver::onConfig(HttpRequest& request, HttpResponse& response
 		auto configStream = app.cfg->createExportStream(ConfigDB::Json::format);
 		response.sendDataStream(configStream.release(), MIME_JSON);
 	}
+}
+
+void ApplicationWebserver::onApiDocs(HttpRequest& request, HttpResponse& response)
+{
+	if(!preflightRequest(request, response, {HttpMethod::GET, HttpMethod::HEAD})) {
+		return;
+	}
+	response.setHeader(F("Cache-Control"), F("no-cache"));
+	response.sendDataStream(new FSTR::Stream(api_docs), MIME_HTML);
+}
+
+void ApplicationWebserver::onOpenApi(HttpRequest& request, HttpResponse& response)
+{
+	if(!preflightRequest(request, response, {HttpMethod::GET, HttpMethod::HEAD})) {
+		return;
+	}
+	response.setHeader(F("Cache-Control"), F("no-cache"));
+	response.headers[HTTP_HEADER_CONTENT_ENCODING] = F("gzip");
+	response.sendDataStream(new FSTR::Stream(api_openapi), MIME_JSON);
 }
 
 void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response){

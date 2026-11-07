@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { gzipSync } from "node:zlib";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const outputDirectory = join(root, "schema");
@@ -96,6 +97,53 @@ const wire = await generateSchemaProjection(
 const manifest = await readJson("api.json");
 const openapi = await readJson("openapi.json");
 
+const schemaNames = {
+  "schema/app-config.schema.json": "AppConfig",
+  "schema/app-data.schema.json": "AppData",
+  "json-rpc-api.schema.json": "Wire",
+};
+
+function bundle(value, scope) {
+  if (Array.isArray(value)) {
+    return value.map((child) => bundle(child, scope));
+  }
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+  const result = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (scope && ["$schema", "$id"].includes(key)) {
+      continue;
+    }
+    if (key === "$ref") {
+      const [file, fragment = ""] = child.split("#");
+      const target = file ? schemaNames[file] : scope;
+      if (file && !target) {
+        throw new Error(`Unknown OpenAPI schema reference: ${child}`);
+      }
+      result[key] = target ? `#/components/schemas/${target}${fragment}` : child;
+    } else if (key === "items" && Array.isArray(child)) {
+      result.prefixItems = bundle(child, scope);
+    } else if (key === "additionalItems") {
+      result.items = bundle(child, scope);
+    } else {
+      result[key] = bundle(child, scope);
+    }
+  }
+  return result;
+}
+
+const bundledOpenapi = bundle(openapi);
+bundledOpenapi.servers = [{ url: "/" }];
+bundledOpenapi.components.schemas = {
+  ...(bundledOpenapi.components.schemas ?? {}),
+  AppConfig: bundle(config, "AppConfig"),
+  AppData: bundle(data, "AppData"),
+  Wire: bundle(wire, "Wire"),
+};
+await writeFile(join(root, "openapi.generated.json"), stableJson(bundledOpenapi));
+await writeFile(join(root, "openapi.generated.json.gz"), gzipSync(stableJson(bundledOpenapi), { level: 9 }));
+
 const sourceSchemas = [
   { database: "Definitions", source: "defs.cfgdb", persistent: false },
   { database: "Api", source: "schema/json-rpc-api.cfgdb", projection: "json-rpc-api.schema.json", persistent: false },
@@ -113,7 +161,7 @@ const digest = createHash("sha256");
 for (const source of ["defs.cfgdb", "schema/json-rpc-api.cfgdb", "app-config.cfgdb", "app-data.cfgdb"]) {
   digest.update(await readText(source));
 }
-for (const artifact of [manifest, wire, openapi]) {
+for (const artifact of [manifest, wire, openapi, bundledOpenapi]) {
   digest.update(stableJson(artifact));
 }
 
@@ -133,6 +181,7 @@ const version = {
     "schema/app-config.schema.json",
     "schema/app-data.schema.json",
     "openapi.json",
+    "openapi.generated.json",
   ],
 };
 await writeFile(join(root, "api-version.json"), stableJson(version));
