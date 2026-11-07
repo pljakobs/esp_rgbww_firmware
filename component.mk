@@ -1,7 +1,15 @@
 COMPONENT_SEARCH_DIRS := $(PROJECT_DIR)/Components
 COMPONENT_DEPENDS += MDNS RGBWWLed LittleFS ConfigDB ArduinoJson6 OtaNetwork 
 
+ifeq ($(SMING_ARCH),Esp32)
+ifeq ($(SMING_SOC),esp32c3)
+STATUS_DISPLAY ?= 1
+else
 STATUS_DISPLAY ?= 0
+endif
+else
+STATUS_DISPLAY ?= 0
+endif
 ifeq ($(STATUS_DISPLAY),1)
 ifeq ($(SMING_ARCH),Host)
 $(error STATUS_DISPLAY requires physical hardware)
@@ -116,8 +124,7 @@ else
 endif
 GIT_DATE = $(firstword $(shell git --no-pager show --date=short --format="%ad" --name-only))
 SMING_GITVERSION =	$(shell git -C $(SMING_HOME)/.. describe --abbrev=4 --dirty --always --tags)"-["$(shell git -C $(SMING_HOME)/.. rev-parse --abbrev-ref HEAD)"]"
-WEBAPP_VERSION = $(shell cat $(PROJECT_DIR)/webapp/VERSION)
-USER_CFLAGS = -DGITVERSION=\"$(GIT_VERSION)\" -DGITDATE=\"$(GIT_DATE)\" -DWEBAPP_VERSION=\"$(WEBAPP_VERSION)\" -DSMING_GITVERSION=\"$(SMING_GITVERSION)\" -DMQTT_USER=\"$(MQTT_USER)\" -DMQTT_PASS=\"$(MQTT_PASS)\"
+USER_CFLAGS = -DGITVERSION=\"$(GIT_VERSION)\" -DGITDATE=\"$(GIT_DATE)\" -DSMING_GITVERSION=\"$(SMING_GITVERSION)\" -DMQTT_USER=\"$(MQTT_USER)\" -DMQTT_PASS=\"$(MQTT_PASS)\"
 # For ENABLE_GDB=1 sessions, control whether the target halts inside
 # gdbstub_init() on boot. Default 0 (device runs freely). The VS Code debug
 # tasks override this to 1 so cppdbg attaches to a halted, silent target,
@@ -171,7 +178,6 @@ COMPONENT_CPPFLAGS += -DCONFIG_ESP_CONSOLE_USB_CDC=1
 #endif
 
 $(info using firmware version $(GIT_VERSION))
-$(info using WEBapp $(WEBAPP_VERSION))
 $(info using SMING $(SMING_GITVERSION))
 
 # include partition file for initial OTA
@@ -195,10 +201,6 @@ ifndef GIT_DATE
 	$(info no GIT_DATE available, using unknown)
 	GIT_DATE = "unknown"
 endif
-ifndef WEBAPP_VERSION
-	$(error can not find webapp/VERSION file - please ensure the source code is complete)
-endif
-
 #.PHONY: api-schema-rebuild
 #api-schema-rebuild:
 #	$(Q) node $(PROJECT_DIR)/tools/generate-api-schemas.mjs

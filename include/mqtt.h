@@ -20,6 +20,7 @@
 #include "RGBWWCtrl.h"
 
 class IMasterClockSink;
+class RGBWWLed;
 
 
 class AppMqttClient{
@@ -33,8 +34,8 @@ public:
     void stop();
     bool isRunning() const;
 
-    void publishCurrentHsv(const HSVCT& color);
-    void publishCurrentRaw(const ChannelOutput& raw);
+    void publishCurrentHsv(const RGBWWLed& light, uint16_t index);
+    void publishCurrentRaw(const RGBWWLed& light, uint16_t index);
     void publishClock(uint32_t steps);
     void publishClockReset();
     void publishClockInterval(uint32_t curInterval);
@@ -85,4 +86,7 @@ private:
 
     HSVCT _lastHsv;
     ChannelOutput _lastRaw;
+    uint16_t _lastColorLight = 0;
+    bool _hasLastColor = false;
+    bool _lastColorWasHsv = false;
 };

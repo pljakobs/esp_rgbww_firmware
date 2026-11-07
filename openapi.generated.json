@@ -20,6 +20,68 @@
     }
   ],
   "paths": {
+    "/catalog": {
+      "get": {
+        "operationId": "getHardwareCatalog",
+        "summary": "Get board and template catalog",
+        "description": "Returns the complete board/template catalog as gzip-compressed JSON. The HTTP client should transparently decode Content-Encoding.",
+        "responses": {
+          "200": {
+            "description": "Board profiles and templates",
+            "headers": {
+              "Content-Encoding": {
+                "description": "The response body is gzip-compressed.",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "gzip"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "schema_version",
+                    "version",
+                    "boards",
+                    "templates"
+                  ],
+                  "properties": {
+                    "schema_version": {
+                      "type": "integer"
+                    },
+                    "version": {
+                      "type": "integer"
+                    },
+                    "boards": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AppConfig/definitions/board_profile"
+                      }
+                    },
+                    "templates": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AppConfig/definitions/hardware_template"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/Busy"
+          }
+        }
+      }
+    },
     "/config": {
       "get": {
         "operationId": "getConfig",
@@ -172,9 +234,14 @@
       }
     },
     "/color": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/LightSelector"
+        }
+      ],
       "get": {
         "operationId": "getColor",
-        "summary": "Get current raw and HSV color",
+        "summary": "Get the selected or default light's active color representation",
         "responses": {
           "200": {
             "description": "Current color",
@@ -474,6 +541,11 @@
       }
     },
     "/stop": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/LightSelector"
+        }
+      ],
       "post": {
         "operationId": "stop",
         "summary": "Stop animation",
@@ -497,6 +569,11 @@
       }
     },
     "/skip": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/LightSelector"
+        }
+      ],
       "post": {
         "operationId": "skip",
         "summary": "Skip animation",
@@ -520,6 +597,11 @@
       }
     },
     "/pause": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/LightSelector"
+        }
+      ],
       "post": {
         "operationId": "pause",
         "summary": "Pause animation",
@@ -543,6 +625,11 @@
       }
     },
     "/continue": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/LightSelector"
+        }
+      ],
       "post": {
         "operationId": "continue",
         "summary": "Continue animation",
@@ -566,6 +653,11 @@
       }
     },
     "/toggle": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/LightSelector"
+        }
+      ],
       "post": {
         "operationId": "toggle",
         "summary": "Toggle output",
@@ -589,6 +681,11 @@
       }
     },
     "/on": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/LightSelector"
+        }
+      ],
       "post": {
         "operationId": "setOn",
         "summary": "Turn output on",
@@ -612,6 +709,11 @@
       }
     },
     "/off": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/LightSelector"
+        }
+      ],
       "post": {
         "operationId": "setOff",
         "summary": "Turn output off",
@@ -635,6 +737,11 @@
       }
     },
     "/blink": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/LightSelector"
+        }
+      ],
       "post": {
         "operationId": "blink",
         "summary": "Execute blink command",
@@ -741,6 +848,19 @@
         "type": "http",
         "scheme": "basic",
         "description": "Enabled only when security.api_secured is true."
+      }
+    },
+    "parameters": {
+      "LightSelector": {
+        "name": "light",
+        "in": "query",
+        "required": false,
+        "description": "Persistent configured light index. Omission selects the unique is_default light. If JSON also supplies light, the values must match.",
+        "schema": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        }
       }
     },
     "responses": {
@@ -1332,6 +1452,11 @@
           "hardware": {
             "type": "object",
             "properties": {
+              "schema_version": {
+                "type": "integer",
+                "minimum": 4,
+                "default": 4
+              },
               "version": {
                 "type": "integer",
                 "default": 0
@@ -1406,55 +1531,90 @@
               },
               "available_pins": {
                 "type": "array",
+                "maxItems": 2,
                 "items": {
                   "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "soc",
+                    "pins"
+                  ],
                   "properties": {
                     "soc": {
-                      "type": "string"
+                      "type": "string",
+                      "pattern": "^(esp32|esp32c3)$"
                     },
                     "pins": {
                       "type": "array",
+                      "maxItems": 40,
                       "items": {
-                        "$ref": "#/components/schemas/AppConfig/definitions/pin"
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "gpio",
+                          "capability"
+                        ],
+                        "properties": {
+                          "gpio": {
+                            "$ref": "#/components/schemas/AppConfig/definitions/pin"
+                          },
+                          "capability": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 127,
+                            "description": "Bit mask: input=1, output=2, pwm=4, strapping=8, pull_up=16, pull_down=32, reserved=64."
+                          }
+                        }
                       }
                     }
                   }
                 }
               },
-              "pinconfigs": {
+              "boards": {
                 "type": "array",
+                "maxItems": 16,
                 "items": {
-                  "type": "object",
-                  "properties": {
-                    "name": {
-                      "type": "string"
-                    },
-                    "soc": {
-                      "type": "string"
-                    },
-                    "model": {
-                      "type": "string"
-                    },
-                    "clear_pin": {
-                      "type": "integer"
-                    },
-                    "channels": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/AppConfig/definitions/channel"
-                      }
-                    }
-                  }
+                  "$ref": "#/components/schemas/AppConfig/definitions/board_profile"
                 }
+              },
+              "templates": {
+                "type": "array",
+                "maxItems": 32,
+                "items": {
+                  "$ref": "#/components/schemas/AppConfig/definitions/hardware_template"
+                }
+              },
+              "configuration": {
+                "$ref": "#/components/schemas/AppConfig/definitions/hardware_configuration"
               }
             }
           }
         },
-        "title": "Lightinator persistent configuration",
-        "$comment": "Generated projection of app-config.cfgdb; app-config.cfgdb remains the authoritative AppConfig ConfigDB schema.",
-        "x-configdb-source": "app-config.cfgdb",
-        "x-configdb-database": "AppConfig",
         "definitions": {
+          "color_settings": {
+            "type": "object",
+            "properties": {
+              "startup_color": {
+                "type": "string",
+                "default": "last"
+              },
+              "startup": {
+                "$ref": "#/components/schemas/AppConfig/definitions/light_color_startup"
+              },
+              "brightness": {
+                "$ref": "#/components/schemas/AppConfig/definitions/light_color_brightness"
+              },
+              "colortemp": {
+                "$ref": "#/components/schemas/AppConfig/definitions/light_color_colortemp"
+              },
+              "hsv": {
+                "$ref": "#/components/schemas/AppConfig/definitions/light_color_hsv"
+              },
+              "calibration": {
+                "$ref": "#/components/schemas/AppConfig/definitions/light_color_calibration"
+              }
+            }
+          },
           "timestamp": {
             "type": "integer",
             "minimum": 0,
@@ -1601,8 +1761,583 @@
                 "description": "Constant term"
               }
             }
+          },
+          "light_color_startup": {
+            "description": "modern startup color selection",
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "default": "LAST",
+                "pattern": "^(LAST|SET)$"
+              },
+              "color": {
+                "type": "string"
+              }
+            }
+          },
+          "light_color_brightness": {
+            "type": "object",
+            "properties": {
+              "red": {
+                "type": "integer",
+                "default": 100
+              },
+              "ww": {
+                "type": "integer",
+                "default": 100
+              },
+              "green": {
+                "type": "integer",
+                "default": 100
+              },
+              "blue": {
+                "type": "integer",
+                "default": 100
+              },
+              "cw": {
+                "type": "integer",
+                "default": 100
+              }
+            }
+          },
+          "light_color_colortemp": {
+            "type": "object",
+            "properties": {
+              "ww": {
+                "type": "integer",
+                "default": 2700
+              },
+              "cw": {
+                "type": "integer",
+                "default": 6000
+              }
+            }
+          },
+          "light_color_hsv": {
+            "type": "object",
+            "properties": {
+              "red": {
+                "type": "integer",
+                "default": 0
+              },
+              "magenta": {
+                "type": "integer",
+                "default": 0
+              },
+              "green": {
+                "type": "integer",
+                "default": 0
+              },
+              "blue": {
+                "type": "integer",
+                "default": 0
+              },
+              "yellow": {
+                "type": "integer",
+                "default": 0
+              },
+              "model": {
+                "type": "integer",
+                "default": 0
+              },
+              "cyan": {
+                "type": "integer",
+                "default": 0
+              }
+            }
+          },
+          "light_color_calibration_ct_range": {
+            "type": "object",
+            "description": "Kelvin range normalization bounds",
+            "properties": {
+              "min": {
+                "type": "integer",
+                "minimum": 1000,
+                "default": 1000
+              },
+              "max": {
+                "type": "integer",
+                "maximum": 20000,
+                "default": 20000
+              }
+            }
+          },
+          "light_color_calibration_hsv": {
+            "type": "array",
+            "description": "12 Parabolic coefficients for 30-degree Hue sectors (0, 30, ... 330)",
+            "minItems": 12,
+            "maxItems": 12,
+            "items": {
+              "$ref": "#/components/schemas/AppConfig/definitions/parabola"
+            }
+          },
+          "light_color_calibration": {
+            "type": "object",
+            "properties": {
+              "gamma": {
+                "type": "number",
+                "description": "System output gamma for correction calculation (e.g. 2.2)"
+              },
+              "ct_range": {
+                "$ref": "#/components/schemas/AppConfig/definitions/light_color_calibration_ct_range"
+              },
+              "hsv": {
+                "$ref": "#/components/schemas/AppConfig/definitions/light_color_calibration_hsv"
+              },
+              "ct": {
+                "description": "Parabolic coefficients for Color Temperature curve",
+                "$ref": "#/components/schemas/AppConfig/definitions/parabola"
+              }
+            }
+          },
+          "board_pin": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "gpio",
+              "label",
+              "allowed_functions"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 32
+              },
+              "gpio": {
+                "$ref": "#/components/schemas/AppConfig/definitions/pin"
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "aliases": {
+                "type": "array",
+                "maxItems": 8,
+                "items": {
+                  "type": "string",
+                  "maxLength": 32
+                }
+              },
+              "allowed_functions": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 6,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "^(light\\.pwm|button\\.input|system\\.clear_config|i2c\\.sda|i2c\\.scl|digital\\.data|digital\\.relay)$"
+                }
+              },
+              "active_low": {
+                "type": "boolean",
+                "default": false
+              },
+              "external_pull": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "up",
+                  "down"
+                ],
+                "default": "none"
+              },
+              "hardware_debounce": {
+                "type": "boolean",
+                "default": false
+              },
+              "restrictions": {
+                "type": "array",
+                "maxItems": 8,
+                "items": {
+                  "type": "string",
+                  "maxLength": 64
+                }
+              }
+            }
+          },
+          "board_profile": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "revision",
+              "name",
+              "soc",
+              "implemented_pins"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "revision": {
+                "type": "integer",
+                "minimum": 1,
+                "default": 1
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "soc": {
+                "type": "string",
+                "pattern": "^(esp32|esp32c3)$"
+              },
+              "implemented_pins": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 40,
+                "items": {
+                  "$ref": "#/components/schemas/AppConfig/definitions/board_pin"
+                }
+              },
+              "reserved_gpios": {
+                "type": "array",
+                "maxItems": 40,
+                "uniqueItems": true,
+                "items": {
+                  "$ref": "#/components/schemas/AppConfig/definitions/pin"
+                }
+              }
+            }
+          },
+          "light_configuration": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "name",
+              "type",
+              "pins"
+            ],
+            "properties": {
+              "index": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 65535,
+                "default": 65535
+              },
+              "is_default": {
+                "type": "boolean",
+                "default": false
+              },
+              "template_id": {
+                "type": "string",
+                "default": ""
+              },
+              "template_revision": {
+                "type": "integer",
+                "minimum": 0,
+                "default": 0
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "name": {
+                "type": "string",
+                "maxLength": 64
+              },
+              "type": {
+                "type": "string",
+                "pattern": "^(RGBWWCW|RGBWW|RGBCW|RGB|WWCW|WW|CW|SINGLE)$",
+                "description": "RGBWWCW, RGBWW, RGBCW, RGB, WWCW, WW, CW or SINGLE, matching RGBWWLed::LightType."
+              },
+              "pins": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 5,
+                "uniqueItems": true,
+                "description": "Physical GPIO numbers in type order: RGBWWCW=[R,G,B,WW,CW], RGBWW=[R,G,B,WW], RGBCW=[R,G,B,CW], RGB=[R,G,B], WWCW=[WW,CW], WW=[WW], CW=[CW], SINGLE=[single output].",
+                "items": {
+                  "$ref": "#/components/schemas/AppConfig/definitions/pin"
+                }
+              },
+              "color": {
+                "$ref": "#/components/schemas/AppConfig/definitions/color_settings"
+              }
+            }
+          },
+          "template_light_configuration": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "name",
+              "type",
+              "pins"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "name": {
+                "type": "string",
+                "maxLength": 64
+              },
+              "type": {
+                "type": "string",
+                "pattern": "^(RGBWWCW|RGBWW|RGBCW|RGB|WWCW|WW|CW|SINGLE)$"
+              },
+              "pins": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 5,
+                "uniqueItems": true,
+                "description": "Board pin IDs in the channel order defined by type; frontend resolves IDs to GPIO numbers before activation.",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 32
+                }
+              },
+              "color": {
+                "$ref": "#/components/schemas/AppConfig/definitions/color_settings"
+              }
+            }
+          },
+          "system_configuration": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "clear_config_pin": {
+                "$ref": "#/components/schemas/AppConfig/definitions/pin",
+                "default": 0,
+                "description": "Physical GPIO used for configuration clear when enabled."
+              },
+              "clear_config_enabled": {
+                "type": "boolean",
+                "default": false
+              },
+              "clear_config_active_low": {
+                "type": "boolean",
+                "default": true
+              },
+              "clear_config_external_pull_up": {
+                "type": "boolean",
+                "default": false
+              },
+              "clear_config_external_pull_down": {
+                "type": "boolean",
+                "default": false
+              }
+            }
+          },
+          "button_configuration": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "pin"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "pin": {
+                "$ref": "#/components/schemas/AppConfig/definitions/pin"
+              },
+              "active_low": {
+                "type": "boolean",
+                "default": true
+              },
+              "external_pull_up": {
+                "type": "boolean",
+                "default": false
+              },
+              "external_pull_down": {
+                "type": "boolean",
+                "default": false
+              },
+              "enabled": {
+                "type": "boolean",
+                "default": false
+              },
+              "debounce_ms": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1000,
+                "default": 50
+              }
+            }
+          },
+          "i2c_configuration": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "sda",
+              "scl"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "type": {
+                "type": "string",
+                "pattern": "^i2c$",
+                "default": "i2c"
+              },
+              "sda": {
+                "$ref": "#/components/schemas/AppConfig/definitions/pin"
+              },
+              "scl": {
+                "$ref": "#/components/schemas/AppConfig/definitions/pin"
+              },
+              "enabled": {
+                "type": "boolean",
+                "default": false
+              },
+              "frequency": {
+                "type": "integer",
+                "minimum": 10000,
+                "maximum": 400000,
+                "default": 100000
+              }
+            }
+          },
+          "hardware_template": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "revision",
+              "name",
+              "board_id",
+              "board_revision",
+              "lights"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "revision": {
+                "type": "integer",
+                "minimum": 1,
+                "default": 1
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "board_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "board_revision": {
+                "type": "integer",
+                "minimum": 1,
+                "default": 1
+              },
+              "lights": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 16,
+                "items": {
+                  "$ref": "#/components/schemas/AppConfig/definitions/template_light_configuration"
+                }
+              },
+              "system": {
+                "$ref": "#/components/schemas/AppConfig/definitions/system_configuration"
+              },
+              "buttons": {
+                "type": "array",
+                "maxItems": 16,
+                "items": {
+                  "$ref": "#/components/schemas/AppConfig/definitions/button_configuration"
+                }
+              },
+              "buses": {
+                "type": "array",
+                "maxItems": 2,
+                "items": {
+                  "$ref": "#/components/schemas/AppConfig/definitions/i2c_configuration"
+                }
+              }
+            }
+          },
+          "hardware_configuration": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "revision": {
+                "type": "integer",
+                "minimum": 0,
+                "default": 0
+              },
+              "board_id": {
+                "type": "string",
+                "maxLength": 64,
+                "default": ""
+              },
+              "soc": {
+                "type": "string",
+                "pattern": "^(esp32|esp32c3)$",
+                "default": "esp32c3"
+              },
+              "board_revision": {
+                "type": "integer",
+                "minimum": 0,
+                "default": 0
+              },
+              "template_id": {
+                "type": "string",
+                "maxLength": 64,
+                "default": ""
+              },
+              "template_revision": {
+                "type": "integer",
+                "minimum": 0,
+                "default": 0
+              },
+              "lights": {
+                "type": "array",
+                "maxItems": 16,
+                "items": {
+                  "$ref": "#/components/schemas/AppConfig/definitions/light_configuration"
+                }
+              },
+              "system": {
+                "$ref": "#/components/schemas/AppConfig/definitions/system_configuration"
+              },
+              "buttons": {
+                "type": "array",
+                "maxItems": 16,
+                "items": {
+                  "$ref": "#/components/schemas/AppConfig/definitions/button_configuration"
+                }
+              },
+              "buses": {
+                "type": "array",
+                "maxItems": 2,
+                "items": {
+                  "$ref": "#/components/schemas/AppConfig/definitions/i2c_configuration"
+                }
+              }
+            }
           }
-        }
+        },
+        "title": "Lightinator persistent configuration",
+        "$comment": "Generated projection of app-config.cfgdb; app-config.cfgdb remains the authoritative AppConfig ConfigDB schema.",
+        "x-configdb-source": "app-config.cfgdb",
+        "x-configdb-database": "AppConfig"
       },
       "AppData": {
         "type": "object",
@@ -1833,6 +2568,30 @@
           }
         },
         "definitions": {
+          "color_settings": {
+            "type": "object",
+            "properties": {
+              "startup_color": {
+                "type": "string",
+                "default": "last"
+              },
+              "startup": {
+                "$ref": "#/components/schemas/AppData/definitions/light_color_startup"
+              },
+              "brightness": {
+                "$ref": "#/components/schemas/AppData/definitions/light_color_brightness"
+              },
+              "colortemp": {
+                "$ref": "#/components/schemas/AppData/definitions/light_color_colortemp"
+              },
+              "hsv": {
+                "$ref": "#/components/schemas/AppData/definitions/light_color_hsv"
+              },
+              "calibration": {
+                "$ref": "#/components/schemas/AppData/definitions/light_color_calibration"
+              }
+            }
+          },
           "timestamp": {
             "type": "integer",
             "minimum": 0,
@@ -1977,6 +2736,135 @@
               "c": {
                 "type": "number",
                 "description": "Constant term"
+              }
+            }
+          },
+          "light_color_startup": {
+            "description": "modern startup color selection",
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "default": "LAST",
+                "pattern": "^(LAST|SET)$"
+              },
+              "color": {
+                "type": "string"
+              }
+            }
+          },
+          "light_color_brightness": {
+            "type": "object",
+            "properties": {
+              "red": {
+                "type": "integer",
+                "default": 100
+              },
+              "ww": {
+                "type": "integer",
+                "default": 100
+              },
+              "green": {
+                "type": "integer",
+                "default": 100
+              },
+              "blue": {
+                "type": "integer",
+                "default": 100
+              },
+              "cw": {
+                "type": "integer",
+                "default": 100
+              }
+            }
+          },
+          "light_color_colortemp": {
+            "type": "object",
+            "properties": {
+              "ww": {
+                "type": "integer",
+                "default": 2700
+              },
+              "cw": {
+                "type": "integer",
+                "default": 6000
+              }
+            }
+          },
+          "light_color_hsv": {
+            "type": "object",
+            "properties": {
+              "red": {
+                "type": "integer",
+                "default": 0
+              },
+              "magenta": {
+                "type": "integer",
+                "default": 0
+              },
+              "green": {
+                "type": "integer",
+                "default": 0
+              },
+              "blue": {
+                "type": "integer",
+                "default": 0
+              },
+              "yellow": {
+                "type": "integer",
+                "default": 0
+              },
+              "model": {
+                "type": "integer",
+                "default": 0
+              },
+              "cyan": {
+                "type": "integer",
+                "default": 0
+              }
+            }
+          },
+          "light_color_calibration_ct_range": {
+            "type": "object",
+            "description": "Kelvin range normalization bounds",
+            "properties": {
+              "min": {
+                "type": "integer",
+                "minimum": 1000,
+                "default": 1000
+              },
+              "max": {
+                "type": "integer",
+                "maximum": 20000,
+                "default": 20000
+              }
+            }
+          },
+          "light_color_calibration_hsv": {
+            "type": "array",
+            "description": "12 Parabolic coefficients for 30-degree Hue sectors (0, 30, ... 330)",
+            "minItems": 12,
+            "maxItems": 12,
+            "items": {
+              "$ref": "#/components/schemas/AppData/definitions/parabola"
+            }
+          },
+          "light_color_calibration": {
+            "type": "object",
+            "properties": {
+              "gamma": {
+                "type": "number",
+                "description": "System output gamma for correction calculation (e.g. 2.2)"
+              },
+              "ct_range": {
+                "$ref": "#/components/schemas/AppData/definitions/light_color_calibration_ct_range"
+              },
+              "hsv": {
+                "$ref": "#/components/schemas/AppData/definitions/light_color_calibration_hsv"
+              },
+              "ct": {
+                "description": "Parabolic coefficients for Color Temperature curve",
+                "$ref": "#/components/schemas/AppData/definitions/parabola"
               }
             }
           }
@@ -2180,6 +3068,25 @@
             },
             "additionalProperties": false
           },
+          "indexedRawPoint": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1023
+            },
+            "maxItems": 5
+          },
+          "rawState": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Wire/definitions/rawPoint"
+              },
+              {
+                "$ref": "#/components/schemas/Wire/definitions/indexedRawPoint"
+              }
+            ]
+          },
           "hsvPoint": {
             "type": "object",
             "properties": {
@@ -2206,7 +3113,7 @@
             },
             "additionalProperties": false
           },
-          "relativeRawPoint": {
+          "relativeNamedRawPoint": {
             "type": "object",
             "properties": {
               "r": {
@@ -2227,6 +3134,30 @@
             },
             "additionalProperties": false
           },
+          "relativeIndexedRawPoint": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Wire/definitions/absoluteOrRelativeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "maxItems": 5
+          },
+          "relativeRawPoint": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Wire/definitions/relativeNamedRawPoint"
+              },
+              {
+                "$ref": "#/components/schemas/Wire/definitions/relativeIndexedRawPoint"
+              }
+            ]
+          },
           "relativeHsvPoint": {
             "type": "object",
             "properties": {
@@ -2246,43 +3177,35 @@
             "additionalProperties": false
           },
           "colorState": {
-            "type": "object",
-            "required": [
-              "raw",
-              "hsv"
-            ],
-            "properties": {
-              "raw": {
-                "$ref": "#/components/schemas/Wire/definitions/rawPoint"
+            "oneOf": [
+              {
+                "type": "object",
+                "required": [
+                  "raw"
+                ],
+                "properties": {
+                  "raw": {
+                    "$ref": "#/components/schemas/Wire/definitions/rawState"
+                  }
+                },
+                "additionalProperties": false
               },
-              "hsv": {
-                "$ref": "#/components/schemas/Wire/definitions/hsvPoint"
+              {
+                "type": "object",
+                "required": [
+                  "hsv"
+                ],
+                "properties": {
+                  "hsv": {
+                    "$ref": "#/components/schemas/Wire/definitions/hsvPoint"
+                  }
+                },
+                "additionalProperties": false
               }
-            },
-            "additionalProperties": false
+            ]
           },
           "colorEventParams": {
-            "type": "object",
-            "required": [
-              "mode",
-              "raw"
-            ],
-            "properties": {
-              "mode": {
-                "type": "string",
-                "enum": [
-                  "raw",
-                  "hsv"
-                ]
-              },
-              "raw": {
-                "$ref": "#/components/schemas/Wire/definitions/rawPoint"
-              },
-              "hsv": {
-                "$ref": "#/components/schemas/Wire/definitions/hsvPoint"
-              }
-            },
-            "additionalProperties": false
+            "$ref": "#/components/schemas/Wire/definitions/colorState"
           },
           "commandFields": {
             "type": "object",
@@ -2317,6 +3240,11 @@
               },
               "q": {
                 "$ref": "#/components/schemas/Wire/definitions/queuePosition"
+              },
+              "light": {
+                "type": "integer",
+                "minimum": -1,
+                "maximum": 65535
               },
               "channels": {
                 "type": "array",
@@ -2372,6 +3300,11 @@
               },
               "q": {
                 "$ref": "#/components/schemas/Wire/definitions/queuePosition"
+              },
+              "light": {
+                "type": "integer",
+                "minimum": -1,
+                "maximum": 65535
               },
               "channels": {
                 "type": "array",
@@ -2451,6 +3384,11 @@
               "q": {
                 "$ref": "#/components/schemas/Wire/definitions/queuePosition"
               },
+              "light": {
+                "type": "integer",
+                "minimum": -1,
+                "maximum": 65535
+              },
               "channels": {
                 "type": "array",
                 "items": {
@@ -2494,6 +3432,11 @@
               "ramp": {
                 "type": "integer",
                 "minimum": 0
+              },
+              "light": {
+                "type": "integer",
+                "minimum": -1,
+                "maximum": 65535
               },
               "q": {
                 "$ref": "#/components/schemas/Wire/definitions/queuePosition"

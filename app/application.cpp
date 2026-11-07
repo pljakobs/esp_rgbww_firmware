@@ -28,11 +28,16 @@
 #include <Storage/SysMem.h>
 #include <Storage/ProgMem.h>
 #include <Storage/Debug.h>
+#include <Data/Stream/FileStream.h>
 #include <JSON/StreamingParser.h>
 #include <VersionListener.h>
 #include <FlashString/Stream.hpp>
 #include <fileMap.h>
 #include <apihandler.h>
+#include <Wire.h>
+#ifdef ARCH_ESP32
+#include <driver/gpio.h>
+#endif
 #if defined(ESP8266)
   #include <osapi.h>
 #endif
@@ -59,7 +64,9 @@ extern "C" {
 #define PART0 "factory"
 #endif
 
-//IMPORT_FSTR_LOCAL(default_config, PROJECT_DIR "/default_config.json");
+IMPORT_FSTR_LOCAL(soc_pins_defaults, PROJECT_DIR "/soc-pins.json");
+IMPORT_FSTR_LOCAL(hardware_catalog, PROJECT_DIR "/hardware-catalog.json.gz");
+IMPORT_FSTR_LOCAL(hardware_catalog_version, PROJECT_DIR "/hardware-catalog.version");
 
 #if defined(ARCH_ESP8266) && !defined(SMING_RELEASE)
 #include <Platform/OsMessageInterceptor.h>
@@ -307,33 +314,8 @@ extern "C" __attribute__((noinline)) void allocateHeapHog(size_t take) {
 void onReady()
 {
 	#ifdef ARCH_HOST
-	// Consume all but ~20kB of the (tracked) heap so the emulator runs close to
-	// the low-memory conditions seen on the device.
-	//	
-	// Getting the compiler to actually perform (and keep) the allocation needs
-	// two tricks:
-	//   1. A compiler barrier on the returned pointer, so the escaped value is
-	//      considered "used" and the malloc call can't be dead-code eliminated.
-	//   2. memset with a NON-zero value; memset-to-zero right after malloc gets
-	//      folded into calloc and then dropped as a dead store, which is why the
-	//      tracked free heap previously never moved.
-	/*
-	static uint8_t* heapHog = nullptr;
-	auto free = system_get_free_heap_size();
-	if (free>HOST_FREE_TARGET){
-		size_t take = free - HOST_FREE_TARGET;
-		debug_i(ANSI_COLOR_BLUE "onReady: free heap %d, allocating %d bytes to squeeze heap to ~%i" ANSI_COLOR_RESET, free, (int)take, HOST_FREE_TARGET);
-		heapHog = static_cast<uint8_t*>(malloc(take));
-		allocateHeapHog(take);
-		debug_i(ANSI_COLOR_BLUE "onReady: heapHog allocated %d bytes, free heap now %d" ANSI_COLOR_RESET, (int)take, system_get_free_heap_size());
-	}
-	*/
-	//use MallocCount to limit heap usage on the host (needs c0911d21a31b43b21ec35c6210fdabbb5b2c10c9)
-	//MallocCount::enableLogging(true);
-	cdebug_i(APPLICATION, "onReady: " ANSI_COLOR_YELLOW "setting malloc limit to %i bytes" ANSI_COLOR_RESET, HOST_FREE_TARGET);
-	cdebug_i(APPLICATION, "onReady: " ANSI_COLOR_YELLOW "free heap before malloc limit: %d" ANSI_COLOR_RESET, system_get_free_heap_size());
-	MallocCount::setAllocLimit(HOST_FREE_TARGET);
-	cdebug_i(APPLICATION, "onReady: " ANSI_COLOR_YELLOW "free heap after malloc limit: %d" ANSI_COLOR_RESET, system_get_free_heap_size());
+	cdebug_i(APPLICATION, "onReady: Host heap is not capped to the ESP8266 allocation budget; free heap: %u",
+			 unsigned(system_get_free_heap_size()));
 	#endif
 	//System.setCpuFrequencye(CF_160MHz);
 	cdebug_i(APPLICATION, "onReady: " ANSI_COLOR_BLUE "getting reset info from rtc" ANSI_COLOR_RESET);
@@ -406,6 +388,8 @@ int32_t getVersion(IDataSourceStream& input)
 
 Application::~Application()
 {
+	_buttonPollTimer.stop();
+	_resetPinTimer.stop();
 	if(pNtpclient != nullptr) {
 		delete pNtpclient;
 		pNtpclient = nullptr;
@@ -601,6 +585,66 @@ bool Application::checkHeap( uint32_t minHeap)
 
 namespace
 {
+bool copyFstrToFile(FSTR::Stream& source, const String& destinationPath)
+{
+	File destination;
+	if(!destination.open(destinationPath, File::CreateNewAlways | File::WriteOnly)) {
+		return false;
+	}
+	char buffer[256];
+	bool success = true;
+	while(source.available()) {
+		const int count = source.readBytes(buffer, sizeof(buffer));
+		if(count <= 0 || destination.write(buffer, count) != size_t(count)) {
+			success = false;
+			break;
+		}
+	}
+	destination.close();
+	return success;
+}
+
+uint32_t getCatalogSeedVersion()
+{
+	FSTR::Stream versionStream(hardware_catalog_version);
+	char version[16]{};
+	versionStream.readBytes(version, sizeof(version) - 1);
+	return String(version).toInt();
+}
+
+bool isGzipFile(const String& path)
+{
+	FileStream file;
+	if(!file.open(path, File::ReadOnly)) {
+		return false;
+	}
+	uint8_t header[2]{};
+	const bool valid = file.readBytes(reinterpret_cast<char*>(header), sizeof(header)) == sizeof(header) &&
+		header[0] == 0x1f && header[1] == 0x8b;
+	file.close();
+	return valid;
+}
+
+bool seedHardwareCatalog()
+{
+	static const String catalogPath = F("hardware-catalog.json.gz");
+	static const String versionPath = F("hardware-catalog.version");
+	const uint32_t seedVersion = getCatalogSeedVersion();
+	const String installedVersionText = fileGetContent(versionPath);
+	const uint32_t installedVersion = installedVersionText.toInt();
+	if(seedVersion == 0) {
+		return false;
+	}
+	if(fileExist(catalogPath) && installedVersion >= seedVersion && isGzipFile(catalogPath)) {
+		return true;
+	}
+	FSTR::Stream catalogStream(hardware_catalog);
+	if(!copyFstrToFile(catalogStream, catalogPath)) {
+		return false;
+	}
+	return fileSetContent(versionPath, String(seedVersion)) >= 0;
+}
+
 /*
  * webapp used to live in the root app-config store; it is now its own store.
  * ConfigDB resets a whole store to defaults on any unknown key, so the old
@@ -729,72 +773,53 @@ cdebug_i(APPLICATION, "Application::init: " ANSI_COLOR_BLUE "running partition "
 	migrateWebappStore();
 	cfg =  std::make_unique<AppConfig>(configDB_PATH);
 	data = std::make_unique<AppData>(dataDB_PATH);
+	socPins = std::make_unique<Pins>(pinsDB_PATH);
 	api = std::make_unique<Api>();
 	controllers = std::make_unique<Controllers>();
 	(void)getFreeHeapSize(); // sample heap after ConfigDB + Controllers construction
 
-	// verify if there is a new version of the hardware config
-	
-
 	{
-		// check if the pinconfig json provided with the frontend is newer than the pinconfig array in the configdb
-		// this allows to simply add new pin configs to running controllers
-		AppConfig::Hardware hardware(*cfg);
-		uint32_t currentVersion=hardware.getVersion();
-
-		cdebug_i(APPLICATION, "Application::init: " ANSI_COLOR_BLUE "make pinconfig stream" ANSI_COLOR_RESET);
-		FSTR::Stream fs(fileMap["config/pinconfig.json"]);	
-		//Serial.println(fileMap["config/pinconfig.json"]);
-		cdebug_i(APPLICATION, "Application::init: " ANSI_COLOR_BLUE "get file Version" ANSI_COLOR_RESET);
-		uint32_t fileVersion=getVersion(fs);
-		cdebug_i(APPLICATION, "Application::init: " ANSI_COLOR_BLUE "fileVersion " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, fileVersion);	
-		if(fileVersion == -1){
-			cdebug_i(APPLICATION, "Application::init: " ANSI_COLOR_BLUE "no version found in pinconfig" ANSI_COLOR_RESET);
-		}
-		cdebug_i(APPLICATION, "Application::init: " ANSI_COLOR_BLUE "hardware version: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE ", file version: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, currentVersion, fileVersion);
-		if(fileVersion>currentVersion){
-			if(auto hardwareUpdate = hardware.update()){
-				hardwareUpdate.importFromStream(ConfigDB::Json::format, fs);
+		Pins::Root pins(*socPins);
+		FSTR::Stream versionStream(soc_pins_defaults);
+		const uint32_t defaultsVersion = getVersion(versionStream);
+		const uint32_t currentVersion = pins.getVersion();
+		if(defaultsVersion != uint32_t(-1) && defaultsVersion > currentVersion) {
+			if(auto pinsUpdate = pins.update()) {
+				cdebug_i(APPLICATION, "Importing SoC pin capability revision %u (stored %u)", defaultsVersion,
+						 currentVersion);
+				FSTR::Stream defaultsStream(soc_pins_defaults);
+				const auto status = pinsUpdate.importFromStream(ConfigDB::Json::format, defaultsStream);
+				if(!status) {
+					cdebug_e(APPLICATION, "SoC pin capability import failed: %s", status.toString().c_str());
+				}
 			}
 		}
 	}
 	{
-    	int clearPin = -1;
-		{
-			AppConfig::General general(*cfg);
-			AppConfig::Hardware hardware(*cfg);
-
-			String pinConfigName = general.getCurrentPinConfigName();
-			String SoC = SOC;
-
-			if (hardware.pinconfigs.getItemCount() > 0) {
-				for (auto pinconfig : hardware.pinconfigs) {
-					if (pinconfig.getName() == pinConfigName && pinconfig.getSoc() == SoC) {
-						clearPin = pinconfig.getClearPin();
-						break;
-					}
-				}
+		AppConfig::Hardware hardware(*cfg);
+		if(hardware.availablePins.getItemCount() || hardware.boards.getItemCount() || hardware.templates.getItemCount()) {
+			if(auto hardwareUpdate = hardware.update()) {
+				hardwareUpdate.availablePins.clear();
+				hardwareUpdate.boards.clear();
+				hardwareUpdate.templates.clear();
+				hardwareUpdate.setVersion(0);
 			}
 		}
-		cdebug_i(APPLICATION, "Application::init: " ANSI_COLOR_BLUE "clear pin " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, clearPin);
-		if(clearPin >= 0) {
-			pinMode(clearPin, INPUT);
-			cdebug_i(APPLICATION, "Application::init: " ANSI_COLOR_BLUE "clear pin set to input" ANSI_COLOR_RESET);
-		
-			_clearPin = clearPin;
-            _resetPinTimer.initializeMs(100, TimerDelegate(&Application::pollResetButton, this)).start();
-        }
-		#if !defined(ARCH_HOST)
-
-			if(clearPin >=0 && digitalRead(clearPin) < 1) {
-				cdebug_i(APPLICATION, "Application::init: " ANSI_COLOR_BLUE "CLR button low - resetting settings" ANSI_COLOR_RESET);
-				// ConfigDB - decide if to reload defaults or load a specific saved version
-				// perhaps by holding the clear pin low for a certain time along with blink codes?
-				// cfg.reset();
-				network.forgetWifi();
-			}
-
-		#endif
+	}
+	if(!seedHardwareCatalog()) {
+		cdebug_w(APPLICATION, "Could not seed the hardware catalog working copy");
+	}
+	{
+		String error;
+		if(!configureHardwareInputs(error)) {
+			cdebug_e(APPLICATION, "Startup input configuration rejected: %s", error.c_str());
+		}
+#ifndef ARCH_HOST
+		if(_clearPin >= 0 && digitalRead(_clearPin) == (_clearActiveLow ? LOW : HIGH)) {
+			cdebug_i(APPLICATION, "Clear input held at boot; forgetting WiFi settings");
+			network.forgetWifi();
+		}
+#endif
 	}
 
 	cdebug_i(APPLICATION, "Application::init: " ANSI_COLOR_BLUE "hardware config loaded" ANSI_COLOR_RESET);
@@ -826,16 +851,10 @@ cdebug_i(APPLICATION, "Application::init: " ANSI_COLOR_BLUE "running partition "
 			}
 
 		} else {
-			cdebug_i(APPLICATION, "Application::init: " ANSI_COLOR_BLUE "ConfigDB already initialized. resetting hardware definition" ANSI_COLOR_RESET);
+			cdebug_i(APPLICATION, "Application::init: " ANSI_COLOR_BLUE "ConfigDB already initialized. retaining active hardware configuration" ANSI_COLOR_RESET);
 			{
 			if (auto generalUpdate= general.update()){
 				generalUpdate.supportedColorModels.loadArrayDefaults();
-				}
-			}
-			{
-				AppConfig::Hardware hardware(*app.cfg);
-				if(auto hardwareUpdate=hardware.update()){
-					hardwareUpdate.availablePins.loadArrayDefaults();
 				}
 			}
 		}
@@ -924,36 +943,151 @@ cdebug_i(APPLICATION, "Application::init: " ANSI_COLOR_BLUE "running partition "
 }
 void Application::initButtons()
 {
-	Vector<String> buttons;
-	{
-		cdebug_i(APPLICATION, "Application::initButtons: " ANSI_COLOR_BLUE "Application::initButtons" ANSI_COLOR_RESET);
-		AppConfig::General general(*cfg);
+	String error;
+	if(!configureHardwareInputs(error)) {
+		cdebug_e(APPLICATION, "Hardware input configuration rejected: %s", error.c_str());
+	}
+}
 
-		if(general.getButtonsConfig().length() <= 0)
-			return;
-
-		String buttonsConfig = general.getButtonsConfig();
-
-		cdebug_i(APPLICATION, "Application::initButtons: " ANSI_COLOR_BLUE "Configuring buttons using string: '" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "'" ANSI_COLOR_RESET, buttonsConfig.c_str());
-
-		splitString(buttonsConfig, ',', buttons);
-	} // end of ConfigDB general context
-
-	for(uint32_t i = 0; i < buttons.count(); ++i) {
-		if(buttons[i].length() == 0)
-			continue;
-
-		uint32_t pin = buttons[i].toInt();
-		if(pin >= _lastToggles.size()) {
-			cdebug_i(APPLICATION, "Application::initButtons: " ANSI_COLOR_BLUE "Pin " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " is invalid. Max is " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, pin, _lastToggles.size() - 1);
-			continue;
+String Application::inputsSignature() const
+{
+	AppConfig::Hardware hardware(*cfg);
+	MemoryDataStream stream;
+	hardware.configuration.system.exportToStream(ConfigDB::Json::format, stream);
+	hardware.configuration.buttons.exportToStream(ConfigDB::Json::format, stream);
+	hardware.configuration.buses.exportToStream(ConfigDB::Json::format, stream);
+	for(auto board : hardware.boards) {
+		if(board.getId() == hardware.configuration.getBoardId() &&
+		   board.getRevision() == hardware.configuration.getBoardRevision()) {
+			board.exportToStream(ConfigDB::Json::format, stream);
+			break;
 		}
-		cdebug_i(APPLICATION, "Application::initButtons: " ANSI_COLOR_BLUE "Configuring button: '" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "'" ANSI_COLOR_RESET, buttons[i].c_str());
+	}
+	return stream.readString(stream.available());
+}
 
-		_lastToggles[pin] = 0ul;
+bool Application::validateHardwareInputs(const HardwareInputs& inputs, String& error) const
+{
+#if STATUS_DISPLAY
+	if(statusDisplay && _hardwareInputs.i2cEnabled && !inputs.i2cEnabled) {
+		error = F("Cannot disable I2C while the status display is active");
+		return false;
+	}
+#else
+	(void)inputs;
+	(void)error;
+#endif
+	return true;
+}
 
-		attachInterrupt(pin, std::bind(&Application::onButtonTogglePressed, this, pin), FALLING);
-		pinMode(pin, INPUT_PULLUP);
+bool Application::configureHardwareInputs(String& error)
+{
+	const String signature = inputsSignature();
+	if(signature == _inputsSignature) {
+		return true;
+	}
+	HardwareInputs next;
+	if(!rgbwwctrl.resolveInputs(next, error) || !validateHardwareInputs(next, error)) {
+		return false;
+	}
+	const bool busChanged = next.i2cEnabled != _hardwareInputs.i2cEnabled || next.sda != _hardwareInputs.sda ||
+		next.scl != _hardwareInputs.scl || next.frequency != _hardwareInputs.frequency;
+	std::vector<InputState> states(next.buttons.size());
+	_buttonPollTimer.stop();
+	_resetPinTimer.stop();
+	for(const auto& button : _hardwareInputs.buttons) {
+		pinMode(button.gpio, INPUT);
+	}
+	if(_clearPin >= 0) {
+		pinMode(_clearPin, INPUT);
+	}
+	if(busChanged) {
+#if STATUS_DISPLAY
+		if(!statusDisplay) {
+#endif
+			if(_hardwareInputs.i2cEnabled) {
+				Wire.end();
+			}
+			if(next.i2cEnabled) {
+				Wire.begin(next.sda, next.scl);
+				Wire.setClock(next.frequency);
+			}
+#if STATUS_DISPLAY
+		}
+#endif
+	}
+	auto applyPin = [](const ConfiguredInput& input) {
+		pinMode(input.gpio, input.internalPullUp ? INPUT_PULLUP : INPUT);
+#ifdef ARCH_ESP32
+		if(input.internalPullDown) {
+			gpio_set_pull_mode((gpio_num_t)input.gpio, GPIO_PULLDOWN_ONLY);
+		}
+#endif
+	};
+	for(unsigned index = 0; index < next.buttons.size(); ++index) {
+		const auto& button = next.buttons[index];
+		applyPin(button);
+		states[index].sample = states[index].pressed = digitalRead(button.gpio) == (button.activeLow ? LOW : HIGH);
+		states[index].changedAt = millis();
+		cdebug_i(APPLICATION, "Button %s: GPIO%d, active %s, debounce %u ms, internal pulls %u/%u", button.id.c_str(),
+			button.gpio, button.activeLow ? "low" : "high", unsigned(button.debounceMs), unsigned(button.internalPullUp),
+			unsigned(button.internalPullDown));
+	}
+	_clearPin = next.clear.gpio;
+	_clearActiveLow = next.clear.activeLow;
+	_clearHoldCounter = 0;
+	if(_clearPin >= 0) {
+		applyPin(next.clear);
+#ifndef ARCH_HOST
+		_resetPinTimer.initializeMs(100, TimerDelegate(&Application::pollResetButton, this)).start();
+#endif
+	}
+	_hardwareInputs = std::move(next);
+	_buttonStates.swap(states);
+	if(!_hardwareInputs.buttons.empty()) {
+		_buttonPollTimer.initializeMs(10, TimerDelegate(&Application::pollButtons, this)).start();
+	}
+	_inputsSignature = signature;
+	cdebug_i(APPLICATION, "Hardware inputs applied: %u buttons, clear GPIO%d, I2C %s SDA%d SCL%d %u Hz",
+		unsigned(_hardwareInputs.buttons.size()), _clearPin, _hardwareInputs.i2cEnabled ? "enabled" : "disabled",
+		_hardwareInputs.sda, _hardwareInputs.scl, unsigned(_hardwareInputs.frequency));
+	return true;
+}
+
+std::unique_ptr<FSTR::Stream> Application::hardwareCatalogSeedStream() const
+{
+	return std::make_unique<FSTR::Stream>(hardware_catalog);
+}
+
+RGBWWLed* Application::getLight(int32_t index, String& error) const
+{
+	for(const auto& light : lights) {
+		if(index >= 0 ? light.index == uint16_t(index) : light.isDefault) {
+			return light.led.get();
+		}
+	}
+	error = index >= 0 ? F("Configured light index not found") : F("No default light is configured");
+	return nullptr;
+}
+
+void Application::pollButtons()
+{
+	const uint32_t now = millis();
+	for(unsigned index = 0; index < _hardwareInputs.buttons.size(); ++index) {
+		const auto& button = _hardwareInputs.buttons[index];
+		auto& state = _buttonStates[index];
+		const bool pressed = digitalRead(button.gpio) == (button.activeLow ? LOW : HIGH);
+		if(pressed != state.sample) {
+			state.sample = pressed;
+			state.changedAt = now;
+		}
+		if(state.pressed != state.sample && uint32_t(now - state.changedAt) >= button.debounceMs) {
+			state.pressed = state.sample;
+			cdebug_i(APPLICATION, "Button %s: %s", button.id.c_str(), state.pressed ? "pressed" : "released");
+			if(state.pressed) {
+				onButtonTogglePressed(button.gpio);
+			}
+		}
 	}
 }
 
@@ -1357,25 +1491,6 @@ bool Application::mountfs(int slot)
 
 void Application::listFiles()
 {
-	if(FileHandle file = fileOpen(F("VERSION"), IFS::OpenFlag::Read)) {
-		cdebug_i(APPLICATION, "Application::listFiles: " ANSI_COLOR_BLUE "found VERSION file" ANSI_COLOR_RESET);
-		char buffer[64];
-		int bytesRead = fileRead(file, buffer, sizeof(buffer));
-		if(bytesRead < 0) {
-			cdebug_e(APPLICATION, "Application::listFiles: " ANSI_COLOR_RED "Failed reading VERSION file" ANSI_COLOR_RESET);
-			fileClose(file);
-			return;
-		}
-		if(bytesRead >= static_cast<int>(sizeof(buffer))) {
-			bytesRead = sizeof(buffer) - 1;
-		}
-		buffer[bytesRead] = '\0';
-		cdebug_i(APPLICATION, "Application::listFiles: " ANSI_COLOR_BLUE "\nweb app version String: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, buffer);
-		fileClose(file);
-	} else {
-		cdebug_i(APPLICATION, "Application::listFiles: " ANSI_COLOR_BLUE "Partition has no version file\n" ANSI_COLOR_RESET);
-	}
-
 	Directory dir;
 	if(dir.open()) {
 		while(dir.next()) {
@@ -1534,12 +1649,21 @@ void Application::wsBroadcast(const String& cmd, const JsonObject& params)
 			auto color = update.toColor();
 			if(params.containsKey(F("raw"))) {
 				auto raw = color.toRaw();
-				auto p = params[F("raw")].as<JsonObject>();
-				raw.setR(p[F("r")] | 0);
-				raw.setG(p[F("g")] | 0);
-				raw.setB(p[F("b")] | 0);
-				raw.setWw(p[F("ww")] | 0);
-				raw.setCw(p[F("cw")] | 0);
+				JsonVariant rawValue = params[F("raw")];
+				if(rawValue.is<JsonArray>()) {
+					auto indexed = raw.toRawIndexed();
+					for(JsonVariant value : rawValue.as<JsonArray>()) {
+						indexed.addItem(value | 0);
+					}
+				} else {
+					auto named = raw.toRawNamed();
+					auto p = rawValue.as<JsonObject>();
+					named.setR(p[F("r")] | 0);
+					named.setG(p[F("g")] | 0);
+					named.setB(p[F("b")] | 0);
+					named.setWw(p[F("ww")] | 0);
+					named.setCw(p[F("cw")] | 0);
+				}
 			} else if(params.containsKey(F("hsv"))) {
 				auto hsv = color.toHsv();
 				auto p = params[F("hsv")].as<JsonObject>();
@@ -1550,7 +1674,8 @@ void Application::wsBroadcast(const String& cmd, const JsonObject& params)
 			}
 		}
 		String jsonStr;
-		if(codec.render({0, JsonRPC::Message::Kind::notification, cmd}, root.asColor(), jsonStr)) {
+		if(codec.render({0, JsonRPC::Message::Kind::notification, cmd}, root.asColor(), jsonStr) &&
+		   normalizeRawUnionForWire(jsonStr)) {
 			wsBroadcast(jsonStr);
 			return;
 		}
@@ -1634,21 +1759,17 @@ void Application::onButtonTogglePressed(int pin)
 
 void Application::pollResetButton()
 {
-    // Static counter to keep track of hold duration across function calls
-    static int holdCounter = 0;
-
     if (_clearPin < 0) return;
 
-    // Check if button is pressed (Active LOW)
-    if (digitalRead(_clearPin) == LOW) {
-        holdCounter++;
+	if (digitalRead(_clearPin) == (_clearActiveLow ? LOW : HIGH)) {
+		_clearHoldCounter++;
         
         // 30 ticks * 100ms = 3000ms (3 seconds)
-        if (holdCounter >= 30) {
+		if (_clearHoldCounter >= 30) {
             cdebug_w(APPLICATION, "Application::pollResetButton: " ANSI_COLOR_YELLOW "Emergency ROM Switch triggered via Reset Pin!" ANSI_COLOR_RESET);
 
             // Reset counter to prevent multiple triggers (though we reboot anyway)
-            holdCounter = 0;
+			_clearHoldCounter = 0;
 
             // Visual feedback
             for(int i = 0; i < 4; i++) {
@@ -1661,7 +1782,7 @@ void Application::pollResetButton()
         }
     } else {
         // Button released, reset counter
-        holdCounter = 0;
+		_clearHoldCounter = 0;
     }
 }
 

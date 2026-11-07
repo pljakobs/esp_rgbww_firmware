@@ -1,47 +1,70 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
-  "store":"false",
-  "properties":{
-  },
-  "$defs":{
-    "timestamp":{
-      "type":"integer",
-      "minimum":0,
-      "maximum":9223372036854775807
+  "store": "false",
+  "properties": {},
+  "$defs": {
+    "color_settings": {
+      "type": "object",
+      "properties": {
+        "startup_color": {
+          "type": "string",
+          "default": "last"
+        },
+        "startup": {
+          "$ref": "#/$defs/light_color_startup"
+        },
+        "brightness": {
+          "$ref": "#/$defs/light_color_brightness"
+        },
+        "colortemp": {
+          "$ref": "#/$defs/light_color_colortemp"
+        },
+        "hsv": {
+          "$ref": "#/$defs/light_color_hsv"
+        },
+        "calibration": {
+          "$ref": "#/$defs/light_color_calibration"
+        }
+      }
+    },
+    "timestamp": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9223372036854776000
     },
     "raw": {
       "type": "object",
       "properties": {
         "ww": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 1023,
-            "alias":"warmwhite"
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1023,
+          "alias": "warmwhite"
         },
         "r": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 1023,
-            "alias":"red"
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1023,
+          "alias": "red"
         },
         "b": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 1023,
-            "alias":"blue"
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1023,
+          "alias": "blue"
         },
         "cw": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 1023,
-            "alias":"coldwhite"
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1023,
+          "alias": "coldwhite"
         },
         "g": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 1023,
-            "alias":"green"
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1023,
+          "alias": "green"
         }
       }
     },
@@ -49,28 +72,28 @@
       "type": "object",
       "properties": {
         "s": {
-            "type": "number",
-            "minimum": 0,
-            "maximum": 100,
-            "alias":"sat"
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "alias": "sat"
         },
         "v": {
-            "type": "number",
-            "minimum": 0,
-            "maximum": 100,
-            "alias":"val"
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "alias": "val"
         },
         "h": {
-            "type": "number",
-            "minimum": 0,
-            "maximum": 359,
-            "alias":"hue"
+          "type": "number",
+          "minimum": 0,
+          "maximum": 359,
+          "alias": "hue"
         },
-        "ct":{
-          "type":"integer",
-          "maximum":10000,
-          "minimum":0,
-          "alias":"colortemp"
+        "ct": {
+          "type": "integer",
+          "maximum": 10000,
+          "minimum": 0,
+          "alias": "colortemp"
         }
       }
     },
@@ -78,28 +101,28 @@
       "type": "object",
       "properties": {
         "s": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 100,
-            "alias":"sat"
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "alias": "sat"
         },
         "v": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 100,
-            "alias":"val"
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "alias": "val"
         },
         "h": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 359,
-            "alias":"hue"
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 359,
+          "alias": "hue"
         },
-        "ct":{
-          "type":"integer",
-          "maximum":10000,
-          "minimum":0,
-          "alias":"colortemp"
+        "ct": {
+          "type": "integer",
+          "maximum": 10000,
+          "minimum": 0,
+          "alias": "colortemp"
         }
       }
     },
@@ -113,36 +136,186 @@
     },
     "color": {
       "oneOf": [
-        { "$ref": "#/$defs/hsv" },
-        { "$ref": "#/$defs/hsvct" },
-        { "$ref": "#/$defs/raw" },
-        { "$ref": "#/$defs/Preset" }
+        {
+          "$ref": "#/$defs/hsv"
+        },
+        {
+          "$ref": "#/$defs/hsvct"
+        },
+        {
+          "$ref": "#/$defs/raw"
+        },
+        {
+          "$ref": "#/$defs/Preset"
+        }
       ]
     },
-    "pin":{
-        "type":"integer",
-        "minimum":0,
-        "maximum":255
+    "pin": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 255
     },
     "channel": {
-      "type":"object",
-      "properties":{ 
-        "name":{
-            "type":"string"
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
         },
         "pin": {
-          "$ref":"#/$defs/pin"
+          "$ref": "#/$defs/pin"
         }
       }
     },
-   "parabola": {
+    "parabola": {
       "type": "object",
-      "required": ["a", "b", "c"],
+      "required": [
+        "a",
+        "b",
+        "c"
+      ],
       "properties": {
-        "a": { "type": "number", "description": "Quadratic term" },
-        "b": { "type": "number", "description": "Linear term" },
-        "c": { "type": "number", "description": "Constant term" }
+        "a": {
+          "type": "number",
+          "description": "Quadratic term"
+        },
+        "b": {
+          "type": "number",
+          "description": "Linear term"
+        },
+        "c": {
+          "type": "number",
+          "description": "Constant term"
+        }
       }
-    }  
+    },
+    "light_color_startup": {
+      "description": "modern startup color selection",
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "default": "LAST",
+          "pattern": "^(LAST|SET)$"
+        },
+        "color": {
+          "type": "string"
+        }
+      }
+    },
+    "light_color_brightness": {
+      "type": "object",
+      "properties": {
+        "red": {
+          "type": "integer",
+          "default": 100
+        },
+        "ww": {
+          "type": "integer",
+          "default": 100
+        },
+        "green": {
+          "type": "integer",
+          "default": 100
+        },
+        "blue": {
+          "type": "integer",
+          "default": 100
+        },
+        "cw": {
+          "type": "integer",
+          "default": 100
+        }
+      }
+    },
+    "light_color_colortemp": {
+      "type": "object",
+      "properties": {
+        "ww": {
+          "type": "integer",
+          "default": 2700
+        },
+        "cw": {
+          "type": "integer",
+          "default": 6000
+        }
+      }
+    },
+    "light_color_hsv": {
+      "type": "object",
+      "properties": {
+        "red": {
+          "type": "integer",
+          "default": 0
+        },
+        "magenta": {
+          "type": "integer",
+          "default": 0
+        },
+        "green": {
+          "type": "integer",
+          "default": 0
+        },
+        "blue": {
+          "type": "integer",
+          "default": 0
+        },
+        "yellow": {
+          "type": "integer",
+          "default": 0
+        },
+        "model": {
+          "type": "integer",
+          "default": 0
+        },
+        "cyan": {
+          "type": "integer",
+          "default": 0
+        }
+      }
+    },
+    "light_color_calibration_ct_range": {
+      "type": "object",
+      "description": "Kelvin range normalization bounds",
+      "properties": {
+        "min": {
+          "type": "integer",
+          "minimum": 1000,
+          "default": 1000
+        },
+        "max": {
+          "type": "integer",
+          "maximum": 20000,
+          "default": 20000
+        }
+      }
+    },
+    "light_color_calibration_hsv": {
+      "type": "array",
+      "description": "12 Parabolic coefficients for 30-degree Hue sectors (0, 30, ... 330)",
+      "minItems": 12,
+      "maxItems": 12,
+      "items": {
+        "$ref": "defs/$defs/parabola"
+      }
+    },
+    "light_color_calibration": {
+      "type": "object",
+      "properties": {
+        "gamma": {
+          "type": "number",
+          "description": "System output gamma for correction calculation (e.g. 2.2)"
+        },
+        "ct_range": {
+          "$ref": "#/$defs/light_color_calibration_ct_range"
+        },
+        "hsv": {
+          "$ref": "#/$defs/light_color_calibration_hsv"
+        },
+        "ct": {
+          "description": "Parabolic coefficients for Color Temperature curve",
+          "$ref": "defs/$defs/parabola"
+        }
+      }
+    }
   }
 }

@@ -59,6 +59,11 @@ jobs:
         with:
           node-version: '24'
 
+      - name: Test M3 hardware schema and light ownership
+        run: |
+          node tools/generate-api-schemas.mjs
+          node --test .github/tests/test_hardware_schema.mjs .github/tests/test_virtual_light.mjs .github/tests/test_ledctrl.mjs
+
       - name: Validate generated OpenAPI documentation
         run: |
           node tools/generate-api-schemas.mjs

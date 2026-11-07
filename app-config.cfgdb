@@ -1,115 +1,152 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
-  "store":true,
+  "store": true,
   "properties": {
     "general": {
       "type": "object",
-      "store":true,
+      "store": true,
       "properties": {
-          "is_initialized":{
-          "type":"boolean",
-          "default":false
+        "is_initialized": {
+          "type": "boolean",
+          "default": false
         },
         "device_name": {
           "type": "string",
-          "default":""
+          "default": ""
         },
         "buttons_debounce_ms": {
           "type": "integer",
-          "default":50
+          "default": 50
         },
         "buttons_config": {
           "type": "string"
         },
-        "pin_config_url":{
-            "type":"string",
-            "default":"https://raw.githubusercontent.com/pljakobs/esp_rgb_webapp2/develop/public/config/pinconfig.json"
+        "pin_config_url": {
+          "type": "string",
+          "default": "https://raw.githubusercontent.com/pljakobs/esp_rgb_webapp2/develop/public/config/pinconfig.json"
         },
-        "supported_color_models":{
-            "type": "array",
-            "items":{
-                "type":"string"
-            },
-            "default":["RGB", "RGBWW", "RGBCW", "RGBWWCW"]
+        "supported_color_models": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "RGB",
+            "RGBWW",
+            "RGBCW",
+            "RGBWWCW"
+          ]
         },
-        "current_pin_config_name":{
-          "type":"string",
-          "default":"mrpj"
+        "current_pin_config_name": {
+          "type": "string",
+          "default": "mrpj"
         },
-        "allow_web_icons":{
-          "type":"boolean",
-          "default":true
+        "allow_web_icons": {
+          "type": "boolean",
+          "default": true
         },
-        "UI":{
-          "type":"object",
-          "properties":{
-            "dark_mode":{
-              "type":"boolean",
-              "default":false
+        "UI": {
+          "type": "object",
+          "properties": {
+            "dark_mode": {
+              "type": "boolean",
+              "default": false
             }
           }
         }
       }
     },
-    "ota":{
-      "type":"object",
-      "properties":{
-        "url":{
-          "type":"string",
-          "default":"http://lightinator.de/version.json"
+    "ota": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "default": "http://lightinator.de/version.json"
         }
       }
     },
-    "webapp":{
-      "type":"object",
-      "store":true,
-      "properties":{
-        "enabled":{
-          "type":"boolean",
-          "default":true
+    "webapp": {
+      "type": "object",
+      "store": true,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
         },
-        "api_base_url":{
-          "type":"string",
-          "default":"http://lightinator.de/api"
+        "api_base_url": {
+          "type": "string",
+          "default": "http://lightinator.de/api"
         },
-        "installed_version":{
-          "type":"string",
-          "default":""
+        "installed_version": {
+          "type": "string",
+          "default": ""
         },
-        "installed_md5":{
-          "type":"string",
-          "default":""
+        "installed_md5": {
+          "type": "string",
+          "default": ""
         },
-        "last_check_status":{
-          "type":"string",
-          "default":""
+        "last_check_status": {
+          "type": "string",
+          "default": ""
         },
-        "in_progress":{
-          "type":"boolean",
-          "default":false
+        "in_progress": {
+          "type": "boolean",
+          "default": false
         },
         "current": {
-          "type":"object",
+          "type": "object",
           "properties": {
-            "version": { "type":"string", "default":"" },
-            "branch": { "type":"string", "default":"" },
-            "type": { "type":"string", "default":"" },
-            "basepath": { "type":"string", "default":"" },
-            "min_firmware": { "type":"string", "default":"" },
-            "total_size": { "type":"integer", "minimum":0, "default":0 },
+            "version": {
+              "type": "string",
+              "default": ""
+            },
+            "branch": {
+              "type": "string",
+              "default": ""
+            },
+            "type": {
+              "type": "string",
+              "default": ""
+            },
+            "basepath": {
+              "type": "string",
+              "default": ""
+            },
+            "min_firmware": {
+              "type": "string",
+              "default": ""
+            },
+            "total_size": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            },
             "files": {
-              "type":"array",
+              "type": "array",
               "items": {
-                "type":"object",
+                "type": "object",
                 "properties": {
-                  "filename": { "type":"string", "default":"" },
-                  "md5": { "type":"string", "default":"" },
-                  "size": { "type":"integer", "minimum":0, "default":0 }
+                  "filename": {
+                    "type": "string",
+                    "default": ""
+                  },
+                  "md5": {
+                    "type": "string",
+                    "default": ""
+                  },
+                  "size": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 0
+                  }
                 }
               }
             },
-            "comment": { "type":"string", "default":"" }
+            "comment": {
+              "type": "string",
+              "default": ""
+            }
           }
         }
       }
@@ -119,33 +156,35 @@
       "properties": {
         "api_secured": {
           "type": "boolean",
-          "default":false
+          "default": false
         },
         "api_password": {
-          "type":"string"
+          "type": "string"
         }
       }
     },
     "color": {
       "type": "object",
-      "store":true,
       "properties": {
         "startup_color": {
           "type": "string",
           "default": "last"
         },
         "startup": {
-          "description":"modern startup color selection",
-          "type":"object",
-          "properties":{  
-            "mode":{
-              "type":"string",
-              "default":"LAST",
-              "ctype":"ColorStartupMode",
-              "enum":[ "LAST", "SET"]
+          "description": "modern startup color selection",
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "default": "LAST",
+              "ctype": "ColorStartupMode",
+              "enum": [
+                "LAST",
+                "SET"
+              ]
             },
-            "color":{
-              "type":"string"
+            "color": {
+              "type": "string"
             }
           }
         },
@@ -154,23 +193,23 @@
           "properties": {
             "red": {
               "type": "integer",
-              "default":100
+              "default": 100
             },
             "ww": {
               "type": "integer",
-              "default":100
+              "default": 100
             },
             "green": {
               "type": "integer",
-              "default":100
+              "default": 100
             },
             "blue": {
               "type": "integer",
-              "default":100
+              "default": 100
             },
             "cw": {
               "type": "integer",
-              "default":100
+              "default": 100
             }
           }
         },
@@ -179,66 +218,77 @@
           "properties": {
             "ww": {
               "type": "integer",
-              "default":2700
+              "default": 2700
             },
             "cw": {
               "type": "integer",
-              "default":6000
+              "default": 6000
             }
           }
         },
         "color_mode": {
           "type": "integer",
-          "default":0,
-          "alias":[ "outputmode", "colormode"]
+          "default": 0,
+          "alias": [
+            "outputmode",
+            "colormode"
+          ]
         },
         "hsv": {
           "type": "object",
           "properties": {
             "red": {
               "type": "integer",
-              "default":0
+              "default": 0
             },
             "magenta": {
               "type": "integer",
-              "default":0
+              "default": 0
             },
             "green": {
               "type": "integer",
-              "default":0
+              "default": 0
             },
             "blue": {
               "type": "integer",
-              "default":0
+              "default": 0
             },
             "yellow": {
               "type": "integer",
-              "default":0
+              "default": 0
             },
             "model": {
               "type": "integer",
-              "default":0
+              "default": 0
             },
             "cyan": {
               "type": "integer",
-              "default":0
+              "default": 0
             }
           }
         },
-        "calibration":{
-          "type":"object",
-          "properties":{
-             "gamma": {
+        "calibration": {
+          "type": "object",
+          "properties": {
+            "gamma": {
               "type": "number",
               "description": "System output gamma for correction calculation (e.g. 2.2)"
             },
             "ct_range": {
-                "type": "object",
-                "description": "Kelvin range normalization bounds",
-                "properties": {
-                    "min": { "type": "integer", "minimum": 1000, "default":1000 },
-                    "max": { "type": "integer", "maximum": 20000, "default": 20000 }
+              "type": "object",
+              "description": "Kelvin range normalization bounds",
+              "properties": {
+                "min": {
+                  "type": "integer",
+                  "minimum": 1000,
+                  "default": 1000
+                },
+                "max": {
+                  "type": "integer",
+                  "maximum": 20000,
+                  "default": 20000
                 }
+              }
             },
             "hsv": {
               "type": "array",
@@ -255,15 +305,16 @@
             }
           }
         }
-      }
+      },
+      "store": true
     },
     "sync": {
       "type": "object",
-      "store":true,
+      "store": true,
       "properties": {
         "cmd_master_enabled": {
           "type": "boolean",
-          "default":false
+          "default": false
         },
         "color_slave_enabled": {
           "type": "boolean",
@@ -271,39 +322,39 @@
         },
         "color_slave_topic": {
           "type": "string",
-          "default":"home/led1/command"
+          "default": "home/led1/command"
         },
         "clock_master_enabled": {
           "type": "boolean",
-          "default":false
+          "default": false
         },
         "color_master_interval_ms": {
           "type": "integer",
-          "default":0
+          "default": 0
         },
         "clock_slave_enabled": {
           "type": "boolean",
-          "default":false
+          "default": false
         },
         "cmd_slave_enabled": {
           "type": "boolean",
-          "default":false
+          "default": false
         },
         "clock_master_interval": {
           "type": "integer",
-          "default":30
+          "default": 30
         },
         "clock_slave_topic": {
           "type": "string",
-          "default":"home/led1/clock"
+          "default": "home/led1/clock"
         },
         "cmd_slave_topic": {
           "type": "string",
-          "default":"home/led/command"
+          "default": "home/led/command"
         },
         "color_master_enabled": {
           "type": "boolean",
-          "default":false
+          "default": false
         }
       }
     },
@@ -312,57 +363,57 @@
       "properties": {
         "color_interval_ms": {
           "type": "integer",
-          "default":500
+          "default": 500
         },
         "color_min_interval_ms": {
           "type": "integer",
-          "default":500
+          "default": 500
         },
         "trans_fin_interval_ms": {
           "type": "integer",
-          "default":1000,
-          "alias":"transfin_interval_ms"
+          "default": 1000,
+          "alias": "transfin_interval_ms"
         },
         "server_enabled": {
           "type": "boolean",
-          "default":true
+          "default": true
         }
       }
     },
     "network": {
       "type": "object",
-      "store":true,
+      "store": true,
       "properties": {
         "mqtt": {
           "type": "object",
           "properties": {
             "server": {
               "type": "string",
-              "default":"mqtt.local"
+              "default": "mqtt.local"
             },
             "password": {
               "type": "string",
-              "default":""
+              "default": ""
             },
             "port": {
               "type": "integer",
-              "default":1883
+              "default": 1883
             },
             "topic_base": {
               "type": "string",
-              "default":"home/"
+              "default": "home/"
             },
             "enabled": {
               "type": "boolean",
-              "default":false
+              "default": false
             },
             "username": {
               "type": "string",
-              "default":""
+              "default": ""
             },
             "homeassistant": {
-              "type":"object",
-              "properties":{
+              "type": "object",
+              "properties": {
                 "enable": {
                   "type": "boolean",
                   "default": true
@@ -373,26 +424,26 @@
                 },
                 "node_id": {
                   "type": "string",
-                  "default": ""  
+                  "default": ""
                 }
               }
             }
           }
         },
-        "ntp":{
-          "type":"object",
-          "properties":{
-            "enabled":{
-              "type":"boolean",
-              "default":false
+        "ntp": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
             },
-            "server":{
-              "type":"string",
-              "default":"pool.ntp.org"
+            "server": {
+              "type": "string",
+              "default": "pool.ntp.org"
             },
-            "interval":{
-              "type":"integer",
-              "default":3600
+            "interval": {
+              "type": "integer",
+              "default": 3600
             }
           }
         },
@@ -401,19 +452,19 @@
           "properties": {
             "netmask": {
               "type": "string",
-              "default":"255.255.255.0"
+              "default": "255.255.255.0"
             },
             "ip": {
               "type": "string",
-              "default":"192.168.1.1"
+              "default": "192.168.1.1"
             },
             "dhcp": {
               "type": "boolean",
-              "default":true
+              "default": true
             },
             "gateway": {
               "type": "string",
-              "default":"192.168.1.255"
+              "default": "192.168.1.255"
             }
           }
         },
@@ -422,42 +473,42 @@
           "properties": {
             "password": {
               "type": "string",
-              "default":"configesp"
+              "default": "configesp"
             },
             "secured": {
               "type": "boolean",
-              "default":true
+              "default": true
             },
             "ssid": {
               "type": "string"
             }
           }
         },
-        "mdns":{
-          "type":"object",
-          "properties":{
-            "enabled":{
-              "type":"boolean",
-              "default":true
+        "mdns": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true
             },
-            "name":{
-              "type":"string"
+            "name": {
+              "type": "string"
             }
           }
         },
-        "rsyslog":{
-          "type":"object",
-          "properties":{
-            "enabled":{
-              "type":"boolean",
+        "rsyslog": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
               "default": false
             },
-            "host":{
-              "type":"string"
+            "host": {
+              "type": "string"
             },
-            "port":{
-              "type":"integer",
-              "default":514
+            "port": {
+              "type": "integer",
+              "default": 514
             }
           }
         },
@@ -465,144 +516,617 @@
           "type": "object",
           "properties": {
             "statsEnabled": {
-              "type":"boolean",
-              "@default":"False if SMING_RELEASE else True"
+              "type": "boolean",
+              "@default": "False if SMING_RELEASE else True"
             },
             "logEnabled": {
-              "type":"boolean",
-              "default":false
-          },
+              "type": "boolean",
+              "default": false
+            },
             "url": {
               "type": "string",
-              "default":"lightinator.de:1883"
+              "default": "lightinator.de:1883"
             },
             "user": {
               "type": "string",
-              "default":"rgbww"
+              "default": "rgbww"
             },
             "password": {
               "type": "string",
-              "default":"rgbwwdebug"
+              "default": "rgbwwdebug"
             },
             "numReboots": {
               "type": "integer",
-              "default":0
+              "default": 0
             }
           }
         }
       }
     },
     "hardware": {
-      "type":"object",
-      "store":true,
-      "properties":{
-        "version":{
-          "type":"integer",
-          "default":0
+      "type": "object",
+      "store": true,
+      "properties": {
+        "schema_version": {
+          "type": "integer",
+          "minimum": 4,
+          "default": 4
         },
-        "pwm":{
-          "type":"object",
-          "properties":{
-            "timer":{
-              "type":"object",
-              "properties":{
-                "speed_mode":{
-                  "type":"string",
-                  "default":"LOWSPEED",
-                  "ctype":"TimerSpeedMode",
-                  "enum":[ "LOWSPEED", "HIGHSPEED"]
+        "version": {
+          "type": "integer",
+          "default": 0
+        },
+        "pwm": {
+          "type": "object",
+          "properties": {
+            "timer": {
+              "type": "object",
+              "properties": {
+                "speed_mode": {
+                  "type": "string",
+                  "default": "LOWSPEED",
+                  "ctype": "TimerSpeedMode",
+                  "enum": [
+                    "LOWSPEED",
+                    "HIGHSPEED"
+                  ]
                 },
-                "frequency":{
-                  "type":"integer",
-                  "default":1000
+                "frequency": {
+                  "type": "integer",
+                  "default": 1000
                 },
-                "resolution":{
-                  "type":"integer",
-                  "default":10, 
-                  "minimum":1,
-                  "maximum":14
+                "resolution": {
+                  "type": "integer",
+                  "default": 10,
+                  "minimum": 1,
+                  "maximum": 14
                 },
-                "number":{
-                  "type":"integer",
-                  "default":0,
-                  "minimum":0,
-                  "maximum":3
+                "number": {
+                  "type": "integer",
+                  "default": 0,
+                  "minimum": 0,
+                  "maximum": 3
                 }
               }
             },
-            "spreadSpectrum":{
-              "type":"object",
-              "properties":{
-                "mode":{
-                  "type":"string",
-                  "default":"ON",
-                  "ctype":"SpreadSpectrumMode",
-                  "enum":[ "ON", "OFF"]
+            "spreadSpectrum": {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "default": "ON",
+                  "ctype": "SpreadSpectrumMode",
+                  "enum": [
+                    "ON",
+                    "OFF"
+                  ]
                 },
-                "width":{
-                  "type":"integer",
-                  "default":15
+                "width": {
+                  "type": "integer",
+                  "default": 15
                 },
-                "subsampling":{
-                  "type":"integer",
-                  "default":4
+                "subsampling": {
+                  "type": "integer",
+                  "default": 4
                 }
               }
             },
-            "phaseShift":{
-              "type":"object",
-              "properties":{
-                "mode":{ 
-                  "type":"string",
-                  "ctype":"PhaseShiftMode",
-                  "default":"ON",
-                  "enum":[ "ON", "OFF"]
+            "phaseShift": {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "ctype": "PhaseShiftMode",
+                  "default": "ON",
+                  "enum": [
+                    "ON",
+                    "OFF"
+                  ]
                 }
               }
             }
           }
         },
-        "available_pins":{
-          "type":"array",
-          "items":{
-            "type":"object",
-            "properties" :{
-              "soc":{
-                "type":"string"
-              },
-              "pins":{
-                "type":"array",
-                "items":{
-                  "$ref":"defs/$defs/pin"
-                }
-              }
-            }
-          }
-        },
-        "pinconfigs":{
-          "type":"array",
-          "items":{
-            "type":"object",
-            "properties":{
-              "name": {
-                "type": "string"
-              },
+        "available_pins": {
+          "type": "array",
+          "maxItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "soc",
+              "pins"
+            ],
+            "properties": {
               "soc": {
-                "type": "string"
+                "type": "string",
+                "pattern": "^(esp32|esp32c3)$"
               },
-              "model":{
-                "type":"string"
-              },
-              "clear_pin":{
-                "type":"integer"
-              },
-              "channels": {
-                "type":"array",
-                "items":{
-                  "$ref":"defs/$defs/channel"
+              "pins": {
+                "type": "array",
+                "maxItems": 40,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "gpio",
+                    "capability"
+                  ],
+                  "properties": {
+                    "gpio": {
+                      "$ref": "defs/$defs/pin"
+                    },
+                    "capability": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 127,
+                      "description": "Bit mask: input=1, output=2, pwm=4, strapping=8, pull_up=16, pull_down=32, reserved=64."
+                    }
+                  }
                 }
               }
             }
+          }
+        },
+        "boards": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/board_profile"
+          }
+        },
+        "templates": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/hardware_template"
+          }
+        },
+        "configuration": {
+          "$ref": "#/$defs/hardware_configuration"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "board_pin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "gpio",
+        "label",
+        "allowed_functions"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "gpio": {
+          "$ref": "defs/$defs/pin"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "aliases": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "string",
+            "maxLength": 32
+          }
+        },
+        "allowed_functions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 6,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^(light\\.pwm|button\\.input|system\\.clear_config|i2c\\.sda|i2c\\.scl|digital\\.data|digital\\.relay)$"
+          }
+        },
+        "active_low": {
+          "type": "boolean",
+          "default": false
+        },
+        "external_pull": {
+          "type": "string",
+          "enum": [
+            "none",
+            "up",
+            "down"
+          ],
+          "default": "none"
+        },
+        "hardware_debounce": {
+          "type": "boolean",
+          "default": false
+        },
+        "restrictions": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "string",
+            "maxLength": 64
+          }
+        }
+      }
+    },
+    "board_profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "revision",
+        "name",
+        "soc",
+        "implemented_pins"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "soc": {
+          "type": "string",
+          "pattern": "^(esp32|esp32c3)$"
+        },
+        "implemented_pins": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 40,
+          "items": {
+            "$ref": "#/$defs/board_pin"
+          }
+        },
+        "reserved_gpios": {
+          "type": "array",
+          "maxItems": 40,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "defs/$defs/pin"
+          }
+        }
+      }
+    },
+    "light_configuration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "type",
+        "pins"
+      ],
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "default": 65535
+        },
+        "is_default": {
+          "type": "boolean",
+          "default": false
+        },
+        "template_id": {
+          "type": "string",
+          "default": ""
+        },
+        "template_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "type": {
+          "type": "string",
+          "pattern": "^(RGBWWCW|RGBWW|RGBCW|RGB|WWCW|WW|CW|SINGLE)$",
+          "description": "RGBWWCW, RGBWW, RGBCW, RGB, WWCW, WW, CW or SINGLE, matching RGBWWLed::LightType."
+        },
+        "pins": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 5,
+          "uniqueItems": true,
+          "description": "Physical GPIO numbers in type order: RGBWWCW=[R,G,B,WW,CW], RGBWW=[R,G,B,WW], RGBCW=[R,G,B,CW], RGB=[R,G,B], WWCW=[WW,CW], WW=[WW], CW=[CW], SINGLE=[single output].",
+          "items": {
+            "$ref": "defs/$defs/pin"
+          }
+        },
+        "color": {
+          "$ref": "defs/$defs/color_settings"
+        }
+      }
+    },
+    "template_light_configuration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "type",
+        "pins"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "type": {
+          "type": "string",
+          "pattern": "^(RGBWWCW|RGBWW|RGBCW|RGB|WWCW|WW|CW|SINGLE)$"
+        },
+        "pins": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 5,
+          "uniqueItems": true,
+          "description": "Board pin IDs in the channel order defined by type; frontend resolves IDs to GPIO numbers before activation.",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32
+          }
+        },
+        "color": {
+          "$ref": "defs/$defs/color_settings"
+        }
+      }
+    },
+    "system_configuration": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "clear_config_pin": {
+          "$ref": "defs/$defs/pin",
+          "default": 0,
+          "description": "Physical GPIO used for configuration clear when enabled."
+        },
+        "clear_config_enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "clear_config_active_low": {
+          "type": "boolean",
+          "default": true
+        },
+        "clear_config_external_pull_up": {
+          "type": "boolean",
+          "default": false
+        },
+        "clear_config_external_pull_down": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "button_configuration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "pin"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "pin": {
+          "$ref": "defs/$defs/pin"
+        },
+        "active_low": {
+          "type": "boolean",
+          "default": true
+        },
+        "external_pull_up": {
+          "type": "boolean",
+          "default": false
+        },
+        "external_pull_down": {
+          "type": "boolean",
+          "default": false
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "debounce_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000,
+          "default": 50
+        }
+      }
+    },
+    "i2c_configuration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "sda",
+        "scl"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "type": {
+          "type": "string",
+          "pattern": "^i2c$",
+          "default": "i2c"
+        },
+        "sda": {
+          "$ref": "defs/$defs/pin"
+        },
+        "scl": {
+          "$ref": "defs/$defs/pin"
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "frequency": {
+          "type": "integer",
+          "minimum": 10000,
+          "maximum": 400000,
+          "default": 100000
+        }
+      }
+    },
+    "hardware_template": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "revision",
+        "name",
+        "board_id",
+        "board_revision",
+        "lights"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "board_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "board_revision": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1
+        },
+        "lights": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/template_light_configuration"
+          }
+        },
+        "system": {
+          "$ref": "#/$defs/system_configuration"
+        },
+        "buttons": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/button_configuration"
+          }
+        },
+        "buses": {
+          "type": "array",
+          "maxItems": 2,
+          "items": {
+            "$ref": "#/$defs/i2c_configuration"
+          }
+        }
+      }
+    },
+    "hardware_configuration": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0
+        },
+        "board_id": {
+          "type": "string",
+          "maxLength": 64,
+          "default": ""
+        },
+        "soc": {
+          "type": "string",
+          "pattern": "^(esp32|esp32c3)$",
+          "default": "esp32c3"
+        },
+        "board_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0
+        },
+        "template_id": {
+          "type": "string",
+          "maxLength": 64,
+          "default": ""
+        },
+        "template_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0
+        },
+        "lights": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/light_configuration"
+          }
+        },
+        "system": {
+          "$ref": "#/$defs/system_configuration"
+        },
+        "buttons": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/button_configuration"
+          }
+        },
+        "buses": {
+          "type": "array",
+          "maxItems": 2,
+          "items": {
+            "$ref": "#/$defs/i2c_configuration"
           }
         }
       }

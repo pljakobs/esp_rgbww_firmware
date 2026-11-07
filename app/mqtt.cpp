@@ -152,6 +152,7 @@ void AppMqttClient::start()
 
 int AppMqttClient::onConnected(MqttClient& client, mqtt_message_t* message){
 	cdebug_i(APPMQTTCLIENT, "AppMqttClient::onConnected: " ANSI_COLOR_BLUE "MQTT Broker connected!!" ANSI_COLOR_RESET);
+    _hasLastColor = false;
 	// Reset discovery flag so config is re-published after a broker restart.
 	// Retained discovery messages can be lost when a broker restarts; re-publishing
 	// ensures HA always has a valid discovery payload.
@@ -290,28 +291,49 @@ void AppMqttClient::publish(const String& topic, const String& data, bool retain
 	*/	
 }
 
-void AppMqttClient::publishCurrentRaw(const ChannelOutput& raw)
+void AppMqttClient::publishCurrentRaw(const RGBWWLed& light, uint16_t index)
 {
-	if(raw == _lastRaw)
+    const ChannelOutput raw = light.getCurrentOutput();
+    if(_hasLastColor && !_lastColorWasHsv && _lastColorLight == index && raw == _lastRaw)
 		return;
 	_lastRaw = raw;
+    _lastColorLight = index;
+    _hasLastColor = true;
+    _lastColorWasHsv = false;
 
 	cdebug_d(APPMQTTCLIENT, "AppMqttClient::publishCurrentRaw: " "ApplicationMQTTClient::publishCurrentRaw\n");
 
 	auto& codec = rpcCodec();
 	Jsonrpc::Root root(codec.db());
 	if(auto update = root.update()) {
-		auto command = update.toCommandFields();
+        auto command = update.toCommandRequestFields();
 		command.setCmd(F("solid"));
 		command.setT(0);
-		command.raw.setR(raw.r);
-		command.raw.setG(raw.g);
-		command.raw.setB(raw.b);
-		command.raw.setCw(raw.cw);
-		command.raw.setWw(raw.ww);
+        if(light.usesNamedRawChannels()) {
+            auto named = command.raw.toRawInputNamed();
+            named.setR(String(raw.r));
+            named.setG(String(raw.g));
+            named.setB(String(raw.b));
+            named.setCw(String(raw.cw));
+            named.setWw(String(raw.ww));
+        } else {
+            auto indexed = command.raw.toRawInputIndexed();
+            RGBWWLed::ChannelList channels;
+            light.getChannels(channels);
+            for(auto channel : channels) {
+                switch(channel) {
+                case CtrlChannel::Red: indexed.addItem(String(raw.r)); break;
+                case CtrlChannel::Green: indexed.addItem(String(raw.g)); break;
+                case CtrlChannel::Blue: indexed.addItem(String(raw.b)); break;
+                case CtrlChannel::WarmWhite: indexed.addItem(String(raw.ww)); break;
+                case CtrlChannel::ColdWhite: indexed.addItem(String(raw.cw)); break;
+                default: break;
+                }
+            }
+        }
 	}
 	String jsonMsg;
-	if(codec.renderPayload(root.asCommandFields(), jsonMsg)) {
+    if(codec.renderPayload(root.asCommandRequestFields(), jsonMsg) && normalizeRawUnionForWire(jsonMsg)) {
 		publish(buildTopic(F("color")), jsonMsg, true);
 	}
 
@@ -321,11 +343,15 @@ void AppMqttClient::publishCurrentRaw(const ChannelOutput& raw)
 	}
 }
 
-void AppMqttClient::publishCurrentHsv(const HSVCT& color)
+void AppMqttClient::publishCurrentHsv(const RGBWWLed& light, uint16_t index)
 {
-	if(color == _lastHsv)
+    const HSVCT color = light.getCurrentColor();
+    if(_hasLastColor && _lastColorWasHsv && _lastColorLight == index && color == _lastHsv)
 		return;
 	_lastHsv = color;
+    _lastColorLight = index;
+    _hasLastColor = true;
+    _lastColorWasHsv = true;
 
 	cdebug_d(APPMQTTCLIENT, "AppMqttClient::publishCurrentHsv: " "ApplicationMQTTClient::publishCurrentHsv\n");
 
@@ -351,7 +377,7 @@ void AppMqttClient::publishCurrentHsv(const HSVCT& color)
 
 	// Also publish to Home Assistant
 	if (_haEnabled) {
-		publishHAState(app.rgbwwctrl.getCurrentOutput(), &color);
+        publishHAState(light.getCurrentOutput(), &color);
 	}
 }
 
@@ -420,13 +446,22 @@ void AppMqttClient::publishCommand(const String& method, const JsonObject& param
 			} else if(method == F("color_event")) {
 				auto color = update.toColor();
 				if(params.containsKey(F("raw"))) {
-					auto raw = color.toRaw();
-					auto p = params[F("raw")].as<JsonObject>();
-					raw.setR(p[F("r")] | 0);
-					raw.setG(p[F("g")] | 0);
-					raw.setB(p[F("b")] | 0);
-					raw.setWw(p[F("ww")] | 0);
-					raw.setCw(p[F("cw")] | 0);
+                    auto raw = color.toRaw();
+                    JsonVariant rawValue = params[F("raw")];
+                    if(rawValue.is<JsonArray>()) {
+                        auto indexed = raw.toRawIndexed();
+                        for(JsonVariant value : rawValue.as<JsonArray>()) {
+                            indexed.addItem(value | 0);
+                        }
+                    } else {
+                        auto named = raw.toRawNamed();
+                        auto p = rawValue.as<JsonObject>();
+                        named.setR(p[F("r")] | 0);
+                        named.setG(p[F("g")] | 0);
+                        named.setB(p[F("b")] | 0);
+                        named.setWw(p[F("ww")] | 0);
+                        named.setCw(p[F("cw")] | 0);
+                    }
 				} else if(params.containsKey(F("hsv"))) {
 					auto hsv = color.toHsv();
 					auto p = params[F("hsv")].as<JsonObject>();
@@ -458,7 +493,8 @@ void AppMqttClient::publishCommand(const String& method, const JsonObject& param
 				return;
 			}
 		} else if(method == F("color_event")) {
-			if(codec.render({0, JsonRPC::Message::Kind::notification, method}, root.asColor(), msgStr)) {
+            if(codec.render({0, JsonRPC::Message::Kind::notification, method}, root.asColor(), msgStr) &&
+               normalizeRawUnionForWire(msgStr)) {
 				publish(buildTopic(F("command")), msgStr, false);
 				return;
 			}
@@ -1043,53 +1079,19 @@ int AppMqttClient::getCurrentColorMode() {
 
 void AppMqttClient::getActiveChannelNames(Vector<String>& channels) {
     channels.clear();
-
-    // Use pin config logic from ledctrl.cpp
-    AppConfig::General general(*app.cfg);
-    AppConfig::Hardware hardware(*app.cfg);
-
-    String pinConfigName = general.getCurrentPinConfigName();
-    String SoC = SOC;
-    bool found = false;
-
-    if (hardware.pinconfigs.getItemCount() > 0) {
-        for (auto pinconfig : hardware.pinconfigs) {
-            if (pinconfig.getName() == pinConfigName && pinconfig.getSoc() == SoC) {
-                found = true;
-                for (auto channel : pinconfig.channels) {
-                    String channelName = channel.getName();
-                    if (channelName.length() > 0) {
-                        channels.addElement(channelName);
-                    }
-                }
-                break;
-            }
-        }
+    if (app.lights.size() != 1 || !app.lights.front().led) {
+        return;
     }
-
-    // Fallback to default names if not found
-    if (!found || channels.count() == 0) {
-        int colorMode = getCurrentColorMode();
-
-        // All modes have RGB
-        channels.addElement(F("red"));
-        channels.addElement(F("green"));
-        channels.addElement(F("blue"));
-
-        // Add white channels based on mode
-        switch (colorMode) {
-            case 1: // RGBWW
-                channels.addElement(F("warm_white"));
-                break;
-            case 2: // RGBCW
-                channels.addElement(F("cool_white"));
-                break;
-            case 3: // RGBWWCW
-                channels.addElement(F("warm_white"));
-                channels.addElement(F("cool_white"));
-                break;
-            default: // RGB
-                break;
+    RGBWWLed::ChannelList activeChannels;
+    app.lights.front().led->getChannels(activeChannels);
+    for (auto channel : activeChannels) {
+        switch (channel) {
+            case CtrlChannel::Red: channels.addElement(F("red")); break;
+            case CtrlChannel::Green: channels.addElement(F("green")); break;
+            case CtrlChannel::Blue: channels.addElement(F("blue")); break;
+            case CtrlChannel::WarmWhite: channels.addElement(F("warm_white")); break;
+            case CtrlChannel::ColdWhite: channels.addElement(F("cool_white")); break;
+            default: break;
         }
     }
 }

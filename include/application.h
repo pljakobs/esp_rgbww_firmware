@@ -21,10 +21,14 @@
  */
 #pragma once
 #include <RGBWWCtrl.h>
+#include <FlashString/Stream.hpp>
+#include <pins.h>
 #include <otaupdate.h>
 #include <webappota.h>
 #include <controllers.h>
 #include <mdnsHandler.h>
+#include <virtuallight.h>
+#include <vector>
 #if STATUS_DISPLAY
 #include <statusDisplay.h>
 #endif
@@ -49,6 +53,10 @@ public:
 
     void init();
     void initButtons();
+    bool validateHardwareInputs(const HardwareInputs& inputs, String& error) const;
+    bool configureHardwareInputs(String& error);
+    std::unique_ptr<FSTR::Stream> hardwareCatalogSeedStream() const;
+    RGBWWLed* getLight(int32_t index, String& error) const;
 
     void startServices();
     void startNetworkServices();
@@ -116,6 +124,7 @@ public:
     UdpSyslogStream udpSyslogStream;
 #endif
     APPLedCtrl rgbwwctrl;
+    std::vector<VirtualLight> lights;
     std::unique_ptr<Api> api;
     std::unique_ptr<Controllers> controllers;
     
@@ -123,6 +132,7 @@ public:
     WebappOta webappOta;
     std::unique_ptr<AppConfig> cfg;
     std::unique_ptr<AppData> data;
+    std::unique_ptr<Pins> socPins;
 
 
     
@@ -154,6 +164,19 @@ public:
     }
 
 private:
+    String inputsSignature() const;
+    void pollButtons();
+    struct InputState {
+        bool sample = false;
+        bool pressed = false;
+        uint32_t changedAt = 0;
+    };
+    HardwareInputs _hardwareInputs;
+    std::vector<InputState> _buttonStates;
+    String _inputsSignature;
+    Timer _buttonPollTimer;
+    unsigned _clearHoldCounter = 0;
+    bool _clearActiveLow = true;
     void loadbootinfo();
     void listFiles();
     void logRestart();
@@ -187,10 +210,7 @@ private:
     size_t _HeapLowErr10min   = 0;
     size_t _minMaxFreeBlock   = 0x80000;
 
-    std::array<int, 17> _lastToggles;
-
-    int8_t clearPin  = 16; //  GPIO16 is the default for the old mrpj boards, newer boards will load from pinconfig 
-    int8_t _clearPin = -1;
+    int _clearPin = -1;
 
     bool _reboot_reported=false;
 };

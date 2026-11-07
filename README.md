@@ -52,6 +52,57 @@ Pin configurations are fetched at runtime from a remote JSON file (default:
 `https://raw.githubusercontent.com/pljakobs/esp_rgb_webapp2/develop/public/config/pinconfig.json`)
 and can be overridden in the configuration.
 
+### M3 hardware schema (5.1 feature branch)
+
+The M3 schema replaces `hardware.pinconfigs` with a separation between SoC
+capabilities, frontend catalog data and the active device configuration:
+
+- `pins.cfgdb`: SoC GPIO records describing input/output, PWM, strapping,
+  internal pull capabilities and reserved resources, stored in a separate ConfigDB.
+- `hardware-catalog.json.gz`: frontend-only board inventories and templates,
+  kept as a filesystem working copy and streamed by `GET /catalog`.
+- `hardware.configuration`: active light types with GPIO-number pin arrays,
+  per-light color settings, clear input, buttons and buses.
+
+The frontend resolves template board-pin IDs to physical GPIOs before writing
+active configuration. Firmware validates GPIO assignments against the selected
+SoC's capability mask; it does not need board maps or templates. Templates never
+become active implicitly, and GPIO0 remains a valid physical pin.
+
+The SoC pin seed lives in `soc-pins.json`. Board/template defaults are embedded
+as FSTR resources, copied to LittleFS when missing, and upgraded only when the
+filesystem catalog revision is older than the firmware seed. A version sidecar
+allows that comparison without decompressing or parsing the catalog.
+
+The virtual-light runtime foundation is implemented. Each configured light is
+validated by type and numeric GPIO against the SoC capability ConfigDB, then
+owns a `std::unique_ptr<RGBWWLed>` in the application light vector. A hardware
+ConfigDB commit queues a runtime reload; PWM callback drain and new resource
+validation are checked before replacing running instances. Button, clear and
+I2C setup also consume the numeric GPIO and electrical properties from active
+configuration.
+
+Public command routing is still the legacy singleton path through
+`app.rgbwwctrl`; the `light` selector is not yet routed to individual instances.
+Per-light readback, events, MQTT topics and last-color restore remain follow-up
+work. The interim M3 string-ID pin schema was never released and does not need
+migration. Any 5.0-to-5.1 migration is a separate compatibility task. The 5.0
+schema/runtime are unchanged, and this PR remains draft until API routing and
+supported upgrade behavior are complete.
+
+An earlier, unreleased M3 schema stored board labels such as `L1` in light
+`pins`, button `pin`, clear-pin and I2C SDA/SCL fields. It is not a released
+format and requires no migration. The current active schema stores numeric GPIOs.
+5.0’s separate legacy pin configuration is unchanged; any supported 5.0-to-5.1
+migration is a separate compatibility task.
+
+Schema fixture tests:
+
+```sh
+node tools/generate-api-schemas.mjs
+node --test .github/tests/test_hardware_schema.mjs .github/tests/test_virtual_light.mjs .github/tests/test_ledctrl.mjs
+```
+
 ---
 
 ## Features

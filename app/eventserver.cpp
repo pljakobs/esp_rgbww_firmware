@@ -154,18 +154,38 @@ void EventServer::publishCurrentState(const ChannelOutput& raw, const HSVCT* pHs
 			hsv.setCt(ct);
 		} else {
 			auto rawColor = color.toRaw();
-			rawColor.setR(raw.r);
-			rawColor.setG(raw.g);
-			rawColor.setB(raw.b);
-			rawColor.setWw(raw.ww);
-			rawColor.setCw(raw.cw);
+			String lightError;
+			RGBWWLed* defaultLight = app.getLight(-1, lightError);
+			if(defaultLight != nullptr && !defaultLight->usesNamedRawChannels()) {
+				auto indexed = rawColor.toRawIndexed();
+				RGBWWLed::ChannelList channels;
+				defaultLight->getChannels(channels);
+				for(auto channel : channels) {
+					switch(channel) {
+					case CtrlChannel::Red: indexed.addItem(raw.r); break;
+					case CtrlChannel::Green: indexed.addItem(raw.g); break;
+					case CtrlChannel::Blue: indexed.addItem(raw.b); break;
+					case CtrlChannel::WarmWhite: indexed.addItem(raw.ww); break;
+					case CtrlChannel::ColdWhite: indexed.addItem(raw.cw); break;
+					default: indexed.addItem(0); break;
+					}
+				}
+			} else {
+				auto named = rawColor.toRawNamed();
+				named.setR(raw.r);
+				named.setG(raw.g);
+				named.setB(raw.b);
+				named.setWw(raw.ww);
+				named.setCw(raw.cw);
+			}
 		}
 	}
 
 	cdebug_d(EVENTSERVER, "EventServer::publishCurrentState: " "EventServer::publishCurrentColor\n");
 
 	String payload;
-	if(codec.render({0, JsonRPC::Message::Kind::notification, F("color_event")}, root.asColor(), payload)) {
+	if(codec.render({0, JsonRPC::Message::Kind::notification, F("color_event")}, root.asColor(), payload) &&
+	   normalizeRawUnionForWire(payload)) {
 		sendPayload(payload);
 	}
 }

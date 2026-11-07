@@ -243,7 +243,6 @@
 
 #if ARCH_HOST
 #include <malloc_count.h>
-#define HOST_FREE_TARGET 23000
 #endif
 
 
@@ -281,5 +280,6 @@
 
 #define configDB_PATH "app-config"
 #define dataDB_PATH "app-data"
+#define pinsDB_PATH "soc-pins"
 
 #define RSYSLOG 1

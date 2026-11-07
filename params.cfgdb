@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$defs": {
-    "raw": {
+    "raw-named": {
       "type": "object",
       "properties": {
         "r": { "$ref": "value-types/$defs/raw-value" },
@@ -10,6 +10,17 @@
         "ww": { "$ref": "value-types/$defs/raw-value" },
         "cw": { "$ref": "value-types/$defs/raw-value" }
       }
+    },
+    "raw-indexed": {
+      "type": "array",
+      "items": { "$ref": "value-types/$defs/raw-value" },
+      "maxItems": 5
+    },
+    "raw": {
+      "oneOf": [
+        { "$ref": "#/$defs/raw-named", "title": "named" },
+        { "$ref": "#/$defs/raw-indexed", "title": "indexed" }
+      ]
     },
     "hsv": {
       "type": "object",
@@ -30,14 +41,15 @@
       "type": "object",
       "properties": {
         "cmd": { "$ref": "value-types/$defs/string-value" },
-        "raw": { "$ref": "#/$defs/raw" },
+        "raw": { "$ref": "#/$defs/raw-named" },
         "hsv": { "$ref": "#/$defs/hsv" },
         "t": { "$ref": "value-types/$defs/non-negative-integer" },
         "s": { "$ref": "value-types/$defs/non-negative-integer" },
         "r": { "$ref": "value-types/$defs/boolean-value" },
         "d": { "$ref": "value-types/$defs/non-negative-integer" },
         "name": { "$ref": "value-types/$defs/string-value" },
-        "q": { "$ref": "value-types/$defs/string-value" }
+        "q": { "$ref": "value-types/$defs/string-value" },
+        "light": { "type": "integer", "minimum": -1, "maximum": 65535, "default": -1 }
       },
       "additionalProperties": false
     },
@@ -78,7 +90,7 @@
       },
       "additionalProperties": false
     },
-    "raw-input": {
+    "raw-input-named": {
       "type": "object",
       "properties": {
         "r": { "$ref": "value-types/$defs/string-value" },
@@ -89,6 +101,21 @@
         "from": { "$ref": "#/$defs/raw-input-base" }
       },
       "additionalProperties": false
+    },
+    "raw-indexed-value": {
+      "type": "string",
+      "default": ""
+    },
+    "raw-input-indexed": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/raw-indexed-value" },
+      "maxItems": 5
+    },
+    "raw-input": {
+      "oneOf": [
+        { "$ref": "#/$defs/raw-input-named", "title": "named" },
+        { "$ref": "#/$defs/raw-input-indexed", "title": "indexed" }
+      ]
     },
     "command-request-item": {
       "type": "object",
@@ -102,6 +129,7 @@
         "d": { "type": "integer", "minimum": 0, "maximum": 1, "default": 1 },
         "name": { "$ref": "value-types/$defs/string-value" },
         "q": { "$ref": "value-types/$defs/string-value" },
+        "light": { "type": "integer", "minimum": -1, "maximum": 65535, "default": -1 },
         "channels": { "$ref": "#/$defs/channel-list" }
       },
       "additionalProperties": false
@@ -119,6 +147,7 @@
         "d": { "type": "integer", "minimum": 0, "maximum": 1, "default": 1 },
         "name": { "$ref": "value-types/$defs/string-value" },
         "q": { "$ref": "value-types/$defs/string-value" },
+        "light": { "type": "integer", "minimum": -1, "maximum": 65535, "default": -1 },
         "channels": { "$ref": "#/$defs/channel-list" },
         "cmds": { "$ref": "#/$defs/command-request-list" }
       },
@@ -141,6 +170,7 @@
         "d": { "type": "integer", "minimum": 0, "maximum": 1, "default": 1 },
         "name": { "$ref": "value-types/$defs/string-value" },
         "q": { "$ref": "value-types/$defs/string-value" },
+        "light": { "type": "integer", "minimum": -1, "maximum": 65535, "default": -1 },
         "channels": { "$ref": "#/$defs/channel-list" },
         "cmds": { "$ref": "#/$defs/command-request-list" },
         "hash": { "$ref": "value-types/$defs/string-value" },
