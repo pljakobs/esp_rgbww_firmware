@@ -27,16 +27,21 @@ device-specific IDs/indexes and optionally retain template ID/revision as
 provenance. Do not store a live link to changing template defaults or introduce
 a template-application command.
 
-Merge each partial update with the current configuration for validation before
-committing. Validate the selected SoC, every numeric GPIO against the SoC
-capability ConfigDB, required roles, unique IDs/indexes, at most one default,
-resource ownership and backend capacity. Board labels, MOSFET availability and
-templates are frontend/catalog data; they cannot grant capabilities that the
-firmware's SoC pin database does not permit. Invalid updates leave persisted
-configuration and running outputs unchanged.
-Changing topology is boot-time configuration: persist it and require restart,
-without reallocating live PWM resources. Distinguish pending configuration from
-running lights until restart. Deleting the last light remains valid.
+The target API contract is to merge each partial update with the current
+configuration and validate the candidate before committing. Validate the
+selected SoC, every numeric GPIO against the SoC capability ConfigDB, required
+roles, unique IDs/indexes, at most one default, resource ownership and backend
+capacity. Board labels, MOSFET availability and templates are frontend/catalog
+data; they cannot grant capabilities the SoC database does not permit. Precommit
+validation is not implemented yet: current reload validation runs after the
+ConfigDB commit, so a rejected candidate can remain persisted even though
+running outputs are retained.
+
+The implemented runtime applies topology changes through a queued ConfigDB
+commit reload rather than requiring restart. The callback drains pending PWM
+work, validates the numeric GPIO resources, builds replacement instances and
+then swaps them into the application-owned vector. Deleting the last light is
+valid. Public command/readback/event/MQTT routing remains a follow-up.
 
 ## Catalog and SoC Pin Database
 
@@ -88,6 +93,11 @@ unknown/deleted indexes, missing defaults and independent per-light commands.
 - Implemented in commits `8c7a16e` and `ec6b912`: separate `Pins` ConfigDB,
   versioned gzip catalog seed/working-copy flow, streamed `/catalog`, numeric
   GPIO active configuration, and legacy static catalog-array cleanup.
+- The internal virtual-light lifecycle is implemented: typed numeric-GPIO
+  records map to one owned `RGBWWLed` instance each, per-light color settings
+  are applied during setup, and hardware commits queue reloads. Public command
+  dispatch still targets the legacy singleton; selector-based per-light API
+  routing is the next phase.
 - Verification: ESP32-C3 and Host builds pass; 13 focused Node tests and 25
   workflow-policy tests pass; the full Host `testnet.sh` suite passes (60 passed,
   1 skipped). The raw `/catalog` response was verified as gzip with three boards
