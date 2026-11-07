@@ -5,6 +5,12 @@ on:
   push:
     paths:
       - '.github/**'
+      - '**/*.cfgdb'
+      - 'tools/generate-api-schemas.mjs'
+      - 'api*.json'
+      - 'api-docs.html'
+      - 'openapi*.json*'
+      - 'schema/**'
   workflow_dispatch:
 
 permissions:
@@ -47,3 +53,26 @@ jobs:
 
       - name: Test workflow syntax and policies
         run: python -m unittest discover -s .github/tests -v
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Validate generated OpenAPI documentation
+        run: |
+          node tools/generate-api-schemas.mjs
+          node --test .github/tests/test_openapi.mjs
+          npx --yes @redocly/cli@2.12.0 lint openapi.generated.json --extends=minimal
+          git diff --exit-code -- api-version.json schema/app-config.schema.json schema/app-data.schema.json json-rpc-api.schema.json openapi.generated.json openapi.generated.json.gz
+
+      - name: Upload API documentation
+        uses: actions/upload-artifact@v7
+        with:
+          name: api-documentation
+          if-no-files-found: error
+          path: |
+            api-docs.html
+            openapi.generated.json
+            openapi.generated.json.gz
+            api-version.json

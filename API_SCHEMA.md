@@ -29,6 +29,25 @@ This writes:
 - `schema/app-config.schema.json`
 - `schema/app-data.schema.json`
 - `api-version.json`
+- `openapi.generated.json` and its deterministic gzip copy `openapi.generated.json.gz`
+
+The generated OpenAPI 3.1 document combines HTTP metadata from `openapi.json`
+with payload projections from the ConfigDB sources. All schema references are
+local to the document. HTTP paths, query parameters, and authentication cannot
+be inferred from ConfigDB alone and remain maintained in `openapi.json`.
+
+Firmware serves `GET /api/docs` (also `/api/docs/`) and `GET /api/openapi.json`,
+using the same conditional Basic authentication as the other API endpoints.
+Both support HEAD. The specification is streamed gzip-compressed from flash;
+it does not depend on a webapp installation. The docs page loads pinned Swagger
+UI 5.31.0 assets from jsDelivr, so viewing the UI requires internet access.
+The specification and Try it out requests stay on the controller's origin;
+no external validator is used and authorization is not persisted in storage.
+
+Workflow Validation regenerates, tests, and lints the OpenAPI document, checks
+for stale committed outputs, and uploads an `api-documentation` artifact. Its
+HTML page can also load the adjacent specification for browsing when hosted
+together. Use the controller's `/api/docs` page for same-origin Try it out.
 
 These files are read-only projections of the cfgdb sources for tools which cannot load the `.cfgdb` extension or ConfigDB-specific keywords. They are never firmware database inputs. The normalizer converts ConfigDB `$defs` and cross-file references into Draft-07 `definitions`, removes ConfigDB-only generator keywords, and embeds shared definitions where required. `api-version.json` hashes both authoritative cfgdb sources and their projections so source/projection drift is detectable.
 
@@ -41,7 +60,8 @@ Generation is deterministic. Frontend CI should regenerate these files and fail 
 ```bash
 node tools/generate-api-schemas.mjs
 python -c 'import json; from jsonschema import Draft7Validator; files=["api-manifest.schema.json","json-rpc-api.cfgdb","json-rpc-api.schema.json","schema/app-config.schema.json","schema/app-data.schema.json"]; schemas=[json.load(open(path)) for path in files]; [Draft7Validator.check_schema(schema) for schema in schemas]; Draft7Validator(schemas[0]).validate(json.load(open("api.json")))'
-npx --yes @redocly/cli lint openapi.json
+node --test .github/tests/test_openapi.mjs
+npx --yes @redocly/cli@2.12.0 lint openapi.generated.json --extends=minimal
 ```
 
 Warnings about unused definitions are expected because the normalized ConfigDB schemas intentionally contain the complete shared definition set.
