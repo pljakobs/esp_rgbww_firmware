@@ -548,7 +548,7 @@ void mdnsHandler::checkGroupLeadership() {
     Vector<String> groupsToLead;
     
     // Get access to all groups and track our memberships
-    AppData::Root::Groups groups(*app.data);
+    AppData::Groups groups(*app.data);
 
     // We can lead at most as many groups as exist; reserve up front so the
     // push_back()s in becomeGroupLeader() don't trigger reallocations.
@@ -718,7 +718,7 @@ void mdnsHandler::becomeGroupLeader(const char* groupId, const char* groupName)
 void mdnsHandler::relinquishGroupLeadership(const char* groupId)
 {
     // Find the group name for logging
-    AppData::Root::Groups groups(*app.data);
+    AppData::Groups groups(*app.data);
     String groupName = "unknown";
 
     for (auto it = groups.begin(); it != groups.end(); ++it) {
