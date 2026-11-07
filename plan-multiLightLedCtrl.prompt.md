@@ -92,9 +92,13 @@ unknown/deleted indexes, missing defaults and independent per-light commands.
   workflow-policy tests pass; the full Host `testnet.sh` suite passes (60 passed,
   1 skipped). The raw `/catalog` response was verified as gzip with three boards
   and three templates.
-- The latest GitHub `Workflow Validation` and matrix checks pass. The Host smoke
-  job currently aborts in the test harness's shutdown/restart cleanup with lwIP
-  `invalid socket state for poll`; no pytest summary was produced by that job.
+- The latest GitHub `Workflow Validation` and matrix checks pass. In Host CI, the
+  61-case HTTP/API smoke phase passes (60 passed, 1 skipped). The separate legacy
+  RGBWW behavior phase fails 11 tests because per-light command/control routing
+  is unfinished and those operations do not yet drive the configured virtual
+  light instances. Its subsequent restart cleanup also hits lwIP's
+  `invalid socket state for poll` assertion; this is separate from the test
+  failures.
 - The earlier M3 schema used string board IDs such as `"L1"` in active light,
   button, clear and I2C assignments. That schema was never released, so no
   migration path is required for it. The current contract uses numeric GPIOs. Any
