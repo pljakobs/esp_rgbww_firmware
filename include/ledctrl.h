@@ -128,7 +128,7 @@ private:
     static void updateLedCb(void* pTimerArg);
     static bool isPinValid(int pin);
     void publishToEventServer();
-    void publishToMqtt();
+    void publishToMqtt(const RGBWWLed& light, uint16_t index);
     void publishFinishedStepAnimations();
     void publishColorStayedCmds();
     void checkStableColorState();

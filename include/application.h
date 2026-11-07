@@ -53,6 +53,7 @@ public:
 
     void init();
     void initButtons();
+    bool validateHardwareInputs(const HardwareInputs& inputs, String& error) const;
     bool configureHardwareInputs(String& error);
     std::unique_ptr<FSTR::Stream> hardwareCatalogSeedStream() const;
     RGBWWLed* getLight(int32_t index, String& error) const;
@@ -163,7 +164,6 @@ public:
     }
 
 private:
-    void requestInputsReload();
     String inputsSignature() const;
     void pollButtons();
     struct InputState {
@@ -174,9 +174,6 @@ private:
     HardwareInputs _hardwareInputs;
     std::vector<InputState> _buttonStates;
     String _inputsSignature;
-    bool _inputsReloadQueued = false;
-    bool _watchingInputs = false;
-    std::shared_ptr<uint8_t> _inputsLifetime = std::make_shared<uint8_t>(0);
     Timer _buttonPollTimer;
     unsigned _clearHoldCounter = 0;
     bool _clearActiveLow = true;

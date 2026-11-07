@@ -409,7 +409,7 @@ void APPLedCtrl::requestReload()
 bool APPLedCtrl::reload(String& error)
 {
 	HardwareInputs inputs;
-	if(!resolveInputs(inputs, error)) {
+	if(!resolveInputs(inputs, error) || !app.validateHardwareInputs(inputs, error)) {
 		return false;
 	}
 	AppConfig::Hardware hardware(*app.cfg);
@@ -436,6 +436,9 @@ bool APPLedCtrl::reload(String& error)
 			light.led->getPwmOutput()->setOutput(0, 0, 0, 0, 0);
 		}
 		app.lights.clear();
+		if(!app.configureHardwareInputs(error)) {
+			return false;
+		}
 		_activeConfiguration = configurationSignature();
 		cdebug_i(APPLEDCTRL, "No virtual lights configured");
 		return true;
@@ -486,6 +489,9 @@ bool APPLedCtrl::reload(String& error)
 		light.led->getPwmOutput()->setOutput(0, 0, 0, 0, 0);
 	}
 	app.lights.clear();
+	if(!app.configureHardwareInputs(error)) {
+		return false;
+	}
 #ifdef ARCH_ESP32
 	unsigned channelStart = 0;
 #endif
@@ -584,7 +590,7 @@ void APPLedCtrl::publishToEventServer()
  * 
  * @note This function does nothing if the color master is disabled.
  */
-void APPLedCtrl::publishToMqtt()
+void APPLedCtrl::publishToMqtt(const RGBWWLed& light, uint16_t index)
 {
 	bool mqttEnabled;
 	{
@@ -593,12 +599,12 @@ void APPLedCtrl::publishToMqtt()
 	}
 	if(mqttEnabled) {
 		if(colorMaster) {
-			switch(_mode) {
+			switch(light.getMode()) {
 			case ColorMode::Hsv:
-				app.mqttclient.publishCurrentHsv(getCurrentColor());
+				app.mqttclient.publishCurrentHsv(light, index);
 				break;
 			case ColorMode::Raw:
-				app.mqttclient.publishCurrentRaw(getCurrentOutput());
+				app.mqttclient.publishCurrentRaw(light, index);
 				break;
 			}
 		}
@@ -625,16 +631,26 @@ void APPLedCtrl::updateLed()
 {
 	_ledTimer.startOnce();
 	bool animFinished = false;
+	bool defaultFinished = false;
 	VirtualLight* defaultLight = nullptr;
 	for(auto& light : app.lights) {
-		animFinished |= light.led->show();
+		const bool finished = light.led->show();
+		animFinished |= finished;
 		if(light.isDefault) {
 			defaultLight = &light;
+			defaultFinished = finished;
 		}
 	}
 	++_stepCounter;
+	if(clockMaster && _stepCounter % std::max(clockMasterInterval, uint32_t(1)) == 0) {
+		app.mqttclient.publishClock(_stepCounter);
+	}
 
 	const static uint32_t stepLenMs = 1000 / RGBWW_UPDATEFREQUENCY;
+	if(defaultLight != nullptr && colorMaster &&
+	   (defaultFinished || colorMasterInterval == 0 || ((stepLenMs * _stepCounter) % colorMasterInterval) < stepLenMs)) {
+		publishToMqtt(*defaultLight->led, defaultLight->index);
+	}
 	if(defaultLight != nullptr && colorMasterInterval >= 0 &&
 	   (animFinished || colorMasterInterval == 0 || ((stepLenMs * _stepCounter) % colorMasterInterval) < stepLenMs)) {
 		const uint32_t now = millis();

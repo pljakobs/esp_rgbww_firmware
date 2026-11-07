@@ -388,7 +388,6 @@ int32_t getVersion(IDataSourceStream& input)
 
 Application::~Application()
 {
-	_inputsLifetime.reset();
 	_buttonPollTimer.stop();
 	_resetPinTimer.stop();
 	if(pNtpclient != nullptr) {
@@ -948,15 +947,6 @@ void Application::initButtons()
 	if(!configureHardwareInputs(error)) {
 		cdebug_e(APPLICATION, "Hardware input configuration rejected: %s", error.c_str());
 	}
-	if(!_watchingInputs) {
-		_watchingInputs = true;
-		std::weak_ptr<uint8_t> lifetime = _inputsLifetime;
-		AppConfig::Hardware::onCommit(*cfg, [this, lifetime](AppConfig::HardwareUpdater) {
-			if(!lifetime.expired()) {
-				requestInputsReload();
-			}
-		});
-	}
 }
 
 String Application::inputsSignature() const
@@ -976,23 +966,18 @@ String Application::inputsSignature() const
 	return stream.readString(stream.available());
 }
 
-void Application::requestInputsReload()
+bool Application::validateHardwareInputs(const HardwareInputs& inputs, String& error) const
 {
-	if(_inputsReloadQueued) {
-		return;
+#if STATUS_DISPLAY
+	if(statusDisplay && _hardwareInputs.i2cEnabled && !inputs.i2cEnabled) {
+		error = F("Cannot disable I2C while the status display is active");
+		return false;
 	}
-	_inputsReloadQueued = true;
-	std::weak_ptr<uint8_t> lifetime = _inputsLifetime;
-	System.queueCallback([this, lifetime]() {
-		if(lifetime.expired()) {
-			return;
-		}
-		_inputsReloadQueued = false;
-		String error;
-		if(!configureHardwareInputs(error)) {
-			cdebug_e(APPLICATION, "Hardware input reload rejected: %s", error.c_str());
-		}
-	});
+#else
+	(void)inputs;
+	(void)error;
+#endif
+	return true;
 }
 
 bool Application::configureHardwareInputs(String& error)
@@ -1002,17 +987,11 @@ bool Application::configureHardwareInputs(String& error)
 		return true;
 	}
 	HardwareInputs next;
-	if(!rgbwwctrl.resolveInputs(next, error)) {
+	if(!rgbwwctrl.resolveInputs(next, error) || !validateHardwareInputs(next, error)) {
 		return false;
 	}
 	const bool busChanged = next.i2cEnabled != _hardwareInputs.i2cEnabled || next.sda != _hardwareInputs.sda ||
 		next.scl != _hardwareInputs.scl || next.frequency != _hardwareInputs.frequency;
-#if STATUS_DISPLAY
-	if(statusDisplay && _hardwareInputs.i2cEnabled && !next.i2cEnabled) {
-		error = F("Cannot disable I2C while the status display is active");
-		return false;
-	}
-#endif
 	std::vector<InputState> states(next.buttons.size());
 	_buttonPollTimer.stop();
 	_resetPinTimer.stop();

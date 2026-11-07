@@ -30,8 +30,8 @@ a template-application command.
 The target API contract is to merge each partial update with the current
 configuration and validate the candidate before committing. Validate the
 selected SoC, every numeric GPIO against the SoC capability ConfigDB, required
-roles, unique IDs/indexes, at most one default, resource ownership and backend
-capacity. Board labels, MOSFET availability and templates are frontend/catalog
+roles, unique IDs/indexes, exactly one default for a nonempty light list,
+resource ownership and backend capacity. Board labels, MOSFET availability and templates are frontend/catalog
 data; they cannot grant capabilities the SoC database does not permit. Precommit
 validation is not implemented yet: current reload validation runs after the
 ConfigDB commit, so a rejected candidate can remain persisted even though
@@ -71,10 +71,11 @@ indexes; spontaneous color events still publish the default light only.
 - An explicit selector wins. An omitted selector resolves only the configured
   `is_default` light, never implicitly index 0. No matching/default light returns
   an explicit error, including when there are zero configured lights.
-- `is_default` defaults to false. At most one light may have it set. Switching it
-  requires clearing the old flag and setting the new flag in one configuration
-  update; candidates containing multiple defaults are rejected. Deleting
-  the default leaves none unless a replacement is explicitly selected.
+- `is_default` defaults to false. A nonempty light list must contain exactly one
+  default; an empty list is valid. Switching or deleting the default while other
+  lights remain requires selecting a replacement in the same configuration update.
+  Reload rejects configurations with zero or multiple defaults when lights exist;
+  precommit rejection remains a follow-up.
 - Controller-wide info, networking, OTA and discovery remain controller-wide.
   Preserve old single-light request shapes where compatible. Addressed reads and
   commands identify the selected light; spontaneous color events remain tied to

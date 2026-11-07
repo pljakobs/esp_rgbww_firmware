@@ -23,6 +23,46 @@ function compileAndRun(source) {
   }
 }
 
+test("hardware reload releases old outputs before applying inputs and new outputs", () => {
+  const controller = readFileSync(join(root, "app/ledctrl.cpp"), "utf8");
+  const application = readFileSync(join(root, "app/application.cpp"), "utf8");
+  const begin = controller.indexOf("bool APPLedCtrl::reload(");
+  const end = controller.indexOf("void APPLedCtrl::reconfigure(", begin);
+  assert.ok(begin >= 0 && end > begin);
+  const reload = controller.slice(begin, end);
+  const validate = reload.indexOf("app.validateHardwareInputs(inputs, error)");
+  const release = reload.lastIndexOf("app.lights.clear()");
+  const applyInputs = reload.lastIndexOf("app.configureHardwareInputs(error)");
+  const initialize = reload.indexOf("staged[index].led->init(");
+  assert.ok(validate >= 0 && validate < release && release < applyInputs && applyInputs < initialize);
+  assert.doesNotMatch(application, /requestInputsReload\(/);
+});
+
+test("MQTT relay preserves normalized raw data and the resolved light selector", () => {
+  const source = readFileSync(join(root, "app/apihandler.cpp"), "utf8");
+  const begin = source.indexOf("bool Api::dispatchCommandFromStream(");
+  const end = source.indexOf("bool Api::dispatchJsonRpc(", begin);
+  assert.ok(begin >= 0 && end > begin);
+  const dispatch = source.slice(begin, end);
+  assert.match(dispatch, /relayJson\s*=\s*requestJson/);
+  const importParams = dispatch.indexOf("request.params.importFromStream");
+  const setLight = dispatch.indexOf("request.params.setLight(params.light)", importParams);
+  const selectedStop = dispatch.indexOf("if(id == CommandMethodId::Stop", importParams);
+  assert.ok(importParams >= 0 && setLight > importParams && setLight < selectedStop);
+});
+
+test("MQTT synchronization publishes clock and default light state", () => {
+  const controller = readFileSync(join(root, "app/ledctrl.cpp"), "utf8");
+  const mqtt = readFileSync(join(root, "app/mqtt.cpp"), "utf8");
+  const begin = controller.indexOf("void APPLedCtrl::updateLed()");
+  const end = controller.indexOf("void APPLedCtrl::checkStableColorState()", begin);
+  assert.ok(begin >= 0 && end > begin);
+  const update = controller.slice(begin, end);
+  assert.match(update, /clockMaster[\s\S]*publishClock\(_stepCounter\)/);
+  assert.match(update, /colorMaster[\s\S]*publishToMqtt\(\*defaultLight->led, defaultLight->index\)/);
+  assert.match(mqtt, /light\.usesNamedRawChannels\(\)[\s\S]*toRawInputIndexed\(\)/);
+});
+
 test("configured light types require the library's exact pin count", () => {
   const text = readFileSync(join(root, "app/ledctrl.cpp"), "utf8");
   const begin = text.indexOf("bool selectLightType(");

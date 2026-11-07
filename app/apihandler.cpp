@@ -443,7 +443,7 @@ bool Api::dispatchCommandFromStream(const String& method, Stream& body, String& 
 	if(relay && relayName != nullptr) {
 		AppConfig::Sync sync(*app.cfg);
 		if(sync.getCmdMasterEnabled()) {
-			relayJson = body.readString(1024);
+			relayJson = body.readString(4096);
 			buffered.write(reinterpret_cast<const uint8_t*>(relayJson.c_str()), relayJson.length());
 			source = &buffered;
 		}
@@ -456,6 +456,9 @@ bool Api::dispatchCommandFromStream(const String& method, Stream& body, String& 
 				errorMsg = F("malformed json");
 			}
 			return false;
+		}
+		if(relayJson.length() > 0) {
+			relayJson = requestJson;
 		}
 	}
 	MemoryDataStream requestBody{std::move(requestJson)};
@@ -533,6 +536,9 @@ bool Api::dispatchCommandFromStream(const String& method, Stream& body, String& 
 			const auto relayStatus = request.params.importFromStream(ConfigDB::Json::format, relayInput);
 			if(relayStatus || (relayStatus.error == ConfigDB::Error::FormatError &&
 							   relayStatus.code.formatError == ConfigDB::FormatError::NotInSchema)) {
+				if(params.light >= 0) {
+					request.params.setLight(params.light);
+				}
 				if(id == CommandMethodId::Stop || id == CommandMethodId::Skip || id == CommandMethodId::Pause) {
 					auto selected = [&params](CtrlChannel channel) {
 						return params.channels.count() == 0 || params.channels.contains(channel);
@@ -542,7 +548,6 @@ bool Api::dispatchCommandFromStream(const String& method, Stream& body, String& 
 					if(selectedLight == nullptr) {
 						return false;
 					}
-					request.params.setLight(params.light);
 					if(selectedLight->getMode() == RGBWWLed::ColorMode::Hsv) {
 						const HSVCT& color = selectedLight->getCurrentColor();
 						if(selected(CtrlChannel::Hue)) request.params.hsv.setH(String((float(color.h) / float(RGBWW_CALC_HUEWHEELMAX)) * 360.0f, 2));
