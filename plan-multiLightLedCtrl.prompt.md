@@ -95,14 +95,11 @@ unknown/deleted indexes, missing defaults and independent per-light commands.
 - The latest GitHub `Workflow Validation` and matrix checks pass. The Host smoke
   job currently aborts in the test harness's shutdown/restart cleanup with lwIP
   `invalid socket state for poll`; no pytest summary was produced by that job.
-- Migration caveat: “string-based pin assignments” means the interim M3
-  `hardware.configuration.lights[].pins` values such as `"L1"`, plus string
-  button/clear/I2C pin IDs. Current active config requires GPIO integers. 5.0's
-  schema/runtime is unchanged, and the M3 line has not been released; if an
-  interim M3 AppConfig is to be preserved, a one-time mapping migration must
-  translate those IDs using its stored board catalog before ConfigDB loads the
-  numeric schema. Do not clear the old mapping data before that migration is
-  complete for any deployed interim build.
+- The earlier M3 schema used string board IDs such as `"L1"` in active light,
+  button, clear and I2C assignments. That schema was never released, so no
+  migration path is required for it. The current contract uses numeric GPIOs. Any
+  migration from a released 5.0 configuration is a separate compatibility task;
+  5.0's schema and runtime remain unchanged.
 
 # Historical Prerequisites (Superseded Where Inconsistent)
 - Implement the new light types and shared API behavior on all supported architectures. ESP8266 remains single-light, but its one light may use the new `SINGLE`, `WW`, or `WWCW` profiles; ESP32 supports multiple configured lights.
