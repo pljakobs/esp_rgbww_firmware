@@ -16,11 +16,13 @@
  */
 
 #include <RGBWWCtrl.h>
+#include <ArduinoJson.h>
 #include <ConfigDB/JsonRPC/ReadStream.h>
 #include <Data/Stream/MemoryDataStream.h>
 #include <Network/Http/Websocket/WebsocketConnection.h>
 #include <Platform/System.h>
 #include <array>
+#include <cstring>
 #include <cstdlib>
 #include <functional>
 
@@ -84,7 +86,63 @@ public:
 private:
 	bool& flag;
 };
+
+void flattenRawVariant(JsonVariant value, bool& changed)
+{
+	if(value.is<JsonObject>()) {
+		JsonObject object = value.as<JsonObject>();
+		JsonVariant raw = object[F("raw")];
+		if(raw.is<JsonObject>()) {
+			JsonObject tagged = raw.as<JsonObject>();
+			const char* variants[] = {"named", "indexed"};
+			for(const char* variantName : variants) {
+				JsonVariantConst selected = tagged[variantName];
+				if(selected.isNull()) {
+					continue;
+				}
+				StaticJsonDocument<512> copy;
+				copy.set(selected);
+				raw.set(copy.as<JsonVariantConst>());
+				changed = true;
+				break;
+			}
+		}
+		for(JsonPair pair : object) {
+			if(std::strcmp(pair.key().c_str(), "raw") != 0) {
+				flattenRawVariant(pair.value(), changed);
+			}
+		}
+	} else if(value.is<JsonArray>()) {
+		for(JsonVariant child : value.as<JsonArray>()) {
+			flattenRawVariant(child, changed);
+		}
+	}
+}
 } // namespace
+
+bool normalizeRawUnionForWire(String& json)
+{
+	if(json.indexOf(F("\"raw\"")) < 0 ||
+	   (json.indexOf(F("\"named\"")) < 0 && json.indexOf(F("\"indexed\"")) < 0)) {
+		return true;
+	}
+	DynamicJsonDocument document(json.length() * 2 + 256);
+	if(deserializeJson(document, json)) {
+		return false;
+	}
+	bool changed = false;
+	flattenRawVariant(document.as<JsonVariant>(), changed);
+	if(!changed) {
+		return true;
+	}
+	String normalized;
+	normalized.reserve(json.length());
+	if(serializeJson(document, normalized) == 0) {
+		return false;
+	}
+	json = std::move(normalized);
+	return true;
+}
 
 struct RpcCodec::StreamTask::State : std::enable_shared_from_this<State>
 {

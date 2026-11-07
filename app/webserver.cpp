@@ -62,6 +62,25 @@ struct WsQueuedOutput {
 	String payload;
 };
 
+bool parseLightSelector(const String& value, int32_t& selector, String& error)
+{
+	selector = -1;
+	if(value.length() == 0) {
+		return true;
+	}
+	uint32_t parsed = 0;
+	for(unsigned i = 0; i < value.length(); ++i) {
+		const char digit = value[i];
+		if(digit < '0' || digit > '9' || parsed > (65535u - unsigned(digit - '0')) / 10u) {
+			error = F("light selector must be an index from 0 to 65535");
+			return false;
+		}
+		parsed = parsed * 10u + unsigned(digit - '0');
+	}
+	selector = static_cast<int32_t>(parsed);
+	return true;
+}
+
 // Per-connection WebSocket authentication state, attached via setUserData().
 // Allocated in wsConnected(), released in wsDisconnected(). The challenge is a
 // one-shot nonce handed to the client in an "authentication required" reply and
@@ -369,17 +388,19 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 	String authHash;
 	String notificationChannel;
 	int requestId = 0;
+	int32_t lightSelector = -1;
 	bool sparse = true;
 	bool paramsEmpty = true;
 	String errorMsg;
 	int errorCode = 0;
+	bool dataIsColor = false;
 	Api::HeapTestRequest* heapTestRequest = nullptr;
 #if defined(ARCH_HOST) && !defined(SMING_RELEASE)
 	Api::HeapTestRequest heapTest;
 	heapTestRequest = &heapTest;
 #endif
 
-	if(!app.api || !app.api->parseJsonRpcRequest(requestStream, methodName, paramsJson, requestId, authHash, sparse, paramsEmpty, errorMsg, heapTestRequest, &notificationChannel)) {
+	if(!app.api || !app.api->parseJsonRpcRequest(requestStream, methodName, paramsJson, requestId, authHash, sparse, paramsEmpty, errorMsg, heapTestRequest, &notificationChannel, &lightSelector)) {
 		auto& codec = rpcCodec();
 		Jsonrpc::Root root(codec.db());
 		if(auto update = root.update()) {
@@ -514,6 +535,7 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 			// Data handlers always succeed for a known method; result is streamed in phase 2.
 			resultKind = RK_Data;
 			dataIsInfo = isInfoMethod;
+			dataIsColor = isColorGetter || (strcmp_P(method, PSTR("getColor")) == 0);
 		} else {
 			// Command: execute now (side effects + success/error), stream the envelope after.
 			MemoryDataStream paramsStream(std::move(paramsJson));
@@ -535,7 +557,14 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 
 	// ---- Phase 2: stream the JSON-RPC envelope --------------------------
 	if(resultKind == RK_Data && errorMsg.length() == 0 && app.api != nullptr) {
-		if(auto dataStream = app.api->renderDataStream(methodName, sparse, requestId)) {
+		if(dataIsColor) {
+			String payload;
+			if(app.api->renderData(methodName, sparse, payload, requestId, lightSelector)) {
+				queueWsPayload(socket, payload.c_str(), payload.length(), true);
+				return;
+			}
+		}
+		if(auto dataStream = app.api->renderDataStream(methodName, sparse, requestId, lightSelector)) {
 			queueWsStream(socket, std::move(dataStream));
 			return;
 		}
@@ -834,10 +863,14 @@ bool ApplicationWebserver::dispatchBodyCommand(HttpRequest& request, const Strin
 		msg = F("api not initialized");
 		return false;
 	}
+	int32_t lightSelector = -1;
+	if(!parseLightSelector(request.getQueryParameter(F("light")), lightSelector, msg)) {
+		return false;
+	}
 
 	auto bodyStream = request.getBodyStream();
 	if(bodyStream != nullptr) {
-		return app.api->dispatchCommandFromStream(method, *bodyStream, msg, true);
+		return app.api->dispatchCommandFromStream(method, *bodyStream, msg, true, lightSelector);
 	}
 
 	String body = request.getBody();
@@ -846,7 +879,7 @@ bool ApplicationWebserver::dispatchBodyCommand(HttpRequest& request, const Strin
 		return false;
 	}
 	MemoryDataStream mem(std::move(body));
-	return app.api->dispatchCommandFromStream(method, mem, msg, true);
+	return app.api->dispatchCommandFromStream(method, mem, msg, true, lightSelector);
 }
 
 bool ApplicationWebserver::importConfigBody(HttpRequest& request, HttpResponse& response, ConfigDB::Object& target,
@@ -1605,9 +1638,18 @@ void ApplicationWebserver::onColorGet(HttpRequest& request, HttpResponse& respon
 {
 	cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onColorGet: " ANSI_COLOR_BLUE "onColorGet" ANSI_COLOR_RESET);
 
+	String error;
+	int32_t lightSelector = -1;
+	if(!parseLightSelector(request.getQueryParameter(F("light")), lightSelector, error)) {
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, error);
+		return;
+	}
 	String payload;
 	payload.reserve(256);
-	app.api->renderData(F("color"), JsonObject(), payload);
+	if(!app.api->renderData(F("color"), true, payload, -1, lightSelector)) {
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("selected light not found"));
+		return;
+	}
 
 	response.code = HTTP_STATUS_OK;
 	response.setContentType(MIME_JSON);

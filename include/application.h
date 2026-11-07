@@ -55,6 +55,7 @@ public:
     void initButtons();
     bool configureHardwareInputs(String& error);
     std::unique_ptr<FSTR::Stream> hardwareCatalogSeedStream() const;
+    RGBWWLed* getLight(int32_t index, String& error) const;
 
     void startServices();
     void startNetworkServices();

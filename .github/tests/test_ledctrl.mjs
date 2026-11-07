@@ -101,9 +101,13 @@ int main()
     String id;
     String type;
     Items<int> pins;
+    uint16_t index = 0;
+    bool isDefault = false;
     String getId() const { return id; }
     String getName() const { return id; }
     String getType() const { return type; }
+    uint16_t getIndex() const { return index; }
+    bool getIsDefault() const { return isDefault; }
   };
   struct System { bool getClearConfigEnabled() const { return false; } int getClearConfigPin() const { return 0; } };
   struct Button { int getPin() const { return 0; } };
@@ -135,19 +139,26 @@ int main()
       available.pins.push_back({index});
     }
     pinDatabase.availablePins.push_back(available);
-    hardware.configuration.lights.push_back({"rgb0", "RGB", {0, 1, 2}});
-    hardware.configuration.lights.push_back({"white0", "WWCW", {3, 4}});
+    hardware.configuration.lights.push_back({"rgb0", "RGB", {0, 1, 2}, 10, true});
+    hardware.configuration.lights.push_back({"white0", "WWCW", {3, 4}, 23, false});
     std::vector<ResolvedLight> resolved;
     String error;
     assert(resolveConfiguredLights(hardware, pinDatabase, "esp32", 5, resolved, error));
     assert(resolved.size() == 2 && resolved[0].type == LightType::RGB && resolved[0].pins[0] == 0);
     assert(resolved[1].type == LightType::WWCW && resolved[1].pins[3] == 3 && resolved[1].pins[4] == 4);
+    assert(resolved[0].index == 10 && resolved[0].isDefault);
     assert(!resolveConfiguredLights(hardware, pinDatabase, "esp32", 4, resolved, error));
     auto invalid = hardware;
     invalid.configuration.lights[1].pins[0] = 0;
     assert(!resolveConfiguredLights(invalid, pinDatabase, "esp32", 5, resolved, error));
     invalid = hardware;
     invalid.configuration.lights[1].id = "rgb0";
+    assert(!resolveConfiguredLights(invalid, pinDatabase, "esp32", 5, resolved, error));
+    invalid = hardware;
+    invalid.configuration.lights[0].isDefault = false;
+    assert(!resolveConfiguredLights(invalid, pinDatabase, "esp32", 5, resolved, error));
+    invalid = hardware;
+    invalid.configuration.lights[1].isDefault = true;
     assert(!resolveConfiguredLights(invalid, pinDatabase, "esp32", 5, resolved, error));
     auto invalidPins = pinDatabase;
     invalidPins.availablePins[0].pins[0].capability &= ~CAPA_PWM;

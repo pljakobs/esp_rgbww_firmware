@@ -25,7 +25,7 @@ test("5.1 extends available_pins and replaces fixed pinconfigs", () => {
   assert.deepEqual(pinDefaults.available_pins.map(entry => entry.soc), ["esp32", "esp32c3"]);
   assert.equal(pinDefaults.schema_version, 1);
   assert.equal(pinDefaults.version, 2);
-  assert.equal(catalog.version, 2);
+  assert.equal(catalog.version, 3);
   const capability = pinsSchema.properties.available_pins.items.properties.pins.items.properties.capability;
   assert.equal(capability.type, "integer");
   assert.equal(capability.maximum, 127);
@@ -36,6 +36,9 @@ test("built-in board output mappings match the vendor pinouts", () => {
     "quinled-an-penta-mini": [5, 4, 1, 0, 3],
     "quinled-an-penta-deca": [27, 26, 25, 23, 22, 21, 19, 18, 17, 14, 13, 12, 5, 4, 2],
     "quinled-an-penta-plus": [33, 32, 12, 4, 2],
+    "quinled-dig-uno-v4": [],
+    "quinled-dig-quad-v4": [],
+    "quinled-dig-next-2": [],
   };
   for (const board of catalog.boards) {
     const pins = board.implemented_pins.filter(pin => pin.allowed_functions.includes("light.pwm"));
@@ -50,12 +53,32 @@ test("built-in board output mappings match the vendor pinouts", () => {
         assert.equal(capabilities.get(pin.gpio).capability & (CAPA.output | CAPA.pwm), CAPA.output | CAPA.pwm);
         assert.ok(!board.reserved_gpios?.includes(pin.gpio));
       }
+      if (pin.allowed_functions.some(fn => fn.startsWith("digital."))) {
+        assert.ok(capabilities.get(pin.gpio).capability & CAPA.output);
+      }
     }
   }
 });
 
-test("SDA/SCL and buttons are physical board resources", () => {
+test("digital controllers expose level-shifted data outputs", () => {
+  const expected = {
+    "quinled-dig-uno-v4": [2, 4],
+    "quinled-dig-quad-v4": [2, 4, 12, 14],
+    "quinled-dig-next-2": [2, 4],
+    "quinled-an-penta-plus": [5],
+  };
   for (const board of catalog.boards) {
+    const data = board.implemented_pins.filter(pin => pin.allowed_functions.includes("digital.data"));
+    assert.deepEqual(data.map(pin => pin.gpio), expected[board.id] ?? []);
+  }
+  const next = catalog.boards.find(board => board.id === "quinled-dig-next-2");
+  const pins = new Map(next.implemented_pins.map(pin => [pin.id, pin.gpio]));
+  assert.equal(pins.get("I2C_SDA"), 15);
+  assert.equal(pins.get("I2C_SCL"), 14);
+});
+
+test("SDA/SCL and buttons are physical board resources", () => {
+  for (const board of catalog.boards.filter(entry => entry.id.startsWith("quinled-an-penta"))) {
     const pins = new Map(board.implemented_pins.map(pin => [pin.id, pin]));
     const mini = board.soc === "esp32c3";
     assert.equal(pins.get("I2C_SDA").gpio, mini ? 6 : 15);

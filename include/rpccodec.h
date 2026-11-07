@@ -24,6 +24,8 @@
 
 class WebsocketConnection;
 
+bool normalizeRawUnionForWire(String& json);
+
 /**
  * @brief Transient workspace for building outbound JSON-RPC messages.
  *

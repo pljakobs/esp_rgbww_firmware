@@ -420,13 +420,22 @@ void AppMqttClient::publishCommand(const String& method, const JsonObject& param
 			} else if(method == F("color_event")) {
 				auto color = update.toColor();
 				if(params.containsKey(F("raw"))) {
-					auto raw = color.toRaw();
-					auto p = params[F("raw")].as<JsonObject>();
-					raw.setR(p[F("r")] | 0);
-					raw.setG(p[F("g")] | 0);
-					raw.setB(p[F("b")] | 0);
-					raw.setWw(p[F("ww")] | 0);
-					raw.setCw(p[F("cw")] | 0);
+                    auto raw = color.toRaw();
+                    JsonVariant rawValue = params[F("raw")];
+                    if(rawValue.is<JsonArray>()) {
+                        auto indexed = raw.toRawIndexed();
+                        for(JsonVariant value : rawValue.as<JsonArray>()) {
+                            indexed.addItem(value | 0);
+                        }
+                    } else {
+                        auto named = raw.toRawNamed();
+                        auto p = rawValue.as<JsonObject>();
+                        named.setR(p[F("r")] | 0);
+                        named.setG(p[F("g")] | 0);
+                        named.setB(p[F("b")] | 0);
+                        named.setWw(p[F("ww")] | 0);
+                        named.setCw(p[F("cw")] | 0);
+                    }
 				} else if(params.containsKey(F("hsv"))) {
 					auto hsv = color.toHsv();
 					auto p = params[F("hsv")].as<JsonObject>();
@@ -458,7 +467,8 @@ void AppMqttClient::publishCommand(const String& method, const JsonObject& param
 				return;
 			}
 		} else if(method == F("color_event")) {
-			if(codec.render({0, JsonRPC::Message::Kind::notification, method}, root.asColor(), msgStr)) {
+            if(codec.render({0, JsonRPC::Message::Kind::notification, method}, root.asColor(), msgStr) &&
+               normalizeRawUnionForWire(msgStr)) {
 				publish(buildTopic(F("command")), msgStr, false);
 				return;
 			}
