@@ -74,7 +74,7 @@ public:
     class Iterator {
     private:
         Controllers& manager;
-        AppData::Root::Controllers configControllers;
+        AppData::Controllers configControllers;
         size_t currentIndex;
         size_t totalCount;
 

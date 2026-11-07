@@ -845,7 +845,7 @@ cdebug_i(APPLICATION, "Application::init: " ANSI_COLOR_BLUE "running partition "
 	{
 		// pre-allocate heap for the visible hosts vector. 
 		// this should adapt to the number of hosts detected in earlier boots
-		AppData::Root::Controllers controllers(*app.data);
+		AppData::Controllers controllers(*app.data);
 		
 		auto myId=(uint32_t)system_get_chip_id();
 		AppConfig::General general(*cfg);
