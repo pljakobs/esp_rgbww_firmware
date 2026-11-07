@@ -11,25 +11,47 @@ Use the existing `GET /config` and partial-update `POST /config` contract. Do no
 add `/light` or `/lights` CRUD endpoints or `create_light`, `modify_light` and
 `delete_light` methods. The historical CRUD proposal below is superseded.
 
-Clients read board definitions, templates and `hardware.configuration` from
-`/config`. Creating, modifying, listing and deleting lights are ordinary
-configuration operations on `hardware.configuration.lights`. Existing ConfigDB
-array replacement/selector semantics apply; a partial update is not implicitly
-a merge-by-light-ID operation. Client-assigned indexes and IDs must be unique.
+Clients read board definitions and templates from `GET /catalog`, and active
+device settings from `GET /config`. The catalog is a gzip-compressed JSON file
+with a filesystem working copy and an embedded FSTR seed. Creating, modifying,
+listing and deleting lights are ordinary configuration operations on
+`hardware.configuration.lights`. Existing ConfigDB array replacement/selector
+semantics apply; a partial update is not implicitly a merge-by-light-ID
+operation. Client-assigned indexes and IDs must be unique.
 
-Applying a template is client-side: copy its light type, assignments and supported
-settings into the configuration update. Assign device-specific IDs/indexes and
-optionally retain template ID/revision as provenance. Do not store a live link
-to changing template defaults or introduce a template-application command.
+Applying a template is client-side: resolve board pin IDs (for example `L1`) to
+physical GPIO numbers using the selected catalog board, then copy the light
+type, GPIO array and supported settings into the configuration update. Active
+light `pins`, button/clear pins and I2C SDA/SCL are numeric GPIOs. Assign
+device-specific IDs/indexes and optionally retain template ID/revision as
+provenance. Do not store a live link to changing template defaults or introduce
+a template-application command.
 
 Merge each partial update with the current configuration for validation before
-committing. Validate the complete candidate graph, board/SoC, required roles,
-unique IDs/indexes, at most one default, resource ownership and backend capacity.
-Invalid updates leave persisted configuration and running outputs unchanged.
+committing. Validate the selected SoC, every numeric GPIO against the SoC
+capability ConfigDB, required roles, unique IDs/indexes, at most one default,
+resource ownership and backend capacity. Board labels, MOSFET availability and
+templates are frontend/catalog data; they cannot grant capabilities that the
+firmware's SoC pin database does not permit. Invalid updates leave persisted
+configuration and running outputs unchanged.
 Changing topology is boot-time configuration: persist it and require restart,
 without reallocating live PWM resources. Distinguish pending configuration from
-running lights until restart. Client-supplied catalogue metadata cannot override
-firmware GPIO restrictions. Deleting the last light remains valid.
+running lights until restart. Deleting the last light remains valid.
+
+## Catalog and SoC Pin Database
+
+- `pins.cfgdb` is the only board/pin-related database opened by firmware. It
+  contains SoC GPIO capability masks (`input=1`, `output=2`, `pwm=4`,
+  `strapping=8`, `pull_up=16`, `pull_down=32`, `reserved=64`) and is seeded from
+  `soc-pins.json` through generated ConfigDB accessors.
+- Board maps and templates are not part of AppConfig or its `/config` export.
+  `hardware-catalog.json.gz` and `hardware-catalog.version` are separate
+  frontend/catalog resources; firmware seeds the filesystem copy if missing,
+  corrupt or older than the embedded seed.
+- `GET /catalog` streams the filesystem gzip file with
+  `Content-Encoding: gzip`; it falls back to the embedded FSTR stream if the
+  filesystem copy is unavailable. Firmware does not decompress or parse this
+  catalog.
 
 ## Light Addressing and Defaults
 
@@ -60,6 +82,27 @@ default light; fresh firmware with no lights must remain valid and must not
 auto-create one merely to satisfy legacy tests. Test CRUD, persistence/restart,
 template selection, duplicate resources/defaults/indexes, selector conflicts,
 unknown/deleted indexes, missing defaults and independent per-light commands.
+
+## Implementation Progress (2026-11-07)
+
+- Implemented in commits `8c7a16e` and `ec6b912`: separate `Pins` ConfigDB,
+  versioned gzip catalog seed/working-copy flow, streamed `/catalog`, numeric
+  GPIO active configuration, and legacy static catalog-array cleanup.
+- Verification: ESP32-C3 and Host builds pass; 13 focused Node tests and 25
+  workflow-policy tests pass; the full Host `testnet.sh` suite passes (60 passed,
+  1 skipped). The raw `/catalog` response was verified as gzip with three boards
+  and three templates.
+- The latest GitHub `Workflow Validation` and matrix checks pass. The Host smoke
+  job currently aborts in the test harness's shutdown/restart cleanup with lwIP
+  `invalid socket state for poll`; no pytest summary was produced by that job.
+- Migration caveat: “string-based pin assignments” means the interim M3
+  `hardware.configuration.lights[].pins` values such as `"L1"`, plus string
+  button/clear/I2C pin IDs. Current active config requires GPIO integers. 5.0's
+  schema/runtime is unchanged, and the M3 line has not been released; if an
+  interim M3 AppConfig is to be preserved, a one-time mapping migration must
+  translate those IDs using its stored board catalog before ConfigDB loads the
+  numeric schema. Do not clear the old mapping data before that migration is
+  complete for any deployed interim build.
 
 # Historical Prerequisites (Superseded Where Inconsistent)
 - Implement the new light types and shared API behavior on all supported architectures. ESP8266 remains single-light, but its one light may use the new `SINGLE`, `WW`, or `WWCW` profiles; ESP32 supports multiple configured lights.

@@ -86,6 +86,13 @@ general pin-selector fields remain migration inputs until that work is complete.
 Do not advertise the new capability or ship this branch before the linked runtime
 and migration implementation passes its checks. No 5.0 schema is changed.
 
+“String-based pin assignments” refers specifically to interim, unreleased M3
+ConfigDB records that stored board labels such as `L1` in light `pins`, button
+`pin`, clear-pin and I2C SDA/SCL fields. The current active schema stores GPIO
+numbers. 5.0’s separate legacy pin configuration format is unchanged. Automatic
+migration from an interim M3 store still needs to map those labels using its
+stored board catalog before the numeric schema is loaded.
+
 Schema fixture tests:
 
 ```sh
