@@ -9,6 +9,46 @@
   "servers": [{ "url": "http://{controller}", "variables": { "controller": { "default": "lightinator.local" } } }],
   "security": [{ "basicAuth": [] }],
   "paths": {
+    "/catalog": {
+      "get": {
+        "operationId": "getHardwareCatalog",
+        "summary": "Get board and template catalog",
+        "description": "Returns the complete board/template catalog as gzip-compressed JSON. The HTTP client should transparently decode Content-Encoding.",
+        "responses": {
+          "200": {
+            "description": "Board profiles and templates",
+            "headers": {
+              "Content-Encoding": {
+                "description": "The response body is gzip-compressed.",
+                "schema": { "type": "string", "enum": ["gzip"] }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["schema_version", "version", "boards", "templates"],
+                  "properties": {
+                    "schema_version": { "type": "integer" },
+                    "version": { "type": "integer" },
+                    "boards": {
+                      "type": "array",
+                      "items": { "$ref": "schema/app-config.schema.json#/definitions/board_profile" }
+                    },
+                    "templates": {
+                      "type": "array",
+                      "items": { "$ref": "schema/app-config.schema.json#/definitions/hardware_template" }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/Busy" }
+        }
+      }
+    },
     "/config": {
       "get": {
         "operationId": "getConfig",
@@ -69,9 +109,10 @@
       }
     },
     "/color": {
+      "parameters": [{ "$ref": "#/components/parameters/LightSelector" }],
       "get": {
         "operationId": "getColor",
-        "summary": "Get current raw and HSV color",
+        "summary": "Get the selected or default light's active color representation",
         "responses": {
           "200": { "description": "Current color", "content": { "application/json": { "schema": { "$ref": "json-rpc-api.schema.json#/definitions/colorState" } } } },
           "401": { "$ref": "#/components/responses/Unauthorized" },
@@ -200,14 +241,15 @@
         }
       }
     },
-    "/stop": { "post": { "operationId": "stop", "summary": "Stop animation", "requestBody": { "$ref": "#/components/requestBodies/AnimationParams" }, "responses": { "200": { "$ref": "#/components/responses/Success" }, "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "429": { "$ref": "#/components/responses/Busy" } } } },
-    "/skip": { "post": { "operationId": "skip", "summary": "Skip animation", "requestBody": { "$ref": "#/components/requestBodies/AnimationParams" }, "responses": { "200": { "$ref": "#/components/responses/Success" }, "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "429": { "$ref": "#/components/responses/Busy" } } } },
-    "/pause": { "post": { "operationId": "pause", "summary": "Pause animation", "requestBody": { "$ref": "#/components/requestBodies/AnimationParams" }, "responses": { "200": { "$ref": "#/components/responses/Success" }, "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "429": { "$ref": "#/components/responses/Busy" } } } },
-    "/continue": { "post": { "operationId": "continue", "summary": "Continue animation", "requestBody": { "$ref": "#/components/requestBodies/AnimationParams" }, "responses": { "200": { "$ref": "#/components/responses/Success" }, "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "429": { "$ref": "#/components/responses/Busy" } } } },
-    "/toggle": { "post": { "operationId": "toggle", "summary": "Toggle output", "requestBody": { "$ref": "#/components/requestBodies/AnimationParams" }, "responses": { "200": { "$ref": "#/components/responses/Success" }, "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "429": { "$ref": "#/components/responses/Busy" } } } },
-    "/on": { "post": { "operationId": "setOn", "summary": "Turn output on", "requestBody": { "$ref": "#/components/requestBodies/AnimationParams" }, "responses": { "200": { "$ref": "#/components/responses/Success" }, "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "429": { "$ref": "#/components/responses/Busy" } } } },
-    "/off": { "post": { "operationId": "setOff", "summary": "Turn output off", "requestBody": { "$ref": "#/components/requestBodies/AnimationParams" }, "responses": { "200": { "$ref": "#/components/responses/Success" }, "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "429": { "$ref": "#/components/responses/Busy" } } } },
+    "/stop": { "parameters": [{ "$ref": "#/components/parameters/LightSelector" }], "post": { "operationId": "stop", "summary": "Stop animation", "requestBody": { "$ref": "#/components/requestBodies/AnimationParams" }, "responses": { "200": { "$ref": "#/components/responses/Success" }, "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "429": { "$ref": "#/components/responses/Busy" } } } },
+    "/skip": { "parameters": [{ "$ref": "#/components/parameters/LightSelector" }], "post": { "operationId": "skip", "summary": "Skip animation", "requestBody": { "$ref": "#/components/requestBodies/AnimationParams" }, "responses": { "200": { "$ref": "#/components/responses/Success" }, "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "429": { "$ref": "#/components/responses/Busy" } } } },
+    "/pause": { "parameters": [{ "$ref": "#/components/parameters/LightSelector" }], "post": { "operationId": "pause", "summary": "Pause animation", "requestBody": { "$ref": "#/components/requestBodies/AnimationParams" }, "responses": { "200": { "$ref": "#/components/responses/Success" }, "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "429": { "$ref": "#/components/responses/Busy" } } } },
+    "/continue": { "parameters": [{ "$ref": "#/components/parameters/LightSelector" }], "post": { "operationId": "continue", "summary": "Continue animation", "requestBody": { "$ref": "#/components/requestBodies/AnimationParams" }, "responses": { "200": { "$ref": "#/components/responses/Success" }, "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "429": { "$ref": "#/components/responses/Busy" } } } },
+    "/toggle": { "parameters": [{ "$ref": "#/components/parameters/LightSelector" }], "post": { "operationId": "toggle", "summary": "Toggle output", "requestBody": { "$ref": "#/components/requestBodies/AnimationParams" }, "responses": { "200": { "$ref": "#/components/responses/Success" }, "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "429": { "$ref": "#/components/responses/Busy" } } } },
+    "/on": { "parameters": [{ "$ref": "#/components/parameters/LightSelector" }], "post": { "operationId": "setOn", "summary": "Turn output on", "requestBody": { "$ref": "#/components/requestBodies/AnimationParams" }, "responses": { "200": { "$ref": "#/components/responses/Success" }, "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "429": { "$ref": "#/components/responses/Busy" } } } },
+    "/off": { "parameters": [{ "$ref": "#/components/parameters/LightSelector" }], "post": { "operationId": "setOff", "summary": "Turn output off", "requestBody": { "$ref": "#/components/requestBodies/AnimationParams" }, "responses": { "200": { "$ref": "#/components/responses/Success" }, "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "429": { "$ref": "#/components/responses/Busy" } } } },
     "/blink": {
+      "parameters": [{ "$ref": "#/components/parameters/LightSelector" }],
       "post": {
         "operationId": "blink",
         "summary": "Execute blink command",
@@ -247,6 +289,15 @@
   "components": {
     "securitySchemes": {
       "basicAuth": { "type": "http", "scheme": "basic", "description": "Enabled only when security.api_secured is true." }
+    },
+    "parameters": {
+      "LightSelector": {
+        "name": "light",
+        "in": "query",
+        "required": false,
+        "description": "Persistent configured light index. Omission selects the unique is_default light. If JSON also supplies light, the values must match.",
+        "schema": { "type": "integer", "minimum": 0, "maximum": 65535 }
+      }
     },
     "responses": {
       "Success": { "description": "Command accepted", "content": { "application/json": { "schema": { "$ref": "json-rpc-api.schema.json#/definitions/apiSuccess" } } } },

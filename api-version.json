@@ -2,29 +2,29 @@
   "apiVersion": "1.0.0-inferred.1",
   "status": "inferred",
   "schemaHashAlgorithm": "sha256",
-  "schemaHash": "576612374cf3a20c10c633d4a7ec70c4b97ea97c8ce8b37bd18d77f8089c0941",
+  "schemaHash": "8c34dc57d6db80e9daf91506eb7274eedbcd86efa9e173c43ec2d75f0b4c11a6",
   "sourceSchemas": [
     {
       "database": "Definitions",
       "source": "defs.cfgdb",
       "persistent": false,
-      "sourceHash": "5b149ae213514b5527126bac397f4f9e5478c0a778a208848c3958fae89090f9"
+      "sourceHash": "7e681336eab026c1c3bba6cf085051a26627398715a04f76b0d295b268865f37"
     },
     {
       "database": "Api",
       "source": "schema/json-rpc-api.cfgdb",
       "projection": "json-rpc-api.schema.json",
       "persistent": false,
-      "sourceHash": "9460d36470e72505c44442ed9dad6f0d27b079db4eaffc3377fbf5b6bcb08d92",
-      "projectionHash": "f3e084fc99073457e3ffa773a6ceb613388feeafd8be38c0c7d56fec396a1d50"
+      "sourceHash": "9dc0abccff6827192bc16436b32aeed69be41f26e0acb3504f0d8ded2d6791a6",
+      "projectionHash": "6f1f332c6437276ad9dd4c978ea12d9d28693b2625c90225c76274e8e98bfee2"
     },
     {
       "database": "AppConfig",
       "source": "app-config.cfgdb",
       "projection": "schema/app-config.schema.json",
       "persistent": true,
-      "sourceHash": "4ef0cb89aa67994fa76f5811bc0b27509ac8e25bfcb8814042748a3b4948c2fc",
-      "projectionHash": "19b6b3599bd9d35b8bca6ea4c5aa5928f36a4a86dedec360ffed9294ec8f5900"
+      "sourceHash": "6d56fb0f4336bf9bc407f09ce39234dc3b8f6e1fa8c5b617de23a74f00ada807",
+      "projectionHash": "38bd7574a70d6e62465c8f404dfad7790b86fd29f689f677836892ef8c676fdc"
     },
     {
       "database": "AppData",
@@ -32,7 +32,7 @@
       "projection": "schema/app-data.schema.json",
       "persistent": true,
       "sourceHash": "d7f6dbb03ad17e4fe58a608b5febc86640fb0a9fd78a6cacf729c81d1d9aa049",
-      "projectionHash": "ab2d82536f161e72de28047f77ab507a934ab558c83071d0e7323d3bd23eabe0"
+      "projectionHash": "5085fd2d7f19568ec8ccfb6f49a071a442e04bdf334cdd7a4af2e96b6ce520e7"
     }
   ],
   "artifacts": [

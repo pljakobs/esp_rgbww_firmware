@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import gzip
 import hashlib
 import http.client
 import json
@@ -20,6 +21,142 @@ import pytest
 
 
 GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+
+def post_config_update(smoke_config: SmokeConfig, update: dict[str, Any]) -> None:
+    response = http_request(
+        "POST",
+        f"{smoke_config.base_url}/config",
+        body=json.dumps(update, separators=(",", ":")).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+    )
+    trace = {"request": {"method": "POST", "path": "/config", "body": update}, "response": response}
+    payload = decode_json_response(response, trace, failure_message="Configuration update failed")
+    if response["status"] != 200 or payload.get("success") is not True:
+        fail_with_trace("Configuration update was rejected", trace)
+
+
+def test_catalog_endpoint_streams_gzip(smoke_config: SmokeConfig, api_secured: bool) -> None:
+    if api_secured:
+        pytest.skip("catalog endpoint check requires an unsecured Host instance")
+    with request.urlopen(f"{smoke_config.base_url}/catalog", timeout=5.0) as response:
+        assert response.status == 200
+        assert response.headers.get("Content-Encoding") == "gzip"
+        assert response.headers.get_content_type() == "application/json"
+        catalog = json.loads(gzip.decompress(response.read()))
+    assert isinstance(catalog, dict)
+    assert isinstance(catalog.get("version"), int) and catalog["version"] > 0
+    assert isinstance(catalog.get("boards"), list)
+    assert isinstance(catalog.get("templates"), list)
+    assert "available_pins" not in catalog
+
+    response = http_request("GET", f"{smoke_config.base_url}/config")
+    config = decode_json_response(
+        response, {"request": {"path": "/config"}, "response": response},
+        failure_message="Config read failed while checking catalog separation",
+    )
+    hardware = config["hardware"]
+    assert hardware["available_pins"] == []
+    assert hardware["boards"] == []
+    assert hardware["templates"] == []
+
+
+@pytest.mark.skipif(
+    os.environ.get("HOST_SMOKE_REAL_DEVICE") == "1",
+    reason="creates and removes virtual lights on the Host emulator only",
+)
+@pytest.mark.parametrize(
+    ("light_type", "pins"),
+    [
+        ("SINGLE", [5]),
+        ("WWCW", [5, 4]),
+        ("RGB", [5, 4, 1]),
+        ("RGBWW", [5, 4, 1, 0]),
+        ("RGBCW", [5, 4, 1, 3]),
+        ("RGBWWCW", [5, 4, 1, 0, 3]),
+    ],
+)
+def test_virtual_light_create_delete_reloads_runtime(
+    smoke_config: SmokeConfig, api_secured: bool, light_type: str, pins: list[int]
+) -> None:
+    if api_secured:
+        pytest.skip("configuration mutation requires an unsecured Host instance")
+    log_name = os.environ.get("HOST_SMOKE_APP_LOG")
+    if not log_name:
+        pytest.skip("set HOST_SMOKE_APP_LOG to the testnet/emulator output log")
+    app_log = Path(log_name)
+    if not app_log.is_file():
+        pytest.fail(f"Host runtime log does not exist: {app_log}")
+
+    response = http_request("GET", f"{smoke_config.base_url}/config")
+    original = decode_json_response(
+        response, {"request": {"path": "/config"}, "response": response}, failure_message="Config snapshot failed"
+    )["hardware"]["configuration"]
+
+    def debug(enabled: bool) -> None:
+        result = http_request(
+            "POST", f"{smoke_config.base_url}/system",
+            body=json.dumps({"cmd": "debug", "enable": enabled}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+        if result["error"] or result["status"] != 200:
+            fail_with_trace("Could not set Host diagnostic output", {"response": result})
+
+    def wait_for_runtime(message: str, offset: int) -> None:
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline:
+            text = app_log.read_bytes()[offset:].decode("utf-8", errors="replace")
+            if message in text:
+                return
+            time.sleep(0.02)
+        pytest.fail(f"Runtime did not report {message!r}; log: {app_log}")
+
+    debug(True)
+    try:
+        configuration = {
+            "board_id": "quinled-an-penta-mini",
+            "board_revision": 1,
+            "soc": "esp32c3",
+            "system": {
+                "clear_config_enabled": False,
+                "clear_config_pin": 0,
+                "clear_config_active_low": True,
+                "clear_config_external_pull_up": False,
+                "clear_config_external_pull_down": False,
+            },
+            "buttons": [],
+            "buses": [],
+            "lights": [{"id": "host-create-delete", "index": 23, "name": "Host test", "is_default": True,
+                        "type": light_type, "pins": pins}],
+        }
+        offset = app_log.stat().st_size
+        post_config_update(smoke_config, {"hardware": {"configuration": configuration}})
+        wait_for_runtime("Initialized 1 virtual lights", offset)
+        response = http_request("GET", f"{smoke_config.base_url}/config")
+        stored = decode_json_response(
+            response, {"response": response}, failure_message="Created light readback failed"
+        )["hardware"]["configuration"]["lights"]
+        assert len(stored) == 1
+        assert stored[0]["id"] == "host-create-delete"
+        assert stored[0]["index"] == 23
+        assert stored[0]["is_default"] is True
+        assert stored[0]["type"] == light_type
+        assert stored[0]["pins"] == pins
+
+        offset = app_log.stat().st_size
+        post_config_update(smoke_config, {"hardware": {"configuration": {"lights": []}}})
+        wait_for_runtime("No virtual lights configured", offset)
+        response = http_request("GET", f"{smoke_config.base_url}/config")
+        stored = decode_json_response(
+            response, {"response": response}, failure_message="Deleted light readback failed"
+        )["hardware"]["configuration"]["lights"]
+        assert stored == []
+        assert http_request("GET", f"{smoke_config.base_url}/ping")["status"] == 200
+    finally:
+        try:
+            post_config_update(smoke_config, {"hardware": {"configuration": original}})
+        finally:
+            debug(False)
 
 
 @dataclass(frozen=True)
@@ -71,6 +208,47 @@ def api_secured(smoke_config: SmokeConfig) -> bool:
     except json.JSONDecodeError:
         return False
     return bool(config.get("security", {}).get("api_secured", False))
+
+
+@pytest.fixture(scope="module", autouse=True)
+def configured_default_light(smoke_config: SmokeConfig, api_secured: bool):
+    if api_secured or os.environ.get("HOST_SMOKE_REAL_DEVICE") == "1":
+        yield
+        return
+
+    response = http_request("GET", f"{smoke_config.base_url}/config")
+    if response["error"] or response["status"] != 200:
+        pytest.fail("Could not snapshot hardware configuration before API tests")
+    original = json.loads(response["body"])["hardware"]["configuration"]
+    configuration = {
+        "board_id": "quinled-an-penta-mini",
+        "board_revision": 1,
+        "soc": "esp32c3",
+        "system": {
+            "clear_config_enabled": False,
+            "clear_config_pin": 0,
+            "clear_config_active_low": True,
+            "clear_config_external_pull_up": False,
+            "clear_config_external_pull_down": False,
+        },
+        "buttons": [],
+        "buses": [],
+        "lights": [
+            {
+                "id": "host-smoke-default",
+                "index": 10,
+                "name": "Host smoke default",
+                "is_default": True,
+                "type": "RGBWWCW",
+                "pins": [5, 4, 1, 0, 3],
+            }
+        ],
+    }
+    try:
+        post_config_update(smoke_config, {"hardware": {"configuration": configuration}})
+        yield
+    finally:
+        post_config_update(smoke_config, {"hardware": {"configuration": original}})
 
 
 @pytest.fixture(scope="session", autouse=True)

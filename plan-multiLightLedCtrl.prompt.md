@@ -1,4 +1,140 @@
-# prerequisite:
+# M3 API Contract (2026-11-05)
+
+This section supersedes conflicting proposals below. Implementation is exclusive
+to the 5.1 ESP32/ESP32-C3 firmware line; 5.0 schemas and runtime are unchanged.
+The older architecture sketch is retained as historical context, not a second
+contract.
+
+## Configuration Through /config
+
+Use the existing `GET /config` and partial-update `POST /config` contract. Do not
+add `/light` or `/lights` CRUD endpoints or `create_light`, `modify_light` and
+`delete_light` methods. The historical CRUD proposal below is superseded.
+
+Clients read board definitions and templates from `GET /catalog`, and active
+device settings from `GET /config`. The catalog is a gzip-compressed JSON file
+with a filesystem working copy and an embedded FSTR seed. Creating, modifying,
+listing and deleting lights are ordinary configuration operations on
+`hardware.configuration.lights`. Existing ConfigDB array replacement/selector
+semantics apply; a partial update is not implicitly a merge-by-light-ID
+operation. Client-assigned indexes and IDs must be unique.
+
+Applying a template is client-side: resolve board pin IDs (for example `L1`) to
+physical GPIO numbers using the selected catalog board, then copy the light
+type, GPIO array and supported settings into the configuration update. Active
+light `pins`, button/clear pins and I2C SDA/SCL are numeric GPIOs. Assign
+device-specific IDs/indexes and optionally retain template ID/revision as
+provenance. Do not store a live link to changing template defaults or introduce
+a template-application command.
+
+The target API contract is to merge each partial update with the current
+configuration and validate the candidate before committing. Validate the
+selected SoC, every numeric GPIO against the SoC capability ConfigDB, required
+roles, unique IDs/indexes, at most one default, resource ownership and backend
+capacity. Board labels, MOSFET availability and templates are frontend/catalog
+data; they cannot grant capabilities the SoC database does not permit. Precommit
+validation is not implemented yet: current reload validation runs after the
+ConfigDB commit, so a rejected candidate can remain persisted even though
+running outputs are retained.
+
+The implemented runtime applies topology changes through a queued ConfigDB
+commit reload rather than requiring restart. The callback drains pending PWM
+work, validates the numeric GPIO resources, builds replacement instances and
+then swaps them into the application-owned vector. Deleting the last light is
+valid. Public command/readback and native MQTT sync routing use persistent light
+indexes; spontaneous color events still publish the default light only.
+
+## Catalog and SoC Pin Database
+
+- `pins.cfgdb` is the only board/pin-related database opened by firmware. It
+  contains SoC GPIO capability masks (`input=1`, `output=2`, `pwm=4`,
+  `strapping=8`, `pull_up=16`, `pull_down=32`, `reserved=64`) and is seeded from
+  `soc-pins.json` through generated ConfigDB accessors.
+- Board maps and templates are not part of AppConfig or its `/config` export.
+  `hardware-catalog.json.gz` and `hardware-catalog.version` are separate
+  frontend/catalog resources; firmware seeds the filesystem copy if missing,
+  corrupt or older than the embedded seed.
+- `GET /catalog` streams the filesystem gzip file with
+  `Content-Encoding: gzip`; it falls back to the embedded FSTR stream if the
+  filesystem copy is unavailable. Firmware does not decompress or parse this
+  catalog.
+
+## Light Addressing and Defaults
+
+- Every light has a persistent numeric `index` and stable string `id`. The index
+  is an API identifier, not the current vector position; deletion never renumbers
+  survivors. Clients assign unused indexes when adding configured lights.
+- Existing light-specific HTTP GET requests use `?light=N`. POST accepts
+  `light` in JSON or the query. If both are supplied they must match.
+- WebSocket and MQTT carry `light` in JSON operation parameters. Commands,
+  readback, queue operations and per-light events use the same identifier.
+- An explicit selector wins. An omitted selector resolves only the configured
+  `is_default` light, never implicitly index 0. No matching/default light returns
+  an explicit error, including when there are zero configured lights.
+- `is_default` defaults to false. At most one light may have it set. Switching it
+  requires clearing the old flag and setting the new flag in one configuration
+  update; candidates containing multiple defaults are rejected. Deleting
+  the default leaves none unless a replacement is explicitly selected.
+- Controller-wide info, networking, OTA and discovery remain controller-wide.
+  Preserve old single-light request shapes where compatible. Addressed reads and
+  commands identify the selected light; spontaneous color events remain tied to
+  the configured default light for compatibility.
+
+## Color and Raw Channel Wire Contract
+
+- Every color command may carry HSVCT; each `RGBWWLed::LightType` consumes only
+  its meaningful HSVCT channels. RGB-family profiles use `h/s/v`, RGBWWCW also
+  uses `ct`, WWCW uses `v/ct`, and WW/CW/SINGLE use `v`.
+- RGBWWCW, RGBWW, RGBCW and RGB retain named raw objects (`r/g/b/ww/cw` as
+  available on the profile). WWCW, WW, CW and SINGLE use a raw array ordered by
+  configured physical pin/channel order. Missing entries and `null` leave a
+  channel unchanged; zero turns it off.
+- ConfigDB represents the input as a tagged union internally. The transport
+  adapter accepts and emits the public direct object/array forms, so the
+  `named`/`indexed` discriminator is not part of the public raw payload.
+- Color readback uses the requested/default light and publishes only its active
+  HSVCT or raw representation. Spontaneous WebSocket color events currently
+  publish the default light for legacy compatibility; per-light event IDs remain
+  a follow-up. MQTT sync commands carry the same `light` JSON field. The
+  Home-Assistant-specific MQTT topic handler remains legacy/single-light and
+  is intentionally deferred pending the native HA integration decision.
+
+## Delivery and Verification
+
+Use the existing HTTP, WebSocket and MQTT dispatchers and schema/manifest/OpenAPI
+sources. Share validation and light resolution across transports. Do not create
+a second configuration authority. Host behavior tests explicitly configure a
+default light; fresh firmware with no lights must remain valid and must not
+auto-create one merely to satisfy legacy tests. Test CRUD, persistence/restart,
+template selection, duplicate resources/defaults/indexes, selector conflicts,
+unknown/deleted indexes, missing defaults and independent per-light commands.
+
+## Implementation Progress (2026-11-07)
+
+- Implemented in commits `8c7a16e` and `ec6b912`: separate `Pins` ConfigDB,
+  versioned gzip catalog seed/working-copy flow, streamed `/catalog`, numeric
+  GPIO active configuration, and legacy static catalog-array cleanup.
+- The internal virtual-light lifecycle and public selector routing are
+  implemented: typed numeric-GPIO records map to owned `RGBWWLed` instances;
+  HTTP accepts `?light=N` and JSON `light`, while WebSocket/MQTT JSON commands
+  use the same persistent index. Omitted selectors resolve through the unique
+  `is_default` light.
+- Verification (2026-11-07): Host and ESP32-C3 builds pass; 12 focused Node
+  schema/controller tests pass; OpenAPI lint passes with only existing
+  unused-definition warnings. The full 84-case Host API/RGBWW suite passes 83
+  with one intentional Webapp-check skip at real-time scale. Its per-test table
+  is written to `out/testnet-pytest/final-full-suite-results.md`. All eight
+  profiles have type-correct HSVCT/raw/control coverage, and mixed RGB + WWCW
+  selector isolation is covered over HTTP and WebSocket.
+- PR CI has not yet been rerun with these changes; pushing this update will
+  trigger the GitHub checks.
+- The earlier M3 schema used string board IDs such as `"L1"` in active light,
+  button, clear and I2C assignments. That schema was never released, so no
+  migration path is required for it. The current contract uses numeric GPIOs. Any
+  migration from a released 5.0 configuration is a separate compatibility task;
+  5.0's schema and runtime remain unchanged.
+
+# Historical Prerequisites (Superseded Where Inconsistent)
 - Implement the new light types and shared API behavior on all supported architectures. ESP8266 remains single-light, but its one light may use the new `SINGLE`, `WW`, or `WWCW` profiles; ESP32 supports multiple configured lights.
 - Preserve the existing API contract: legacy unindexed calls continue to address the default light with unchanged request/response shapes. The optional light selector and multi-light enumeration are additive; ESP8266 resolves only its single configured light and rejects other selectors.
 - The firmware must still build across supported architectures. Keep architecture-specific behavior behind the existing build/source selection model, rather than scattering `#ifdef` conditionals through shared application code.

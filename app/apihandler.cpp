@@ -1,6 +1,7 @@
 #include <apihandler.h>
 
 #include <application.h>
+#include <ArduinoJson.h>
 #include <BufferInputStream.h>
 #include <Data/Stream/MemoryDataStream.h>
 #include <cstring>
@@ -25,6 +26,99 @@ extern "C" {
 #define NO_INLINE __attribute__((noinline))
 
 namespace {
+bool wrapRawUnion(JsonObject object, bool& changed)
+{
+	JsonVariant raw = object[F("raw")];
+	if(raw.is<JsonObject>()) {
+		JsonObject named = raw.as<JsonObject>();
+		if(!named.containsKey(F("named")) && !named.containsKey(F("indexed"))) {
+			StaticJsonDocument<512> copy;
+			copy.set(named);
+			if(copy.overflowed()) {
+				return false;
+			}
+			raw.clear();
+			JsonObject variant = raw.to<JsonObject>();
+			variant[F("named")].set(copy.as<JsonObjectConst>());
+			changed = true;
+		}
+	} else if(raw.is<JsonArray>()) {
+		StaticJsonDocument<512> copy;
+		copy.set(raw.as<JsonArray>());
+		if(copy.overflowed()) {
+			return false;
+		}
+		raw.clear();
+		JsonObject variant = raw.to<JsonObject>();
+		variant[F("indexed")].set(copy.as<JsonArrayConst>());
+		changed = true;
+	}
+
+	JsonArray commands = object[F("cmds")].as<JsonArray>();
+	for(JsonVariant command : commands) {
+		if(command.is<JsonObject>() && !wrapRawUnion(command.as<JsonObject>(), changed)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+bool normalizeRawUnion(String& json, bool rpcEnvelope, String& errorMsg)
+{
+	if(json.indexOf(F("\"raw\"")) < 0) {
+		return true;
+	}
+	constexpr size_t maxCapacity = 4096;
+	size_t capacity = json.length() + 256;
+	if(capacity > maxCapacity) {
+		capacity = maxCapacity;
+	}
+	while(true) {
+		DynamicJsonDocument document(capacity);
+		if(document.capacity() == 0) {
+			errorMsg = F("Not enough memory to normalize JSON request");
+			return false;
+		}
+		const auto result = deserializeJson(document, json);
+		if(result && result != DeserializationError::NoMemory) {
+			errorMsg = F("Invalid JSON: malformed JSON payload");
+			return false;
+		}
+		if(!result) {
+			JsonObject root = document.as<JsonObject>();
+			JsonObject fields = rpcEnvelope ? root[F("params")].as<JsonObject>() : root;
+			if(fields.isNull()) {
+				return true;
+			}
+			bool changed = false;
+			if(!wrapRawUnion(fields, changed)) {
+				errorMsg = F("Raw channel payload exceeds normalization capacity");
+				return false;
+			}
+			if(!document.overflowed()) {
+				if(changed) {
+					String normalized;
+					normalized.reserve(json.length() + 32);
+					if(serializeJson(document, normalized) == 0) {
+						errorMsg = F("Unable to serialize normalized JSON");
+						return false;
+					}
+					json = std::move(normalized);
+				}
+				return true;
+			}
+		}
+		if(capacity == maxCapacity) {
+			errorMsg = F("JSON request exceeds normalization capacity");
+			return false;
+		}
+		capacity *= 2;
+		if(capacity > maxCapacity) {
+			capacity = maxCapacity;
+		}
+	}
+}
+
 #if defined(ARCH_HOST) && !defined(SMING_RELEASE)
 constexpr size_t HEAP_TEST_ALLOCATION_COUNT = 32;
 constexpr size_t HEAP_TEST_MAX_ALLOCATION = 64 * 1024;
@@ -266,7 +360,8 @@ bool Api::dispatchSystemCommand(const String& cmd, const String& enable, const S
 	return true;
 }
 
-bool Api::dispatchCommandFromStream(const String& method, Stream& body, String& errorMsg, bool relay)
+bool Api::dispatchCommandFromStream(const String& method, Stream& body, String& errorMsg, bool relay,
+									 int32_t lightSelector, bool rawUnionNormalized)
 {
 	const auto id = getCommandMethodId(method.c_str());
 	const char* relayName;
@@ -353,6 +448,20 @@ bool Api::dispatchCommandFromStream(const String& method, Stream& body, String& 
 			source = &buffered;
 		}
 	}
+	String requestJson;
+	if(!rawUnionNormalized) {
+		requestJson = source->readString(4096);
+		if(requestJson.length() == 0 || !normalizeRawUnion(requestJson, false, errorMsg)) {
+			if(errorMsg.length() == 0) {
+				errorMsg = F("malformed json");
+			}
+			return false;
+		}
+	}
+	MemoryDataStream requestBody{std::move(requestJson)};
+	if(!rawUnionNormalized) {
+		source = &requestBody;
+	}
 
 	auto& jp = app.jsonproc;
 	JsonProcessor::RequestParameters params;
@@ -363,6 +472,20 @@ bool Api::dispatchCommandFromStream(const String& method, Stream& body, String& 
 	if(!jp.parseRequest(*source, params, (id == CommandMethodId::Color) ? &batch : nullptr, errorMsg)) {
 		return false;
 	}
+	if(lightSelector >= 0) {
+		if(params.light >= 0 && params.light != lightSelector) {
+			errorMsg = F("HTTP light selector conflicts with JSON light");
+			return false;
+		}
+		params.light = lightSelector;
+		for(auto& command : batch) {
+			if(command.light >= 0 && command.light != lightSelector) {
+				errorMsg = F("HTTP light selector conflicts with JSON light");
+				return false;
+			}
+			command.light = lightSelector;
+		}
+	}
 
 	bool ok = true;
 	switch(id) {
@@ -370,31 +493,31 @@ bool Api::dispatchCommandFromStream(const String& method, Stream& body, String& 
 		ok = jp.runColor(params, batch, errorMsg);
 		break;
 	case CommandMethodId::Stop:
-		jp.runStop(params, errorMsg);
+		ok = jp.runStop(params, errorMsg);
 		break;
 	case CommandMethodId::Skip:
-		jp.runSkip(params, errorMsg);
+		ok = jp.runSkip(params, errorMsg);
 		break;
 	case CommandMethodId::Pause:
-		jp.runPause(params, errorMsg);
+		ok = jp.runPause(params, errorMsg);
 		break;
 	case CommandMethodId::Continue:
-		jp.runContinue(params);
+		ok = jp.runContinue(params, errorMsg);
 		break;
 	case CommandMethodId::Blink:
-		jp.runBlink(params);
+		ok = jp.runBlink(params, errorMsg);
 		break;
 	case CommandMethodId::Toggle:
-		jp.runToggle();
+		ok = jp.runToggle(params, errorMsg);
 		break;
 	case CommandMethodId::Direct:
-		jp.runDirect(params, errorMsg);
+		ok = jp.runDirect(params, errorMsg);
 		break;
 	case CommandMethodId::SetOn:
-		jp.runSetOn(params);
+		ok = jp.runSetOn(params, errorMsg);
 		break;
 	case CommandMethodId::SetOff:
-		jp.runSetOff(params);
+		ok = jp.runSetOff(params, errorMsg);
 		break;
 	default:
 		break;
@@ -414,24 +537,52 @@ bool Api::dispatchCommandFromStream(const String& method, Stream& body, String& 
 					auto selected = [&params](CtrlChannel channel) {
 						return params.channels.count() == 0 || params.channels.contains(channel);
 					};
-					if(app.rgbwwctrl.getMode() == RGBWWLed::ColorMode::Hsv) {
-						const HSVCT& color = app.rgbwwctrl.getCurrentColor();
+					String lightError;
+					RGBWWLed* selectedLight = app.getLight(params.light, lightError);
+					if(selectedLight == nullptr) {
+						return false;
+					}
+					request.params.setLight(params.light);
+					if(selectedLight->getMode() == RGBWWLed::ColorMode::Hsv) {
+						const HSVCT& color = selectedLight->getCurrentColor();
 						if(selected(CtrlChannel::Hue)) request.params.hsv.setH(String((float(color.h) / float(RGBWW_CALC_HUEWHEELMAX)) * 360.0f, 2));
 						if(selected(CtrlChannel::Sat)) request.params.hsv.setS(String((float(color.s) / float(RGBWW_CALC_MAXVAL)) * 100.0f, 2));
 						if(selected(CtrlChannel::Val)) request.params.hsv.setV(String((float(color.v) / float(RGBWW_CALC_MAXVAL)) * 100.0f, 2));
 						if(selected(CtrlChannel::ColorTemp)) request.params.hsv.setCt(String(color.ct));
 					} else {
-						const ChannelOutput& color = app.rgbwwctrl.getCurrentOutput();
-						if(selected(CtrlChannel::Red)) request.params.raw.setR(String(color.r));
-						if(selected(CtrlChannel::Green)) request.params.raw.setG(String(color.g));
-						if(selected(CtrlChannel::Blue)) request.params.raw.setB(String(color.b));
-						if(selected(CtrlChannel::WarmWhite)) request.params.raw.setWw(String(color.ww));
-						if(selected(CtrlChannel::ColdWhite)) request.params.raw.setCw(String(color.cw));
+						const ChannelOutput& color = selectedLight->getCurrentOutput();
+						if(selectedLight->usesNamedRawChannels()) {
+							auto raw = request.params.raw.toRawInputNamed();
+							if(selected(CtrlChannel::Red)) raw.setR(String(color.r));
+							if(selected(CtrlChannel::Green)) raw.setG(String(color.g));
+							if(selected(CtrlChannel::Blue)) raw.setB(String(color.b));
+							if(selected(CtrlChannel::WarmWhite)) raw.setWw(String(color.ww));
+							if(selected(CtrlChannel::ColdWhite)) raw.setCw(String(color.cw));
+						} else {
+							auto raw = request.params.raw.toRawInputIndexed();
+							RGBWWLed::ChannelList rawChannels;
+							selectedLight->getChannels(rawChannels);
+							for(auto channel : rawChannels) {
+								String value;
+								if(selected(channel)) {
+									switch(channel) {
+									case CtrlChannel::Red: value = String(color.r); break;
+									case CtrlChannel::Green: value = String(color.g); break;
+									case CtrlChannel::Blue: value = String(color.b); break;
+									case CtrlChannel::WarmWhite: value = String(color.ww); break;
+									case CtrlChannel::ColdWhite: value = String(color.cw); break;
+									default: break;
+									}
+								}
+								raw.addItem(value);
+							}
+						}
 					}
 				}
 				String rpcMessage;
 				auto& codec = rpcCodec();
-				if(codec.render({0, JsonRPC::Message::Kind::notification, relayName}, request.params, rpcMessage)) {
+				if(codec.render({0, JsonRPC::Message::Kind::notification, relayName}, request.params, rpcMessage) &&
+				   normalizeRawUnionForWire(rpcMessage)) {
 					app.onCommandRelay(relayName, rpcMessage);
 				}
 			}
@@ -464,7 +615,7 @@ bool Api::dispatchJsonRpc(const String& json, String& errorMsg, bool relay)
 		return false;
 	}
 	MemoryDataStream paramsStream(std::move(params));
-	return dispatchCommandFromStream(method, paramsStream, errorMsg, relay);
+	return dispatchCommandFromStream(method, paramsStream, errorMsg, relay, -1, true);
 }
 
 #if defined(ARCH_HOST) && !defined(SMING_RELEASE)
@@ -537,8 +688,8 @@ bool Api::handleHostHeapTest(const HeapTestRequest& request, char* result, size_
 #endif
 
 bool Api::parseJsonRpcRequest(Stream& input, String& method, String& params, int& requestId, String& authHash,
-															 bool& sparse, bool& paramsEmpty, String& errorMsg, HeapTestRequest* heapTest,
-															 String* notificationChannel)
+									 bool& sparse, bool& paramsEmpty, String& errorMsg, HeapTestRequest* heapTest,
+									 String* notificationChannel, int32_t* lightSelector)
 {
 	auto& codec = rpcCodec();
 	Jsonrpc::Root root(codec.db());
@@ -548,7 +699,15 @@ bool Api::parseJsonRpcRequest(Stream& input, String& method, String& params, int
 		return false;
 	}
 	auto request = update.toWsRequest();
-	const ConfigDB::Status status = request.importFromStream(ConfigDB::Json::format, input);
+	String rpcJson = input.readString(4096);
+	if(rpcJson.length() == 0 || !normalizeRawUnion(rpcJson, true, errorMsg)) {
+		if(errorMsg.length() == 0) {
+			errorMsg = F("malformed json");
+		}
+		return false;
+	}
+	MemoryDataStream normalizedRequest{std::move(rpcJson)};
+	const ConfigDB::Status status = request.importFromStream(ConfigDB::Json::format, normalizedRequest);
 	if(!status && !(status.error == ConfigDB::Error::FormatError &&
 					status.code.formatError == ConfigDB::FormatError::NotInSchema)) {
 		errorMsg = F("malformed json");
@@ -563,7 +722,10 @@ bool Api::parseJsonRpcRequest(Stream& input, String& method, String& params, int
 	const String sparseValue = request.params.getSparse();
 	sparse = sparseValue.length() == 0 ||
 		!(sparseValue == F("0") || sparseValue == F("false") || sparseValue == F("off"));
-	const auto fields = request.params;
+	auto fields = request.params;
+	if(lightSelector != nullptr) {
+		*lightSelector = fields.getLight();
+	}
 	if(notificationChannel != nullptr) {
 		*notificationChannel = fields.getChannel();
 	}
@@ -575,14 +737,28 @@ bool Api::parseJsonRpcRequest(Stream& input, String& method, String& params, int
 		params = "";
 		return true;
 	}
+	bool rawEmpty = true;
+	using RawTag = decltype(fields.raw.getTag());
+	if(fields.raw.getTag() == RawTag::Indexed) {
+		auto rawValues = fields.raw.asRawInputIndexed();
+		for(unsigned index = 0; index < rawValues.getItemCount(); ++index) {
+			if(rawValues.getItem(index).length() > 0) {
+				rawEmpty = false;
+				break;
+			}
+		}
+	} else {
+		auto raw = fields.raw.asRawInputNamed();
+		auto from = raw.from;
+		rawEmpty = raw.getR().length() == 0 && raw.getG().length() == 0 && raw.getB().length() == 0 &&
+			   raw.getWw().length() == 0 && raw.getCw().length() == 0 && from.getR().length() == 0 &&
+			   from.getG().length() == 0 && from.getB().length() == 0 && from.getWw().length() == 0 &&
+			   from.getCw().length() == 0;
+	}
 	paramsEmpty = fields.getCmd().length() == 0 && fields.getT() == 0 && fields.getS() == 0 && !fields.getR() &&
 			   fields.getD() == 1 && fields.getName().length() == 0 && fields.getQ().length() == 0 &&
 			   fields.getHash().length() == 0 && fields.getChannel().length() == 0 && sparseValue.length() == 0 && !fields.getAll() && !fields.getDebug() &&
-			   fields.channels.getItemCount() == 0 && fields.cmds.getItemCount() == 0 &&
-			   fields.raw.getR().length() == 0 && fields.raw.getG().length() == 0 && fields.raw.getB().length() == 0 &&
-			   fields.raw.getWw().length() == 0 && fields.raw.getCw().length() == 0 &&
-			   fields.raw.from.getR().length() == 0 && fields.raw.from.getG().length() == 0 &&
-			   fields.raw.from.getB().length() == 0 && fields.raw.from.getWw().length() == 0 && fields.raw.from.getCw().length() == 0 &&
+			   fields.channels.getItemCount() == 0 && fields.cmds.getItemCount() == 0 && rawEmpty &&
 			   fields.hsv.getH().length() == 0 && fields.hsv.getS().length() == 0 && fields.hsv.getV().length() == 0 &&
 			   fields.hsv.getCt().length() == 0 && fields.hsv.from.getH().length() == 0 &&
 			   fields.hsv.from.getS().length() == 0 && fields.hsv.from.getV().length() == 0 &&
@@ -616,25 +792,26 @@ bool Api::renderData(const String& method, const JsonObject& params, String& out
 	return renderData(method, sparse, out, requestId);
 }
 
-bool Api::renderData(const String& method, bool sparse, String& out, int requestId)
+bool Api::renderData(const String& method, bool sparse, String& out, int requestId, int32_t lightSelector)
 {
-	return renderDataImpl(method, sparse, &out, nullptr, requestId);
+	return renderDataImpl(method, sparse, &out, nullptr, requestId, lightSelector);
 }
 
-std::unique_ptr<IDataSourceStream> Api::renderDataStream(const String& method, bool sparse, int requestId)
+std::unique_ptr<IDataSourceStream> Api::renderDataStream(const String& method, bool sparse, int requestId,
+													 int32_t lightSelector)
 {
 	if(requestId < 0) {
 		return nullptr;
 	}
 	std::unique_ptr<IDataSourceStream> stream;
-	if(!renderDataImpl(method, sparse, nullptr, &stream, requestId)) {
+	if(!renderDataImpl(method, sparse, nullptr, &stream, requestId, lightSelector)) {
 		return nullptr;
 	}
 	return stream;
 }
 
 bool Api::renderDataImpl(const String& method, bool sparse, String* out,
-						 std::unique_ptr<IDataSourceStream>* streamOut, int requestId)
+						 std::unique_ptr<IDataSourceStream>* streamOut, int requestId, int32_t lightSelector)
 {
 	auto& codec = rpcCodec();
 	auto emit = [&](const JsonRPC::Message& message, const ConfigDB::Object& body) {
@@ -665,7 +842,7 @@ bool Api::renderDataImpl(const String& method, bool sparse, String* out,
 			value.app.setGitDate(fw_git_date);
 			AppConfig::Webapp webappCfg(*app.cfg);
 			String installedVer = webappCfg.getInstalledVersion();
-			value.app.setWebappVersion(installedVer.length() > 0 ? installedVer : String(WEBAPP_VERSION));
+			value.app.setWebappVersion(installedVer.length() > 0 ? installedVer : String("unknown"));
 			value.sming.setVersion(SMING_VERSION);
 			IFS::FileSystem::Info fsInfo;
 			if(fileGetSystemInfo(fsInfo) == FS_OK) {
@@ -739,23 +916,43 @@ bool Api::renderDataImpl(const String& method, bool sparse, String* out,
 	}
 
 	if(dataMethodId == DataMethodId::Color) {
+		String lightError;
+		RGBWWLed* selectedLight = app.getLight(lightSelector, lightError);
+		if(selectedLight == nullptr) {
+			return false;
+		}
 		if(auto update = root.update()) {
 			auto color = update.toColor();
-			ChannelOutput output = app.rgbwwctrl.getCurrentOutput();
-			{
+			if(selectedLight->getMode() == RGBWWLed::ColorMode::Raw) {
+				ChannelOutput output = selectedLight->getCurrentOutput();
 				auto raw = color.toRaw();
-				raw.setR(output.r);
-				raw.setG(output.g);
-				raw.setB(output.b);
-				raw.setWw(output.ww);
-				raw.setCw(output.cw);
-			}
-
-			float h, s, v;
-			int ct;
-			HSVCT current = app.rgbwwctrl.getCurrentColor();
-			current.asRadian(h, s, v, ct);
-			{
+				if(selectedLight->usesNamedRawChannels()) {
+					auto named = raw.toRawNamed();
+					named.setR(output.r);
+					named.setG(output.g);
+					named.setB(output.b);
+					named.setWw(output.ww);
+					named.setCw(output.cw);
+				} else {
+					auto indexed = raw.toRawIndexed();
+					RGBWWLed::ChannelList channels;
+					selectedLight->getChannels(channels);
+					for(auto channel : channels) {
+						switch(channel) {
+						case CtrlChannel::Red: indexed.addItem(output.r); break;
+						case CtrlChannel::Green: indexed.addItem(output.g); break;
+						case CtrlChannel::Blue: indexed.addItem(output.b); break;
+						case CtrlChannel::WarmWhite: indexed.addItem(output.ww); break;
+						case CtrlChannel::ColdWhite: indexed.addItem(output.cw); break;
+						default: indexed.addItem(0); break;
+						}
+					}
+				}
+			} else {
+				float h, s, v;
+				int ct;
+				HSVCT current = selectedLight->getCurrentColor();
+				current.asRadian(h, s, v, ct);
 				auto hsv = color.toHsv();
 				hsv.setH(h);
 				hsv.setS(s);
@@ -764,9 +961,13 @@ bool Api::renderDataImpl(const String& method, bool sparse, String* out,
 			}
 		}
 		if(requestId >= 0) {
-			return emit({requestId, JsonRPC::Message::Kind::result, method}, root.asColor());
+			if(out == nullptr) {
+				return emit({requestId, JsonRPC::Message::Kind::result, method}, root.asColor());
+			}
+			return codec.render({requestId, JsonRPC::Message::Kind::result, method}, root.asColor(), *out) &&
+			   normalizeRawUnionForWire(*out);
 		}
-		return out != nullptr && codec.renderPayload(root.asColor(), *out);
+		return out != nullptr && codec.renderPayload(root.asColor(), *out) && normalizeRawUnionForWire(*out);
 	}
 
 	if(dataMethodId == DataMethodId::Networks) {

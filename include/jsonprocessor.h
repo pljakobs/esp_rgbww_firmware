@@ -36,6 +36,7 @@ class JsonProcessor {
 public:
     struct RequestParameters {
         String target;
+        int32_t light = -1;
 
         enum class Mode {
             Undefined,
@@ -54,6 +55,8 @@ public:
 
         RequestChannelOutput raw;
         RequestChannelOutput rawFrom;
+        bool rawIndexed = false;
+        std::vector<Optional<AbsOrRelValue>> rawIndexedValues;
 
         int direction = 1;
         bool requeue = false;
@@ -93,20 +96,23 @@ public:
     bool parseRequest(Stream& body, RequestParameters& params, std::vector<RequestParameters>* batch,
                       String& errorMsg);
 
-    void addChannelStatesToCmd(JsonObject root, const RGBWWLed::ChannelList& channels);
+    void addChannelStatesToCmd(JsonObject root, const RGBWWLed::ChannelList& channels, const RGBWWLed& light);
 
     // Transport-agnostic command execution, shared by the JsonObject and ConfigDB paths
     bool runColor(RequestParameters& params, std::vector<RequestParameters>& batch, String& errorMsg);
-    void runStop(const RequestParameters& params, String& msg);
-    void runSkip(const RequestParameters& params, String& msg);
-    void runPause(const RequestParameters& params, String& msg);
-    void runContinue(const RequestParameters& params);
-    void runBlink(const RequestParameters& params);
-    void runToggle();
-    void runDirect(const RequestParameters& params, String& msg);
-    void runSetOn(const RequestParameters& params);
-    void runSetOff(RequestParameters& params);
+    bool runStop(const RequestParameters& params, String& msg);
+    bool runSkip(const RequestParameters& params, String& msg);
+    bool runPause(const RequestParameters& params, String& msg);
+    bool runContinue(const RequestParameters& params, String& msg);
+    bool runBlink(const RequestParameters& params, String& msg);
+    bool runToggle(const RequestParameters& params, String& msg);
+    bool runDirect(const RequestParameters& params, String& msg);
+    bool runSetOn(const RequestParameters& params, String& msg);
+    bool runSetOff(const RequestParameters& params, String& msg);
 
 private:
+    RGBWWLed* resolveLight(const RequestParameters& params, String& errorMsg) const;
+    bool resolveRawChannels(const RequestParameters& params, const RGBWWLed& light, RequestChannelOutput& raw,
+                           String& errorMsg) const;
     bool runColorCommand(RequestParameters& params, String& errorMsg);
 };

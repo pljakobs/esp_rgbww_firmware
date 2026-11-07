@@ -412,7 +412,8 @@ run_smoke_phase() {
   if [[ "$PYTEST_MD_AVAILABLE" == "1" ]]; then
     SMOKE_PYTEST_ARGS+=(--md "$SMOKE_TEST_REPORT")
   fi
-  "${SMOKE_PYTEST_ARGS[@]}" 2>&1 | tee "$SMOKE_TEST_OUTPUT"
+  HOST_SMOKE_APP_LOG="$APP_LOG_SMOKE" PYTEST_RESULT_TABLE="$LOG_DIR/smoke-test-case-results.md" \
+    "${SMOKE_PYTEST_ARGS[@]}" 2>&1 | tee "$SMOKE_TEST_OUTPUT"
   SMOKE_PYTEST_EXIT=${PIPESTATUS[0]}
   set -e
 
@@ -453,7 +454,8 @@ run_rgbww_phase() {
   if [[ "$PYTEST_MD_AVAILABLE" == "1" ]]; then
     RGBWW_PYTEST_ARGS+=(--md "$RGBWW_TEST_REPORT")
   fi
-  "${RGBWW_PYTEST_ARGS[@]}" 2>&1 | tee "$RGBWW_TEST_OUTPUT"
+  PYTEST_RESULT_TABLE="$LOG_DIR/rgbww-test-case-results.md" \
+    "${RGBWW_PYTEST_ARGS[@]}" 2>&1 | tee "$RGBWW_TEST_OUTPUT"
   RGBWW_PYTEST_EXIT=${PIPESTATUS[0]}
   set -e
 

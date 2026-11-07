@@ -5,6 +5,8 @@ Created on 02.04.2017
 
 Converted to pytest format integrated with host_smoke_api_test.py harness by pjakobs
 """
+from __future__ import annotations
+
 import json
 import os
 import socket
@@ -15,7 +17,16 @@ from urllib import error, request
 import pytest
 
 # Import helpers from host_smoke_api_test
-from host_smoke_api_test import SmokeConfig, http_request, smoke_config, websocket_handshake, ws_recv_frame, ws_send_text  # noqa: F401
+from host_smoke_api_test import (
+    SmokeConfig,
+    api_secured,
+    http_request,
+    post_config_update,
+    smoke_config,
+    websocket_handshake,
+    ws_recv_frame,
+    ws_send_text,
+)  # noqa: F401
 
 TIME_SCALE = float(os.environ.get("RGBWW_TEST_TIME_SCALE", "1.0"))
 RAMP_ACCURACY_RAMP_SECONDS = float(os.environ.get("RGBWW_RAMP_ACCURACY_SECONDS", "60"))
@@ -74,6 +85,79 @@ jsonTemplSolid = """{{
 }}
 """
 
+LIGHT_PROFILES = [
+    ("RGBWWCW", [5, 4, 1, 0, 3], {"h": "120", "s": "80", "v": "70", "ct": "3000"}, ["r", "g", "b", "ww", "cw"], "v"),
+    ("RGBWW", [5, 4, 1, 0], {"h": "120", "s": "80", "v": "70"}, ["r", "g", "b", "ww"], "v"),
+    ("RGBCW", [5, 4, 1, 3], {"h": "120", "s": "80", "v": "70"}, ["r", "g", "b", "cw"], "v"),
+    ("RGB", [5, 4, 1], {"h": "120", "s": "80", "v": "70"}, ["r", "g", "b"], "v"),
+    ("WWCW", [5, 4], {"v": "70", "ct": "3000"}, ["ww", "cw"], "v"),
+    ("WW", [5], {"v": "70"}, [], "v"),
+    ("CW", [5], {"v": "70"}, [], "v"),
+    ("SINGLE", [5], {"v": "70"}, [], "v"),
+]
+HSVCT_INPUT = {"h": "120", "s": "80", "v": "70", "ct": "3000"}
+
+
+def _configuration(lights: list[dict]) -> dict:
+    return {
+        "board_id": "quinled-an-penta-mini",
+        "board_revision": 1,
+        "soc": "esp32c3",
+        "system": {
+            "clear_config_enabled": False,
+            "clear_config_pin": 0,
+            "clear_config_active_low": True,
+            "clear_config_external_pull_up": False,
+            "clear_config_external_pull_down": False,
+        },
+        "buttons": [],
+        "buses": [],
+        "lights": lights,
+    }
+
+
+def _light(light_type: str, pins: list[int], index: int, is_default: bool) -> dict:
+    return {
+        "id": f"rgbww-test-{index}",
+        "index": index,
+        "name": f"RGBWW test {index}",
+        "is_default": is_default,
+        "type": light_type,
+        "pins": pins,
+    }
+
+
+def _configure_lights(smoke_config: SmokeConfig, lights: list[dict]) -> None:
+    post_config_update(smoke_config, {"hardware": {"configuration": _configuration(lights)}})
+    if not lights:
+        return
+    selector = next((light["index"] for light in lights if light["is_default"]), lights[0]["index"])
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        response = http_request("GET", f"{smoke_config.color_url}?light={selector}")
+        if response["status"] == 200:
+            return
+        time.sleep(0.05)
+    pytest.fail(f"Configured light {selector} did not become available: {response}")
+
+
+@pytest.fixture(scope="module", autouse=True)
+def configured_rgbww_suite(smoke_config: SmokeConfig, api_secured: bool):
+    if os.environ.get("HOST_SMOKE_REAL_DEVICE") == "1":
+        yield
+        return
+    if api_secured:
+        pytest.skip("RGBWW configuration tests require an unsecured Host instance")
+    response = http_request("GET", f"{smoke_config.base_url}/config")
+    if response["status"] != 200:
+        pytest.fail(f"Could not snapshot hardware configuration: {response}")
+    original = json.loads(response["body"])["hardware"]["configuration"]
+    try:
+        _configure_lights(smoke_config, [_light("RGBWW", [5, 4, 1, 0], 10, True)])
+        yield
+    finally:
+        post_config_update(smoke_config, {"hardware": {"configuration": original}})
+
 
 def do_post(base_url: str, endpoint: str, post_data: str) -> None:
     """Post data to endpoint, raise on error"""
@@ -110,6 +194,30 @@ def get_val(color_url: str) -> float:
     return get_color(color_url)["hsv"]["v"]
 
 
+def get_selected_color(smoke_config: SmokeConfig, index: int) -> dict:
+    return get_color(f"{smoke_config.color_url}?light={index}")
+
+
+def get_raw_channels(color: dict) -> dict | list:
+    if "raw" not in color:
+        raise AssertionError(f"Color response has no raw state: {color}")
+    raw = color["raw"]
+    if "named" in raw:
+        return raw["named"]
+    if "indexed" in raw:
+        return raw["indexed"]
+    return raw
+
+
+def post_json(base_url: str, endpoint: str, payload: dict) -> dict:
+    return http_request(
+        "POST",
+        f"{base_url}/{endpoint}",
+        body=json.dumps(payload, separators=(",", ":")).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+
+
 def rgbww_set(base_url: str, h: float, s: float, v: float) -> None:
     """Set solid color"""
     post_data = jsonTemplSolid.format(h=h, s=s, v=v)
@@ -138,7 +246,10 @@ def ws_recv_color_event(sock: socket.socket, timeout: float = 2.0) -> Optional[d
     """Receive frames until a color_event is found, return the parsed JSON or None"""
     start_time = time.time()
     while time.time() - start_time < timeout:
-        opcode, payload = ws_recv_frame(sock, timeout=0.5)
+        try:
+            opcode, payload = ws_recv_frame(sock, timeout=0.5)
+        except TimeoutError:
+            continue
         if opcode is None:
             continue
         if opcode == 1:  # Text frame
@@ -153,6 +264,245 @@ def ws_recv_color_event(sock: socket.socket, timeout: float = 2.0) -> Optional[d
             pong_payload = payload or b""
             sock.sendall(bytes([0x8A, len(pong_payload)]) + pong_payload)
     return None
+
+
+def ws_recv_response(sock: socket.socket, request_id: str, timeout: float = 3.0) -> dict:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            opcode, payload = ws_recv_frame(sock, timeout=0.5)
+        except TimeoutError:
+            continue
+        if opcode == 9:
+            ping = payload or b""
+            sock.sendall(bytes([0x8A, len(ping)]) + ping)
+            continue
+        if opcode != 1 or payload is None:
+            continue
+        response = json.loads(payload.decode("utf-8", errors="replace"))
+        if str(response.get("id")) == request_id:
+            return response
+    raise AssertionError(f"No WebSocket response for request {request_id}")
+
+
+@pytest.mark.parametrize("light_type,pins,meaningful_hsv,raw_channels,control_channel", LIGHT_PROFILES)
+def test_each_light_type_command_suite(
+    smoke_config: SmokeConfig,
+    light_type: str,
+    pins: list[int],
+    meaningful_hsv: dict[str, str],
+    raw_channels: list[str],
+    control_channel: str,
+) -> None:
+    """HSVCT uses meaningful components and raw writes target the profile's supported channels."""
+    if os.environ.get("HOST_SMOKE_REAL_DEVICE") == "1":
+        pytest.skip("creates virtual lights on the Host emulator only")
+    index = 40
+    _configure_lights(smoke_config, [_light(light_type, pins, index, True)])
+    try:
+        result = post_json(
+            smoke_config.base_url,
+            "color",
+            {"light": index, "hsv": HSVCT_INPUT, "cmd": "solid"},
+        )
+        assert result["status"] == 200, f"{light_type} HSVCT command rejected: {result}"
+        wait_for_fade_complete(0)
+        for field in meaningful_hsv:
+            expected = float(meaningful_hsv[field])
+            assert_eventually_close(
+                lambda field=field: float(get_selected_color(smoke_config, index)["hsv"][field]),
+                expected,
+                ASSERT_TOLERANCE,
+                f"{light_type} expected HSVCT {field}={expected}",
+            )
+
+        for endpoint in ("stop", "skip", "pause", "continue", "blink", "toggle", "on", "off"):
+            result = post_json(
+                smoke_config.base_url,
+                f"{endpoint}?light={index}",
+                {"channels": [control_channel]},
+            )
+            assert result["status"] == 200, f"{light_type} {endpoint} command rejected: {result}"
+
+        rgb_based = light_type in {"RGBWWCW", "RGBWW", "RGBCW", "RGB"}
+        for value, channel in enumerate(raw_channels, start=420):
+            raw_value = {"raw": {channel: str(value)}} if rgb_based else {
+                "raw": [str(value) if index == value - 420 else None for index in range(len(raw_channels))]
+            }
+            result = post_json(
+                smoke_config.base_url,
+                f"color?light={index}",
+                {**raw_value, "cmd": "solid"},
+            )
+            assert result["status"] == 200, f"{light_type} raw {channel} command rejected: {result}"
+            wait_for_fade_complete(0)
+            raw_response = get_selected_color(smoke_config, index)["raw"]
+            assert isinstance(raw_response, dict if rgb_based else list), (
+                f"{light_type} raw readback used the wrong wire shape: {raw_response}"
+            )
+            assert_eventually_close(
+                lambda value=value, channel=channel: float(
+                    get_raw_channels(get_selected_color(smoke_config, index))[channel if rgb_based else value - 420]
+                ),
+                float(value),
+                ASSERT_TOLERANCE,
+                f"{light_type} expected raw channel {channel}={value}",
+            )
+
+        if raw_channels:
+            off_payload = {"raw": {raw_channels[0]: "0"}} if rgb_based else {
+                "raw": ["0"] + [None] * (len(raw_channels) - 1)
+            }
+            result = post_json(
+                smoke_config.base_url,
+                f"color?light={index}",
+                {**off_payload, "cmd": "solid"},
+            )
+            assert result["status"] == 200, f"{light_type} raw off command rejected: {result}"
+            wait_for_fade_complete(0)
+            assert_eventually_close(
+                lambda: float(
+                    get_raw_channels(get_selected_color(smoke_config, index))[raw_channels[0] if rgb_based else 0]
+                ),
+                0,
+                ASSERT_TOLERANCE,
+                f"{light_type} expected explicit zero to turn off its first channel",
+            )
+    finally:
+        _configure_lights(smoke_config, [_light("RGBWW", [5, 4, 1, 0], 10, True)])
+
+
+def test_mixed_light_http_and_websocket_selection(smoke_config: SmokeConfig) -> None:
+    """HTTP and WebSocket selectors address the same configured light without cross-talk."""
+    if os.environ.get("HOST_SMOKE_REAL_DEVICE") == "1":
+        pytest.skip("creates virtual lights on the Host emulator only")
+    _configure_lights(
+        smoke_config,
+        [
+            _light("WWCW", [0, 3], 23, False),
+            _light("RGB", [5, 4, 1], 10, True),
+        ],
+    )
+    try:
+        default_result = post_json(
+            smoke_config.base_url,
+            "color",
+            {"hsv": HSVCT_INPUT, "cmd": "solid"},
+        )
+        assert default_result["status"] == 200
+        white_result = post_json(
+            smoke_config.base_url,
+            "color",
+            {"light": 23, "hsv": {"h": "120", "s": "80", "v": "60", "ct": "3200"}, "cmd": "solid"},
+        )
+        assert white_result["status"] == 200
+        wait_for_fade_complete(0)
+        assert abs(float(get_color(smoke_config.color_url)["hsv"]["v"]) - 70) < ASSERT_TOLERANCE
+        assert abs(float(get_selected_color(smoke_config, 23)["hsv"]["v"]) - 60) < ASSERT_TOLERANCE
+
+        conflict = post_json(
+            smoke_config.base_url,
+            "color?light=23",
+            {"light": 10, "raw": {"ww": "300"}},
+        )
+        assert conflict["status"] == 400
+        assert http_request("GET", f"{smoke_config.color_url}?light=65535")["status"] == 400
+
+        sock, _ = websocket_handshake(smoke_config, os.urandom(16))
+        try:
+            ws_send_text(sock, json.dumps({"jsonrpc": "2.0", "id": "23", "method": "color", "params": {"light": 23}}))
+            response = ws_recv_response(sock, "23")
+            assert "error" not in response, response
+            assert abs(float(response["result"]["hsv"]["v"]) - 60) < ASSERT_TOLERANCE
+            ws_send_text(
+                sock,
+                json.dumps(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": "24",
+                        "method": "color",
+                        "params": {"light": 23, "raw": ["480", None], "cmd": "solid"},
+                    }
+                ),
+            )
+            response = ws_recv_response(sock, "24")
+            assert "error" not in response, response
+        finally:
+            sock.close()
+        wait_for_fade_complete(0)
+        assert float(get_raw_channels(get_selected_color(smoke_config, 23))[0]) == 480
+        assert abs(float(get_color(smoke_config.color_url)["hsv"]["v"]) - 70) < ASSERT_TOLERANCE
+    finally:
+        _configure_lights(smoke_config, [_light("RGBWW", [5, 4, 1, 0], 10, True)])
+
+
+@pytest.mark.parametrize(
+    "light_type,pins,raw,channel",
+    [
+        ("RGB", [5, 4, 1], {"r": "440"}, "r"),
+        ("WWCW", [0, 3], ["440", None], 0),
+    ],
+)
+def test_raw_normalization_small_and_batched(smoke_config: SmokeConfig, light_type: str, pins: list[int], raw, channel) -> None:
+    """Small and batched raw commands retain their channel values on HTTP and WebSocket."""
+    if os.environ.get("HOST_SMOKE_REAL_DEVICE") == "1":
+        pytest.skip("creates virtual lights on the Host emulator only")
+    index = 40
+    _configure_lights(smoke_config, [_light(light_type, pins, index, True)])
+    try:
+        result = post_json(smoke_config.base_url, "color", {"light": index, "raw": raw, "cmd": "solid"})
+        assert result["status"] == 200, result
+        wait_for_fade_complete(0)
+        assert_eventually_close(
+            lambda: float(get_raw_channels(get_selected_color(smoke_config, index))[channel]),
+            440,
+            ASSERT_TOLERANCE,
+            f"{light_type} small raw command",
+        )
+
+        batch = {"light": index, "cmds": [{"raw": raw, "cmd": "solid"} for _ in range(12)]}
+        result = post_json(smoke_config.base_url, "color", batch)
+        assert result["status"] == 200, result
+
+        sock, _ = websocket_handshake(smoke_config, os.urandom(16))
+        try:
+            ws_send_text(sock, json.dumps({"jsonrpc": "2.0", "id": "41", "method": "color", "params": batch}))
+            response = ws_recv_response(sock, "41")
+            assert "error" not in response, response
+        finally:
+            sock.close()
+        wait_for_fade_complete(0)
+        assert_eventually_close(
+            lambda: float(get_raw_channels(get_selected_color(smoke_config, index))[channel]),
+            440,
+            ASSERT_TOLERANCE,
+            f"{light_type} batched raw command",
+        )
+    finally:
+        _configure_lights(smoke_config, [_light("RGBWW", [5, 4, 1, 0], 10, True)])
+
+
+def test_raw_normalization_rejects_oversized_batch(smoke_config: SmokeConfig) -> None:
+    """Oversized raw batches fail explicitly without applying any command."""
+    if os.environ.get("HOST_SMOKE_REAL_DEVICE") == "1":
+        pytest.skip("exercises normalization limits on the Host emulator only")
+    initial = post_json(smoke_config.base_url, "color", {"raw": {"r": "440"}, "cmd": "solid"})
+    assert initial["status"] == 200, initial
+    wait_for_fade_complete(0)
+    batch = {"cmds": [{"raw": {"r": "100"}, "cmd": "solid"} for _ in range(80)]}
+    assert len(json.dumps(batch, separators=(",", ":"))) < 4096
+    result = post_json(smoke_config.base_url, "color", batch)
+    assert result["status"] == 400, result
+    assert "normalization capacity" in result["body"], result
+    oversized_raw = post_json(smoke_config.base_url, "color", {"raw": {"r": "1" * 1200}, "cmd": "solid"})
+    assert oversized_raw["status"] == 400, oversized_raw
+    assert "normalization capacity" in oversized_raw["body"], oversized_raw
+    assert_eventually_close(
+        lambda: float(get_raw_channels(get_color(smoke_config.color_url))["r"]),
+        440,
+        ASSERT_TOLERANCE,
+        "oversized batch must not change the active light",
+    )
 
 
 # Pytest tests

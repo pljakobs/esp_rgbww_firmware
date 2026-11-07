@@ -420,13 +420,22 @@ void AppMqttClient::publishCommand(const String& method, const JsonObject& param
 			} else if(method == F("color_event")) {
 				auto color = update.toColor();
 				if(params.containsKey(F("raw"))) {
-					auto raw = color.toRaw();
-					auto p = params[F("raw")].as<JsonObject>();
-					raw.setR(p[F("r")] | 0);
-					raw.setG(p[F("g")] | 0);
-					raw.setB(p[F("b")] | 0);
-					raw.setWw(p[F("ww")] | 0);
-					raw.setCw(p[F("cw")] | 0);
+                    auto raw = color.toRaw();
+                    JsonVariant rawValue = params[F("raw")];
+                    if(rawValue.is<JsonArray>()) {
+                        auto indexed = raw.toRawIndexed();
+                        for(JsonVariant value : rawValue.as<JsonArray>()) {
+                            indexed.addItem(value | 0);
+                        }
+                    } else {
+                        auto named = raw.toRawNamed();
+                        auto p = rawValue.as<JsonObject>();
+                        named.setR(p[F("r")] | 0);
+                        named.setG(p[F("g")] | 0);
+                        named.setB(p[F("b")] | 0);
+                        named.setWw(p[F("ww")] | 0);
+                        named.setCw(p[F("cw")] | 0);
+                    }
 				} else if(params.containsKey(F("hsv"))) {
 					auto hsv = color.toHsv();
 					auto p = params[F("hsv")].as<JsonObject>();
@@ -458,7 +467,8 @@ void AppMqttClient::publishCommand(const String& method, const JsonObject& param
 				return;
 			}
 		} else if(method == F("color_event")) {
-			if(codec.render({0, JsonRPC::Message::Kind::notification, method}, root.asColor(), msgStr)) {
+            if(codec.render({0, JsonRPC::Message::Kind::notification, method}, root.asColor(), msgStr) &&
+               normalizeRawUnionForWire(msgStr)) {
 				publish(buildTopic(F("command")), msgStr, false);
 				return;
 			}
@@ -1043,53 +1053,19 @@ int AppMqttClient::getCurrentColorMode() {
 
 void AppMqttClient::getActiveChannelNames(Vector<String>& channels) {
     channels.clear();
-
-    // Use pin config logic from ledctrl.cpp
-    AppConfig::General general(*app.cfg);
-    AppConfig::Hardware hardware(*app.cfg);
-
-    String pinConfigName = general.getCurrentPinConfigName();
-    String SoC = SOC;
-    bool found = false;
-
-    if (hardware.pinconfigs.getItemCount() > 0) {
-        for (auto pinconfig : hardware.pinconfigs) {
-            if (pinconfig.getName() == pinConfigName && pinconfig.getSoc() == SoC) {
-                found = true;
-                for (auto channel : pinconfig.channels) {
-                    String channelName = channel.getName();
-                    if (channelName.length() > 0) {
-                        channels.addElement(channelName);
-                    }
-                }
-                break;
-            }
-        }
+    if (app.lights.size() != 1 || !app.lights.front().led) {
+        return;
     }
-
-    // Fallback to default names if not found
-    if (!found || channels.count() == 0) {
-        int colorMode = getCurrentColorMode();
-
-        // All modes have RGB
-        channels.addElement(F("red"));
-        channels.addElement(F("green"));
-        channels.addElement(F("blue"));
-
-        // Add white channels based on mode
-        switch (colorMode) {
-            case 1: // RGBWW
-                channels.addElement(F("warm_white"));
-                break;
-            case 2: // RGBCW
-                channels.addElement(F("cool_white"));
-                break;
-            case 3: // RGBWWCW
-                channels.addElement(F("warm_white"));
-                channels.addElement(F("cool_white"));
-                break;
-            default: // RGB
-                break;
+    RGBWWLed::ChannelList activeChannels;
+    app.lights.front().led->getChannels(activeChannels);
+    for (auto channel : activeChannels) {
+        switch (channel) {
+            case CtrlChannel::Red: channels.addElement(F("red")); break;
+            case CtrlChannel::Green: channels.addElement(F("green")); break;
+            case CtrlChannel::Blue: channels.addElement(F("blue")); break;
+            case CtrlChannel::WarmWhite: channels.addElement(F("warm_white")); break;
+            case CtrlChannel::ColdWhite: channels.addElement(F("cool_white")); break;
+            default: break;
         }
     }
 }

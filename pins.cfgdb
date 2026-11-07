@@ -1,0 +1,52 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "store": true,
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0
+    },
+    "available_pins": {
+      "type": "array",
+      "maxItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["soc", "pins"],
+        "properties": {
+          "soc": {
+            "type": "string",
+            "pattern": "^(esp32|esp32c3)$"
+          },
+          "pins": {
+            "type": "array",
+            "maxItems": 40,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["gpio", "capability"],
+              "properties": {
+                "gpio": {
+                  "$ref": "defs/$defs/pin"
+                },
+                "capability": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 127,
+                  "description": "Bit mask: input=1, output=2, pwm=4, strapping=8, pull_up=16, pull_down=32, reserved=64."
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
