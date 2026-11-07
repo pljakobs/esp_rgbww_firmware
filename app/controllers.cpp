@@ -63,7 +63,7 @@ Controllers::Controllers() {
         return;
     }
     cdebug_i(CONTROLLERS, "Controllers::Controllers: " ANSI_COLOR_BLUE "Controllers constructor: accessing ConfigDB..." ANSI_COLOR_RESET);
-    AppData::Root::Controllers controllers(*app.data);
+    AppData::Controllers controllers(*app.data);
     if (auto controllersUpdate = controllers.update()) {
         for (unsigned configIndex = 0; configIndex < controllersUpdate.getItemCount();) {
             uint32_t id;
@@ -180,7 +180,7 @@ void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char*
         visibleControllers.push_back(newController);
     }
 
-    AppData::Root::Controllers controllers(*app.data);
+    AppData::Controllers controllers(*app.data);
     bool foundInConfig = false;
     
     if (auto controllersUpdate = controllers.update()) {
@@ -319,7 +319,7 @@ void Controllers::noteIdentity(unsigned int id, const char* hostname, int ttl, H
 }
 
 void Controllers::writePartialIdentity(unsigned int id, const char* hostname) {
-    AppData::Root::Controllers controllers(*app.data);
+    AppData::Controllers controllers(*app.data);
     auto controllersUpdate = controllers.update();
     if (!controllersUpdate) {
         cdebug_e(CONTROLLERS, "Controllers::writePartialIdentity: " ANSI_COLOR_RED "error: failed to open hosts db for update" ANSI_COLOR_RESET);
@@ -453,7 +453,7 @@ unsigned int Controllers::getIdByIpAddress(const String& ipAddress) {
 
 uint32_t Controllers::getHighestId() {
     uint32_t highest = 0;
-    AppData::Root::Controllers controllers(*app.data);
+    AppData::Controllers controllers(*app.data);
     for (auto& controller : controllers) {
         uint32_t id = parseControllerId(controller.getId());
         if (id > highest) {
@@ -514,7 +514,7 @@ size_t Controllers::getVisibleCount() {
 }
 
 size_t Controllers::getTotalCount() {
-    AppData::Root::Controllers controllers(*app.data);
+    AppData::Controllers controllers(*app.data);
     size_t count = 0;
     for (auto it = controllers.begin(); it != controllers.end(); ++it) {
         count++;
@@ -529,7 +529,7 @@ void Controllers::update() {
 
 void Controllers::forgetControllers(){
     visibleControllers.clear();
-    if (auto controllersUpdate = AppData::Root::Controllers(*app.data).update()) {
+    if (auto controllersUpdate = AppData::Controllers(*app.data).update()) {
         controllersUpdate.clear();
         cdebug_i(CONTROLLERS, "Controllers::forgetControllers: " ANSI_COLOR_BLUE "Cleared all controllers from ConfigDB" ANSI_COLOR_RESET);
     } else {
@@ -552,7 +552,7 @@ Controllers::Iterator::Iterator(Controllers& mgr, bool atEnd)
 }
 
 Controllers::ControllerInfo Controllers::Iterator::operator*() {
-    AppData::Root::Controllers controllers(*app.data);
+    AppData::Controllers controllers(*app.data);
     size_t index = 0;
     for (auto it = controllers.begin(); it != controllers.end(); ++it, ++index) {
         if (index == currentIndex) {
@@ -626,7 +626,7 @@ size_t Controllers::findPendingAddressIndex(const char* hostname) {
 }
 
 Controllers::ControllerInfo Controllers::findById(unsigned int id) {
-    AppData::Root::Controllers controllers(*app.data);
+    AppData::Controllers controllers(*app.data);
     for (auto& controller : controllers) {
         if (parseControllerId(controller.getId()) == id) {
             ControllerInfo info;
@@ -654,7 +654,7 @@ Controllers::ControllerInfo Controllers::findById(unsigned int id) {
 }
 
 Controllers::ControllerInfo Controllers::findByIpAddress(const char* ipAddress) {
-    AppData::Root::Controllers controllers(*app.data);
+    AppData::Controllers controllers(*app.data);
     for (auto& controller : controllers) {
         if (strcmp(controller.getIpAddress().c_str(), ipAddress) == 0) {
             return findById(parseControllerId(controller.getId()));
@@ -668,7 +668,7 @@ Controllers::ControllerInfo Controllers::findByIpAddress(const String& ipAddress
 }
 
 Controllers::ControllerInfo Controllers::findByHostname(const char* hostname) {
-    AppData::Root::Controllers controllers(*app.data);
+    AppData::Controllers controllers(*app.data);
     for (auto& controller : controllers) {
         if (strcmp(controller.getName().c_str(), hostname) == 0) {
             return findById(parseControllerId(controller.getId()));
@@ -718,7 +718,7 @@ std::unique_ptr<IDataSourceStream> Controllers::createJsonStream(JsonFilter filt
     if(auto update = root.update()) {
         auto hostsParams = update.toHosts().toHostsParams();
 
-        AppData::Root::Controllers controllers(*app.data);
+        AppData::Controllers controllers(*app.data);
         for(auto configItem : controllers) {
             ControllerInfo info;
             info.id = parseControllerId(configItem.getId());
