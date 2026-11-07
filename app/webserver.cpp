@@ -539,7 +539,7 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 		} else {
 			// Command: execute now (side effects + success/error), stream the envelope after.
 			MemoryDataStream paramsStream(std::move(paramsJson));
-			if(app.api->dispatchCommandFromStream(methodName, paramsStream, errorMsg, false)) {
+			if(app.api->dispatchCommandFromStream(methodName, paramsStream, errorMsg, false, -1, true)) {
 				resultKind = RK_CommandSuccess;
 			} else {
 				const bool methodMissing = errorMsg.length() == 0 || errorMsg.indexOf(F("method not implemented")) >= 0;

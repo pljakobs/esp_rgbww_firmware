@@ -34,6 +34,9 @@ bool wrapRawUnion(JsonObject object, bool& changed)
 		if(!named.containsKey(F("named")) && !named.containsKey(F("indexed"))) {
 			StaticJsonDocument<512> copy;
 			copy.set(named);
+			if(copy.overflowed()) {
+				return false;
+			}
 			raw.clear();
 			JsonObject variant = raw.to<JsonObject>();
 			variant[F("named")].set(copy.as<JsonObjectConst>());
@@ -42,6 +45,9 @@ bool wrapRawUnion(JsonObject object, bool& changed)
 	} else if(raw.is<JsonArray>()) {
 		StaticJsonDocument<512> copy;
 		copy.set(raw.as<JsonArray>());
+		if(copy.overflowed()) {
+			return false;
+		}
 		raw.clear();
 		JsonObject variant = raw.to<JsonObject>();
 		variant[F("indexed")].set(copy.as<JsonArrayConst>());
@@ -62,28 +68,55 @@ bool normalizeRawUnion(String& json, bool rpcEnvelope, String& errorMsg)
 	if(json.indexOf(F("\"raw\"")) < 0) {
 		return true;
 	}
-	DynamicJsonDocument document(4096);
-	if(deserializeJson(document, json)) {
-		errorMsg = F("Invalid JSON: malformed JSON payload");
-		return false;
+	constexpr size_t maxCapacity = 4096;
+	size_t capacity = json.length() + 256;
+	if(capacity > maxCapacity) {
+		capacity = maxCapacity;
 	}
-	JsonObject root = document.as<JsonObject>();
-	JsonObject fields = rpcEnvelope ? root[F("params")].as<JsonObject>() : root;
-	if(fields.isNull()) {
-		return true;
+	while(true) {
+		DynamicJsonDocument document(capacity);
+		if(document.capacity() == 0) {
+			errorMsg = F("Not enough memory to normalize JSON request");
+			return false;
+		}
+		const auto result = deserializeJson(document, json);
+		if(result && result != DeserializationError::NoMemory) {
+			errorMsg = F("Invalid JSON: malformed JSON payload");
+			return false;
+		}
+		if(!result) {
+			JsonObject root = document.as<JsonObject>();
+			JsonObject fields = rpcEnvelope ? root[F("params")].as<JsonObject>() : root;
+			if(fields.isNull()) {
+				return true;
+			}
+			bool changed = false;
+			if(!wrapRawUnion(fields, changed)) {
+				errorMsg = F("Raw channel payload exceeds normalization capacity");
+				return false;
+			}
+			if(!document.overflowed()) {
+				if(changed) {
+					String normalized;
+					normalized.reserve(json.length() + 32);
+					if(serializeJson(document, normalized) == 0) {
+						errorMsg = F("Unable to serialize normalized JSON");
+						return false;
+					}
+					json = std::move(normalized);
+				}
+				return true;
+			}
+		}
+		if(capacity == maxCapacity) {
+			errorMsg = F("JSON request exceeds normalization capacity");
+			return false;
+		}
+		capacity *= 2;
+		if(capacity > maxCapacity) {
+			capacity = maxCapacity;
+		}
 	}
-	bool changed = false;
-	if(!wrapRawUnion(fields, changed)) {
-		errorMsg = F("malformed raw channel payload");
-		return false;
-	}
-	if(changed) {
-		String normalized;
-		normalized.reserve(json.length() + 32);
-		serializeJson(document, normalized);
-		json = std::move(normalized);
-	}
-	return true;
 }
 
 #if defined(ARCH_HOST) && !defined(SMING_RELEASE)
@@ -328,7 +361,7 @@ bool Api::dispatchSystemCommand(const String& cmd, const String& enable, const S
 }
 
 bool Api::dispatchCommandFromStream(const String& method, Stream& body, String& errorMsg, bool relay,
-										 int32_t lightSelector)
+									 int32_t lightSelector, bool rawUnionNormalized)
 {
 	const auto id = getCommandMethodId(method.c_str());
 	const char* relayName;
@@ -415,15 +448,20 @@ bool Api::dispatchCommandFromStream(const String& method, Stream& body, String& 
 			source = &buffered;
 		}
 	}
-	String requestJson = source->readString(4096);
-	if(requestJson.length() == 0 || !normalizeRawUnion(requestJson, false, errorMsg)) {
-		if(errorMsg.length() == 0) {
-			errorMsg = F("malformed json");
+	String requestJson;
+	if(!rawUnionNormalized) {
+		requestJson = source->readString(4096);
+		if(requestJson.length() == 0 || !normalizeRawUnion(requestJson, false, errorMsg)) {
+			if(errorMsg.length() == 0) {
+				errorMsg = F("malformed json");
+			}
+			return false;
 		}
-		return false;
 	}
 	MemoryDataStream requestBody{std::move(requestJson)};
-	source = &requestBody;
+	if(!rawUnionNormalized) {
+		source = &requestBody;
+	}
 
 	auto& jp = app.jsonproc;
 	JsonProcessor::RequestParameters params;
@@ -577,7 +615,7 @@ bool Api::dispatchJsonRpc(const String& json, String& errorMsg, bool relay)
 		return false;
 	}
 	MemoryDataStream paramsStream(std::move(params));
-	return dispatchCommandFromStream(method, paramsStream, errorMsg, relay);
+	return dispatchCommandFromStream(method, paramsStream, errorMsg, relay, -1, true);
 }
 
 #if defined(ARCH_HOST) && !defined(SMING_RELEASE)
