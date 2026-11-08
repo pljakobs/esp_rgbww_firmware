@@ -24,6 +24,10 @@
  */
 
 #include <RGBWWCtrl.h>
+#include <pwmchannelplanner.h>
+#ifdef ARCH_ESP32
+#include <Esp32PwmPlatform.h>
+#endif
 
 #include <Wiring/WVector.h>
 #include <Wiring/SplitString.h>
@@ -76,6 +80,9 @@ struct ResolvedLight {
 	bool isDefault = false;
 	LightType type;
 	std::array<int, 5> pins{{-1, -1, -1, -1, -1}};
+#ifdef ARCH_ESP32
+	RGBWWPwmConfig pwm;
+#endif
 };
 template <typename PinDatabase>
 bool claimSocPin(const PinDatabase& pinDatabase, const String& soc, int gpio, const String& function,
@@ -112,8 +119,8 @@ bool claimSocPin(const PinDatabase& pinDatabase, const String& soc, int gpio, co
 }
 
 template <typename Hardware, typename PinDatabase>
-bool resolveConfiguredLights(const Hardware& hardware, const PinDatabase& pinDatabase, const String& runtimeSoc, unsigned capacity,
-							 std::vector<ResolvedLight>& result, String& error)
+bool resolveConfiguredLights(const Hardware& hardware, const PinDatabase& pinDatabase, const String& runtimeSoc,
+								 std::vector<ResolvedLight>& result, String& error)
 {
 	result.clear();
 	const auto& configuration = hardware.configuration;
@@ -161,7 +168,6 @@ bool resolveConfiguredLights(const Hardware& hardware, const PinDatabase& pinDat
 		}
 	}
 #endif
-	unsigned channelCount = 0;
 	unsigned defaultCount = 0;
 	for(auto configured : configuration.lights) {
 		ResolvedLight resolved;
@@ -216,10 +222,6 @@ bool resolveConfiguredLights(const Hardware& hardware, const PinDatabase& pinDat
 				return false;
 			}
 			channelPins[channel] = configured.pins[pinIndex];
-			if(++channelCount > capacity) {
-				error = F("PWM channel capacity exceeded");
-				return false;
-			}
 		}
 		resolved.pins = channelPins;
 		result.push_back(std::move(resolved));
@@ -230,6 +232,116 @@ bool resolveConfiguredLights(const Hardware& hardware, const PinDatabase& pinDat
 	}
 	return true;
 }
+
+#ifdef ARCH_ESP32
+template <typename PwmSettings>
+bool makePwmBankConfigs(const PwmSettings& settings, RGBWWPwmConfig& config, String& error)
+{
+	if(settings.timer.getFrequency() <= 0) {
+		error = F("Invalid PWM frequency");
+		return false;
+	}
+	const int timerNumber = settings.timer.getNumber();
+	if(timerNumber < 0 || timerNumber >= ESP32_PWM_MAX_TIMERS) {
+		error = F("Invalid PWM timer number");
+		return false;
+	}
+
+	auto& primary = config.primary;
+	primary.timer.frequency = settings.timer.getFrequency();
+	primary.timer.resolution = static_cast<ledc_timer_bit_t>(settings.timer.getResolution());
+	primary.timer.timer_num = static_cast<ledc_timer_t>(timerNumber);
+	const auto speedMode = settings.timer.getSpeedMode();
+#if ESP32_PWM_HAS_HIGH_SPEED_MODE
+	if(speedMode == AppConfig::ContainedHardware::ContainedPwm::TimerSpeedMode::HIGHSPEED) {
+		primary.timer.speed_mode = LEDC_HIGH_SPEED_MODE;
+		config.secondary.timer.speed_mode = LEDC_LOW_SPEED_MODE;
+	} else if(speedMode == AppConfig::ContainedHardware::ContainedPwm::TimerSpeedMode::LOWSPEED) {
+		primary.timer.speed_mode = LEDC_LOW_SPEED_MODE;
+		config.secondary.timer.speed_mode = LEDC_HIGH_SPEED_MODE;
+	} else {
+		error = F("Unsupported PWM speed mode");
+		return false;
+	}
+#else
+	if(speedMode != AppConfig::ContainedHardware::ContainedPwm::TimerSpeedMode::LOWSPEED) {
+		error = F("Unsupported PWM speed mode");
+		return false;
+	}
+	primary.timer.speed_mode = LEDC_LOW_SPEED_MODE;
+#endif
+	config.secondary.timer.frequency = primary.timer.frequency;
+	config.secondary.timer.resolution = primary.timer.resolution;
+	config.secondary.timer.timer_num = primary.timer.timer_num;
+	config.secondary.timer.clk_cfg = primary.timer.clk_cfg;
+
+	primary.spreadSpectrum.mode = settings.spreadSpectrum.getMode() ==
+		AppConfig::ContainedHardware::ContainedPwm::SpreadSpectrumMode::ON
+		? Esp32HardwarePwm::SpreadSpectrumMode::ON : Esp32HardwarePwm::SpreadSpectrumMode::OFF;
+	primary.spreadSpectrum.WidthPercent = settings.spreadSpectrum.getWidth();
+	primary.spreadSpectrum.Subsampling = settings.spreadSpectrum.getSubsampling();
+	config.secondary.spreadSpectrum = primary.spreadSpectrum;
+	primary.phaseShift.mode = settings.phaseShift.getMode() ==
+		AppConfig::ContainedHardware::ContainedPwm::PhaseShiftMode::ON
+		? Esp32HardwarePwm::PhaseShiftMode::AUTO : Esp32HardwarePwm::PhaseShiftMode::OFF;
+	config.secondary.phaseShift = primary.phaseShift;
+	return true;
+}
+
+template <typename PwmSettings>
+bool planPwmChannels(const PwmSettings& settings, std::vector<ResolvedLight>& lights, String& error)
+{
+	RGBWWPwmConfig bankConfig;
+	if(!makePwmBankConfigs(settings, bankConfig, error)) {
+		return false;
+	}
+	#if ESP32_PWM_HAS_HIGH_SPEED_MODE
+	constexpr unsigned bankCount = 2;
+	#else
+	constexpr unsigned bankCount = 1;
+	#endif
+	constexpr unsigned bankCapacity = ESP32_PWM_MAX_CHANNELS;
+	std::vector<std::array<int, 5>> channelPinsByLight;
+	channelPinsByLight.reserve(lights.size());
+	for(const auto& light : lights) {
+		channelPinsByLight.push_back(light.pins);
+	}
+	std::vector<PwmChannelPlanner::Allocation> allocations;
+	const auto planStatus = PwmChannelPlanner::plan(channelPinsByLight, bankCapacity, bankCount, allocations);
+	if(planStatus != PwmChannelPlanner::Status::Ok) {
+		error = planStatus == PwmChannelPlanner::Status::CapacityExceeded ? F("PWM channel capacity exceeded")
+															 : F("Invalid PWM channel allocation");
+		return false;
+	}
+	bool spreadSpectrumOwner[2] = {};
+
+	for(std::size_t index = 0; index < lights.size(); ++index) {
+		auto& light = lights[index];
+		const auto& allocation = allocations[index];
+		light.pwm = bankConfig;
+		light.pwm.primary.channelStart = static_cast<ledc_channel_t>(allocation.primaryStart);
+		light.pwm.secondary.channelStart = static_cast<ledc_channel_t>(allocation.secondaryStart);
+		light.pwm.secondaryChannelMask = allocation.secondaryChannelMask;
+		const bool usesPrimary = allocation.primaryCount != 0;
+		const bool usesSecondary = allocation.secondaryCount != 0;
+		if(usesPrimary && light.pwm.primary.spreadSpectrum.mode != Esp32HardwarePwm::SpreadSpectrumMode::OFF) {
+			if(spreadSpectrumOwner[0]) {
+				light.pwm.primary.spreadSpectrum.mode = Esp32HardwarePwm::SpreadSpectrumMode::OFF;
+			} else {
+				spreadSpectrumOwner[0] = true;
+			}
+		}
+		if(usesSecondary && light.pwm.secondary.spreadSpectrum.mode != Esp32HardwarePwm::SpreadSpectrumMode::OFF) {
+			if(spreadSpectrumOwner[1]) {
+				light.pwm.secondary.spreadSpectrum.mode = Esp32HardwarePwm::SpreadSpectrumMode::OFF;
+			} else {
+				spreadSpectrumOwner[1] = true;
+			}
+		}
+	}
+	return true;
+}
+#endif
 
 template <typename Color>
 void configureLightColor(RGBWWLed& light, const Color& color)
@@ -256,14 +368,15 @@ bool APPLedCtrl::resolveInputs(HardwareInputs& inputs, String& error) const
 	inputs = HardwareInputs{};
 	AppConfig::Hardware hardware(*app.cfg);
 	Pins::Root pinDatabase(*app.socPins);
-	unsigned capacity = 16;
-#ifdef ARCH_ESP32
-	capacity = LEDC_CHANNEL_MAX;
-#endif
 	std::vector<ResolvedLight> lights;
-	if(!resolveConfiguredLights(hardware, pinDatabase, String(SOC), capacity, lights, error)) {
+	if(!resolveConfiguredLights(hardware, pinDatabase, String(SOC), lights, error)) {
 		return false;
 	}
+#ifdef ARCH_ESP32
+	if(!lights.empty() && !planPwmChannels(hardware.pwm, lights, error)) {
+		return false;
+	}
+#endif
 	const auto& configuration = hardware.configuration;
 	if(configuration.buttons.getItemCount() == 0 && configuration.buses.getItemCount() == 0 &&
 	   !configuration.system.getClearConfigEnabled()) {
@@ -413,13 +526,9 @@ bool APPLedCtrl::reload(String& error)
 		return false;
 	}
 	AppConfig::Hardware hardware(*app.cfg);
-	unsigned capacity = 16;
-#ifdef ARCH_ESP32
-	capacity = LEDC_CHANNEL_MAX;
-#endif
 	std::vector<ResolvedLight> resolved;
 	Pins::Root pinDatabase(*app.socPins);
-	if(!resolveConfiguredLights(hardware, pinDatabase, String(SOC), capacity, resolved, error)) {
+	if(!resolveConfiguredLights(hardware, pinDatabase, String(SOC), resolved, error)) {
 		return false;
 	}
 #ifdef ARCH_ESP32
@@ -444,35 +553,9 @@ bool APPLedCtrl::reload(String& error)
 		return true;
 	}
 #ifdef ARCH_ESP32
-	const auto& pwm = hardware.pwm;
-	if(pwm.timer.getFrequency() <= 0) {
-		error = F("Invalid PWM frequency");
+	if(!planPwmChannels(hardware.pwm, resolved, error)) {
 		return false;
 	}
-	Esp32HardwarePwm::Config pwmConfig;
-	pwmConfig.timer.frequency = pwm.timer.getFrequency();
-	pwmConfig.timer.resolution = (ledc_timer_bit_t)pwm.timer.getResolution();
-	pwmConfig.timer.timer_num = (ledc_timer_t)pwm.timer.getNumber();
-	const auto speedMode = pwm.timer.getSpeedMode();
-#ifdef SOC_ESP32
-	if(speedMode == AppConfig::ContainedHardware::ContainedPwm::TimerSpeedMode::HIGHSPEED) {
-		pwmConfig.timer.speed_mode = LEDC_HIGH_SPEED_MODE;
-	} else
-#endif
-	if(speedMode == AppConfig::ContainedHardware::ContainedPwm::TimerSpeedMode::LOWSPEED) {
-		pwmConfig.timer.speed_mode = LEDC_LOW_SPEED_MODE;
-	} else {
-		error = F("Unsupported PWM speed mode");
-		return false;
-	}
-	pwmConfig.spreadSpectrum.mode = pwm.spreadSpectrum.getMode() ==
-		AppConfig::ContainedHardware::ContainedPwm::SpreadSpectrumMode::ON
-		? Esp32HardwarePwm::SpreadSpectrumMode::ON : Esp32HardwarePwm::SpreadSpectrumMode::OFF;
-	pwmConfig.spreadSpectrum.WidthPercent = pwm.spreadSpectrum.getWidth();
-	pwmConfig.spreadSpectrum.Subsampling = pwm.spreadSpectrum.getSubsampling();
-	pwmConfig.phaseShift.mode = pwm.phaseShift.getMode() ==
-		AppConfig::ContainedHardware::ContainedPwm::PhaseShiftMode::ON
-		? Esp32HardwarePwm::PhaseShiftMode::AUTO : Esp32HardwarePwm::PhaseShiftMode::OFF;
 #endif
 	std::vector<VirtualLight> staged;
 	staged.reserve(resolved.size());
@@ -492,16 +575,11 @@ bool APPLedCtrl::reload(String& error)
 	if(!app.configureHardwareInputs(error)) {
 		return false;
 	}
-#ifdef ARCH_ESP32
-	unsigned channelStart = 0;
-#endif
 	for(unsigned index = 0; index < resolved.size(); ++index) {
 		const auto& light = resolved[index];
 		const auto& pins = light.pins;
 #ifdef ARCH_ESP32
-		pwmConfig.channelStart = (ledc_channel_t)channelStart;
-		staged[index].led->init(pins[0], pins[1], pins[2], pins[3], pins[4], light.type, pwmConfig);
-		channelStart += std::count_if(pins.begin(), pins.end(), [](int gpio) { return gpio >= 0; });
+		staged[index].led->init(pins[0], pins[1], pins[2], pins[3], pins[4], light.type, light.pwm);
 #else
 		staged[index].led->init(pins[0], pins[1], pins[2], pins[3], pins[4], light.type, PWM_FREQUENCY);
 #endif

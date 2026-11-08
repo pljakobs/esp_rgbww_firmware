@@ -408,7 +408,7 @@ run_smoke_phase() {
   collect_runtime_valgrind_snapshot "$VALGRIND_RUNTIME_LOG_SMOKE_START" "smoke_startup_idle"
 
   set +e
-  SMOKE_PYTEST_ARGS=("${PYTEST_CMD[@]}" -v tests/host_smoke_api_test.py)
+  SMOKE_PYTEST_ARGS=("${PYTEST_CMD[@]}" -v tests/test_pwm_channel_planner.py tests/host_smoke_api_test.py)
   if [[ "$PYTEST_MD_AVAILABLE" == "1" ]]; then
     SMOKE_PYTEST_ARGS+=(--md "$SMOKE_TEST_REPORT")
   fi
