@@ -1066,6 +1066,13 @@ RGBWWLed* Application::getLight(int32_t index, String& error) const
 			return light.led.get();
 		}
 	}
+	AppConfig::Hardware hardware(*cfg);
+	for(auto configured : hardware.configuration.lights) {
+		if(index >= 0 ? configured.getIndex() == uint16_t(index) : configured.getIsDefault()) {
+			error = index >= 0 ? F("Configured light is not initialized") : F("Configured default light is not initialized");
+			return nullptr;
+		}
+	}
 	error = index >= 0 ? F("Configured light index not found") : F("No default light is configured");
 	return nullptr;
 }

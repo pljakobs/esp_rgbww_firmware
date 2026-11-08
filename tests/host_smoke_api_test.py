@@ -143,6 +143,18 @@ def test_virtual_light_create_delete_reloads_runtime(
         assert stored[0]["type"] == light_type
         assert stored[0]["pins"] == pins
 
+        selected = http_request("GET", f"{smoke_config.base_url}/color?light=23")
+        if selected["error"] or selected["status"] != 200:
+            fail_with_trace("Configured light selector failed", {"response": selected})
+
+        missing = http_request("GET", f"{smoke_config.base_url}/color?light=24")
+        missing_payload = decode_json_response(
+            missing, {"request": {"path": "/color?light=24"}, "response": missing},
+            failure_message="Missing light selector response was not valid JSON",
+        )
+        assert missing["status"] == 400
+        assert missing_payload.get("error") == "Configured light index not found"
+
         offset = app_log.stat().st_size
         post_config_update(smoke_config, {"hardware": {"configuration": {"lights": []}}})
         wait_for_runtime("No virtual lights configured", offset)

@@ -797,27 +797,32 @@ bool Api::renderData(const String& method, const JsonObject& params, String& out
 	return renderData(method, sparse, out, requestId);
 }
 
-bool Api::renderData(const String& method, bool sparse, String& out, int requestId, int32_t lightSelector)
+bool Api::renderData(const String& method, bool sparse, String& out, int requestId, int32_t lightSelector,
+					 String* errorMsg)
 {
-	return renderDataImpl(method, sparse, &out, nullptr, requestId, lightSelector);
+	return renderDataImpl(method, sparse, &out, nullptr, requestId, lightSelector, errorMsg);
 }
 
 std::unique_ptr<IDataSourceStream> Api::renderDataStream(const String& method, bool sparse, int requestId,
-													 int32_t lightSelector)
+														 int32_t lightSelector, String* errorMsg)
 {
 	if(requestId < 0) {
 		return nullptr;
 	}
 	std::unique_ptr<IDataSourceStream> stream;
-	if(!renderDataImpl(method, sparse, nullptr, &stream, requestId, lightSelector)) {
+	if(!renderDataImpl(method, sparse, nullptr, &stream, requestId, lightSelector, errorMsg)) {
 		return nullptr;
 	}
 	return stream;
 }
 
 bool Api::renderDataImpl(const String& method, bool sparse, String* out,
-						 std::unique_ptr<IDataSourceStream>* streamOut, int requestId, int32_t lightSelector)
+							 std::unique_ptr<IDataSourceStream>* streamOut, int requestId, int32_t lightSelector,
+							 String* errorMsg)
 {
+	if(errorMsg != nullptr) {
+		*errorMsg = String::nullstr;
+	}
 	auto& codec = rpcCodec();
 	auto emit = [&](const JsonRPC::Message& message, const ConfigDB::Object& body) {
 		if(streamOut != nullptr) {
@@ -924,6 +929,9 @@ bool Api::renderDataImpl(const String& method, bool sparse, String* out,
 		String lightError;
 		RGBWWLed* selectedLight = app.getLight(lightSelector, lightError);
 		if(selectedLight == nullptr) {
+			if(errorMsg != nullptr) {
+				*errorMsg = lightError;
+			}
 			return false;
 		}
 		if(auto update = root.update()) {
@@ -969,10 +977,18 @@ bool Api::renderDataImpl(const String& method, bool sparse, String* out,
 			if(out == nullptr) {
 				return emit({requestId, JsonRPC::Message::Kind::result, method}, root.asColor());
 			}
-			return codec.render({requestId, JsonRPC::Message::Kind::result, method}, root.asColor(), *out) &&
-			   normalizeRawUnionForWire(*out);
+			const bool rendered = codec.render({requestId, JsonRPC::Message::Kind::result, method}, root.asColor(), *out) &&
+				normalizeRawUnionForWire(*out);
+			if(!rendered && errorMsg != nullptr) {
+				*errorMsg = F("Failed to render color response");
+			}
+			return rendered;
 		}
-		return out != nullptr && codec.renderPayload(root.asColor(), *out) && normalizeRawUnionForWire(*out);
+		const bool rendered = out != nullptr && codec.renderPayload(root.asColor(), *out) && normalizeRawUnionForWire(*out);
+		if(!rendered && errorMsg != nullptr) {
+			*errorMsg = F("Failed to render color response");
+		}
+		return rendered;
 	}
 
 	if(dataMethodId == DataMethodId::Networks) {
