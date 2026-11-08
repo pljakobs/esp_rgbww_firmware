@@ -1646,8 +1646,11 @@ void ApplicationWebserver::onColorGet(HttpRequest& request, HttpResponse& respon
 	}
 	String payload;
 	payload.reserve(256);
-	if(!app.api->renderData(F("color"), true, payload, -1, lightSelector)) {
-		sendApiCode(response, API_CODES::API_BAD_REQUEST, F("selected light not found"));
+	if(!app.api->renderData(F("color"), true, payload, -1, lightSelector, &error)) {
+		if(error.length() == 0) {
+			error = F("Failed to render color response");
+		}
+		sendApiCode(response, API_CODES::API_BAD_REQUEST, error);
 		return;
 	}
 
