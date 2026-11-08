@@ -188,11 +188,11 @@ ConfigDB's cross-file reference form is `<database>/$defs/<path>`; the database 
 ### Step 3: `APPLedCtrl` multi-instance init *(depends on step 2)*
 - Add `int _lightIndex` and `String _lightName` to `include/ledctrl.h`
 - Change `APPLedCtrl::init()` in `app/ledctrl.cpp` to `init(int lightIndex, const LightConfig& cfg)`
-- ESP32 baseline: use two 8-channel banks on classic ESP32 (low-speed and high-speed); SoCs without both modes use the banks/capacity reported by the hardware provider. Each logical light must fit wholly within one bank; do not split a light across the channel-8 boundary. Reject configurations that cannot be packed.
+- ESP32 baseline: use two 8-channel banks on classic ESP32 (low-speed and high-speed); SoCs without both modes expose only their supported bank. Assign outputs in configured light/channel order, filling the selected primary bank before spilling remaining outputs into the secondary bank. A logical RGBWW light may span both banks.
 - Query per-bank capacity from `ESP32_PWM_MAX_CHANNELS` / `SOC_LEDC_CHANNEL_NUM`; use `ESP32_PWM_TOTAL_CHANNELS` only to determine whether a second speed-mode bank exists, not as one flat channel range. Validate unique/valid GPIOs and each bank-local channel range.
-- Configure one LEDC timer per bank, shared by that bank's channels. The bank owns the timer lifetime; per-light PWM views must not independently deconfigure a shared timer. A bank has one frequency/resolution in this baseline.
+- Configure one shared timer number per speed-mode bank. Both banks use the configured frequency/resolution; the speed mode distinguishes their timer blocks. Ensure only one PWM instance per bank owns spread-spectrum modulation, and tear down/rebuild the complete light set as a unit before reusing shared timer resources.
 - Treat light topology, pin order, and bank/channel assignments as boot-time configuration. Changes are persisted and take effect after reboot; do not reallocate or renumber live outputs. Configure one timer per bank at startup and keep each bank stable for the running instance.
-- Verify the Pentadeca layout against bank packing: three 5-channel lights cannot fit as whole lights into two 8-channel banks despite 15 aggregate outputs, so that configuration is rejected by the baseline.
+- Verify the Pentadeca layout against bank packing: three 5-channel lights use 8 channels in the primary bank and 7 in the secondary bank, with one light crossing the bank boundary.
 - `colorSave()`/`colorReset()` read/write `last-colors[_lightName]`
 
 ### Step 4: `Application` light access abstraction *(depends on step 3)*
