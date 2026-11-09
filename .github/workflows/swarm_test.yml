@@ -9,18 +9,10 @@ env:
 on:
   push:
     branches:
-      - stable
-      - testing
-      - develop
-      - experimental
       - '5.0/**'
       - '5.1/**'
   pull_request:
     branches:
-      - stable
-      - testing
-      - develop
-      - experimental
       - '5.0/**'
       - '5.1/**'
   workflow_dispatch:
@@ -37,10 +29,6 @@ on:
           - 5.1/develop
           - 5.1/testing
           - 5.1/prod
-          - stable
-          - testing
-          - develop
-          - experimental
 
 jobs:
   # Single-controller mDNS neighbour-scaling check on the self-hosted runner.

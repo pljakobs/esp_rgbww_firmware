@@ -8,10 +8,6 @@ on:
     workflows: ["firmwareBuild"]
     types: [completed]
     branches:
-      - stable
-      - testing
-      - develop
-      - experimental
       - '5.0/**'
       - '5.1/**'
   workflow_dispatch:
@@ -28,10 +24,6 @@ on:
           - 5.1/develop
           - 5.1/testing
           - 5.1/prod
-          - stable
-          - testing
-          - develop
-          - experimental
 
 jobs:
   get-version:
@@ -63,10 +55,10 @@ jobs:
           fi
 
           case "$source_branch" in
-            5.0/develop|develop) release_ref="5.0/develop" ;;
-            5.0/testing|testing) release_ref="5.0/testing" ;;
-            5.0/prod|stable) release_ref="5.0/prod" ;;
-            5.1/develop|experimental) release_ref="5.1/develop" ;;
+            5.0/develop) release_ref="5.0/develop" ;;
+            5.0/testing) release_ref="5.0/testing" ;;
+            5.0/prod) release_ref="5.0/prod" ;;
+            5.1/develop) release_ref="5.1/develop" ;;
             5.1/testing) release_ref="5.1/testing" ;;
             5.1/prod) release_ref="5.1/prod" ;;
             *) echo "Unsupported firmware release ref: $source_branch" >&2; exit 1 ;;

@@ -244,17 +244,11 @@ raise SystemExit('Forbidden git operation in policy test: ' + repr(arguments))
         for branch in ("5.0/develop", "5.1/develop"):
             self.assertNotIn("upgrade_from_lines", resolve_branch(branch))
 
-    def test_legacy_refs_resolve_to_their_canonical_release_lines(self):
-        expected = {
-            "develop": ("5.0/develop", "develop"),
-            "testing": ("5.0/testing", "testing"),
-            "stable": ("5.0/prod", "stable"),
-            "experimental": ("5.1/develop", "experimental"),
-        }
-        for branch, result in expected.items():
+    def test_unversioned_refs_are_rejected(self):
+        for branch in ("develop", "testing", "stable", "experimental"):
             with self.subTest(branch=branch):
-                metadata = resolve_branch(branch)
-                self.assertEqual((metadata["release_ref"], metadata["webapp_branch"]), result)
+                with self.assertRaises(ValueError):
+                    resolve_branch(branch)
 
     def test_unknown_and_mismatched_release_refs_are_rejected(self):
         for branch in ("feature/policy", "5.0/experimental", "5.2/develop", "5.1//develop"):
@@ -371,8 +365,8 @@ raise SystemExit('Forbidden git operation in policy test: ' + repr(arguments))
         ])
         cases = [
             ("workflow_run", "", "5.1/develop", "5.1/develop", "5.1-develop"),
-            ("workflow_dispatch", "stable", "", "5.0/prod", "5.0-prod"),
-            ("workflow_dispatch", "experimental", "", "5.1/develop", "5.1-develop"),
+            ("workflow_dispatch", "5.0/prod", "", "5.0/prod", "5.0-prod"),
+            ("workflow_dispatch", "5.1/develop", "", "5.1/develop", "5.1-develop"),
         ]
         for event_name, input_branch, run_branch, release_ref, artifact_branch in cases:
             with self.subTest(event=event_name, branch=input_branch or run_branch):
@@ -389,6 +383,12 @@ raise SystemExit('Forbidden git operation in policy test: ' + repr(arguments))
                 "github.event_name": "workflow_run", "inputs.branch": "",
                 "github.event.inputs.branch": "",
                 "github.event.workflow_run.head_branch": "feature/untrusted",
+            }, success=False)
+        with self.subTest(event="workflow_dispatch", branch="develop"):
+            self.execute(resolve, {
+                "github.event_name": "workflow_dispatch", "inputs.branch": "develop",
+                "github.event.inputs.branch": "develop",
+                "github.event.workflow_run.head_branch": "",
             }, success=False)
 
     def test_version_info_artifact_is_validated_as_data_not_sourced(self):
@@ -427,25 +427,22 @@ raise SystemExit('Forbidden git operation in policy test: ' + repr(arguments))
 
     def test_only_intended_current_branches_trigger_firmware_build(self):
         events = workflow("build_firmware.yml")["on"]
-        expected = ["stable", "testing", "develop", "experimental"]
         canonical = ["5.0/**", "5.1/**"]
-        self.assertEqual(events["push"]["branches"], expected + canonical)
-        self.assertEqual(events["pull_request"]["branches"], expected + canonical)
+        self.assertEqual(events["push"]["branches"], canonical)
+        self.assertEqual(events["pull_request"]["branches"], canonical)
         options = events["workflow_dispatch"]["inputs"]["branch"]["options"]
-        self.assertEqual(options[:6], ["5.0/develop", "5.0/testing", "5.0/prod", "5.1/develop", "5.1/testing", "5.1/prod"])
-        self.assertEqual(options[6:], expected)
+        self.assertEqual(options, ["5.0/develop", "5.0/testing", "5.0/prod", "5.1/develop", "5.1/testing", "5.1/prod"])
 
     def test_self_hosted_swarm_never_runs_pr_code(self):
         document = workflow("swarm_test.yml")
         job = document["jobs"]["swarm-mdns"]
         self.assertIn("self-hosted", job["runs-on"])
         self.assertEqual(job["if"], "github.event_name != 'pull_request'")
-        expected_legacy = ["stable", "testing", "develop", "experimental"]
         expected_lines = ["5.0/**", "5.1/**"]
-        self.assertEqual(document["on"]["push"]["branches"], expected_legacy + expected_lines)
-        self.assertEqual(document["on"]["pull_request"]["branches"], expected_legacy + expected_lines)
-        self.assertEqual(document["on"]["workflow_dispatch"]["inputs"]["branch"]["options"][:6],
-                         ["5.0/develop", "5.0/testing", "5.0/prod", "5.1/develop", "5.1/testing", "5.1/prod"])
+        self.assertEqual(document["on"]["push"]["branches"], expected_lines)
+        self.assertEqual(document["on"]["pull_request"]["branches"], expected_lines)
+        self.assertEqual(document["on"]["workflow_dispatch"]["inputs"]["branch"]["options"],
+                 ["5.0/develop", "5.0/testing", "5.0/prod", "5.1/develop", "5.1/testing", "5.1/prod"])
         checkout = step(document, "swarm-mdns", "Checkout Repository")["with"]
         self.assertEqual(checkout["ref"], "${{ inputs.branch || github.ref }}")
 
