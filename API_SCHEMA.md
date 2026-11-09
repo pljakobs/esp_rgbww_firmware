@@ -84,6 +84,23 @@ Generate strict Ajv standalone validators with coercion, defaults, and property 
 
 ## Inferred Compatibility
 
+- One authenticated WebSocket can subscribe to both `runtime_info` and `lights`
+  using `{"method":"subscribe","params":{"channel":"lights"},"id":1,"jsonrpc":"2.0"}`.
+  The `lights` channel multiplexes all configured lights; no per-light sockets
+  or subscriptions are needed. Unsubscribe uses the same channel name.
+- `light_state` notifications contain `light` (numeric API index), `light_id`
+  (persistent UUID) and `state` (the same HSV-or-RAW object returned by `/color`).
+  Changes on non-default lights are included, at most five updates per second
+  per light. One changed light is published per LED tick, round-robin, to bound
+  output bursts. Legacy unindexed `color_event` broadcasts remain unchanged.
+- `lights_changed` notifies subscribers after successful hardware configuration
+  activation, including deletion of all lights. Its `revision` is a hint to
+  reread `/config`, not a replacement for UUID identity.
+- Commands may supply `light_id` alongside `light`. Firmware rejects a mismatched
+  UUID before touching the selected output, so clients subscribed to changes
+  can safely avoid exporting `/config` before every command. This guard is
+  supported together with the `lights` subscription; older firmware rejects
+  that subscription and requires the legacy discovery/command path.
 - JSON-RPC `color` is overloaded: empty params read color state, while non-empty params execute a color command. `getColor` is the unambiguous read alias.
 - HTTP light operations accept `?light=N`; HTTP command JSON, WebSocket and MQTT JSON accept `"light": N`. If both HTTP selectors are present they must agree. Omitted selectors resolve only the unique configured `is_default` light.
 - `hsv` carries HSVCT for every type; each profile consumes only its meaningful components. Raw writes use named `r/g/b/ww/cw` fields for RGB-family types and a pin-ordered array for `WWCW`, `WW`, `CW` and `SINGLE`. Missing array entries and `null` leave channels unchanged; `0` turns a channel off.

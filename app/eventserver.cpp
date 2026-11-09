@@ -106,6 +106,92 @@ void EventServer::onClientComplete(TcpClient& client, bool succesfull)
 	cdebug_d(EVENTSERVER, "EventServer::onClientComplete: " "Client removed: %x\n", &client);
 }
 
+bool EventServer::publishLightState(VirtualLight& light)
+{
+	if(webServer == nullptr || !webServer->hasLightSubscribers()) {
+		return false;
+	}
+	const auto raw = light.led->getCurrentOutput();
+	const bool hasHsv = light.led->getMode() == RGBWWLed::ColorMode::Hsv;
+	const auto hsv = light.led->getCurrentColor();
+	const uint32_t now = millis();
+	if(light.eventStateKnown &&
+	   ((raw == light.lastEventRaw && hasHsv == light.lastEventHasHsv &&
+	     (!hasHsv || hsv == light.lastEventHsv)) || now - light.lastEventTime < 200)) {
+		return false;
+	}
+	auto& codec = rpcCodec();
+	Jsonrpc::Root root(codec.db());
+	if(auto update = root.update()) {
+		auto event = update.toLightState();
+		event.setLight(light.index);
+		event.setLightId(light.id);
+		if(hasHsv) {
+			float h, s, v;
+			int ct;
+			hsv.asRadian(h, s, v, ct);
+			auto color = event.state.toHsv();
+			color.setH(h);
+			color.setS(s);
+			color.setV(v);
+			color.setCt(ct);
+		} else if(light.led->usesNamedRawChannels()) {
+			auto color = event.state.toRaw().toRawNamed();
+			color.setR(raw.r);
+			color.setG(raw.g);
+			color.setB(raw.b);
+			color.setWw(raw.ww);
+			color.setCw(raw.cw);
+		} else {
+			auto color = event.state.toRaw().toRawIndexed();
+			RGBWWLed::ChannelList channels;
+			light.led->getChannels(channels);
+			for(auto channel : channels) {
+				switch(channel) {
+				case CtrlChannel::Red: color.addItem(raw.r); break;
+				case CtrlChannel::Green: color.addItem(raw.g); break;
+				case CtrlChannel::Blue: color.addItem(raw.b); break;
+				case CtrlChannel::WarmWhite: color.addItem(raw.ww); break;
+				case CtrlChannel::ColdWhite: color.addItem(raw.cw); break;
+				default: color.addItem(0); break;
+				}
+			}
+		}
+	}
+	String payload;
+	if(!codec.render({0, JsonRPC::Message::Kind::notification, F("light_state")}, root.asLightState(), payload) ||
+	   !normalizeRawUnionForWire(payload)) {
+		cdebug_e(EVENTSERVER, "Unable to serialize virtual-light state");
+		return false;
+	}
+	webServer->wsSendLightEvent(payload.c_str(), payload.length());
+	light.lastEventRaw = raw;
+	light.lastEventHsv = hsv;
+	light.lastEventHasHsv = hasHsv;
+	light.eventStateKnown = true;
+	light.lastEventTime = now;
+	return true;
+}
+
+void EventServer::publishLightsChanged()
+{
+	if(webServer == nullptr || !webServer->hasLightSubscribers()) {
+		return;
+	}
+	auto& codec = rpcCodec();
+	Jsonrpc::Root root(codec.db());
+	if(auto update = root.update()) {
+		AppConfig::Hardware hardware(*app.cfg);
+		update.toLightsChanged().setRevision(hardware.configuration.getRevision());
+	}
+	String payload;
+	if(codec.render({0, JsonRPC::Message::Kind::notification, F("lights_changed")}, root.asLightsChanged(), payload)) {
+		webServer->wsSendLightEvent(payload.c_str(), payload.length());
+	} else {
+		cdebug_e(EVENTSERVER, "Unable to serialize light configuration event");
+	}
+}
+
 /**
  * @brief Publishes the current state of the event server.
  *

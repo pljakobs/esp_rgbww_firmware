@@ -10,6 +10,8 @@
     "response": { "$ref": "#/definitions/jsonRpcResponse" },
     "event": { "$ref": "#/definitions/eventEnvelope" },
     "color": { "$ref": "#/definitions/colorState" },
+    "lightState": { "$ref": "#/definitions/lightStateParams" },
+    "lightsChanged": { "$ref": "#/definitions/lightsChangedParams" },
     "colorCommand": { "$ref": "#/definitions/colorParams" },
     "animationCommand": { "$ref": "#/definitions/animationParams" },
     "info": { "$ref": "#/definitions/infoResult" },
@@ -19,6 +21,22 @@
     "apiResult": { "$ref": "#/definitions/apiResult" }
   },
   "definitions": {
+    "lightStateParams": {
+      "type": "object",
+      "required": ["light", "light_id", "state"],
+      "properties": {
+        "light": { "type": "integer", "minimum": 0, "maximum": 65535 },
+        "light_id": { "type": "string" },
+        "state": { "$ref": "#/definitions/colorState" }
+      },
+      "additionalProperties": false
+    },
+    "lightsChangedParams": {
+      "type": "object",
+      "required": ["revision"],
+      "properties": { "revision": { "type": "integer", "minimum": 0 } },
+      "additionalProperties": false
+    },
     "emptyParams": { "type": "object", "additionalProperties": false },
     "apiSuccess": {
       "type": "object",
@@ -48,12 +66,14 @@
     },
     "queuePosition": { "type": "string", "ctype": "QueuePosition", "enum": ["back", "front", "front_reset", "single"] },
     "hostType": { "type": "string", "ctype": "HostType", "enum": ["ALIAS", "CONTROLLER", "WALLPANEL", "UNKNOWN"] },
-    "requestMethod": { "type": "string", "ctype": "RequestMethod", "enum": ["authenticate", "info", "getInfo", "color", "getColor", "networks", "getNetworks", "stop", "skip", "pause", "continue", "blink", "toggle", "direct", "setOn", "on", "setOff", "off", "keep_alive", "scan_networks", "system", "webapp_check", "runtime_info_subscribe", "subscribe_runtime_info", "runtime_info_unsubscribe", "unsubscribe_runtime_info"] },
+    "requestMethod": { "type": "string", "ctype": "RequestMethod", "enum": ["authenticate", "info", "getInfo", "color", "getColor", "networks", "getNetworks", "stop", "skip", "pause", "continue", "blink", "toggle", "direct", "setOn", "on", "setOff", "off", "keep_alive", "scan_networks", "system", "webapp_check", "subscribe", "unsubscribe", "runtime_info_subscribe", "subscribe_runtime_info", "runtime_info_unsubscribe", "unsubscribe_runtime_info"] },
     "eventMethod": {
       "type": "string",
       "ctype": "EventMethod",
       "enum": [
         "color_event",
+        "light_state",
+        "lights_changed",
         "runtime_info",
         "notification",
         "webapp_cmd",
@@ -165,6 +185,7 @@
         "name": { "type": "string" },
         "q": { "$ref": "#/definitions/queuePosition" },
         "light": { "type": "integer", "minimum": -1, "maximum": 65535 },
+        "light_id": { "type": "string" },
         "channels": {
           "type": "array",
           "items": { "type": "string", "enum": ["h", "s", "v", "ct", "r", "g", "b", "ww", "cw"] },
@@ -186,6 +207,7 @@
         "name": { "type": "string" },
         "q": { "$ref": "#/definitions/queuePosition" },
         "light": { "type": "integer", "minimum": -1, "maximum": 65535 },
+        "light_id": { "type": "string" },
         "channels": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
       },
       "anyOf": [
@@ -213,6 +235,7 @@
         "name": { "type": "string" },
         "q": { "$ref": "#/definitions/queuePosition" },
         "light": { "type": "integer", "minimum": -1, "maximum": 65535 },
+        "light_id": { "type": "string" },
         "channels": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
         "cmds": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/commandFields" } }
       },
@@ -229,6 +252,7 @@
       "properties": {
         "ramp": { "type": "integer", "minimum": 0 },
         "light": { "type": "integer", "minimum": -1, "maximum": 65535 },
+        "light_id": { "type": "string" },
         "q": { "$ref": "#/definitions/queuePosition" },
         "r": { "type": "boolean" },
         "name": { "type": "string" },
@@ -404,11 +428,11 @@
     "pingResult": { "type": "object", "required": ["ping"], "properties": { "ping": { "type": "string", "const": "pong" } }, "additionalProperties": false },
     "authenticateParams": { "type": "object", "properties": { "hash": { "type": "string" } }, "additionalProperties": false },
     "authenticateResult": { "type": "object", "required": ["authenticated"], "properties": { "authenticated": { "type": "boolean", "const": true } }, "additionalProperties": false },
-    "runtimeSubscriptionParams": { "type": "object", "properties": { "channel": { "type": "string", "const": "runtime_info" } }, "additionalProperties": false },
+    "runtimeSubscriptionParams": { "type": "object", "properties": { "channel": { "type": "string" } }, "additionalProperties": false },
     "subscriptionResult": {
       "type": "object",
       "required": ["subscribed", "channel"],
-      "properties": { "subscribed": { "type": "boolean" }, "channel": { "type": "string", "const": "runtime_info" } },
+      "properties": { "subscribed": { "type": "boolean" }, "channel": { "type": "string" } },
       "additionalProperties": false
     },
     "messageEventParams": { "type": "object", "required": ["message"], "properties": { "message": { "type": "string" } }, "additionalProperties": false },

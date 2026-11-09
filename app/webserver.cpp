@@ -88,6 +88,7 @@ bool parseLightSelector(const String& value, int32_t& selector, String& error)
 struct WsAuthState {
 	bool authenticated = false;
 	bool runtimeInfoSubscribed = false;
+	bool lightsSubscribed = false;
 	String challenge;
 	std::array<WsQueuedOutput, WS_MAX_QUEUED_OUTPUTS> pendingOutput{};
 	size_t pendingHead{};
@@ -514,12 +515,16 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 		if(legacyMethod && notificationChannel.length() == 0) {
 			notificationChannel = F("runtime_info");
 		}
-		if(notificationChannel != F("runtime_info")) {
+		if(notificationChannel != F("runtime_info") && notificationChannel != F("lights")) {
 			errorCode = -32602;
-			errorMsg = F("channel must be runtime_info");
+			errorMsg = F("channel must be runtime_info or lights");
 		} else {
 			if(wsAuth) {
-				wsAuth->runtimeInfoSubscribed = subscribing;
+				if(notificationChannel == F("lights")) {
+					wsAuth->lightsSubscribed = subscribing;
+				} else {
+					wsAuth->runtimeInfoSubscribed = subscribing;
+				}
 			}
 			resultKind = subscribing ? RK_SubTrue : RK_SubFalse;
 		}
@@ -643,6 +648,34 @@ void ApplicationWebserver::wsSendRuntimeInfo(const char* buffer, size_t length)
 			queueWsPayload(*socket, buffer, length);
         }
     }
+}
+
+bool ApplicationWebserver::hasLightSubscribers() const
+{
+	for(unsigned i = 0; i < webSockets.size(); ++i) {
+		auto* socket = webSockets[i];
+		if(socket != nullptr && socket->getState() == eWSCS_Open) {
+			auto* state = static_cast<WsAuthState*>(socket->getUserData());
+			if(state != nullptr && state->lightsSubscribed) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+void ApplicationWebserver::wsSendLightEvent(const char* buffer, size_t length)
+{
+	for(unsigned i = 0; i < webSockets.size(); ++i) {
+		auto* socket = webSockets[i];
+		if(socket == nullptr || socket->getState() != eWSCS_Open) {
+			continue;
+		}
+		auto* state = static_cast<WsAuthState*>(socket->getUserData());
+		if(state != nullptr && state->lightsSubscribed) {
+			queueWsPayload(*socket, buffer, length);
+		}
+	}
 }
 
 unsigned ApplicationWebserver::getHttpActiveConnections() const

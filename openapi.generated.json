@@ -2891,6 +2891,12 @@
           "color": {
             "$ref": "#/components/schemas/Wire/definitions/colorState"
           },
+          "lightState": {
+            "$ref": "#/components/schemas/Wire/definitions/lightStateParams"
+          },
+          "lightsChanged": {
+            "$ref": "#/components/schemas/Wire/definitions/lightsChangedParams"
+          },
           "colorCommand": {
             "$ref": "#/components/schemas/Wire/definitions/colorParams"
           },
@@ -2914,6 +2920,41 @@
           }
         },
         "definitions": {
+          "lightStateParams": {
+            "type": "object",
+            "required": [
+              "light",
+              "light_id",
+              "state"
+            ],
+            "properties": {
+              "light": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 65535
+              },
+              "light_id": {
+                "type": "string"
+              },
+              "state": {
+                "$ref": "#/components/schemas/Wire/definitions/colorState"
+              }
+            },
+            "additionalProperties": false
+          },
+          "lightsChangedParams": {
+            "type": "object",
+            "required": [
+              "revision"
+            ],
+            "properties": {
+              "revision": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "additionalProperties": false
+          },
           "emptyParams": {
             "type": "object",
             "additionalProperties": false
@@ -3017,6 +3058,8 @@
               "scan_networks",
               "system",
               "webapp_check",
+              "subscribe",
+              "unsubscribe",
               "runtime_info_subscribe",
               "subscribe_runtime_info",
               "runtime_info_unsubscribe",
@@ -3027,6 +3070,8 @@
             "type": "string",
             "enum": [
               "color_event",
+              "light_state",
+              "lights_changed",
               "runtime_info",
               "notification",
               "webapp_cmd",
@@ -3246,6 +3291,9 @@
                 "minimum": -1,
                 "maximum": 65535
               },
+              "light_id": {
+                "type": "string"
+              },
               "channels": {
                 "type": "array",
                 "items": {
@@ -3305,6 +3353,9 @@
                 "type": "integer",
                 "minimum": -1,
                 "maximum": 65535
+              },
+              "light_id": {
+                "type": "string"
               },
               "channels": {
                 "type": "array",
@@ -3389,6 +3440,9 @@
                 "minimum": -1,
                 "maximum": 65535
               },
+              "light_id": {
+                "type": "string"
+              },
               "channels": {
                 "type": "array",
                 "items": {
@@ -3437,6 +3491,9 @@
                 "type": "integer",
                 "minimum": -1,
                 "maximum": 65535
+              },
+              "light_id": {
+                "type": "string"
               },
               "q": {
                 "$ref": "#/components/schemas/Wire/definitions/queuePosition"
@@ -3945,8 +4002,7 @@
             "type": "object",
             "properties": {
               "channel": {
-                "type": "string",
-                "const": "runtime_info"
+                "type": "string"
               }
             },
             "additionalProperties": false
@@ -3962,8 +4018,7 @@
                 "type": "boolean"
               },
               "channel": {
-                "type": "string",
-                "const": "runtime_info"
+                "type": "string"
               }
             },
             "additionalProperties": false

@@ -19,6 +19,8 @@
 
 #include <Wiring/WVector.h>
 
+struct VirtualLight;
+
 class EventServer : public TcpServer{
 public:
     EventServer() : webServer(nullptr), enabled(false) {} // Empty constructor
@@ -29,6 +31,8 @@ public:
 	void stop();
 
 	void publishCurrentState(const ChannelOutput& raw, const HSVCT* pColor = NULL);
+	bool publishLightState(VirtualLight& light);
+	void publishLightsChanged();
 	void publishTransitionFinished(const String& name, bool requeued = false);
 	void publishKeepAlive();
 	void publishClockSlaveStatus(int offset, uint32_t interval);

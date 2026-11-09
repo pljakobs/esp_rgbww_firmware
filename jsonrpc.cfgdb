@@ -12,6 +12,26 @@
             ]
         },
         {
+            "type": "object",
+            "title": "light_state",
+            "properties": {
+                "light": { "type": "integer", "minimum": 0, "maximum": 65535 },
+                "light_id": { "type": "string" },
+                "state": {
+                    "type": "object",
+                    "oneOf": [
+                        { "$ref": "params/$defs/raw" },
+                        { "$ref": "params/$defs/hsv" }
+                    ]
+                }
+            }
+        },
+        {
+            "type": "object",
+            "title": "lights_changed",
+            "properties": { "revision": { "type": "integer", "minimum": 0 } }
+        },
+        {
             "$ref": "params/$defs/command-fields",
             "title": "command"
         },

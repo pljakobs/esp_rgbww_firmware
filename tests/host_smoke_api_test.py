@@ -1226,6 +1226,8 @@ def test_websocket_runtime_subscriptions(smoke_config: SmokeConfig, api_secured:
             (9161, "unsubscribe", {"channel": "runtime_info"}, False),
             (9162, "runtime_info_subscribe", {}, True),
             (9163, "runtime_info_unsubscribe", {}, False),
+            (9165, "subscribe", {"channel": "lights"}, True),
+            (9166, "unsubscribe", {"channel": "lights"}, False),
         ):
             payload, trace = ws_request(
                 sock,
@@ -1235,7 +1237,7 @@ def test_websocket_runtime_subscriptions(smoke_config: SmokeConfig, api_secured:
             if (
                 payload.get("id") != request_id
                 or result.get("subscribed") is not expected
-                or result.get("channel") != "runtime_info"
+                or result.get("channel") != params.get("channel", "runtime_info")
             ):
                 fail_with_trace(f"{method} should acknowledge the subscription state", trace)
         payload, trace = ws_request(

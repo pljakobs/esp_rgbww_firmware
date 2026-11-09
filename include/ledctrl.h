@@ -158,4 +158,5 @@ private:
     uint32_t _timerInterval = RGBWW_MINTIMEDIFF;
     HashMap<String, bool> _stepFinishedAnimations;
     uint32_t _lastColorEvent = 0;
+    size_t _nextLightEvent = 0;
 };

@@ -37,6 +37,7 @@ public:
     struct RequestParameters {
         String target;
         int32_t light = -1;
+        String lightId;
 
         enum class Mode {
             Undefined,

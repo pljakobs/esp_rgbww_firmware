@@ -88,6 +88,8 @@ public:
 
     void wsSendBroadcast(const char* buffer, size_t length);
     void wsSendRuntimeInfo(const char* buffer, size_t length);
+    bool hasLightSubscribers() const;
+    void wsSendLightEvent(const char* buffer, size_t length);
 
     String getApiCodeMsg(API_CODES code);
 

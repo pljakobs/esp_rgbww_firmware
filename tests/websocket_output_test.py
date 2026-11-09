@@ -18,6 +18,8 @@ CPP_SUPPORT = r"""
 #include <type_traits>
 #include <vector>
 
+#define F(value) value
+
 class String : public std::string {
 public:
     using std::string::string;
@@ -31,12 +33,16 @@ struct IDataSourceStream {
 };
 int IDataSourceStream::alive = 0;
 
+enum { eWSCS_Open, eWSCS_Closed };
+
 struct WebsocketConnection {
     void* state = nullptr;
+    bool open = true;
     bool disconnectOnSend = false;
     size_t closes = 0;
     std::vector<std::string> sent;
     void* getUserData() { return state; }
+    int getState() const { return open ? eWSCS_Open : eWSCS_Closed; }
     bool send(IDataSourceStream* stream) { delete stream; return true; }
     bool sendString(const String& payload) {
         sent.emplace_back(payload);
@@ -64,9 +70,18 @@ struct RpcCodec {
 RpcCodec& rpcCodec() { return codec; }
 """
 
+CPP_LIGHT_INTERFACE = r"""
+struct ApplicationWebserver {
+    std::vector<WebsocketConnection*> webSockets;
+    bool hasLightSubscribers() const;
+    void wsSendLightEvent(const char*, size_t);
+};
+"""
+
 CPP_TESTS = r"""
 void WebsocketConnection::close() {
     ++closes;
+    open = false;
     delete static_cast<WsAuthState*>(state);
     state = nullptr;
 }
@@ -142,6 +157,29 @@ int main(int argc, char** argv) {
         codec.completions.pop_front();
         callback(false);
         assert(!socket.state && socket.closes == 1);
+    } else if(scenario == "light_subscription") {
+        WebsocketConnection runtime;
+        runtime.state = new WsAuthState();
+        static_cast<WsAuthState*>(runtime.state)->runtimeInfoSubscribed = true;
+        ApplicationWebserver server;
+        server.webSockets = {nullptr, &socket, &runtime};
+        assert(!server.hasLightSubscribers());
+        state->lightsSubscribed = true;
+        assert(server.hasLightSubscribers());
+        server.wsSendLightEvent("light-3", 7);
+        server.wsSendLightEvent("light-7", 7);
+        assert(socket.sent == std::vector<std::string>({"light-3", "light-7"}));
+        assert(runtime.sent.empty());
+        state->lightsSubscribed = false;
+        assert(!server.hasLightSubscribers());
+        server.wsSendLightEvent("unsubscribed", 12);
+        assert(socket.sent.size() == 2);
+        state->lightsSubscribed = true;
+        socket.close();
+        assert(!server.hasLightSubscribers());
+        server.wsSendLightEvent("closed", 6);
+        assert(socket.sent.size() == 2);
+        runtime.close();
     } else {
         return 2;
     }
@@ -161,10 +199,13 @@ def websocket_output_binary(tmp_path_factory: pytest.TempPathFactory) -> Path:
     start = source.index("constexpr size_t WS_MAX_QUEUED_OUTPUTS")
     end = source.index("// Generate a 16-byte random nonce", start)
     implementation = source[start:end]
+    start = source.index("bool ApplicationWebserver::hasLightSubscribers()")
+    end = source.index("unsigned ApplicationWebserver::getHttpActiveConnections()", start)
+    light_output = source[start:end]
     binary = tmp_path_factory.mktemp("websocket-output") / "test"
     result = subprocess.run(
         [compiler, "-std=c++17", "-D_GLIBCXX_ASSERTIONS", "-x", "c++", "-", "-o", str(binary)],
-        input=CPP_SUPPORT + implementation + CPP_TESTS,
+        input=CPP_SUPPORT + implementation + CPP_LIGHT_INTERFACE + light_output + CPP_TESTS,
         text=True,
         capture_output=True,
         check=False,
@@ -175,7 +216,8 @@ def websocket_output_binary(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 @pytest.mark.parametrize(
     "scenario",
-    ["fifo", "overflow", "stream_completion", "disconnect_text", "disconnect_start", "late_completion"],
+    ["fifo", "overflow", "stream_completion", "disconnect_text", "disconnect_start", "late_completion",
+     "light_subscription"],
 )
 def test_websocket_output(websocket_output_binary: Path, scenario: str) -> None:
     result = subprocess.run(

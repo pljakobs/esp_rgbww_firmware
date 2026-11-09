@@ -488,7 +488,17 @@ RGBWWLed* JsonProcessor::resolveLight(const RequestParameters& params, String& e
 		errorMsg = F("light must be an index from 0 to 65535");
 		return nullptr;
 	}
-	return app.getLight(params.light, errorMsg);
+	auto* light = app.getLight(params.light, errorMsg);
+	if(light != nullptr && params.lightId.length() > 0) {
+		for(const auto& configured : app.lights) {
+			if(configured.led.get() == light && configured.id == params.lightId) {
+				return light;
+			}
+		}
+		errorMsg = F("light_id does not match the selected light");
+		return nullptr;
+	}
+	return light;
 }
 
 bool JsonProcessor::resolveRawChannels(const RequestParameters& params, const RGBWWLed& light,
@@ -543,6 +553,7 @@ bool JsonProcessor::resolveRawChannels(const RequestParameters& params, const RG
  */
 void JsonProcessor::parseRequestParams(JsonObject root, RequestParameters& params)
 {
+	params.lightId = root[F("light_id")] | "";
 	if(!root[F("light")].isNull()) {
 		const JsonVariant light = root[F("light")];
 		if(light.is<int>() || light.is<unsigned>()) {
@@ -671,6 +682,7 @@ template <typename Fields> void parseCommandRequestFields(Fields root, JsonProce
 {
 	using RequestParameters = JsonProcessor::RequestParameters;
 	params.light = root.getLight();
+	params.lightId = root.getLightId();
 	auto parseField = [](const String& value, Optional<AbsOrRelValue>& target,
 						  AbsOrRelValue::Type type = AbsOrRelValue::Type::Percent) {
 		if(value.length() > 0) {
@@ -843,6 +855,9 @@ bool JsonProcessor::parseRequest(Stream& body, RequestParameters& params, std::v
 			parseCommandRequestFields(fields.cmds[i], batch->back());
 			if(batch->back().light < 0 && params.light >= 0) {
 				batch->back().light = params.light;
+			}
+			if(batch->back().lightId.length() == 0) {
+				batch->back().lightId = params.lightId;
 			}
 		}
 	}

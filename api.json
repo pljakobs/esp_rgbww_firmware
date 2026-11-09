@@ -88,11 +88,15 @@
       "scan_networks": { "params": "#/definitions/emptyParams", "result": "#/definitions/commandResult" },
       "system": { "params": "#/definitions/systemParams", "result": "#/definitions/commandResult" },
       "webapp_check": { "params": "#/definitions/emptyParams", "result": "#/definitions/commandResult" },
+      "subscribe": { "params": "#/definitions/runtimeSubscriptionParams", "result": "#/definitions/subscriptionResult" },
+      "unsubscribe": { "params": "#/definitions/runtimeSubscriptionParams", "result": "#/definitions/subscriptionResult" },
       "runtime_info_subscribe": { "aliases": ["subscribe_runtime_info"], "params": "#/definitions/runtimeSubscriptionParams", "result": "#/definitions/subscriptionResult" },
       "runtime_info_unsubscribe": { "aliases": ["unsubscribe_runtime_info"], "params": "#/definitions/runtimeSubscriptionParams", "result": "#/definitions/subscriptionResult" }
     },
     "events": {
       "color_event": "#/definitions/colorEventParams",
+      "light_state": "#/definitions/lightStateParams",
+      "lights_changed": "#/definitions/lightsChangedParams",
       "runtime_info": "#/definitions/runtimeInfoParams",
       "notification": "#/definitions/messageEventParams",
       "webapp_cmd": "#/definitions/messageEventParams",

@@ -130,6 +130,7 @@
         "name": { "$ref": "value-types/$defs/string-value" },
         "q": { "$ref": "value-types/$defs/string-value" },
         "light": { "type": "integer", "minimum": -1, "maximum": 65535, "default": -1 },
+        "light_id": { "type": "string" },
         "channels": { "$ref": "#/$defs/channel-list" }
       },
       "additionalProperties": false
@@ -148,6 +149,7 @@
         "name": { "$ref": "value-types/$defs/string-value" },
         "q": { "$ref": "value-types/$defs/string-value" },
         "light": { "type": "integer", "minimum": -1, "maximum": 65535, "default": -1 },
+        "light_id": { "type": "string" },
         "channels": { "$ref": "#/$defs/channel-list" },
         "cmds": { "$ref": "#/$defs/command-request-list" }
       },
@@ -171,6 +173,7 @@
         "name": { "$ref": "value-types/$defs/string-value" },
         "q": { "$ref": "value-types/$defs/string-value" },
         "light": { "type": "integer", "minimum": -1, "maximum": 65535, "default": -1 },
+        "light_id": { "type": "string" },
         "channels": { "$ref": "#/$defs/channel-list" },
         "cmds": { "$ref": "#/$defs/command-request-list" },
         "hash": { "$ref": "value-types/$defs/string-value" },

@@ -549,6 +549,7 @@ bool APPLedCtrl::reload(String& error)
 			return false;
 		}
 		_activeConfiguration = configurationSignature();
+		app.eventserver.publishLightsChanged();
 		cdebug_i(APPLEDCTRL, "No virtual lights configured");
 		return true;
 	}
@@ -587,6 +588,7 @@ bool APPLedCtrl::reload(String& error)
 	app.lights.swap(staged);
 	setup();
 	_activeConfiguration = configurationSignature();
+	app.eventserver.publishLightsChanged();
 	cdebug_i(APPLEDCTRL, "Initialized %u virtual lights", unsigned(app.lights.size()));
 	return true;
 }
@@ -717,6 +719,12 @@ void APPLedCtrl::updateLed()
 		if(light.isDefault) {
 			defaultLight = &light;
 			defaultFinished = finished;
+		}
+	}
+	for(size_t count = 0; count < app.lights.size(); ++count) {
+		const size_t index = _nextLightEvent++ % app.lights.size();
+		if(app.eventserver.publishLightState(app.lights[index])) {
+			break;
 		}
 	}
 	++_stepCounter;
