@@ -182,6 +182,29 @@ void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char*
 
     AppData::Controllers controllers(*app.data);
     bool foundInConfig = false;
+    bool needsUpdate = false;
+    for (auto it = controllers.begin(); it != controllers.end(); ++it) {
+        auto controllerItem = *it;
+        if (parseControllerId(controllerItem.getId()) != id) {
+            continue;
+        }
+        if (foundInConfig || controllerItem.getIpAddress() != ipAddress || controllerItem.getName() != hostname) {
+            needsUpdate = true;
+            break;
+        }
+        foundInConfig = true;
+    }
+    if (foundInConfig && !needsUpdate) {
+        return;
+    }
+    if (!app.checkHeap(CONTROLLER_UPDATE_MIN_FREE_HEAP)) {
+        cdebug_w(CONTROLLERS, "Controllers::addOrUpdate: " ANSI_COLOR_YELLOW "deferring ConfigDB update for " ANSI_COLOR_CYAN "%s" ANSI_COLOR_YELLOW ": free heap=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW ", floor=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_RESET,
+                 hostname, (unsigned)app.getFreeHeapSize(), (unsigned)CONTROLLER_UPDATE_MIN_FREE_HEAP);
+        return;
+    }
+
+    // Release the read-only item references before opening a copy-on-write update.
+    foundInConfig = false;
     
     if (auto controllersUpdate = controllers.update()) {
         for (unsigned configIndex = 0; configIndex < controllersUpdate.getItemCount();) {
