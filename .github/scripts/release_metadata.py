@@ -3,12 +3,6 @@ import re
 import sys
 
 
-LEGACY_REFS = {
-    "develop": ("5.0/develop", "develop"),
-    "testing": ("5.0/testing", "testing"),
-    "stable": ("5.0/prod", "stable"),
-    "experimental": ("5.1/develop", "experimental"),
-}
 RELEASES = {
     "5.0": {"socs": ("esp8266", "esp32", "esp32c3"), "rgbwwled_version": "0.10.1"},
     "5.1": {"socs": ("esp32", "esp32c3"), "rgbwwled_version": "0.11.0"},
@@ -17,25 +11,18 @@ STAGES = {"develop", "testing", "prod"}
 
 
 def resolve_branch(branch):
-    legacy = LEGACY_REFS.get(branch)
-    if legacy:
-        release_ref, webapp_branch = legacy
-    else:
-        release_ref = branch
-        webapp_branch = branch
-
-    match = re.fullmatch(r"(5\.[01])/(develop|testing|prod)", release_ref)
+    match = re.fullmatch(r"(5\.[01])/(develop|testing|prod)", branch)
     if not match:
         raise ValueError(f"Unsupported firmware release ref: {branch}")
 
     release_line, stage = match.groups()
     release = RELEASES[release_line]
     return {
-        "release_ref": release_ref,
+        "release_ref": branch,
         "release_line": release_line,
         "stage": stage,
-        "artifact_branch": release_ref.replace("/", "-"),
-        "webapp_branch": webapp_branch,
+        "artifact_branch": branch.replace("/", "-"),
+        "webapp_branch": branch,
         "socs": release["socs"],
         "soc_json": json.dumps(release["socs"], separators=(",", ":")),
         "soc_csv": ",".join(release["socs"]),
