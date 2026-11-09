@@ -276,6 +276,14 @@ struct RpcCodec::StreamTask::State : std::enable_shared_from_this<State>
 	}
 
 private:
+	void closeDeferred()
+	{
+		auto connection = socket->getConnection();
+		if(connection != nullptr) {
+			connection->setTimeOut(1);
+		}
+	}
+
 	void schedulePump()
 	{
 		if(pumpQueued || !active) {
@@ -419,7 +427,10 @@ private:
 		if(callback) {
 			if(!System.queueCallback([callback = std::move(callback), success]() { callback(success); })) {
 				debug_e("RpcCodec: unable to queue WebSocket completion callback");
-				socket->close();
+				// finish() can run inside TcpConnection::write() (via SegmentStream's
+				// destructor -> release()), so closing synchronously frees the stream
+				// the TCP layer is still iterating. Let lwIP's poll close it instead.
+				closeDeferred();
 			}
 		}
 	}
