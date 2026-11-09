@@ -15,6 +15,13 @@ test("VirtualLight exclusively owns a library instance across vector moves", () 
     writeFileSync(join(directory, "WString.h"), "#pragma once\n#include <string>\nusing String = std::string;\n");
     writeFileSync(join(directory, "RGBWWLed/RGBWWLed.h"), `
 #pragma once
+struct ChannelOutput {
+    int r = 0, g = 0, b = 0, ww = 0, cw = 0;
+};
+struct HSVCT {
+    float h = 0, s = 0, v = 0;
+    int ct = 0;
+};
 class RGBWWLed {
 public:
     inline static int instances = 0;
@@ -39,6 +46,11 @@ int main()
         std::vector<VirtualLight> lights;
         lights.push_back({"light0", "Main", std::make_unique<RGBWWLed>()});
         RGBWWLed* original = lights.front().led.get();
+        lights.front().lastEventRaw.ww = 512;
+        lights.front().lastEventHsv.ct = 4000;
+        lights.front().lastEventHasHsv = true;
+        lights.front().eventStateKnown = true;
+        lights.front().lastEventTime = 1234;
         for (int index = 1; index < 16; ++index) {
             lights.push_back({"light" + std::to_string(index), "Other", std::make_unique<RGBWWLed>()});
         }
@@ -48,6 +60,11 @@ int main()
         assert(RGBWWLed::instances == 16);
         auto moved = std::move(lights);
         assert(moved.front().led.get() == original);
+        assert(moved.front().lastEventRaw.ww == 512);
+        assert(moved.front().lastEventHsv.ct == 4000);
+        assert(moved.front().lastEventHasHsv);
+        assert(moved.front().eventStateKnown);
+        assert(moved.front().lastEventTime == 1234);
         moved.erase(moved.begin() + 1);
         assert(moved[1].id == "light2");
         assert(RGBWWLed::instances == 15);
