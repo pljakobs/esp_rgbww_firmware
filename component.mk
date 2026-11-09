@@ -150,6 +150,12 @@ endif
 
 USER_CFLAGS += -fcheck-new
 
+# Sming's default task queue (10) is too small for this firmware: on Esp32 every
+# Sming timer expiry, LEDC fade-done dispatch, websocket pump and deferred command
+# shares it. A full queue silently drops timer callbacks and makes RpcCodec abort
+# websocket transfers.
+TASK_QUEUE_LENGTH := 32
+
 ifeq ($(SMING_ARCH),Esp8266)
 USER_CFLAGS += -DTCP_SND_BUF=2780
 endif
