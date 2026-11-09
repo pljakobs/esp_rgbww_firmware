@@ -91,6 +91,7 @@ public:
     ~Controllers();
 
     // Core methods
+    // Refresh TTL/last-seen in RAM; persist changes/duplicate cleanup only with at least 12 KB free.
     void addOrUpdate(unsigned int id, const char* hostname, const char* ipAddress, int ttl, HostType hostType = HOST_TYPE_UNKNOWN);
     void addOrUpdate(unsigned int id, const String& hostname, const String& ipAddress, int ttl, HostType hostType = HOST_TYPE_UNKNOWN);
 
@@ -152,6 +153,7 @@ public:
 
 private:
     static const size_t INVALID_INDEX = SIZE_MAX;
+    static constexpr uint32_t CONTROLLER_UPDATE_MIN_FREE_HEAP = 12000;
     
     std::vector<VisibleController> visibleControllers;
 
