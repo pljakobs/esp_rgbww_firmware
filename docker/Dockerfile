@@ -31,12 +31,10 @@ RUN apt-get -y update \
 RUN git clone $SMING_REPO -b $SMING_BRANCH /opt/Sming 
 
 WORKDIR "/opt/Sming"
+# Use the ConfigDB commit pinned by pljakobs/Sming (fork tracking mikee47 feature/json-rpc,
+# which provides the JsonRPC support used by the firmware)
 RUN git submodule update --init Sming/Libraries/ConfigDB
-WORKDIR "/opt/Sming/Sming/Libraries/ConfigDB"
-RUN git remote add upstream https://github.com/mikee47/ConfigDB || true
-RUN git fetch upstream
-RUN git checkout upstream/develop
-RUN echo "Updated ConfigDB to upstream HEAD: $(git rev-parse --short HEAD)"
+RUN echo "ConfigDB pinned at: $(git -C Sming/Libraries/ConfigDB rev-parse --short HEAD)"
 
 SHELL ["/bin/bash", "-c"]
 WORKDIR "/opt/Sming"

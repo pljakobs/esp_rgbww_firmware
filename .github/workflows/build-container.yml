@@ -35,8 +35,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
-        with:
-          ref: develop
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
