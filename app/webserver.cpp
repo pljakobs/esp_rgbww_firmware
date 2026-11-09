@@ -2127,7 +2127,7 @@ void ApplicationWebserver::onHosts(HttpRequest& request, HttpResponse& response)
 }
 
 void ApplicationWebserver::onData(HttpRequest& request, HttpResponse& response){
-    if(!preflightRequest(request, response, {HttpMethod::POST, HttpMethod::GET}, 12000)) return;
+    if(!preflightRequest(request, response, {HttpMethod::POST, HttpMethod::GET}, 14000)) return;
     
 	if(request.method==HttpMethod::GET){	
 		setCorsHeaders(response);
