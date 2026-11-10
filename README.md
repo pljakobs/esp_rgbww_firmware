@@ -2,7 +2,7 @@
 
 # ESP RGBWW Firmware
 
-Open-source firmware for ESP8266/ESP32-based RGBWW(CW) LED controllers, supporting up to 5 independent PWM channels (R, G, B, WW, CW). Built on the [Sming](https://github.com/SmingHub/Sming) framework.
+Open-source firmware for ESP8266/ESP32-based RGBWW(CW) LED controllers. Depending on the SoC, a controller can use up to 16 hardware PWM outputs across multiple configured lights; each light supports up to 5 color channels (R, G, B, WW, CW). Built on the [Sming](https://github.com/SmingHub/Sming) framework.
 
 This is a fork of [Patrick Jahns' original firmware](https://github.com/patrickjahns/esp_rgbww_firmware) and [VBS's extension](https://github.com/verybadsoldier/esp_rgbww_firmware), significantly extended with multi-controller synchronisation, a rich JSON HTTP API, MQTT with Home Assistant auto-discovery, OTA updates, mDNS, rsyslog support, and a modern Vue/Quasar web application.
 
@@ -39,18 +39,36 @@ This is a fork of [Patrick Jahns' original firmware](https://github.com/patrickj
 | ESP32 | ✅ Supported | 4 000 Hz |
 | ESP32-C3 | ✅ Supported | configurable |
 
-### Known pin configurations
+### QuinLED devices and templates
 
-| Name | SoC | R | G | B | WW | CW | Clear |
-|------|-----|---|---|---|----|----|-------|
-| mrpj | ESP8266 | 13 | 12 | 14 | 5 | 4 | 16 |
-| Lightinator Mini | ESP32-C3 | 0 | 4 | 5 | 6 | 7 | 18 |
-| NodeMCU ESP32-C3 01M | ESP32-C3 | 5 | 7 | 6 | 9 | 10 | 21 |
-| Shojo PCB (WemosD1 mini) | ESP8266 | 14 | 4 | 5 | 15 | 12 | 16 |
+The firmware bundles a versioned hardware catalog of QuinLED device profiles,
+available to clients from `GET /catalog`. Catalog presence does not necessarily
+mean that every device is supported for analog LED control in firmware 5.1:
 
-Pin configurations are fetched at runtime from a remote JSON file (default:
-`https://raw.githubusercontent.com/pljakobs/esp_rgb_webapp2/develop/public/config/pinconfig.json`)
-and can be overridden in the configuration.
+| Board | SoC | 5.1 LED support |
+|-------|-----|-----------------|
+| QuinLED An-Penta-Mini | ESP32-C3 | Analog PWM |
+| QuinLED An-Penta-Deca | ESP32 | Analog PWM |
+| QuinLED An-Penta-Plus | ESP32 | Analog PWM |
+| QuinLED Dig-Uno v4 | ESP32 | Not yet supported for analog LEDs |
+| QuinLED Dig-Quad v4 | ESP32 | Not yet supported for analog LEDs |
+| QuinLED Dig-Next-2 | ESP32 | Not yet supported for analog LEDs |
+
+The QuinLED Dig devices have addressable LED data outputs rather than analog
+PWM outputs. Their catalog entries are groundwork for the 5.2 addressable-light
+extension; they are not currently supported for analog LED control in 5.1.
+
+It also includes these starter templates:
+
+| Template | Board |
+|----------|-------|
+| Mini RGBWW | QuinLED An-Penta-Mini |
+| Deca RGBWW on LED 1-5 | QuinLED An-Penta-Deca |
+| Plus RGBWW | QuinLED An-Penta-Plus |
+
+Templates provide frontend setup defaults; selecting one does not implicitly
+activate hardware configuration. The frontend resolves board pin IDs to GPIO
+numbers before saving the active configuration.
 
 ### M3 hardware schema (5.1 feature branch)
 
@@ -156,7 +174,7 @@ or `Not connected`. Names use the built-in ASCII font and occupy up to three
 Display support is disabled by default and is not available in Host builds.
 
 ### Core
-- Up to 5 independent PWM output channels (RGB, RGBWW, RGBCW, RGBWWCW)
+- Up to 16 hardware PWM outputs across configured lights, depending on SoC; each light supports up to 5 output channels (RGB, RGBWW, RGBCW, RGBWWCW)
 - Smooth, programmable on-board fades and animations
 - Independent per-channel animation queues with configurable queue policies
 - Relative color commands (+/- values on any channel)
