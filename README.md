@@ -2,7 +2,7 @@
 
 # ESP RGBWW Firmware
 
-Open-source firmware for ESP8266/ESP32-based RGBWW(CW) LED controllers, supporting up to 5 independent PWM channels (R, G, B, WW, CW). Built on the [Sming](https://github.com/SmingHub/Sming) framework.
+Open-source firmware for ESP8266/ESP32-based RGBWW(CW) LED controllers. Depending on the SoC, a controller can use up to 16 hardware PWM outputs across multiple configured lights; each light supports up to 5 color channels (R, G, B, WW, CW). Built on the [Sming](https://github.com/SmingHub/Sming) framework.
 
 This is a fork of [Patrick Jahns' original firmware](https://github.com/patrickjahns/esp_rgbww_firmware) and [VBS's extension](https://github.com/verybadsoldier/esp_rgbww_firmware), significantly extended with multi-controller synchronisation, a rich JSON HTTP API, MQTT with Home Assistant auto-discovery, OTA updates, mDNS, rsyslog support, and a modern Vue/Quasar web application.
 
@@ -156,7 +156,7 @@ or `Not connected`. Names use the built-in ASCII font and occupy up to three
 Display support is disabled by default and is not available in Host builds.
 
 ### Core
-- Up to 5 independent PWM output channels (RGB, RGBWW, RGBCW, RGBWWCW)
+- Up to 16 hardware PWM outputs across configured lights, depending on SoC; each light supports up to 5 output channels (RGB, RGBWW, RGBCW, RGBWWCW)
 - Smooth, programmable on-board fades and animations
 - Independent per-channel animation queues with configurable queue policies
 - Relative color commands (+/- values on any channel)
