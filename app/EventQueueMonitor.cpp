@@ -1,5 +1,6 @@
 #include "EventQueueMonitor.h"
 
+#include <RGBWWCtrl.h>
 #include <SmingCore.h>
 
 #ifdef ARCH_ESP32
