@@ -74,21 +74,32 @@ as FSTR resources, copied to LittleFS when missing, and upgraded only when the
 filesystem catalog revision is older than the firmware seed. A version sidecar
 allows that comparison without decompressing or parsing the catalog.
 
-The virtual-light runtime foundation is implemented. Each configured light is
-validated by type and numeric GPIO against the SoC capability ConfigDB, then
-owns a `std::unique_ptr<RGBWWLed>` in the application light vector. A hardware
-ConfigDB commit queues a runtime reload; PWM callback drain and new resource
-validation are checked before replacing running instances. Button, clear and
-I2C setup also consume the numeric GPIO and electrical properties from active
-configuration.
+Configured lights are validated by type and numeric GPIO against the SoC
+capability ConfigDB, then instantiated as independent `RGBWWLed` devices. A
+hardware ConfigDB commit queues a runtime reload; PWM callback drain and
+resource validation are checked before running instances are replaced. Button,
+clear-input and I2C setup also use the numeric GPIO and electrical properties
+from active configuration.
 
-Public command routing is still the legacy singleton path through
-`app.rgbwwctrl`; the `light` selector is not yet routed to individual instances.
-Per-light readback, events, MQTT topics and last-color restore remain follow-up
-work. The interim M3 string-ID pin schema was never released and does not need
-migration. Any 5.0-to-5.1 migration is a separate compatibility task. The 5.0
-schema/runtime are unchanged, and this PR remains draft until API routing and
-supported upgrade behavior are complete.
+The 5.1 runtime supports per-light commands and readback. HTTP requests select
+a light with `?light=N`; JSON-RPC, WebSocket and MQTT commands accept
+`"light": N`. A command may also include the light's persistent `light_id` as
+an identity check. If no selector is supplied, the unique configured default
+light is used. WebSocket clients can subscribe once to the `lights` channel for
+multiplexed per-light state notifications and hardware-configuration change
+notifications. The 5.1 ESP32 PWM channel planner allocates outputs across
+available LEDC speed-mode banks and rejects unavailable or conflicting
+assignments.
+
+The HTTP API specification is available at `/api/openapi.json`, with an
+interactive Swagger UI at `/api/docs`. Both are served by the firmware; the
+Swagger UI assets themselves require an internet connection.
+
+The interim M3 string-ID pin schema was never released and does not need
+migration. Any 5.0-to-5.1 migration is a separate compatibility task; the 5.0
+schema and runtime are unchanged. The 5.1 development branch remains in
+progress, and supported upgrade behavior should be checked for the specific
+build before upgrading.
 
 An earlier, unreleased M3 schema stored board labels such as `L1` in light
 `pins`, button `pin`, clear-pin and I2C SDA/SCL fields. It is not a released
