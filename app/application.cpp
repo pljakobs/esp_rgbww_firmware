@@ -35,6 +35,7 @@
 #include <fileMap.h>
 #include <apihandler.h>
 #include <Wire.h>
+#include "EventQueueMonitor.h"
 #ifdef ARCH_ESP32
 #include <driver/gpio.h>
 #endif
@@ -717,6 +718,7 @@ void Application::init()
 	_uptimetimer.initializeMs(1000, TimerDelegate(&Application::uptimeCounter, this)).start();
 	_checkRamTimer.initializeMs(10000, TimerDelegate(&Application::checkRam, this)).start();
 	_sendTelemetryTimer.initializeMs(60000, TimerDelegate(&Application::sendTelemetry, this)).start();
+	EventQueueMonitor::start();
 
 	// Once we've stayed up this long without crashing, declare the running ROM
 	// healthy and clear the crash-loop counters (enforces the "within x seconds" window).

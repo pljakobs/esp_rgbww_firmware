@@ -2,7 +2,7 @@
   "apiVersion": "1.0.0-inferred.1",
   "status": "inferred",
   "schemaHashAlgorithm": "sha256",
-  "schemaHash": "5ce11345c8f151d72e06f1fc1542f4776886163cfe446565c14d9027e170f1ec",
+  "schemaHash": "fe69330bf47fb1f33dc851e84657feebbae1cc7b62128aca637cf75988ef35fb",
   "sourceSchemas": [
     {
       "database": "Definitions",
@@ -15,8 +15,8 @@
       "source": "schema/json-rpc-api.cfgdb",
       "projection": "json-rpc-api.schema.json",
       "persistent": false,
-      "sourceHash": "6606ce09be5a6390d133a197d8d0ef6dd98d47e8077036e2f8165af5bd4d2770",
-      "projectionHash": "7ccd246f273608cd66284bfdab98becf3839d0e88c39456a22f39b1051322b3c"
+      "sourceHash": "faf1dc226188c27acb1073c27a7940bbd3ad50ebf04287cc18c5c0b59a62bd5a",
+      "projectionHash": "889522f6e27ea78b26b6f37f82ff5382399cdc27afbdb39c746b6b8791780ed7"
     },
     {
       "database": "AppConfig",

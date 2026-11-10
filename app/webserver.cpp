@@ -44,6 +44,7 @@ extern "C" {
 #endif
 
 #include <fileMap.h>
+#include "EventQueueMonitor.h"
 
 IMPORT_FSTR_LOCAL(api_docs, PROJECT_DIR "/api-docs.html");
 IMPORT_FSTR_LOCAL(api_openapi, PROJECT_DIR "/openapi.generated.json.gz");
@@ -51,8 +52,8 @@ IMPORT_FSTR_LOCAL(api_openapi, PROJECT_DIR "/openapi.generated.json.gz");
 //#define NOCACHE
 
 namespace {
-constexpr size_t INFO_DOC_CAPACITY_V1 = 512;
-constexpr size_t INFO_DOC_CAPACITY_V2 = 1224;
+constexpr size_t INFO_DOC_CAPACITY_V1 = 768;
+constexpr size_t INFO_DOC_CAPACITY_V2 = 1536;
 constexpr size_t WS_INFO_RESPONSE_OVERHEAD = 300;
 constexpr size_t WS_INFO_RESPONSE_CAPACITY = INFO_DOC_CAPACITY_V1 + WS_INFO_RESPONSE_OVERHEAD;
 constexpr size_t WS_MAX_QUEUED_OUTPUTS = 4;
@@ -78,6 +79,38 @@ bool parseLightSelector(const String& value, int32_t& selector, String& error)
 		parsed = parsed * 10u + unsigned(digit - '0');
 	}
 	selector = static_cast<int32_t>(parsed);
+	return true;
+}
+
+bool appendEventQueueHealth(String& payload)
+{
+	if(payload.length() < 2 || payload[payload.length() - 1] != '}') {
+		cdebug_e(APPLICATIONWEBSERVER, "onInfo: rendered response is not a JSON object");
+		return false;
+	}
+
+	const auto health = EventQueueMonitor::snapshot();
+	char json[256];
+	const int length = snprintf(
+		json, sizeof(json),
+		",\"event_queue\":{\"available\":%s,\"stalled\":%s,\"pending\":%s,"
+		"\"has_dispatched\":%s,\"probes\":%lu,\"dispatched\":%lu,"
+		"\"enqueue_failures\":%lu,\"consecutive_failures\":%lu,\"stalls\":%lu,"
+		"\"last_dispatch_ms_ago\":%lu,\"pending_ms\":%lu}",
+		health.available ? "true" : "false", health.stalled ? "true" : "false",
+		health.pending ? "true" : "false", health.hasDispatched ? "true" : "false",
+		static_cast<unsigned long>(health.probes), static_cast<unsigned long>(health.dispatched),
+		static_cast<unsigned long>(health.enqueueFailures),
+		static_cast<unsigned long>(health.consecutiveFailures), static_cast<unsigned long>(health.stalls),
+		static_cast<unsigned long>(health.lastDispatchMsAgo), static_cast<unsigned long>(health.pendingMs));
+	if(length < 0 || static_cast<size_t>(length) >= sizeof(json)) {
+		cdebug_e(APPLICATIONWEBSERVER, "onInfo: failed to format event queue health");
+		return false;
+	}
+
+	payload.remove(payload.length() - 1);
+	payload += json;
+	payload += '}';
 	return true;
 }
 
@@ -1645,6 +1678,10 @@ void ApplicationWebserver::onInfo(HttpRequest& request, HttpResponse& response){
 	String payload;
 	payload.reserve(isV2 ? INFO_DOC_CAPACITY_V2 : INFO_DOC_CAPACITY_V1);
 	app.api->renderData(F("info"), params, payload);
+	if(!appendEventQueueHealth(payload)) {
+		response.code = HTTP_STATUS_INTERNAL_SERVER_ERROR;
+		return;
+	}
 
 	if(useSparseCache && !app.ota.isProccessing()) {
 		*cachePayload = payload;

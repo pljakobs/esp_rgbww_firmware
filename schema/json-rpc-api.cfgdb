@@ -297,7 +297,7 @@
     },
     "infoV1Result": {
       "type": "object",
-      "required": ["deviceid", "soc", "git_version", "build_type", "git_date", "webapp_version", "sming", "uptime", "heap_free", "connection"],
+      "required": ["deviceid", "soc", "git_version", "build_type", "git_date", "webapp_version", "sming", "uptime", "heap_free", "connection", "event_queue"],
       "properties": {
         "deviceid": { "type": "integer", "minimum": 0 },
         "soc": { "type": "string" },
@@ -311,13 +311,14 @@
         "uptime": { "type": "integer", "minimum": 0 },
         "heap_free": { "type": "integer", "minimum": 0 },
         "rgbww": { "type": "object", "additionalProperties": true },
-        "connection": { "$ref": "#/definitions/connectionInfo" }
+        "connection": { "$ref": "#/definitions/connectionInfo" },
+        "event_queue": { "$ref": "#/definitions/eventQueueHealth" }
       },
       "additionalProperties": false
     },
     "infoV2Result": {
       "type": "object",
-      "required": ["version", "device", "app", "sming", "filesystem", "connection", "mqtt", "homeassistant"],
+      "required": ["version", "device", "app", "sming", "filesystem", "connection", "mqtt", "homeassistant", "event_queue"],
       "properties": {
         "version": { "type": "integer", "const": 2 },
         "device": { "type": "object", "additionalProperties": true },
@@ -330,7 +331,27 @@
         "connection": { "$ref": "#/definitions/connectionInfo" },
         "mqtt": { "type": "object", "additionalProperties": true },
         "homeassistant": { "type": "object", "additionalProperties": true },
-        "ota": { "type": "object", "additionalProperties": true }
+        "ota": { "type": "object", "additionalProperties": true },
+        "event_queue": { "$ref": "#/definitions/eventQueueHealth" }
+      },
+      "additionalProperties": false
+    },
+    "eventQueueHealth": {
+      "type": "object",
+      "description": "Probe-based liveness signal, not direct queue state; stalled after 5 seconds without dispatch or 3 consecutive enqueue failures.",
+      "required": ["available", "stalled", "pending", "has_dispatched", "probes", "dispatched", "enqueue_failures", "consecutive_failures", "stalls", "last_dispatch_ms_ago", "pending_ms"],
+      "properties": {
+        "available": { "type": "boolean" },
+        "stalled": { "type": "boolean" },
+        "pending": { "type": "boolean" },
+        "has_dispatched": { "type": "boolean" },
+        "probes": { "type": "integer", "minimum": 0 },
+        "dispatched": { "type": "integer", "minimum": 0 },
+        "enqueue_failures": { "type": "integer", "minimum": 0 },
+        "consecutive_failures": { "type": "integer", "minimum": 0 },
+        "stalls": { "type": "integer", "minimum": 0 },
+        "last_dispatch_ms_ago": { "type": "integer", "minimum": 0, "description": "Zero until the first probe dispatches." },
+        "pending_ms": { "type": "integer", "minimum": 0, "description": "Zero when no probe is pending." }
       },
       "additionalProperties": false
     },

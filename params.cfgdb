@@ -374,7 +374,8 @@
         "mqtt": { "$ref": "#/$defs/mqtt-info" },
         "homeassistant": { "$ref": "homeassistant/$defs/homeassistant-info" },
         "ota": { "$ref": "#/$defs/ota-info" },
-        "errors": { "$ref": "#/$defs/component-errors" }
+        "errors": { "$ref": "#/$defs/component-errors" },
+        "event_queue": { "$ref": "#/$defs/event-queue-health" }
       },
       "additionalProperties": false
     },
@@ -397,7 +398,8 @@
         "mqtt": { "$ref": "#/$defs/mqtt-info" },
         "homeassistant": { "$ref": "homeassistant/$defs/homeassistant-info" },
         "ota": { "$ref": "#/$defs/ota-info" },
-        "errors": { "$ref": "#/$defs/component-errors" }
+        "errors": { "$ref": "#/$defs/component-errors" },
+        "event_queue": { "$ref": "#/$defs/event-queue-health" }
       },
       "additionalProperties": false
     },
@@ -406,6 +408,24 @@
         { "$ref": "#/$defs/info-static-params" },
         { "$ref": "#/$defs/info-full-params" }
       ]
+    },
+    "event-queue-health": {
+      "type": "object",
+      "required": ["available", "stalled", "pending", "has_dispatched", "probes", "dispatched", "enqueue_failures", "consecutive_failures", "stalls", "last_dispatch_ms_ago", "pending_ms"],
+      "properties": {
+        "available": { "$ref": "value-types/$defs/boolean-value" },
+        "stalled": { "$ref": "value-types/$defs/boolean-value" },
+        "pending": { "$ref": "value-types/$defs/boolean-value" },
+        "has_dispatched": { "$ref": "value-types/$defs/boolean-value" },
+        "probes": { "$ref": "value-types/$defs/non-negative-integer" },
+        "dispatched": { "$ref": "value-types/$defs/non-negative-integer" },
+        "enqueue_failures": { "$ref": "value-types/$defs/non-negative-integer" },
+        "consecutive_failures": { "$ref": "value-types/$defs/non-negative-integer" },
+        "stalls": { "$ref": "value-types/$defs/non-negative-integer" },
+        "last_dispatch_ms_ago": { "$ref": "value-types/$defs/non-negative-integer" },
+        "pending_ms": { "$ref": "value-types/$defs/non-negative-integer" }
+      },
+      "additionalProperties": false
     },
     "netlist-item": {
       "type": "object",
