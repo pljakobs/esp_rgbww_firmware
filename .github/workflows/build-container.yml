@@ -7,6 +7,18 @@ on:
   schedule:
     - cron: "2 10 * * *" # Runs daily at 2:10  UTC
   workflow_dispatch:
+    inputs:
+      sming_commit:
+        description: 'Exact pljakobs/Sming develop SHA (empty uses current develop)'
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sming-container-publish
+  cancel-in-progress: false
 
 jobs:
   check-updates:
@@ -17,8 +29,15 @@ jobs:
     steps:
       - name: Check for updates in pljakobs/Sming
         id: check
+        env:
+          EVENT_NAME: ${{ github.event_name }}
         run: |
-          latest_commit=$(curl -s "https://api.github.com/repos/pljakobs/Sming/commits/develop" | jq -r '.commit.committer.date')
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == workflow_dispatch ]]; then
+            echo "updated=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          latest_commit=$(curl --fail --silent --show-error "https://api.github.com/repos/pljakobs/Sming/commits/develop" | jq -er '.commit.committer.date')
           latest_commit_date=$(date -d "$latest_commit" +%s)
           current_date=$(date +%s)
           difference=$(( (current_date - latest_commit_date) / 86400 ))
@@ -39,18 +58,29 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Clone SmingHub/Sming repository
+      - name: Clone exact Sming source
+        env:
+          SMING_COMMIT: ${{ inputs.sming_commit }}
         run: |
+          set -euo pipefail
+          if [[ -n "$SMING_COMMIT" && ! "$SMING_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::sming_commit must be a full lowercase commit SHA"
+            exit 1
+          fi
           git clone --branch develop https://github.com/pljakobs/Sming.git sming-repo
+          if [[ -n "$SMING_COMMIT" ]]; then
+            git -C sming-repo merge-base --is-ancestor "$SMING_COMMIT" origin/develop
+            git -C sming-repo checkout --detach "$SMING_COMMIT"
+          fi
+          echo "SMING_COMMIT=$(git -C sming-repo rev-parse HEAD)" >> "$GITHUB_ENV"
 
-      - name: Get latest tag from SmingHub/Sming
+      - name: Get Sming image metadata
         id: get_sming_tag
         run: |
           cd sming-repo
           SMING_TAG=$(git describe --abbrev=4 --dirty --always --tags)
           echo "SMING_TAG=$SMING_TAG" >> $GITHUB_ENV
-          SMING_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-          echo "SMING_BRANCH=$SMING_BRANCH" >> $GITHUB_ENV
+          echo "SMING_BRANCH=develop" >> "$GITHUB_ENV"
 
       - name: Login to DockerHub
         uses: docker/login-action@v3
@@ -64,6 +94,8 @@ jobs:
           no-cache: true
           context: .
           file: docker/Dockerfile
+          build-args: |
+            SMING_COMMIT=${{ env.SMING_COMMIT }}
           push: true
           tags: |
             pjakobs/sming:latest
@@ -73,4 +105,4 @@ jobs:
             org.opencontainers.image.title=Sming
             org.opencontainers.image.description=Sming build image for Esp8266, Esp32 and Esp32c3
             org.opencontainers.image.version=${{ env.SMING_TAG }}
-            org.opencontainers.image.revision=${{ env.SMING_BRANCH }}
+            org.opencontainers.image.revision=${{ env.SMING_COMMIT }}

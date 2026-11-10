@@ -30,6 +30,35 @@ def step(document, job, name):
 
 
 class WorkflowPolicyTests(unittest.TestCase):
+    def test_container_dispatch_preserves_exact_source_revision(self):
+        document = workflow("build-container.yml")
+        self.assertIn("sming_commit", document["on"]["workflow_dispatch"]["inputs"])
+        self.assertEqual(document["permissions"], {"contents": "read"})
+        self.assertFalse(document["concurrency"]["cancel-in-progress"])
+        clone = step(document, "build", "Clone exact Sming source")
+        self.assertEqual(clone["env"]["SMING_COMMIT"], "${{ inputs.sming_commit }}")
+        self.assertIn('merge-base --is-ancestor "$SMING_COMMIT" origin/develop', clone["run"])
+        self.assertIn('checkout --detach "$SMING_COMMIT"', clone["run"])
+        build = step(document, "build", "Build and push Docker image")["with"]
+        self.assertIn("SMING_COMMIT=${{ env.SMING_COMMIT }}", build["build-args"])
+        self.assertIn("org.opencontainers.image.revision=${{ env.SMING_COMMIT }}", build["labels"])
+        dockerfile = (ROOT / "docker/Dockerfile").read_text()
+        self.assertIn('checkout --detach "$SMING_COMMIT"', dockerfile)
+        self.assertIn('test "$(git -C /opt/Sming rev-parse HEAD)" = "$SMING_COMMIT"', dockerfile)
+
+    def test_container_dispatch_skips_update_age_check(self):
+        selected = step(workflow("build-container.yml"), "check-updates",
+                        "Check for updates in pljakobs/Sming")
+        result = self.execute(selected, {"github.event_name": "workflow_dispatch"})
+        self.assertEqual(result["updated"], "true")
+
+    def test_container_rejects_non_sha_input_without_executing_it(self):
+        selected = step(workflow("build-container.yml"), "build", "Clone exact Sming source")
+        for value in ("develop", "abc123", "$(touch should-not-exist)", "a" * 39, "A" * 40):
+            with self.subTest(value=value):
+                self.execute(selected, {"inputs.sming_commit": value}, success=False)
+                self.assertFalse((self.directory / "should-not-exist").exists())
+
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix="workflow-policy-")
         self.addCleanup(temporary.cleanup)

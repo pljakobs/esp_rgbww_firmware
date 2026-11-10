@@ -3,6 +3,7 @@ FROM ubuntu:20.04
 ARG SMING_REPO=https://github.com/pljakobs/Sming
 
 ARG SMING_BRANCH=develop
+ARG SMING_COMMIT=
 ARG ESP32_HARDWARE_PWM_COMMIT=f382bf29811af99c290925cc7621e678f65d6371
 ARG INSTALL_ARGS="Esp32 Esp8266"
 
@@ -29,7 +30,11 @@ RUN apt-get -y update \
 # Fetch Sming and install tools
 # ------------------------------------------------------------------------------
 
-RUN git clone $SMING_REPO -b $SMING_BRANCH /opt/Sming 
+RUN git clone "$SMING_REPO" -b "$SMING_BRANCH" /opt/Sming \
+    && if [ -n "$SMING_COMMIT" ]; then \
+        git -C /opt/Sming checkout --detach "$SMING_COMMIT" \
+        && test "$(git -C /opt/Sming rev-parse HEAD)" = "$SMING_COMMIT"; \
+    fi
 
 WORKDIR "/opt/Sming"
 # Use the ConfigDB commit pinned by pljakobs/Sming (fork tracking mikee47 feature/json-rpc,

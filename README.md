@@ -1011,6 +1011,20 @@ The AP password defaults to `configesp` and should be changed before deployment.
 
 ## Building from Source
 
+### CI build container
+
+The container workflow and Dockerfile remain in this repository. Pushes to
+`pljakobs/Sming`'s `develop` branch dispatch
+`.github/workflows/build-container.yml` on `5.1/develop`, passing the exact
+Sming commit SHA. The image retains the `pjakobs/sming:latest`, `develop`, and
+version tags; its OCI revision label records the source SHA.
+
+The fork-only trigger requires an Actions secret named
+`SMING_CONTAINER_DISPATCH_TOKEN` in `pljakobs/Sming`, containing a token with
+Actions write permission on `pljakobs/esp_rgbww_firmware`. DockerHub credentials
+stay in this repository. Manual container builds may omit `sming_commit` to use
+current Sming `develop`; the daily update check remains enabled.
+
 ### Prerequisites
 
 - [Sming framework](https://github.com/SmingHub/Sming) installed and `SMING_HOME` set
