@@ -45,6 +45,8 @@ class WorkflowPolicyTests(unittest.TestCase):
         dockerfile = (ROOT / "docker/Dockerfile").read_text()
         self.assertIn('checkout --detach "$SMING_COMMIT"', dockerfile)
         self.assertIn('test "$(git -C /opt/Sming rev-parse HEAD)" = "$SMING_COMMIT"', dockerfile)
+        self.assertNotIn("ESP32_HARDWARE_PWM_COMMIT", dockerfile)
+        self.assertIn("git rev-parse HEAD:Sming/Libraries/Esp32HardwarePwm", dockerfile)
 
     def test_container_dispatch_skips_update_age_check(self):
         selected = step(workflow("build-container.yml"), "check-updates",

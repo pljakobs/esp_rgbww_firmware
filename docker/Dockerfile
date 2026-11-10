@@ -4,7 +4,6 @@ ARG SMING_REPO=https://github.com/pljakobs/Sming
 
 ARG SMING_BRANCH=develop
 ARG SMING_COMMIT=
-ARG ESP32_HARDWARE_PWM_COMMIT=f382bf29811af99c290925cc7621e678f65d6371
 ARG INSTALL_ARGS="Esp32 Esp8266"
 
 # ------------------------------------------------------------------------------
@@ -42,9 +41,8 @@ WORKDIR "/opt/Sming"
 RUN git submodule update --init Sming/Libraries/ConfigDB
 RUN echo "ConfigDB pinned at: $(git -C Sming/Libraries/ConfigDB rev-parse --short HEAD)"
 RUN git submodule update --init Sming/Libraries/Esp32HardwarePwm \
-    && git -C Sming/Libraries/Esp32HardwarePwm fetch origin "$ESP32_HARDWARE_PWM_COMMIT" \
-    && git -C Sming/Libraries/Esp32HardwarePwm checkout --detach "$ESP32_HARDWARE_PWM_COMMIT" \
-    && test "$(git -C Sming/Libraries/Esp32HardwarePwm rev-parse HEAD)" = "$ESP32_HARDWARE_PWM_COMMIT"
+    && test "$(git -C Sming/Libraries/Esp32HardwarePwm rev-parse HEAD)" = \
+        "$(git rev-parse HEAD:Sming/Libraries/Esp32HardwarePwm)"
 
 SHELL ["/bin/bash", "-c"]
 WORKDIR "/opt/Sming"
