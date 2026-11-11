@@ -28,7 +28,7 @@ on:
 jobs:
   get-version:
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository) }}
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && contains(fromJSON('["push", "workflow_dispatch"]'), github.event.workflow_run.event) && github.event.workflow_run.head_repository.full_name == github.repository) }}
     outputs:
       fw_version: ${{ steps.version.outputs.fw_version }}
       fw_branch: ${{ steps.version.outputs.fw_branch }}
@@ -73,12 +73,14 @@ jobs:
           CI_EVENT_NAME: ${{ github.event_name }}
           CI_INPUT_BRANCH: ${{ inputs.branch }}
           CI_WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [[ "$CI_EVENT_NAME" == "workflow_dispatch" ]]; then
             encoded_branch=$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$CI_INPUT_BRANCH")
-            latest_run_id=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-              "https://api.github.com/repos/pljakobs/esp_rgbww_firmware/actions/workflows/build_firmware.yml/runs?branch=${encoded_branch}&status=success&event=push&per_page=1" \
-              | jq -r '.workflow_runs[0].id // empty')
+            latest_run_id=$(gh api --paginate --slurp \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/build_firmware.yml/runs?branch=${encoded_branch}&status=success&per_page=100" \
+              | jq -r --arg repository "$GITHUB_REPOSITORY" \
+                '[.[].workflow_runs[] | select((.event == "push" or .event == "workflow_dispatch") and .head_repository.full_name == $repository)] | max_by(.created_at) | .id // empty')
             
             if [ -z "$latest_run_id" ] || [ "$latest_run_id" == "null" ]; then
               echo "ERROR: No successful workflow runs found"
@@ -442,4 +444,3 @@ jobs:
           echo "Running remote update script..."
           ssh -o StrictHostKeyChecking=no ${{ env.deploy_user }}@${{ env.deploy_server }} \
             "flock /tmp/lightinator-firmware-deploy.lock bash ${{ env.deploy_path }}/remote_update-${{ env.deploy_run_key }}.sh"
-

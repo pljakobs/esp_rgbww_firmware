@@ -268,6 +268,21 @@ The update URL serves a JSON array of firmware entries. Each entry identifies
 its release line and stage, build type, firmware version, date, supported SoC,
 and binary download URL.
 
+Build-version defaults use the source tree's `FIRMWARE_RELEASE_LINE` in
+`component.mk` (5.1 on this line), not the version of an ancestor tag. Explicit
+`GIT_VERSION` values supplied by release CI remain unchanged. Local builds use
+cached `ci/<branch>/<run>` tags and report
+`V5.1-<run>-<branch>-<hostname>-<commits>[-dirty]`, retaining the entire branch
+name such as `5.1/develop`. Without a CI tag, they report
+`V5.1-local-<commit>[-dirty]-<branch>`. Build evaluation no longer fetches tags;
+run `git fetch --tags` explicitly when newer CI provenance is needed.
+
+Successful `firmwareBuild` runs triggered by pushes or manual dispatches
+automatically trigger publication. Pull-request and fork builds are excluded.
+A manual **Publish_Firmware** run selects the newest successful push or manually
+dispatched build on the selected branch, with artifact release metadata checked
+against that branch before publishing.
+
 > **Note:** Command-line / scripted OTA is not yet documented. A TUI update tool or integration into the Lightinator Log Service companion is planned.
 
 ---
