@@ -1,6 +1,6 @@
 /**
  * @author  Peter Jakobs http://github.com/pljakobs
- * 
+ *
  * @section LICENSE
  *
  * This program is free software; you can redistribute it and/or
@@ -91,6 +91,7 @@ public:
     ~Controllers();
 
     // Core methods
+    // Refresh TTL/last-seen in RAM; persist changes/duplicate cleanup only with at least 12 KB free.
     void addOrUpdate(unsigned int id, const char* hostname, const char* ipAddress, int ttl, HostType hostType = HOST_TYPE_UNKNOWN);
     void addOrUpdate(unsigned int id, const String& hostname, const String& ipAddress, int ttl, HostType hostType = HOST_TYPE_UNKNOWN);
 
@@ -107,7 +108,7 @@ public:
 
     static HostType hostTypeFromString(const String& type);
     static const char* hostTypeToString(HostType type);
-    
+
     // Query methods
     ControllerInfo getController(unsigned int id);
     const char* getIpAddress(unsigned int id);
@@ -119,7 +120,7 @@ public:
     unsigned int getIdByIpAddress(const char* ipAddress);
     unsigned int getIdByIpAddress(const String& ipAddress);
     uint32_t getHighestId();
-    
+
     // State checks
     bool isVisible(unsigned int id);
     bool isVisibleByHostname(const char* hostname);
@@ -127,11 +128,11 @@ public:
     bool isVisibleByIpAddress(const char* ipAddress);
     bool isVisibleByIpAddress(const String& ipAddress);
     int getTTL(unsigned int id);
-    
+
     // Counts
     size_t getVisibleCount();
     size_t getTotalCount();
-    
+
     // Utility
     void update();
     void forgetControllers();
@@ -146,13 +147,14 @@ public:
     // Iterator support
     Iterator begin();
     Iterator end();
-    
+
     // JSON output: renders the hosts list via the ConfigDB-generated jsonrpc "hosts" schema (see jsonrpc.cfgdb / params.cfgdb).
     std::unique_ptr<IDataSourceStream> createJsonStream(JsonFilter filter = VALID_ONLY, bool pretty = false);
 
 private:
     static const size_t INVALID_INDEX = SIZE_MAX;
-    
+    static constexpr uint32_t CONTROLLER_UPDATE_MIN_FREE_HEAP = 12000;
+
     std::vector<VisibleController> visibleControllers;
 
     // Address fragments (hostname + ip) seen before the controller's id is known
@@ -169,7 +171,7 @@ private:
     // Latches the "inventory bound reached" warning so it logs once per episode
     // instead of on every refused mDNS response.
     bool _inventoryFullReported = false;
-    
+
     // Grace period beyond the advertised TTL before a silent record is dropped
     // (RFC 6762 cache-flush tolerance), so a single missed refresh never evicts.
     static constexpr int VISIBLE_CONTROLLER_GRACE_SECONDS = 300;

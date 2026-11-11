@@ -1,5 +1,12 @@
 COMPONENT_SEARCH_DIRS := $(PROJECT_DIR)/Components
-COMPONENT_DEPENDS += MDNS RGBWWLed LittleFS ConfigDB ArduinoJson6 OtaNetwork 
+COMPONENT_DEPENDS += MDNS RGBWWLed LittleFS ConfigDB ArduinoJson6 OtaNetwork
+
+EVENT_MONITOR ?= 0
+ifneq ($(filter $(EVENT_MONITOR),0 1),$(EVENT_MONITOR))
+$(error EVENT_MONITOR must be 0 or 1)
+endif
+COMPONENT_VARS += EVENT_MONITOR
+COMPONENT_CPPFLAGS += -DEVENT_MONITOR=$(EVENT_MONITOR)
 
 ifeq ($(SMING_ARCH),Esp32)
 ifeq ($(SMING_SOC),esp32c3)
@@ -102,7 +109,7 @@ else ifeq ($(SMING_ARCH), Esp32)
 endif
 
 #CUSTOM_TARGETS += check_versions api-schema-rebuild
-CUSTOM_TARGETS += check_versions 
+CUSTOM_TARGETS += check_versions
 
 #### GIT VERSION Information #####
 ifdef GITHUB_RUN_NUMBER
@@ -145,7 +152,7 @@ endif
 # toolchains can reject -Werror=format-security even with -Wformat enabled.
 
 ifeq ($(ENABLE_CUSTOM_HEAP),1)
-USER_CFLAGS += -DAPP_UMM_HEAP=1 
+USER_CFLAGS += -DAPP_UMM_HEAP=1
 endif
 
 USER_CFLAGS += -fcheck-new
@@ -169,14 +176,14 @@ CUSTOM_LWIP_OPTS += -DLWIP_IPV6=0 \
 	       -DMEMP_NUM_UDP_PCB=2 \
 	       -DMEMP_NUM_TCP_PCB=5 \
 	       -DMEM_LIBC_MALLOC=0 \
-               -DMEMP_MEM_MALLOC=0 
-	       
-		
+               -DMEMP_MEM_MALLOC=0
+
+
 ifneq ($(SMING_ARCH), Esp8266)
 USER_CFLAGS += -Werror=format-security
 USER_CXXFLAGS += -Werror=format-security
 endif
-COMPONENT_CPPFLAGS += -DCONFIG_ESP_CONSOLE_USB_CDC=1 
+COMPONENT_CPPFLAGS += -DCONFIG_ESP_CONSOLE_USB_CDC=1
 
 
 #ifdef MDNS_DEBUG
@@ -244,4 +251,3 @@ endif
 	@echo
 	$(Q) python3 $(PROJECT_DIR)/tools/su_report.py \
 		$(PROJECT_DIR)/out/$(SMING_ARCH) $(STACK_REPORT_TOP) $(STACK_REPORT_BYTES)
-

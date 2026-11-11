@@ -3,7 +3,7 @@
  * @file
  * @author  Patrick Jahns http://github.com/patrickjahns
  *          Peter Jakobs http://github.com/pljakobs
- * 
+ *
  *
  * @section LICENSE
  *
@@ -25,6 +25,7 @@
 
 #include <RGBWWCtrl.h>
 #include <pwmchannelplanner.h>
+#include <CallbackTiming.h>
 #ifdef ARCH_ESP32
 #include <Esp32PwmPlatform.h>
 #endif
@@ -501,6 +502,7 @@ void APPLedCtrl::requestReload()
 	_reloadQueued = true;
 	std::weak_ptr<uint8_t> lifetime = _reloadLifetime;
 	System.queueCallback([this, lifetime]() {
+		CallbackTiming::Scope timing(CallbackTiming::Id::LightReload);
 		if(lifetime.expired()) {
 			return;
 		}
@@ -596,7 +598,7 @@ bool APPLedCtrl::reload(String& error)
 
 /**
  * @brief read local configuration from ConfigDB
- * 
+ *
  */
 void APPLedCtrl::reconfigure()
 {
@@ -621,9 +623,9 @@ void APPLedCtrl::reconfigure()
 }
 /**
  * @brief Initializes the LED controller.
- * 
+ *
  * This function sets up the LED controller by configuring the brightness correction,
- * HSV correction, color mode, HSV model, and white temperature based on the 
+ * HSV correction, color mode, HSV model, and white temperature based on the
  * configuration settings stored in the `app` object.
  */
 void APPLedCtrl::setup()
@@ -641,7 +643,7 @@ void APPLedCtrl::setup()
 
 /**
  * @brief Publishes the current state of the LED controller to the event server.
- * 
+ *
  * This function checks if the event server is enabled and updates the clients accordingly.
  * It publishes the current output and color information to the event server.
  */
@@ -663,11 +665,11 @@ void APPLedCtrl::publishToEventServer()
 
 /**
  * @brief Publishes the current LED color or output to MQTT.
- * 
+ *
  * This function is responsible for publishing the current LED color or output to MQTT.
  * It checks if the color master is enabled and based on the current color mode, it publishes
  * the corresponding data to the MQTT broker.
- * 
+ *
  * @note This function does nothing if the color master is disabled.
  */
 void APPLedCtrl::publishToMqtt(const RGBWWLed& light, uint16_t index)
@@ -709,11 +711,13 @@ void APPLedCtrl::updateLedCb(void* pTimerArg)
  */
 void APPLedCtrl::updateLed()
 {
+	CallbackTiming::Scope timing(CallbackTiming::Id::LedUpdate);
 	_ledTimer.startOnce();
 	bool animFinished = false;
 	bool defaultFinished = false;
 	VirtualLight* defaultLight = nullptr;
 	for(auto& light : app.lights) {
+		CallbackTiming::Scope showTiming(CallbackTiming::Id::LightShow);
 		const bool finished = light.led->show();
 		animFinished |= finished;
 		if(light.isDefault) {
@@ -780,7 +784,7 @@ void APPLedCtrl::checkStableColorState()
 
 /**
  * @brief Publishes the finished step animations.
- * 
+ *
  * This function publishes the finished step animations to the MQTT client and event server.
  * It iterates through the list of step animations and publishes each animation's name and requeued status.
  * After publishing, the list of step animations is cleared.
@@ -798,7 +802,7 @@ void APPLedCtrl::publishFinishedStepAnimations()
 
 /**
  * @brief Resets the master clock and updates the timer interval.
- * 
+ *
  * This function is called when the master clock is reset. It resets the step synchronization
  * and updates the timer interval accordingly. After updating the timer interval, it publishes
  * the status.
@@ -811,12 +815,12 @@ void APPLedCtrl::onMasterClockReset()
 
 /**
  * @brief Handles the master clock event and updates the timer interval for LED control.
- * 
+ *
  * This function is called when the master clock event occurs. It calculates the new timer interval
  * based on the current step counter and the number of steps in the master clock. The timer interval
  * is then limited to ensure it falls within a safe range. Finally, the timer interval is set and the
  * status is published.
- * 
+ *
  * @param stepsMaster The number of steps in the master clock.
  */
 void APPLedCtrl::onMasterClock(uint32_t stepsMaster)
@@ -940,7 +944,7 @@ void APPLedCtrl::setOn(const RGBWWLed::ChannelList& channels, int direction, con
 		HSVCT current = getCurrentColor();
 		HSVCT target = _lastHsvct;
 		// If v==0, restore last nonzero HSV (toggle logic)
-		if (target.v == 0) 
+		if (target.v == 0)
 			target.v = 100; // fallback if last was off
 		// For HSV mode, direction/ramp/queue/requeue/name are used, but channels are ignored
 		fadeHSV(current, target, ramp, direction, queue, requeue, name);

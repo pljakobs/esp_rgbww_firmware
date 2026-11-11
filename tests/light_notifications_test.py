@@ -13,8 +13,10 @@ SUPPORT = r"""
 #include <memory>
 #include <string>
 #include <vector>
+#include <CallbackTiming.h>
 #define F(value) value
 #define cdebug_e(...) ((void)0)
+#define cdebug_d(...) ((void)0)
 #define EVENTSERVER 0
 struct String : std::string {
     using std::string::string;
@@ -107,10 +109,12 @@ struct Root {
         explicit operator bool() const { return true; }
         EventBuilder toLightState() { return {}; }
         EventBuilder toLightsChanged() { return {}; }
+        StateBuilder toColor() { return {}; }
     };
     Update update() { return {}; }
     int asLightState() { return 0; }
     int asLightsChanged() { return 0; }
+    int asColor() { return 0; }
 };
 }
 struct Codec {
@@ -123,7 +127,9 @@ struct Codec {
     }
 } codec;
 Codec& rpcCodec() { return codec; }
-bool normalizeRawUnionForWire(String&) { return true; }
+bool normalizationFail=false;
+unsigned normalizationCalls=0;
+bool normalizeRawUnionForWire(String&) { ++normalizationCalls; return !normalizationFail; }
 uint32_t now=1000;
 uint32_t millis() { return now; }
 struct ApplicationWebserver {
@@ -138,7 +144,7 @@ struct Application {
     std::vector<VirtualLight> lights;
     RGBWWLed* getLight(int index, String&) const {
         for(const auto& light: lights)
-            if(light.index==index) return light.led.get();
+            if(index==-1 || light.index==index) return light.led.get();
         return nullptr;
     }
 } app;
@@ -152,6 +158,12 @@ struct EventServer {
     ApplicationWebserver* webServer;
     bool publishLightState(VirtualLight&);
     void publishLightsChanged();
+    void publishCurrentState(const ChannelOutput&, const HSVCT*);
+    ChannelOutput _lastRaw;
+    HSVCT _lastHsv;
+    bool _lastHasHsv=false;
+    uint32_t _lastEventTime=0, _minEventInterval=200;
+    void sendPayload(const String&) { webServer->frames.push_back(frame); }
 };
 struct JsonProcessor {
     struct RequestParameters { int32_t light=-1; String lightId; };
@@ -207,6 +219,12 @@ int main() {
     assert(!server.publishLightState(second));
     codec.fail=false;
     assert(server.publishLightState(second));
+    now+=200;
+    second.led->output.cw=901;
+    normalizationFail=true;
+    assert(!server.publishLightState(second));
+    normalizationFail=false;
+    assert(server.publishLightState(second));
     app.lights.push_back(std::move(first));
     JsonProcessor processor;
     JsonProcessor::RequestParameters params{3,"first"};
@@ -219,6 +237,41 @@ int main() {
     assert(processor.resolveLight(params,error)==app.lights[0].led.get());
     params.light=-2;
     assert(processor.resolveLight(params,error)==nullptr);
+
+    HSVCT hsv{1.0f,0.5f,0.6f,4000};
+    ChannelOutput raw;
+    raw.ww=123;
+    server.publishCurrentState(raw,&hsv);
+    assert(socket.frames.back().method=="color_event");
+    assert(socket.frames.back().hsv.ct==4000);
+    auto frames=socket.frames.size();
+    server.publishCurrentState(raw,&hsv);
+    assert(socket.frames.size()==frames);
+    raw.ww=124;
+    server.publishCurrentState(raw,&hsv);
+    assert(socket.frames.size()==frames);
+    now+=200;
+    server.publishCurrentState(raw,nullptr);
+    assert(socket.frames.size()==frames+1 && socket.frames.back().raw.ww==124);
+    app.lights[0].led->named=false;
+    now+=200;
+    raw.ww=125;
+    server.publishCurrentState(raw,nullptr);
+    assert(socket.frames.back().indexed==std::vector<int>({125}));
+    frames=socket.frames.size();
+    now+=200;
+    raw.ww=126;
+    codec.fail=true;
+    auto normalized=normalizationCalls;
+    server.publishCurrentState(raw,nullptr);
+    assert(socket.frames.size()==frames && normalizationCalls==normalized);
+    codec.fail=false;
+    now+=200;
+    raw.ww=127;
+    normalizationFail=true;
+    server.publishCurrentState(raw,nullptr);
+    assert(socket.frames.size()==frames);
+    normalizationFail=false;
 }
 """
 
@@ -231,14 +284,15 @@ def test_light_notifications_and_uuid_guard(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[1]
     source = (root / "app/eventserver.cpp").read_text()
     start = source.index("bool EventServer::publishLightState(")
-    end = source.index("void EventServer::publishCurrentState(", start)
+    end = source.index("void EventServer::publishClockSlaveStatus(", start)
     publisher = source[start:end]
     source = (root / "app/jsonprocessor.cpp").read_text()
     start = source.index("RGBWWLed* JsonProcessor::resolveLight(")
     end = source.index("bool JsonProcessor::resolveRawChannels(", start)
     binary = tmp_path / "light-notifications"
     result = subprocess.run(
-        [compiler, "-std=c++17", "-D_GLIBCXX_ASSERTIONS", "-x", "c++", "-", "-o", str(binary)],
+        [compiler, "-std=c++17", "-D_GLIBCXX_ASSERTIONS", "-DSMING_RELEASE",
+         "-I", str(root / "include"), "-x", "c++", "-", "-o", str(binary)],
         input=SUPPORT + publisher + source[start:end] + TESTS,
         text=True, capture_output=True, check=False,
     )

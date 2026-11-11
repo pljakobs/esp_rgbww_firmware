@@ -20,6 +20,7 @@
  *
  */
 #include <RGBWWCtrl.h>
+#include <CallbackTiming.h>
 #include <Network/Mqtt/MqttBuffer.h>
 #include <BufferInputStream.h>
 #include <apihandler.h>
@@ -36,14 +37,14 @@ AppMqttClient::~AppMqttClient()
 }
 
 void AppMqttClient::onComplete(TcpClient& client, bool success)
-//onComplete handler for mqtt 
+//onComplete handler for mqtt
 {
     if(!_running) {
         return;
     }
 	// lost connection
 		connectDelayed(2000);
-	
+
 	// Restart connection attempt after few seconds
 }
 
@@ -77,7 +78,7 @@ void AppMqttClient::connect()
 		cdebug_i(APPMQTTCLIENT, "AppMqttClient::connect: " ANSI_COLOR_BLUE "mqtt already connecting" ANSI_COLOR_RESET);
 		return;
 	   }
-	
+
 	String availabilityTopic = buildTopic(F("availability"));
 	if(!mqtt->setWill(availabilityTopic, F("offline"),
 					  MqttClient::getFlags(MQTT_QOS_AT_LEAST_ONCE, MQTT_RETAIN_TRUE))) {
@@ -91,7 +92,7 @@ void AppMqttClient::connect()
 		url = F("mqtt://") + network.mqtt.getUsername() + F(":") + network.mqtt.getPassword() + F("@") +
 				  network.mqtt.getServer() + F(":") + String(network.mqtt.getPort());
         cdebug_i(APPMQTTCLIENT, "AppMqttClient::connect: " ANSI_COLOR_BLUE "mqtt url: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE ", id: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, url.toString().c_str(), _id.c_str());
-		
+
 	} // end ConfigDB network context
 #ifdef ENABLE_SSL
 	// not need i guess? mqtt->addSslOptions(SSL_SERVER_VERIFY_LATER);
@@ -105,10 +106,10 @@ void AppMqttClient::connect()
 #endif
 	// Assign a disconnect callback function
 	mqtt->setCompleteDelegate(TcpClientCompleteDelegate(&AppMqttClient::onComplete, this));
-	
+
 	mqtt->connect(url, _id);
 	// Initialize Home Assistant after connection
-	
+
 }
 
 // ToDo: rework this so the class is less depending on the app itself but rather the app initializes the calls
@@ -125,7 +126,7 @@ void AppMqttClient::init()
 		_id = String("rgbww_") + String(system_get_chip_id());
 		cdebug_i(APPMQTTCLIENT, "AppMqttClient::init: " ANSI_COLOR_BLUE "ID: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "\n" ANSI_COLOR_RESET, _id.c_str());
 	}
-	
+
 	cdebug_i(APPMQTTCLIENT, "AppMqttClient::init: " ANSI_COLOR_BLUE "finished mqtt init\n" ANSI_COLOR_RESET);
 }
 
@@ -157,7 +158,7 @@ int AppMqttClient::onConnected(MqttClient& client, mqtt_message_t* message){
 	// Retained discovery messages can be lost when a broker restarts; re-publishing
 	// ensures HA always has a valid discovery payload.
 	_haConfigPublished = false;
-	// Publish availability "online" to match the LWT "offline" 
+	// Publish availability "online" to match the LWT "offline"
 	publish(buildTopic(F("availability")), F("online"), true);
 	{
 		AppConfig::Sync sync(*app.cfg);
@@ -179,7 +180,7 @@ int AppMqttClient::onConnected(MqttClient& client, mqtt_message_t* message){
 		}else{
 			cdebug_i(APPMQTTCLIENT, "AppMqttClient::onConnected: " ANSI_COLOR_BLUE "home assistant compatibility disabled" ANSI_COLOR_RESET);
 		}
-	} 
+	}
 	return 0;
 }
 
@@ -203,13 +204,14 @@ bool AppMqttClient::isRunning() const
 
 int AppMqttClient::onMessageReceived(MqttClient& client, mqtt_message_t* msg)
 {
+	CallbackTiming::Scope timing(CallbackTiming::Id::MqttReceive);
 	String topic = MqttBuffer(msg->publish.topic_name);
 
     String message = MqttBuffer(msg->publish.content);
-    
+
     cdebug_i(APPMQTTCLIENT, "AppMqttClient::onMessageReceived: " ANSI_COLOR_BLUE "MQTT: Received message on topic: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, topic.c_str());
     cdebug_i(APPMQTTCLIENT, "AppMqttClient::onMessageReceived: " ANSI_COLOR_BLUE "MQTT: Message content: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, message.c_str());
-    
+
     // Check if this is a Home Assistant command
     if (_haEnabled) {
         String haCommandTopic = _haDiscoveryPrefix + F("/light/") + _haNodeId + F("/") + _haObjectId + F("/set");
@@ -218,7 +220,7 @@ int AppMqttClient::onMessageReceived(MqttClient& client, mqtt_message_t* msg)
             handleHomeAssistantCommand(message);
             return 0;
         }
-        
+
         // Check for individual channel commands
         Vector<String> activeChannels;
         getActiveChannelNames(activeChannels);
@@ -265,7 +267,7 @@ int AppMqttClient::onMessageReceived(MqttClient& client, mqtt_message_t* msg)
 
 void AppMqttClient::publish(const String& topic, const String& data, bool retain)
 {
-	
+
 	if(!mqtt) {
 		cdebug_w(APPMQTTCLIENT, "AppMqttClient::publish: " ANSI_COLOR_YELLOW "no MQTT object\n" ANSI_COLOR_RESET);
 		return;
@@ -282,13 +284,13 @@ void AppMqttClient::publish(const String& topic, const String& data, bool retain
 	if (_haEnabled) {
         publishHAState(app.rgbwwctrl.getCurrentOutput(), &color);
     }
-	*/	
+	*/
 
 	/*
 	if (_haEnabled) {
         publishHAState(app.rgbwwctrl.getCurrentOutput(), &color);
     }
-	*/	
+	*/
 }
 
 void AppMqttClient::publishCurrentRaw(const RGBWWLed& light, uint16_t index)
@@ -572,33 +574,33 @@ void AppMqttClient::initHomeAssistant() {
     }
     cdebug_i(APPMQTTCLIENT, "AppMqttClient::initHomeAssistant: " ANSI_COLOR_BLUE "HA::discoveryPrefix: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET,_haDiscoveryPrefix.c_str());
 	cdebug_i(APPMQTTCLIENT, "AppMqttClient::initHomeAssistant: " ANSI_COLOR_BLUE "HA::NodeId: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, _haNodeId.c_str());
-    
+
     // If node_id is empty, use the device ID (controller name)
     if (_haNodeId.length() == 0) {
         _haNodeId = _id;  // This is the controller name
     }
-    
+
     // Clean up node ID: trim spaces and replace spaces with underscores for MQTT topic compatibility
     _haNodeId.trim();
     _haNodeId.replace(F(" "), ("_"));
-    
+
     // Generate unique_id from chip ID
     _haUniqueId = F("rgbww_") + String(system_get_chip_id());
-    
+
     // Object ID for this light entity
     _haObjectId = "1";
-    
+
     cdebug_i(APPMQTTCLIENT, "AppMqttClient::initHomeAssistant: " ANSI_COLOR_BLUE "HA::NodeId (device): " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, _haNodeId.c_str());
     cdebug_i(APPMQTTCLIENT, "AppMqttClient::initHomeAssistant: " ANSI_COLOR_BLUE "HA::UniqueId (chip): " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, _haUniqueId.c_str());
     cdebug_i(APPMQTTCLIENT, "AppMqttClient::initHomeAssistant: " ANSI_COLOR_BLUE "HA::ObjectId (entity): " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, _haObjectId.c_str());
-    
+
     // Subscribe to the HA command topic
     if (mqtt && mqtt->getConnectionState() == TcpClientState::eTCS_Connected) {
         String commandTopic = _haDiscoveryPrefix + F("/light/") + _haNodeId + F("/") + _haObjectId + F("/set");
         mqtt->subscribe(commandTopic);
         cdebug_i(APPMQTTCLIENT, "AppMqttClient::initHomeAssistant: " ANSI_COLOR_BLUE "Subscribed to HA command topic: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, commandTopic.c_str());
     }
-    
+
     // Publish the discovery configuration
     publishHomeAssistantConfig();
 }
@@ -618,13 +620,13 @@ void AppMqttClient::publishHomeAssistantConfig() {
     String cleanDeviceName = deviceName;
     cleanDeviceName.trim();
     cleanDeviceName.replace(F(" "), F("_"));
-    
+
     // Update node_id with clean name if it was auto-generated
     if (_haNodeId == deviceName || _haNodeId.indexOf(' ') >= 0) {
         _haNodeId = cleanDeviceName;
         cdebug_i(APPMQTTCLIENT, "AppMqttClient::publishHomeAssistantConfig: " ANSI_COLOR_BLUE "Updated HA node_id to clean version: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, _haNodeId.c_str());
     }
-    
+
     auto& codec = rpcCodec();
     Jsonrpc::Root root(codec.db());
     auto update = root.update();
@@ -647,14 +649,14 @@ void AppMqttClient::publishHomeAssistantConfig() {
     for (unsigned i = 0; i < supportedModes.count(); i++) {
         discovery.supportedColorModes.addItem(supportedModes[i]);
     }
-    
+
     // Add white temperature support for modes with warm white
     int colorMode = getCurrentColorMode();
     if (colorMode == 1 || colorMode == 3) { // RGBWW or RGBWWCW
         discovery.setMinMireds(153);
         discovery.setMaxMireds(370);
     }
-    
+
     // Optimization
     discovery.setOptimistic(false);
     discovery.setRetain(true);
@@ -663,27 +665,27 @@ void AppMqttClient::publishHomeAssistantConfig() {
     discovery.device.setModel(F("RGBWW Controller"));
     discovery.device.setManufacturer(F("ESP RGBWW Firmware"));
     discovery.device.setSwVersion(GITVERSION);
-    
+
     // Publish discovery message
     String configTopic = _haDiscoveryPrefix + F("/light/") + _haNodeId + F("/") + _haObjectId + F("/config");
-    
+
     cdebug_i(APPMQTTCLIENT, "AppMqttClient::publishHomeAssistantConfig: " ANSI_COLOR_BLUE "Publishing HA config to topic: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, configTopic.c_str());
     cdebug_i(APPMQTTCLIENT, "AppMqttClient::publishHomeAssistantConfig: " ANSI_COLOR_BLUE "Device name: '" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "', Node ID: '" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "', Unique ID: '" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "'" ANSI_COLOR_RESET, deviceName.c_str(), _haNodeId.c_str(), _haUniqueId.c_str());
-    
+
     String configPayload;
     if(codec.renderPayload(root.asHaDiscoveryMain(), configPayload)) {
         publish(configTopic, configPayload, true);
     }
-    
+
     _haConfigPublished = true;
-    
+
     // Publish individual channel configurations
     Vector<String> activeChannels;
     getActiveChannelNames(activeChannels);
     for (unsigned i = 0; i < activeChannels.count(); i++) {
         publishChannelConfig(activeChannels[i]);
     }
-    
+
     // Publish initial state
     publishHAState(app.rgbwwctrl.getCurrentOutput(), &app.rgbwwctrl.getCurrentColor());
 }
@@ -699,7 +701,7 @@ void AppMqttClient::publishChannelConfig(const String& channelName) {
 
     // Topic: homeassistant/light/node_id/channel_name/config
     String configTopic = _haDiscoveryPrefix + F("/light/") + _haNodeId + F("/") + channelName + F("/config");
-    
+
     auto& codec = rpcCodec();
     Jsonrpc::Root root(codec.db());
     auto update = root.update();
@@ -718,14 +720,14 @@ void AppMqttClient::publishChannelConfig(const String& channelName) {
     discovery.device.setModel(F("RGBWW Controller"));
     discovery.device.setManufacturer(F("ESP RGBWW Firmware"));
     discovery.device.setSwVersion(GITVERSION);
-    
+
     // Subscribe to channel command topic
     if (mqtt && mqtt->getConnectionState() == TcpClientState::eTCS_Connected) {
         String commandTopic = _haDiscoveryPrefix + F("/light/") + _haNodeId + F("/") + channelName + F("/set");
         mqtt->subscribe(commandTopic);
     cdebug_i(APPMQTTCLIENT, "AppMqttClient::publishChannelConfig: " ANSI_COLOR_BLUE "Subscribed to channel command topic: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, commandTopic.c_str());
     }
-    
+
     // Publish channel discovery message
     cdebug_i(APPMQTTCLIENT, "AppMqttClient::publishChannelConfig: " ANSI_COLOR_BLUE "Publishing channel config for " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " to: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, channelName.c_str(), configTopic.c_str());
     String configPayload;
@@ -738,25 +740,25 @@ void AppMqttClient::publishHAState(const ChannelOutput& raw, const HSVCT* pHsv) 
     if (!_haEnabled) {
         return;
     }
-    
+
     cdebug_i(APPMQTTCLIENT, "AppMqttClient::publishHAState: " ANSI_COLOR_BLUE "HA: Publishing main light state" ANSI_COLOR_RESET);
     cdebug_i(APPMQTTCLIENT, "AppMqttClient::publishHAState: " ANSI_COLOR_BLUE "HA: Raw values - R:" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " G:" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " B:" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " WW:" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " CW:" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, raw.r, raw.g, raw.b, raw.ww, raw.cw);
-    
+
     // Get HSV values
     HSVCT color = pHsv ? *pHsv : app.rgbwwctrl.getCurrentColor();
     float h, s, v;
     int ct;
     color.asRadian(h, s, v, ct);
-    
+
     cdebug_i(APPMQTTCLIENT, "AppMqttClient::publishHAState: " ANSI_COLOR_BLUE "HA: HSV values - H:" ANSI_COLOR_CYAN "%.3f" ANSI_COLOR_BLUE " deg, S:" ANSI_COLOR_CYAN "%.1f" ANSI_COLOR_BLUE "" ANSI_COLOR_CYAN "%%" ANSI_COLOR_BLUE ", V:" ANSI_COLOR_CYAN "%.1f" ANSI_COLOR_BLUE "" ANSI_COLOR_CYAN "%%" ANSI_COLOR_BLUE ", CT:" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, h, s, v, ct);
-    
+
     // asRadian() actually returns H in degrees (0-360°) and S,V in percentages (0-100%)
     float hue_degrees = h;      // Already in degrees
-    float sat_percent = s;      // Already in percent  
+    float sat_percent = s;      // Already in percent
     float val_percent = v;      // Already in percent
-    
+
     cdebug_i(APPMQTTCLIENT, "AppMqttClient::publishHAState: " ANSI_COLOR_BLUE "HA: Converted for HA - H:" ANSI_COLOR_CYAN "%.1f" ANSI_COLOR_BLUE "°, S:" ANSI_COLOR_CYAN "%.1f" ANSI_COLOR_BLUE "" ANSI_COLOR_CYAN "%%" ANSI_COLOR_BLUE ", V:" ANSI_COLOR_CYAN "%.1f" ANSI_COLOR_BLUE "" ANSI_COLOR_CYAN "%%" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, hue_degrees, sat_percent, val_percent);
-    
+
     const char* stateStr = v > 0 ? "ON" : "OFF";
     const uint8_t brightness = (uint8_t)val_percent;
 
@@ -792,13 +794,13 @@ void AppMqttClient::publishHAState(const ChannelOutput& raw, const HSVCT* pHsv) 
         }
         rendered = codec.renderPayload(root.asHaStateHs(), statePayload);
     }
-    
+
     String stateTopic = _haDiscoveryPrefix + F("/light/") + _haNodeId + F("/") + _haObjectId + F("/state");
     if(rendered) {
         cdebug_i(APPMQTTCLIENT, "AppMqttClient::publishHAState: " ANSI_COLOR_BLUE "HA: Publishing to topic '" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "': " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, stateTopic.c_str(), statePayload.c_str());
         publish(stateTopic, statePayload, true);
     }
-    
+
     // Publish individual channel states
     Vector<String> activeChannels;
     getActiveChannelNames(activeChannels);
@@ -811,9 +813,9 @@ void AppMqttClient::publishChannelState(const String& channelName, const Channel
     if (!_haEnabled) {
         return;
     }
-    
+
     int channelValue = 0;
-    
+
     // Map channel name to raw channel value (0-1023)
     // Check both configured names and standard fallback names
     if (channelName == F("red")) {
@@ -827,9 +829,9 @@ void AppMqttClient::publishChannelState(const String& channelName, const Channel
     } else if (channelName == F("coldwhite") || channelName == F("cool_white") || channelName == F("cold_white")) {
         channelValue = raw.cw;
     }
-    
+
     cdebug_i(APPMQTTCLIENT, "AppMqttClient::publishChannelState: " ANSI_COLOR_BLUE "HA: Publishing channel '" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "' state: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " (0-1023 scale)" ANSI_COLOR_RESET, channelName.c_str(), channelValue);
-    
+
     auto& codec = rpcCodec();
     Jsonrpc::Root root(codec.db());
     if(auto update = root.update()) {
@@ -841,7 +843,7 @@ void AppMqttClient::publishChannelState(const String& channelName, const Channel
     if(!codec.renderPayload(root.asHaChannelState(), statePayload)) {
         return;
     }
-    
+
     String stateTopic = _haDiscoveryPrefix + F("/light/") + _haNodeId + F("/") + channelName + F("/state");
     cdebug_i(APPMQTTCLIENT, "AppMqttClient::publishChannelState: " ANSI_COLOR_BLUE "HA: Publishing to topic '" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "': " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, stateTopic.c_str(), statePayload.c_str());
     publish(stateTopic, statePayload, true);
@@ -849,7 +851,7 @@ void AppMqttClient::publishChannelState(const String& channelName, const Channel
 
 void AppMqttClient::handleChannelCommand(const String& channelName, const String& message) {
     cdebug_i(APPMQTTCLIENT, "AppMqttClient::handleChannelCommand: " ANSI_COLOR_BLUE "HA: Processing channel command for '" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "': " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, channelName.c_str(), message.c_str());
-    
+
     String state;
     String brightnessValue;
     {
@@ -870,12 +872,12 @@ void AppMqttClient::handleChannelCommand(const String& channelName, const String
         state = command.getState();
         brightnessValue = command.getBrightness();
     }
-    
+
     // Get current raw values
     ChannelOutput currentRaw = app.rgbwwctrl.getCurrentOutput();
-    cdebug_i(APPMQTTCLIENT, "AppMqttClient::handleChannelCommand: " ANSI_COLOR_BLUE "HA: Current raw values - R:" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " G:" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " B:" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " WW:" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " CW:" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, 
+    cdebug_i(APPMQTTCLIENT, "AppMqttClient::handleChannelCommand: " ANSI_COLOR_BLUE "HA: Current raw values - R:" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " G:" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " B:" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " WW:" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " CW:" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET,
             currentRaw.r, currentRaw.g, currentRaw.b, currentRaw.ww, currentRaw.cw);
-    
+
     // Handle state command
     if (state.length() > 0) {
         cdebug_i(APPMQTTCLIENT, "AppMqttClient::handleChannelCommand: " ANSI_COLOR_BLUE "HA: Channel state command: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, state.c_str());
@@ -899,19 +901,19 @@ void AppMqttClient::handleChannelCommand(const String& channelName, const String
             }
         }
     }
-    
+
     // Handle brightness command (0-1023 scale as configured in discovery)
     if (brightnessValue.length() > 0) {
         int brightness = brightnessValue.toInt();
         cdebug_i(APPMQTTCLIENT, "AppMqttClient::handleChannelCommand: " ANSI_COLOR_BLUE "HA: Channel brightness command: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " (0-1023 scale)" ANSI_COLOR_RESET, brightness);
-        
+
         // Clamp to valid range 0-1023
         int originalBrightness = brightness;
         brightness = (brightness < 0) ? 0 : ((brightness > 1023) ? 1023 : brightness);
         if (brightness != originalBrightness) {
             cdebug_w(APPMQTTCLIENT, "AppMqttClient::handleChannelCommand: " ANSI_COLOR_YELLOW "HA: Clamped brightness from " ANSI_COLOR_CYAN "%d" ANSI_COLOR_YELLOW " to " ANSI_COLOR_CYAN "%d" ANSI_COLOR_YELLOW "" ANSI_COLOR_RESET, originalBrightness, brightness);
         }
-        
+
         if (channelName == F("red")) {
             currentRaw.r = brightness;
             cdebug_i(APPMQTTCLIENT, "AppMqttClient::handleChannelCommand: " ANSI_COLOR_BLUE "HA: Setting red channel to " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, brightness);
@@ -929,14 +931,14 @@ void AppMqttClient::handleChannelCommand(const String& channelName, const String
             cdebug_i(APPMQTTCLIENT, "AppMqttClient::handleChannelCommand: " ANSI_COLOR_BLUE "HA: Setting cool white channel to " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, brightness);
         }
     }
-    
-    cdebug_i(APPMQTTCLIENT, "AppMqttClient::handleChannelCommand: " ANSI_COLOR_BLUE "HA: New raw values - R:" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " G:" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " B:" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " WW:" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " CW:" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, 
+
+    cdebug_i(APPMQTTCLIENT, "AppMqttClient::handleChannelCommand: " ANSI_COLOR_BLUE "HA: New raw values - R:" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " G:" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " B:" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " WW:" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE " CW:" ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET,
             currentRaw.r, currentRaw.g, currentRaw.b, currentRaw.ww, currentRaw.cw);
-    
+
     // Apply the changes
     cdebug_i(APPMQTTCLIENT, "AppMqttClient::handleChannelCommand: " ANSI_COLOR_BLUE "HA: Applying changes to LED controller" ANSI_COLOR_RESET);
     app.rgbwwctrl.setRAW(currentRaw);
-    
+
     // Publish state update for this channel only
     cdebug_i(APPMQTTCLIENT, "AppMqttClient::handleChannelCommand: " ANSI_COLOR_BLUE "HA: Publishing state update for channel '" ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "'" ANSI_COLOR_RESET, channelName.c_str());
     publishChannelState(channelName, currentRaw);
@@ -950,9 +952,9 @@ void AppMqttClient::handleHomeAssistantCommand(const String& message) {
     if (!_haEnabled) {
         return;
     }
-    
+
     cdebug_i(APPMQTTCLIENT, "AppMqttClient::handleHomeAssistantCommand: " ANSI_COLOR_BLUE "HA: Processing main light command: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, message.c_str());
-    
+
     String state;
     String brightnessValue;
     String colorH;
@@ -1066,7 +1068,7 @@ void AppMqttClient::handleHomeAssistantCommand(const String& message) {
     } else {
         cdebug_i(APPMQTTCLIENT, "AppMqttClient::handleHomeAssistantCommand: " ANSI_COLOR_BLUE "HA: LED controller command processed successfully" ANSI_COLOR_RESET);
     }
-    
+
     // Publish state update after processing
     publishHAState(app.rgbwwctrl.getCurrentOutput(), nullptr);
 }
@@ -1098,12 +1100,12 @@ void AppMqttClient::getActiveChannelNames(Vector<String>& channels) {
 
 void AppMqttClient::getSupportedColorModes(Vector<String>& modes) {
     modes.clear();
-    
+
     // Primary mode is HSV (hue + saturation)
     modes.addElement(F("hs"));
-    
+
     int colorMode = getCurrentColorMode();
-    
+
     // Add white color modes for modes that support white channels
     if (colorMode == 1 || colorMode == 3) { // RGBWW or RGBWWCW
         modes.addElement(F("color_temp"));

@@ -99,6 +99,58 @@ The access point is a recovery/setup path, not a prerequisite for normal
 station-mode operation. Services that require a broker or reachable network
 are conditional on their configuration and on network availability.
 
+## PWM Ownership and Scheduling: Future Investigation
+
+This is an architectural follow-up, not a committed redesign.
+
+Currently, each light's `PWMOutput` creates its own `Esp32HardwarePwm`
+instance(s). Instances can share an LEDC timer without owning a common
+timer-level configuration object. Frequency and spread spectrum are properties
+of that hardware timer, not independent properties of its channels or lights.
+
+The shared PWM worker currently tracks spread-spectrum deadlines per instance.
+At 8 kHz PWM with subsampling 4, each enabled instance requests a 500 us
+interval. Staggered deadlines can multiply worker/timer wakeups as instance
+count grows; sharing the worker alone does not coalesce the schedule. Actual
+rates depend on scheduling and overdue-work coalescing and must be measured.
+
+Investigate:
+
+- Controller-owned PWM resources, created by firmware, with `RGBWWLed` receiving
+  channel assignments or non-owning output views rather than constructing one
+  hardware backend per light.
+- Explicit ownership by LEDC speed mode, timer and channel. One controller
+  backend may still need multiple timer/bank configurations; do not assume one
+  frequency or resolution for every output.
+- Timer-level coordination of frequency/spread-spectrum settings and a shared
+  cadence that avoids redundant writes and staggered per-light wakeups.
+- Resource lifetime, runtime light reconfiguration, conflicting timer settings
+  and portability to ESP8266 and other output backends.
+- Keeping animation queues, color conversion and animation policy in RGBWWLed.
+  Prepared hardware segments can provide lookahead without moving animation
+  ownership into HardwarePWM; completion notifications must not gate the next
+  prepared segment on the 20 ms RGBWWLed tick.
+
+Measure timer firings, worker passes, per-hardware-timer updates and execution
+time before selecting an approach. No runtime behavior changes are implied by
+this note.
+
+## WebSocket String Output: Possible Later Optimization
+
+Investigate routing ordinary string notifications through the application's
+incremental stream pump. Currently the string output queue flushes immediately;
+the underlying WebSocket API already wraps strings in a memory stream, so a
+String-to-Stream adapter alone does not defer the work.
+
+A useful implementation would transfer ownership of the serialized payload
+where possible, defer the initial pump (which currently runs synchronously),
+and bound work per invocation. Preserve payload lifetime, per-connection FIFO
+ordering, backpressure, disconnect handling and broadcast ownership semantics.
+Measure logging, copies, framing and submission separately before changing the
+path. Deferral redistributes work rather than eliminating it, does not reduce
+ConfigDB/JSON generation cost, and does not guarantee a separate TCP/IP batch.
+This is a candidate optimization, not a committed redesign or runtime change.
+
 ## Storage and Update Boundaries
 
 - **Firmware image:** boot/partition management selects the running firmware

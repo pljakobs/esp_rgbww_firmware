@@ -9,6 +9,7 @@
  */
 
 #include <webappota.h>
+#include <CallbackTiming.h>
 #include <application.h>
 #include <ArduinoJson.h>
 #include <FileSystem.h>
@@ -137,13 +138,13 @@ void WebappOta::checkForUpdate(bool ignoreEnabled)
 
     if (app.getFreeHeapSize() < WEBAPP_OTA_MIN_UPDATE_HEAP) {
         cdebug_w(WEBAPPOTA, "WebappOta::checkForUpdate: " ANSI_COLOR_YELLOW "low heap (" ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW ", should be " ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW " bytes), backing off 5s" ANSI_COLOR_RESET, app.getFreeHeapSize(), WEBAPP_OTA_MIN_UPDATE_HEAP);
-        
+
         // Statically allocated CallbackTimer avoids heap allocation.
         static Timer heapRetryTimer;
         heapRetryTimer.initializeMs(5000, TimerDelegate([this, ignoreEnabled]() {
             this->checkForUpdate(ignoreEnabled);
         })).startOnce();
-        
+
         return;
     }
 
@@ -151,7 +152,7 @@ void WebappOta::checkForUpdate(bool ignoreEnabled)
     cdebug_i(WEBAPPOTA, "WebappOta::checkForUpdate: " ANSI_COLOR_BLUE "| file system size and usage |" ANSI_COLOR_RESET);
     cdebug_i(WEBAPPOTA, "WebappOta::checkForUpdate: " ANSI_COLOR_BLUE "==============================" ANSI_COLOR_RESET);
     printFileSystemUsage();
-    
+
     /*
     debug_i(ANSI_COLOR_BLUE "==============================" ANSI_COLOR_RESET);
     debug_i(ANSI_COLOR_BLUE "|   current directory layout |" ANSI_COLOR_RESET);
@@ -507,6 +508,7 @@ int WebappOta::onFileDownloaded(HttpConnection& client, bool successful)
 
 void WebappOta::verifyAndContinue()
 {
+    CallbackTiming::Scope timing(CallbackTiming::Id::OtaVerify);
     AppConfig::Webapp webapp(*app.cfg);
     auto file = webapp.current.files[_pendingFileIndices[_fileIndex]];
     String destPath = stagingPath(file.getFilename());
@@ -529,6 +531,7 @@ void WebappOta::verifyAndContinue()
 
 bool WebappOta::verifyFileMd5(const String& filePath, const String& expectedMd5)
 {
+    CallbackTiming::Scope timing(CallbackTiming::Id::OtaHash);
     FileStream fs;
     if(!fs.open(filePath, File::ReadOnly)) {
         cdebug_e(WEBAPPOTA, "WebappOta::verifyFileMd5: " ANSI_COLOR_RED "cannot open " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED "" ANSI_COLOR_RESET, filePath.c_str());
@@ -828,15 +831,15 @@ void WebappOta::cleanupStaging()
 void WebappOta::listDirectory(const String& path, int depth)
 {
     Directory dir;
-    
+
     // Open the current directory path scope
     if (!dir.open(path)) {
-        return; 
+        return;
     }
 
     while (dir.next()) {
         String name = String(dir.stat().name.c_str());
-        
+
         // Skip hidden/special files if applicable (e.g., "." or "..")
         if (name == "." || name == "..") {
             continue;
@@ -846,7 +849,7 @@ void WebappOta::listDirectory(const String& path, int depth)
         if(dir.stat().attr[FileAttribute::Directory])
         {
             cdebug_i(WEBAPPOTA, "WebappOta::listDirectory: " ANSI_COLOR_BLUE "  ├── [d] " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, name.c_str());
-            
+
             // Construct the next path branch
             String nextPath = path;
             if (!nextPath.endsWith("/")) {
@@ -860,22 +863,22 @@ void WebappOta::listDirectory(const String& path, int depth)
             cdebug_i(WEBAPPOTA, "WebappOta::listDirectory: " ANSI_COLOR_BLUE "  ├── [f] " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE " (" ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE " bytes)" ANSI_COLOR_RESET, name.c_str(), dir.stat().size);
         }
     }
-    
+
     dir.close();
 }
 
 void WebappOta::printFileSystemUsage() {
     IFS::FileSystem::Info fsInfo;
-    
+
     // Populate the structure with the active filesystem's data
     int result = fileGetSystemInfo(fsInfo);
-    
+
     if (result == FS_OK) {
         // Compute metrics directly from the returned architecture fields
         size_t totalBytes = fsInfo.volumeSize;
         size_t freeBytes  = fsInfo.freeSpace;
         size_t usedBytes  = totalBytes - freeBytes;
-        
+
         cdebug_i(WEBAPPOTA, "WebappOta::printFileSystemUsage: " ANSI_COLOR_BLUE "Total FS Size: " ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE " bytes" ANSI_COLOR_RESET, totalBytes);
         cdebug_i(WEBAPPOTA, "WebappOta::printFileSystemUsage: " ANSI_COLOR_BLUE "Used Space:    " ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE " bytes" ANSI_COLOR_RESET, usedBytes);
         cdebug_i(WEBAPPOTA, "WebappOta::printFileSystemUsage: " ANSI_COLOR_BLUE "Free Space:    " ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE " bytes" ANSI_COLOR_RESET, freeBytes);

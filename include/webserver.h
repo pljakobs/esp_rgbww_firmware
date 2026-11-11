@@ -89,6 +89,7 @@ public:
     void wsSendBroadcast(const char* buffer, size_t length);
     void wsSendRuntimeInfo(const char* buffer, size_t length);
     bool hasLightSubscribers() const;
+    bool hasRuntimeInfoSubscribers() const;
     void wsSendLightEvent(const char* buffer, size_t length);
 
     String getApiCodeMsg(API_CODES code);
@@ -161,7 +162,7 @@ private:
     void onBlink(HttpRequest &request, HttpResponse &response);
     void onToggle(HttpRequest &request, HttpResponse &response);
     void onData(HttpRequest &request, HttpResponse &response);
- 
+
         // SetOn/SetOff endpoints
     void onSetOn(HttpRequest &request, HttpResponse &response);
     void onSetOff(HttpRequest &request, HttpResponse &response);
@@ -184,7 +185,7 @@ private:
     bool preflightRequest(HttpRequest& request, HttpResponse& response, std::initializer_list<HttpMethod> allowedMethods, uint32_t minHeap = 0);
 
     String makeId();
-    
+
     static bool isPrintable(const String& str);
 
     void setCorsHeaders(HttpResponse &response);

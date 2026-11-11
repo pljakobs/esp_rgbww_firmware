@@ -182,7 +182,30 @@ void Controllers::addOrUpdate(unsigned int id, const char* hostname, const char*
 
     AppData::Controllers controllers(*app.data);
     bool foundInConfig = false;
-    
+    bool needsUpdate = false;
+    for (auto it = controllers.begin(); it != controllers.end(); ++it) {
+        auto controllerItem = *it;
+        if (parseControllerId(controllerItem.getId()) != id) {
+            continue;
+        }
+        if (foundInConfig || controllerItem.getIpAddress() != ipAddress || controllerItem.getName() != hostname) {
+            needsUpdate = true;
+            break;
+        }
+        foundInConfig = true;
+    }
+    if (foundInConfig && !needsUpdate) {
+        return;
+    }
+    if (!app.checkHeap(CONTROLLER_UPDATE_MIN_FREE_HEAP)) {
+        cdebug_w(CONTROLLERS, "Controllers::addOrUpdate: " ANSI_COLOR_YELLOW "deferring ConfigDB update for " ANSI_COLOR_CYAN "%s" ANSI_COLOR_YELLOW ": free heap=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW ", floor=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_RESET,
+                 hostname, (unsigned)app.getFreeHeapSize(), (unsigned)CONTROLLER_UPDATE_MIN_FREE_HEAP);
+        return;
+    }
+
+    // Release the read-only item references before opening a copy-on-write update.
+    foundInConfig = false;
+
     if (auto controllersUpdate = controllers.update()) {
         for (unsigned configIndex = 0; configIndex < controllersUpdate.getItemCount();) {
             bool duplicate = false;
@@ -538,14 +561,14 @@ void Controllers::forgetControllers(){
 }
 
 // Iterator implementation
-Controllers::Iterator::Iterator(Controllers& mgr, bool atEnd) 
+Controllers::Iterator::Iterator(Controllers& mgr, bool atEnd)
     : manager(mgr), configControllers(*app.data), currentIndex(0), totalCount(0) {
-    
+
     // Count total controllers
     for (auto it = configControllers.begin(); it != configControllers.end(); ++it) {
         totalCount++;
     }
-    
+
     if (atEnd) {
         currentIndex = totalCount;
     }
@@ -564,7 +587,7 @@ Controllers::ControllerInfo Controllers::Iterator::operator*() {
             info.state = OFFLINE;
             info.ttl = 0;
             info.hostType = HOST_TYPE_UNKNOWN;
-            
+
             // Check if controller is visible
             size_t visibleIndex = manager.findVisibleControllerIndex(info.id);
             if (visibleIndex != Controllers::INVALID_INDEX) {
@@ -573,11 +596,11 @@ Controllers::ControllerInfo Controllers::Iterator::operator*() {
             } else if (strlen(info.hostname) == 0 || strlen(info.ipAddress) == 0) {
                 info.state = INCOMPLETE;
             }
-            
+
             return info;
         }
     }
-    
+
     // Return empty info if not found
     return ControllerInfo();
 }
@@ -636,7 +659,7 @@ Controllers::ControllerInfo Controllers::findById(unsigned int id) {
             info.state = OFFLINE;
             info.ttl = 0;
             info.hostType = HOST_TYPE_UNKNOWN;
-            
+
             // Check if visible
             size_t visibleIndex = findVisibleControllerIndex(id);
             if (visibleIndex != INVALID_INDEX) {
@@ -645,11 +668,11 @@ Controllers::ControllerInfo Controllers::findById(unsigned int id) {
             } else if (strlen(info.hostname) == 0 || strlen(info.ipAddress) == 0) {
                 info.state = INCOMPLETE;
             }
-            
+
             return info;
         }
     }
-    
+
     return ControllerInfo(); // NOT_FOUND
 }
 

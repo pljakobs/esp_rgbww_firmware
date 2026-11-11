@@ -16,6 +16,7 @@
  */
 
 #include <RGBWWCtrl.h>
+#include <CallbackTiming.h>
 #include <ArduinoJson.h>
 #include <ConfigDB/JsonRPC/ReadStream.h>
 #include <Data/Stream/MemoryDataStream.h>
@@ -363,6 +364,7 @@ private:
 		if(!active || pumping) {
 			return;
 		}
+		CallbackTiming::Scope timing(CallbackTiming::Id::WebsocketPump);
 		pumping = true;
 
 		for(size_t i = 0; i < slots.size() && !eof; ++i) {

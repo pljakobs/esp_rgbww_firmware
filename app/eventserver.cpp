@@ -2,7 +2,7 @@
  * @file
  * @author  Robin http://github.com/verybadsoldier
  *          Peter Jakobs http://github.com/pljakobs
- * 
+ *
  *
  * @section LICENSE
  *
@@ -23,6 +23,7 @@
  *
  */
 #include <RGBWWCtrl.h>
+#include <CallbackTiming.h>
 
 EventServer::~EventServer()
 {
@@ -31,12 +32,12 @@ EventServer::~EventServer()
 
 /**
  * @brief Starts the event server with the given web server reference.
- * 
+ *
  * This function initializes the event server with the provided web server reference
  * (in order to access the Websocket broadcast function,sets the connection timeout
- * and starts listening on the TCP port. It also starts a timer to periodically 
+ * and starts listening on the TCP port. It also starts a timer to periodically
  * publish keep-alive messages.
- * 
+ *
  * @param webServer The reference to the ApplicationWebserver object.
  */
 void EventServer::start(ApplicationWebserver& webServer)
@@ -120,51 +121,70 @@ bool EventServer::publishLightState(VirtualLight& light)
 	     (!hasHsv || hsv == light.lastEventHsv)) || now - light.lastEventTime < 200)) {
 		return false;
 	}
+	CallbackTiming::Scope timing(CallbackTiming::Id::LightState);
 	auto& codec = rpcCodec();
-	Jsonrpc::Root root(codec.db());
-	if(auto update = root.update()) {
-		auto event = update.toLightState();
-		event.setLight(light.index);
-		event.setLightId(light.id);
-		if(hasHsv) {
-			float h, s, v;
-			int ct;
-			hsv.asRadian(h, s, v, ct);
-			auto color = event.state.toHsv();
-			color.setH(h);
-			color.setS(s);
-			color.setV(v);
-			color.setCt(ct);
-		} else if(light.led->usesNamedRawChannels()) {
-			auto color = event.state.toRaw().toRawNamed();
-			color.setR(raw.r);
-			color.setG(raw.g);
-			color.setB(raw.b);
-			color.setWw(raw.ww);
-			color.setCw(raw.cw);
-		} else {
-			auto color = event.state.toRaw().toRawIndexed();
-			RGBWWLed::ChannelList channels;
-			light.led->getChannels(channels);
-			for(auto channel : channels) {
-				switch(channel) {
-				case CtrlChannel::Red: color.addItem(raw.r); break;
-				case CtrlChannel::Green: color.addItem(raw.g); break;
-				case CtrlChannel::Blue: color.addItem(raw.b); break;
-				case CtrlChannel::WarmWhite: color.addItem(raw.ww); break;
-				case CtrlChannel::ColdWhite: color.addItem(raw.cw); break;
-				default: color.addItem(0); break;
+	auto root = [&codec]() {
+		CallbackTiming::Scope rootTiming(CallbackTiming::Id::Root);
+		return Jsonrpc::Root(codec.db());
+	}();
+	{
+		CallbackTiming::Scope populateTiming(CallbackTiming::Id::Populate);
+		if(auto update = root.update()) {
+			auto event = update.toLightState();
+			event.setLight(light.index);
+			event.setLightId(light.id);
+			if(hasHsv) {
+				float h, s, v;
+				int ct;
+				hsv.asRadian(h, s, v, ct);
+				auto color = event.state.toHsv();
+				color.setH(h);
+				color.setS(s);
+				color.setV(v);
+				color.setCt(ct);
+			} else if(light.led->usesNamedRawChannels()) {
+				auto color = event.state.toRaw().toRawNamed();
+				color.setR(raw.r);
+				color.setG(raw.g);
+				color.setB(raw.b);
+				color.setWw(raw.ww);
+				color.setCw(raw.cw);
+			} else {
+				auto color = event.state.toRaw().toRawIndexed();
+				RGBWWLed::ChannelList channels;
+				light.led->getChannels(channels);
+				for(auto channel : channels) {
+					switch(channel) {
+					case CtrlChannel::Red: color.addItem(raw.r); break;
+					case CtrlChannel::Green: color.addItem(raw.g); break;
+					case CtrlChannel::Blue: color.addItem(raw.b); break;
+					case CtrlChannel::WarmWhite: color.addItem(raw.ww); break;
+					case CtrlChannel::ColdWhite: color.addItem(raw.cw); break;
+					default: color.addItem(0); break;
+					}
 				}
 			}
 		}
 	}
 	String payload;
-	if(!codec.render({0, JsonRPC::Message::Kind::notification, F("light_state")}, root.asLightState(), payload) ||
-	   !normalizeRawUnionForWire(payload)) {
+	bool rendered;
+	{
+		CallbackTiming::Scope renderTiming(CallbackTiming::Id::Render);
+		rendered = codec.render({0, JsonRPC::Message::Kind::notification, F("light_state")}, root.asLightState(), payload);
+	}
+	bool normalized = false;
+	if(rendered) {
+		CallbackTiming::Scope normalizeTiming(CallbackTiming::Id::Normalize);
+		normalized = normalizeRawUnionForWire(payload);
+	}
+	if(!rendered || !normalized) {
 		cdebug_e(EVENTSERVER, "Unable to serialize virtual-light state");
 		return false;
 	}
-	webServer->wsSendLightEvent(payload.c_str(), payload.length());
+	{
+		CallbackTiming::Scope sendTiming(CallbackTiming::Id::Send);
+		webServer->wsSendLightEvent(payload.c_str(), payload.length());
+	}
 	light.lastEventRaw = raw;
 	light.lastEventHsv = hsv;
 	light.lastEventHasHsv = hasHsv;
@@ -217,6 +237,7 @@ void EventServer::publishCurrentState(const ChannelOutput& raw, const HSVCT* pHs
 		cdebug_d(EVENTSERVER, "EventServer::publishCurrentState: " "eventserver, dropping currentState event\n");
 		return; // Silently discard this event
 	}
+	CallbackTiming::Scope timing(CallbackTiming::Id::CurrentState);
 	_lastRaw = raw;
 	_lastHasHsv = hasHsv;
 	if(hasHsv) {
@@ -225,44 +246,50 @@ void EventServer::publishCurrentState(const ChannelOutput& raw, const HSVCT* pHs
 	_lastEventTime = currentTime;
 
 	auto& codec = rpcCodec();
-	Jsonrpc::Root root(codec.db());
-	if(auto update = root.update()) {
-		auto color = update.toColor();
-		if(pHsv) {
-			float h, s, v;
-			int ct;
-			pHsv->asRadian(h, s, v, ct);
+	auto root = [&codec]() {
+		CallbackTiming::Scope rootTiming(CallbackTiming::Id::Root);
+		return Jsonrpc::Root(codec.db());
+	}();
+	{
+		CallbackTiming::Scope populateTiming(CallbackTiming::Id::Populate);
+		if(auto update = root.update()) {
+			auto color = update.toColor();
+			if(pHsv) {
+				float h, s, v;
+				int ct;
+				pHsv->asRadian(h, s, v, ct);
 
-			auto hsv = color.toHsv();
-			hsv.setH(h);
-			hsv.setS(s);
-			hsv.setV(v);
-			hsv.setCt(ct);
-		} else {
-			auto rawColor = color.toRaw();
-			String lightError;
-			RGBWWLed* defaultLight = app.getLight(-1, lightError);
-			if(defaultLight != nullptr && !defaultLight->usesNamedRawChannels()) {
-				auto indexed = rawColor.toRawIndexed();
-				RGBWWLed::ChannelList channels;
-				defaultLight->getChannels(channels);
-				for(auto channel : channels) {
-					switch(channel) {
-					case CtrlChannel::Red: indexed.addItem(raw.r); break;
-					case CtrlChannel::Green: indexed.addItem(raw.g); break;
-					case CtrlChannel::Blue: indexed.addItem(raw.b); break;
-					case CtrlChannel::WarmWhite: indexed.addItem(raw.ww); break;
-					case CtrlChannel::ColdWhite: indexed.addItem(raw.cw); break;
-					default: indexed.addItem(0); break;
-					}
-				}
+				auto hsv = color.toHsv();
+				hsv.setH(h);
+				hsv.setS(s);
+				hsv.setV(v);
+				hsv.setCt(ct);
 			} else {
-				auto named = rawColor.toRawNamed();
-				named.setR(raw.r);
-				named.setG(raw.g);
-				named.setB(raw.b);
-				named.setWw(raw.ww);
-				named.setCw(raw.cw);
+				auto rawColor = color.toRaw();
+				String lightError;
+				RGBWWLed* defaultLight = app.getLight(-1, lightError);
+				if(defaultLight != nullptr && !defaultLight->usesNamedRawChannels()) {
+					auto indexed = rawColor.toRawIndexed();
+					RGBWWLed::ChannelList channels;
+					defaultLight->getChannels(channels);
+					for(auto channel : channels) {
+						switch(channel) {
+						case CtrlChannel::Red: indexed.addItem(raw.r); break;
+						case CtrlChannel::Green: indexed.addItem(raw.g); break;
+						case CtrlChannel::Blue: indexed.addItem(raw.b); break;
+						case CtrlChannel::WarmWhite: indexed.addItem(raw.ww); break;
+						case CtrlChannel::ColdWhite: indexed.addItem(raw.cw); break;
+						default: indexed.addItem(0); break;
+						}
+					}
+				} else {
+					auto named = rawColor.toRawNamed();
+					named.setR(raw.r);
+					named.setG(raw.g);
+					named.setB(raw.b);
+					named.setWw(raw.ww);
+					named.setCw(raw.cw);
+				}
 			}
 		}
 	}
@@ -270,8 +297,18 @@ void EventServer::publishCurrentState(const ChannelOutput& raw, const HSVCT* pHs
 	cdebug_d(EVENTSERVER, "EventServer::publishCurrentState: " "EventServer::publishCurrentColor\n");
 
 	String payload;
-	if(codec.render({0, JsonRPC::Message::Kind::notification, F("color_event")}, root.asColor(), payload) &&
-	   normalizeRawUnionForWire(payload)) {
+	bool rendered;
+	{
+		CallbackTiming::Scope renderTiming(CallbackTiming::Id::Render);
+		rendered = codec.render({0, JsonRPC::Message::Kind::notification, F("color_event")}, root.asColor(), payload);
+	}
+	bool normalized = false;
+	if(rendered) {
+		CallbackTiming::Scope normalizeTiming(CallbackTiming::Id::Normalize);
+		normalized = normalizeRawUnionForWire(payload);
+	}
+	if(rendered && normalized) {
+		CallbackTiming::Scope sendTiming(CallbackTiming::Id::Send);
 		sendPayload(payload);
 	}
 }
@@ -359,8 +396,8 @@ void EventServer::publishTransitionFinished(const String& name, bool requeued)
  * The message is serialized into a JSON string and then sent to each client individually using the
  * `sendString` method of the `TcpClient` class. Additionally, the message is broadcasted to all
  * clients using the `wsBroadcast` method of the `webServer` object.
- * 
- * @note this is a bit of a cludge right now. I assume that mid term, I will deprecate the pure tcp 
+ *
+ * @note this is a bit of a cludge right now. I assume that mid term, I will deprecate the pure tcp
  *      connection and only use the websocket connection. I'm keeping it for now to maintain compatibility
  *      with the fhem module
  *

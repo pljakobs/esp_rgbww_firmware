@@ -74,6 +74,7 @@ CPP_LIGHT_INTERFACE = r"""
 struct ApplicationWebserver {
     std::vector<WebsocketConnection*> webSockets;
     bool hasLightSubscribers() const;
+    bool hasRuntimeInfoSubscribers() const;
     void wsSendLightEvent(const char*, size_t);
 };
 """
@@ -157,6 +158,21 @@ int main(int argc, char** argv) {
         codec.completions.pop_front();
         callback(false);
         assert(!socket.state && socket.closes == 1);
+    } else if(scenario == "runtime_subscription") {
+        ApplicationWebserver server;
+        server.webSockets = {nullptr, &socket};
+        assert(!server.hasRuntimeInfoSubscribers());
+        state->lightsSubscribed = true;
+        assert(!server.hasRuntimeInfoSubscribers());
+        state->runtimeInfoSubscribed = true;
+        assert(server.hasRuntimeInfoSubscribers());
+        socket.open = false;
+        assert(!server.hasRuntimeInfoSubscribers());
+        socket.open = true;
+        state->runtimeInfoSubscribed = false;
+        assert(!server.hasRuntimeInfoSubscribers());
+        socket.close();
+        assert(!server.hasRuntimeInfoSubscribers());
     } else if(scenario == "light_subscription") {
         WebsocketConnection runtime;
         runtime.state = new WsAuthState();
@@ -198,8 +214,10 @@ def websocket_output_binary(tmp_path_factory: pytest.TempPathFactory) -> Path:
     source = (root / "app/webserver.cpp").read_text()
     start = source.index("constexpr size_t WS_MAX_QUEUED_OUTPUTS")
     end = source.index("// Generate a 16-byte random nonce", start)
-    implementation = source[start:end]
-    start = source.index("bool ApplicationWebserver::hasLightSubscribers()")
+    queue_types_end = source.index("bool parseLightSelector(", start)
+    queue_state_start = source.index("struct WsAuthState {", queue_types_end)
+    implementation = source[start:queue_types_end] + source[queue_state_start:end]
+    start = source.index("bool ApplicationWebserver::hasRuntimeInfoSubscribers()")
     end = source.index("unsigned ApplicationWebserver::getHttpActiveConnections()", start)
     light_output = source[start:end]
     binary = tmp_path_factory.mktemp("websocket-output") / "test"
@@ -217,7 +235,7 @@ def websocket_output_binary(tmp_path_factory: pytest.TempPathFactory) -> Path:
 @pytest.mark.parametrize(
     "scenario",
     ["fifo", "overflow", "stream_completion", "disconnect_text", "disconnect_start", "late_completion",
-     "light_subscription"],
+     "light_subscription", "runtime_subscription"],
 )
 def test_websocket_output(websocket_output_binary: Path, scenario: str) -> None:
     result = subprocess.run(

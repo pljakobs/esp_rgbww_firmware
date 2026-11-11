@@ -241,19 +241,32 @@ Refer to the [Wiki — Flashing](https://github.com/verybadsoldier/esp_rgbww_fir
 
 ## OTA Updates
 
-Firmware updates are managed through the webapp's **Firmware Update** dialog (*Settings → Firmware Update → Check firmware*). The dialog fetches a firmware manifest from the configured update server and presents three cascading selectors:
+Firmware updates are managed through the webapp's **Firmware Update** dialog
+(*Settings → Firmware Update → Check firmware*). The dialog fetches a firmware
+manifest from the configured update server and filters available builds by:
 
-- **Branch** — `Stable`, `Testing`, or `Develop` (colour-coded: green/amber/red)
+- **Release line** — `5.0` or `5.1`
+- **Stage** — `Develop`, `Test`, or `Stable`, corresponding to `develop`,
+  `testing`, and `prod`
 - **Build type** — `release` or `debug`
-- **Version** — specific build, with date shown in the dropdown
+- **Version** — a specific build, with its date shown in the list
 
-The dialog shows the currently running firmware version, branch, and webapp version for comparison. Selecting a firmware entry and clicking **Update** triggers the OTA process with live progress reporting via WebSocket.
+The release line and stage together identify the firmware branch: for example,
+`5.0/develop` or `5.1/testing`. Choose a line supported by the controller's
+SoC: 5.0 supports ESP8266, ESP32, and ESP32-C3; 5.1 supports ESP32 and ESP32-C3.
+In particular, 5.1 builds do not support ESP8266.
+
+The dialog shows the currently installed firmware and webapp versions for
+comparison. Selecting a build and clicking **Update** starts the OTA process,
+with live progress reported over WebSocket.
 
 The update server URL defaults to `https://lightinator.de/version.json` and is configurable via the `/config` API key `ota.url`.
 
 > **Important:** An active OTA process blocks `/config`, `/color`, and other write endpoints; the API returns `{"error":"update in progress"}` (HTTP 400) during this time.
 
-The manifest format served at the update URL is a JSON array of firmware entries, each containing `branch`, `type`, `fw_version`, `date`, and a direct download URL for the binary.
+The update URL serves a JSON array of firmware entries. Each entry identifies
+its release line and stage, build type, firmware version, date, supported SoC,
+and binary download URL.
 
 > **Note:** Command-line / scripted OTA is not yet documented. A TUI update tool or integration into the Lightinator Log Service companion is planned.
 
@@ -843,6 +856,283 @@ Enable via `/config`:
 ```
 
 Changes take effect immediately without a reboot.
+
+Runtime-info health sampling continues every ten seconds, but its WebSocket
+notification is only constructed when an open connection subscribes to
+`runtime_info`. The notification reuses that tick's heap measurements rather
+than probing the allocator again.
+
+### Callback timing diagnostics
+
+Callback timing instrumentation is opt-in: build debug firmware with
+`make ... EVENT_MONITOR=1`. The default `EVENT_MONITOR=0` compiles out scopes,
+timers, registry storage and CallbackTiming/DispatcherTiming/DispatcherTrace
+reporting. Release builds also compile these out even when the flag is enabled.
+The existing EventQueueMonitor queue-health probe is independent of this flag.
+Sming's debug dispatcher counters are controlled separately by its debug build;
+this firmware flag controls their collection/reporting, not the framework hooks.
+
+Debug builds keep callback timing counters in RAM and send `CallbackTiming`
+summaries directly to the configured syslog stream every five seconds,
+independently of the normal debug verbosity filter. Release builds omit the
+accounting and reporting.
+
+`runtime_info` also has three nested measurements: `runtime_collect` for heap
+sampling/health accounting, `runtime_json` for ConfigDB population and JSON
+serialization, and `runtime_enqueue` for the synchronous WebSocket send/enqueue
+call (not eventual network delivery). Collection runs without subscribers;
+JSON/enqueue only run with runtime-info subscribers. The outer callback's
+heap-status and render-success log lines remain outside these subsections, so
+their cost appears in `runtime_info` but not the subsection totals. Logging
+inside the WebSocket send call remains included in `runtime_enqueue`.
+
+Each reporting window lists active paths in descending average elapsed time:
+
+```text
+CallbackTiming seq=1 window_ms=5000 inclusive=1 order=avg_us
+CallbackTiming seq=1 name=led_update calls=250 avg_us=180.0 max_us=900 total_us=45000
+```
+
+New diagnostic builds emit versioned runtime-derived paths:
+
+```text
+CallbackTiming seq=1 window_ms=5000 inclusive=1 order=avg_us format=2 dropped_scopes=0
+CallbackTiming seq=1 format=2 name=led_update/light_state/render calls=20 avg_us=800.0 max_us=1100 total_us=16000
+```
+
+`name` is the full synchronous measurement path, with `/` separating components.
+Its parent is the prefix before the last `/`; a single-component name is a root
+scope. Sibling paths are separate scoped operations; ancestor totals include
+descendants. These are instrumented scopes, not a complete function call graph.
+The same function invoked in another context has a separate path, e.g.
+`led_update/light_state/send/ws_pump`, `current_state/send/ws_pump` or a deferred
+top-level `ws_pump`. Dispatcher batches are not synthetic parents: TCP/IP work
+can execute outside a dispatcher batch. Async work does not inherit the scope
+that queued it. All durations still include blocking and preemption.
+
+Both state publications now have `root` (ConfigDB root construction and store
+open), `populate` (update acquisition, state conversion/setters and updater
+destruction), `render` (JSON-RPC export), `normalize` (RAW union normalization,
+including its HSV no-op path) and `send` (synchronous logging, copying and
+TCP/WebSocket send/enqueue) children. Surrounding work and root destruction stay
+in the parent, so subsection totals do not exhaust the parent's duration.
+
+Timing uses a fixed 96-path registry with at most eight levels, no per-call heap
+allocation, and static report snapshots. Unrepresentable scopes and their
+descendants are omitted rather than attributed to an incorrect parent;
+`dropped_scopes` reports their entry count per reporting interval. Counters
+are recorded when scopes finish: child and parent completions can belong to
+different windows, so subtracting child totals in a single window does not
+produce reliable exclusive time. The statistics tool reads both formats,
+deriving format-2 parents from paths and retaining hints for legacy flat names.
+
+`calls`, `avg_us`, `max_us` and `total_us` describe completed calls since the
+previous report, not lifetime statistics. Timings include blocking waits and
+preemption, so a high value means time spent occupying the callback, not
+necessarily CPU computation. Nested timings are inclusive: for example,
+`led_update` includes `light_show`, state publication and any WebSocket pumping
+it invokes. Do not sum those totals as independent CPU usage.
+
+Instrumented paths cover LED updates, individual light updates, actual
+light/current-state publications (excluding suppressed events), WebSocket
+pumping, deferred light reloads, OTA verification and hashing, runtime-info and
+telemetry timers, button polling and MQTT message handling. `timing_report`
+measures the reporter itself and appears in the following window.
+
+Counters and the reporting timer run only in Sming callback context; there is
+no per-call allocation or logging. Reports may be delayed when that thread is
+busy, and cannot be emitted while it is completely stalled. `window_ms` shows
+the actual reporting interval. Enable rsyslog as above to receive the reports.
+
+For exercise-only operation without rebooting or validating results:
+
+```sh
+python3 tests/virtual_light_exerciser.py 192.168.29.224 --permissive
+```
+
+`--permissive` uses HTTP regardless of `--via`, skips WebSocket checks and
+log-service collection, and reports command/read errors without stopping later
+steps or lights. It also works with `--soak-hours`, continuing later cycles after
+command failures. Discovery of configured lights is still required; invalid
+arguments, discovery failures and user interruption are not suppressed.
+Completion returns zero even if exercise errors occurred, with an explicit
+error count (not a validation success). Original states are restored when readable
+unless `--no-restore` is set; soak mode attempts to turn every light off at exit.
+
+Aggregate retained reports with the standard-library-only statistics tool
+(Python 3.10 or later):
+
+```sh
+python3 tests/log_statistics.py --host lightinator.local --log 192.168.29.5
+python3 tests/log_statistics.py --host lightinator.local --log 192.168.29.5 --callback-timing -b -1 --sort total
+python3 tests/log_statistics.py --host lightinator.local --log 192.168.29.5 --dispatcher-timing -b 0
+python3 tests/log_statistics.py --host 192.168.29.69 --host 192.168.29.224 --log 192.168.29.5 -b 0 --timeline calls/s
+```
+
+`--host` accepts a controller hostname or its syslog source IP; use an explicit
+IP if the hostname resolves to multiple addresses. `--log` accepts a log-service
+hostname/address with an optional port (default `4821`) or HTTP(S) scheme.
+The tool does not contact or reboot the controller.
+Repeat `--host` to collect and print separate reports sequentially in argument
+order. Boot offsets are resolved independently for each controller; statistics
+are never pooled across controllers. A collection failure stops processing and
+does not write a partial comparison plot.
+
+Use `--callback-timing` to select the CallbackTiming statistics module explicitly.
+Use `--dispatcher-timing` for dispatcher batch durations (weighted average,
+maximum and total in ms), processed events, sampled queue peak, rejected event
+posts, and mailbox post attempts/rejections. Nonzero rejections also list the
+boot and sequence of each affected report window. These counters reset per
+report; duplicate boot/sequence reports are counted once. Missing sequences and
+UDP loss mean totals can be incomplete. Dispatcher statistics are text-only;
+`--sort` applies to the callback table, and plots require CallbackTiming.
+Select both flags to include both reports.
+With no module flags, all registered modules are reported. `-b 0` (or `--boot 0`)
+selects the current/latest retained boot, `-b -1` the previous retained boot, and
+`-b -2` two retained boots ago. Without `-b`, all retained boots are included.
+Boot selection uses `/api/v1/boots`, independently of whether a boot has timing
+records. Unavailable offsets fail explicitly. Positive offsets are not supported.
+When pagination is needed, queries start at the selected boot's first retained
+log ID and stop at its last ID; records from other boots are excluded even if
+late UDP packets interleave their IDs.
+
+Timing columns are displayed in milliseconds. `--sort` accepts `function`,
+`calls`, `average` (default), `max`, `total`, `calls/s`, `ms/s` or `included-in`. Text columns sort
+alphabetically; numeric columns sort descending, with function names breaking ties.
+Every measurement also shows `Calls/s` and `ms/s`: total calls and inclusive
+milliseconds divided by the summed observed reporting-window time, including
+blocks where that measurement is inactive. Missing sequence blocks are excluded;
+missing headers use the reported five-second estimate. Lost measurement records
+can understate rates. `ms/s` includes blocking/preemption and is not CPU usage;
+parent and child rates must not be added.
+Reports and plots warn about logged windows exceeding 60 seconds, which may
+indicate firmware clock issues and distort rates; logged durations are preserved.
+The table's `Included in` column derives format-2 parents from runtime paths,
+even if the parent has no retained measurements. Legacy flat `ws_pump` records
+list `synchronous caller` because their nesting is unspecified. `-` means no fixed parent is listed,
+not that the measurement is independent or exclusive. Unknown function names
+remain visible. `--sort included-in` groups rows by their parent without altering
+their inclusive measurements.
+
+Use `--sort tree` for an indented runtime measurement tree: parents appear before
+their descendants, and leaf labels are indented by path depth. The `Included in`
+column retains the full parent path, so identical leaf names under different
+parents remain distinct. Numeric sorts continue to display full measurement paths.
+Format-2 headers also identify unqualified names as root scopes, even if individual
+records omit `format=2` or UDP delivers the header after its records.
+
+Add `--timeline` for an interactive standalone HTML load plot, or choose `--timeline load`,
+`--timeline total`, `--timeline calls`, `--timeline calls/s`, `--timeline ms/s`
+or `--timeline all`. Per-second plots normalize each block by its own duration.
+Load is inclusive
+elapsed callback time divided by the actual reporting-window duration, expressed
+as a percentage; the other metrics are total milliseconds or calls per block.
+The output defaults to `log-statistics.html`; use `--plot FILE.html` to change
+the path (`--plot` alone enables all metrics). Open the printed file URL in a
+browser. No packages, CDN, network access or Python GUI environment are needed
+to display the plot. Keep `tests/log_statistics_plot.html` beside the Python script.
+The HTML includes boot/metric selectors and function checkboxes, with independent
+vertical scales and hierarchy labels per function. Hover for precise values;
+the module selector labels each controller. Enable **Compare controllers / boots**
+to overlay the same measurement from every retained boot of the selected module,
+with colored series, legends, shared measurement scales and per-series hover values.
+Comparison uses collector `receivedAt` timestamps with a shared zero at the earliest
+observed report across all selected controllers, preserving their time offsets.
+Device uptime is not used for the horizontal axis. Use `-b 0` to compare only the latest retained
+boot of each controller; without a boot filter, all retained boots are overlaid.
+Drag to zoom the time axis across all panels and reset with the button or
+double-click. Missing function records break the curves rather than becoming
+zero; orange bands mark missing sequences. The horizontal axis uses actual
+collector receive intervals, not device-reported window durations. First reports
+and reports after sequence gaps cover an estimated preceding five seconds, clipped
+at zero; gaps retain their actual collector-time spacing. Missing receive timestamps
+fail explicitly rather than mixing timebases. The t=0 timestamp is printed in the
+page. Rate/load calculations still use device-reported window durations (or an
+explicit five-second estimate for missing headers). Inclusive load is not independent CPU
+utilization and functions are not stacked. The summary table remains in the
+terminal; unreadable ASCII timelines are no longer emitted.
+
+The report includes the timing hierarchy; no child totals are subtracted and
+no additive "overall load" is calculated:
+
+| Measurement | Included measurements/work |
+|-------------|----------------------------|
+| DispatcherTiming batch duration | Synchronous instrumented and uninstrumented batch work, plus dispatcher overhead |
+| `led_update` | All `light_show` calls; `light_state` and `current_state` when publication occurs |
+| `runtime_info` | `runtime_collect`, `runtime_json`, `runtime_enqueue`, surrounding logging/overhead |
+| `ota_verify` | `ota_hash` |
+| `timing_report` | Diagnostic formatting and syslog output, including frozen trace output |
+| `ws_pump` | Stream pumping; its initial synchronous invocation also belongs to its caller |
+| `light_state`, `current_state` | `root`, `populate`, `render`, `normalize`, `send`; any synchronous instrumented send callees |
+| `light_show`, runtime subsections, `ota_hash` | No explicitly nested timing buckets in current normal paths |
+| `light_reload`, `telemetry`, `buttons`, `mqtt_receive` | Whole operation, including any instrumented functions invoked synchronously |
+
+`light_state` and `current_state` are siblings of `light_show`, not included in
+it. Deferred callbacks belong to their later dispatcher batch, not the callback
+that queued them. MQTT reception runs in TCP/IP context and need not belong to a
+Sming dispatcher batch. Durations include blocking and preemption; never sum
+parent and child totals. DispatcherTiming is context here, not a plotted metric
+of the CallbackTiming module.
+
+The tool first queries `/api/v1/search` for each registered statistic. This API
+is capped at 200 global matches without pagination or IP filtering; if the cap
+is reached, the tool announces a fallback to paginated `/api/v1/logs` for the
+controller. It reports per-function calls, call-weighted average, maximum and
+total milliseconds. Sequence numbers identify five-second blocks separately
+per boot; the summary reports observed blocks and internal sequence gaps, using
+actual `window_ms` values where available and estimating missing headers at
+five seconds. Only received records contribute, so UDP loss or log retention
+can leave statistics incomplete. Inclusive function totals are not independent
+CPU utilization measurements.
+
+To add another statistic, define `cli_option`, `search_term`, `consume(record)`,
+`report(sort, timeline)` and `plot_data()` (matching the existing plot data shape,
+or returning `None` for text-only modules)
+and register its class in `STATISTICS` in
+[`tests/log_statistics.py`](tests/log_statistics.py).
+
+On ESP32, the locally instrumented Sming dispatcher also emits
+`DispatcherTiming`: completed batch count, processed events, average/maximum/
+total batch elapsed microseconds, maximum events per batch, event-queue depth
+sampled at batch entry, rejected event posts, and attempted/rejected Sming
+wake-up posts to the TCP/IP mailbox. `mbox_full` counts actual `ERR_MEM`
+rejections; it is not a mailbox occupancy sample or a count of network packet
+drops. The mailbox itself is private to lwIP and is not modified or probed.
+`queue_peak_sampled` is a lower bound on peak queue depth, not a continuous
+high-water mark. Counters reset per report; the batch containing the report
+finishes afterward and is included in the following window.
+
+The dispatcher also retains the last 32 completed callbacks and the currently
+executing callback in a fixed-size RAM flight recorder. The first mailbox
+`ERR_MEM` freezes the completed history and captures the active callback, failure
+timestamp and sampled Sming queue depth. Further rejections are counted without
+overwriting that incident. The next five-second report takes and rearms the
+recorder, emitting `DispatcherTrace` lines oldest first. Callbacks completed
+while frozen are not retained; `overwritten` counts older completed entries
+replaced before freezing. This is not a TCP/IP mailbox snapshot or recovery trace.
+
+Each entry includes a batch number, boot-relative `start_us`, wall-clock
+`elapsed_us`, and raw hexadecimal `sig`/`par`. For `state=active`, elapsed time
+ends at failure, not callback completion. Decode addresses with the exact flashed
+build's ELF, for example `riscv32-esp-elf-addr2line -a -f -C -e
+out/Esp32/esp32c3/debug/build/app.out 0xADDRESS` (use the corresponding Xtensa
+toolchain for other ESP32 variants). `sig` is the dispatched function address;
+`par` may be a function address for a parameterless callback, but is often a
+data/delegate pointer. Shared timer/delegate wrappers may not identify the
+underlying application callback. A trace correlates activity with rejection,
+not proof that a particular callback caused mailbox saturation.
+
+Dispatcher accounting includes two clock reads per completed callback while
+recording, batch timing, and short critical sections protecting shared diagnostic
+state. Freezing allocates nothing and neither logs nor enqueues work. Reporting
+up to 33 entries adds syslog cost to the reporting callback itself. All dispatcher
+diagnostics are omitted from release builds. Firmware using these diagnostics
+needs the matching local Sming `sming_dispatch_stats_take` and
+`sming_dispatch_trace_take` APIs.
+
+Run `python3 tests/test_dispatch_trace.py` for native dispatcher and report-format
+regressions; it compiles the local Sming source with test doubles and also checks
+release/non-network builds. Set `SMING_HOME` if Sming is not at `/opt/sming/Sming`.
 
 ### Lightinator Log Service
 
