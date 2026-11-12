@@ -178,6 +178,18 @@
                 "controller_id": {
                   "type": "string"
                 },
+                "light": {
+                  "description": "Controller-local API index. -1 preserves legacy default-light targeting.",
+                  "type": "integer",
+                  "minimum": -1,
+                  "maximum": 65535,
+                  "default": -1
+                },
+                "light_id": {
+                  "description": "Persistent light UUID. Clients resolve its current index before playback.",
+                  "type": "string",
+                  "default": ""
+                },
                 "pos": {
                   "type": "integer"
                 },

@@ -84,6 +84,70 @@ Generate strict Ajv standalone validators with coercion, defaults, and property 
 
 ## Inferred Compatibility
 
+### Persistent scene targets
+
+Scene settings in `/data` accept optional `light` and `light_id` fields beside
+`controller_id`, `pos`, `color` and `transition`. They do not belong inside the
+stored colour union:
+
+```json
+{
+  "controller_id": "controller-uuid",
+  "light": 1,
+  "light_id": "light-uuid",
+  "pos": 0,
+  "color": { "hsv": { "h": 30, "s": 80, "v": 60, "ct": 2700 } },
+  "transition": { "cmd": "fade", "t": 1000 }
+}
+```
+
+Omitted selectors default to `light: -1` and `light_id: ""`, preserving legacy
+default-light targeting. ConfigDB exports may include these default values.
+As with other empty ConfigDB strings, an unset `light_id` can be exported as
+`null`; absent, empty and null UUIDs mean no UUID guard. Combined with `light: -1`
+they preserve default-light targeting.
+Scene storage does not validate selectors against the storing controller's
+lights: a setting can target another controller.
+
+An explicit UUID identifies the saved target; playback clients must resolve its
+current index and must not fall back to the default if the UUID is missing.
+When constructing a color command, clients copy the resolved selectors from the
+setting onto each command, outside its `hsv` or `raw` value. Group animation steps
+by controller and light, not controller alone.
+
+This is an additive 5.1 storage extension. Unmodified 5.0 controllers continue to
+use unqualified steps; preservation of extended steps on 5.0 is not guaranteed by
+this schema and must be checked before replicating those steps to legacy stores.
+
+### Animation capacity
+
+Queue depth is already advertised by `/info` as `rgbww.queuesize`; no new
+capacity endpoint is needed. It is the number of pending individual commands
+per channel queue, not bytes, batches or a shared budget across all lights. The
+currently executing animation is outside the pending queue.
+
+Clients must account for each affected channel when preloading an animation.
+Sequences fitting the queues are candidates for controller-resident playback;
+longer sequences require an active client to supply further commands. Capacity
+alone is not available headroom or an admission acknowledgement: safe streaming
+also needs progress/admission handling. Do not equate transport chunking with
+queue capacity or claim independent looping playback without testing requeue
+behavior.
+
+Validation for this extension:
+
+```bash
+python -m unittest discover -s .github/tests -p test_scene_schema.py -v
+python -m pytest tests/test_scene_storage.py -q
+```
+
+The second command requires `SMING_HOME` and the existing Host toolchain. It
+builds an isolated test application using the real ConfigDB schemas and checks
+store import, selector mutation, disk reload and export/import without network
+access or live controllers. It does not exercise the HTTP `/data` endpoint.
+
+### Command compatibility
+
 - One authenticated WebSocket can subscribe to both `runtime_info` and `lights`
   using `{"method":"subscribe","params":{"channel":"lights"},"id":1,"jsonrpc":"2.0"}`.
   The `lights` channel multiplexes all configured lights; no per-light sockets
