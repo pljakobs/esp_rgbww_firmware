@@ -41,6 +41,24 @@ void check(AppData& database, int index)
 	require(scene.settings[2].getLight() == 8, "another light has its own selector");
 	require(scene.settings[2].color.asPreset().getId() == F("remote-preset"), "preset reference is unchanged");
 }
+
+void checkPresets(AppData& database)
+{
+	AppData::Presets presets(database);
+	require(presets.getItemCount() == 2, "both preset formats survive persistence");
+	auto legacy = presets[0];
+	require(legacy.getFavorite(), "legacy controller favorite is unchanged");
+	require(legacy.lightFavorites.getItemCount() == 0, "legacy presets need no light overrides");
+	require(legacy.color.asHsv().getCt() == 2700, "preset temperature is unchanged");
+	auto indexed = presets[1];
+	require(indexed.getLightType() == F("WWCW"), "indexed RAW profile survives");
+	require(indexed.rawChannels.getItemCount() == 2, "indexed RAW channel count survives");
+	require(indexed.rawChannels[0] == 250 && indexed.rawChannels[1] == 750, "indexed RAW values survive");
+	require(indexed.lightFavorites.getItemCount() == 2, "independent light overrides survive");
+	require(indexed.lightFavorites[0].getLightId() == F("uuid-one"), "favorite uses stable UUID");
+	require(indexed.lightFavorites[0].getFavorite(), "favorite membership survives");
+	require(!indexed.lightFavorites[1].getFavorite(), "explicit removal survives");
+}
 } // namespace
 
 void init()
@@ -50,6 +68,18 @@ void init()
 	fileSetFileSystem(&IFS::Host::getFileSystem());
 	{
 		AppData database("scene-data");
+		{
+			auto presets = AppData::Presets(database).update();
+			require(bool(presets), "preset store can be updated");
+			import(presets, F(R"([
+				{"id":"legacy","name":"Warm","favorite":true,
+				 "color":{"hsv":{"h":0,"s":0,"v":60,"ct":2700}}},
+				{"id":"indexed","name":"White mix","light_type":"WWCW","raw_channels":[250,750],
+				 "light_favorites":[{"light_id":"uuid-one","favorite":true},
+				                    {"light_id":"uuid-two","favorite":false}]}
+			])"));
+		}
+		checkPresets(database);
 		{
 			auto scenes = AppData::Scenes(database).update();
 			require(bool(scenes), "scene store can be updated");
@@ -78,6 +108,7 @@ void init()
 	String exported;
 	{
 		AppData reloaded("scene-data");
+		checkPresets(reloaded);
 		check(reloaded, 12);
 		MemoryDataStream stream;
 		AppData::Scenes scenes(reloaded);

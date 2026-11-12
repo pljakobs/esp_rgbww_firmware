@@ -51,6 +51,39 @@
             "type": "boolean",
             "default": false
           },
+          "light_favorites": {
+            "description": "Per-light UUID favorite overrides. Missing entries use favorite only for the default light.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "light_id": {
+                  "type": "string"
+                },
+                "favorite": {
+                  "type": "boolean",
+                  "default": false
+                }
+              },
+              "required": [
+                "light_id",
+                "favorite"
+              ]
+            }
+          },
+          "raw_channels": {
+            "description": "Indexed RAW values for a preset with matching light_type; empty uses color instead.",
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1023
+            }
+          },
+          "light_type": {
+            "description": "Source output profile for indexed RAW presets.",
+            "type": "string"
+          },
           "ts": {
             "type": "integer"
           },

@@ -862,6 +862,7 @@ bool Api::renderDataImpl(const String& method, bool sparse, String* out,
 			}
 			value.rgbww.setVersion(RGBWW_VERSION);
 			value.rgbww.setQueuesize(RGBWW_ANIMATIONQSIZE);
+			value.rgbww.setPresetLightFavorites(true);
 			value.connection.setConnected(WifiStation.isConnected());
 			if(WifiStation.isConnected()) {
 				value.connection.setSsid(WifiStation.getSSID());

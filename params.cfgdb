@@ -268,7 +268,8 @@
       "type": "object",
       "properties": {
         "version": { "$ref": "value-types/$defs/string-value" },
-        "queuesize": { "$ref": "value-types/$defs/non-negative-integer" }
+        "queuesize": { "$ref": "value-types/$defs/non-negative-integer" },
+        "preset_light_favorites": { "type": "boolean" }
       },
       "required": ["version", "queuesize"],
       "additionalProperties": false

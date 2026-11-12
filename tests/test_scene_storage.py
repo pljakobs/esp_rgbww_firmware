@@ -50,3 +50,12 @@ def test_native_scene_storage(tmp_path):
     assert steps[2]["light"] == 8
     assert steps[2]["light_id"] == "other-light"
     assert steps[2]["color"] == {"Preset": {"id": "remote-preset"}}
+    presets = json.loads((project / "scene-data/presets.json").read_text())
+    assert presets[0]["favorite"] is True
+    assert presets[0]["light_favorites"] == []
+    assert presets[1]["light_type"] == "WWCW"
+    assert presets[1]["raw_channels"] == [250, 750]
+    assert presets[1]["light_favorites"] == [
+        {"light_id": "uuid-one", "favorite": True},
+        {"light_id": "uuid-two", "favorite": False},
+    ]

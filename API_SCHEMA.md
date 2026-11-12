@@ -119,6 +119,44 @@ This is an additive 5.1 storage extension. Unmodified 5.0 controllers continue t
 use unqualified steps; preservation of extended steps on 5.0 is not guaranteed by
 this schema and must be checked before replicating those steps to legacy stores.
 
+### Controller-local per-light preset swatches
+
+`/info.rgbww.preset_light_favorites: true` advertises the 5.1 preset extension.
+Clients must check this flag before saving per-light membership or indexed RAW
+presets. Older 5.1 firmware must report an upgrade requirement rather than silently
+discarding the metadata. No changes are required on the 5.0 firmware line.
+
+Presets remain shared within one controller. Each preset can carry independent
+UUID-keyed favorite overrides:
+
+```json
+{
+  "id": "preset-1", "name": "Warm", "favorite": true,
+  "color": { "hsv": { "h": 0, "s": 0, "v": 60, "ct": 2700 } },
+  "light_favorites": [
+    { "light_id": "uuid-one", "favorite": true },
+    { "light_id": "uuid-two", "favorite": false }
+  ]
+}
+```
+
+An explicit override takes precedence, including `false`. Without an override,
+the existing `favorite` flag applies only to the configured default light (or
+the single legacy 5.0 light). It must not be copied to every 5.1 light.
+Changing membership preserves the preset color, identity, other lights' overrides
+and controller-local scope. Deleting a preset removes it for every light on that
+controller; removing a star only changes membership for that light.
+
+Indexed RAW presets use `raw_channels: [250, 750]` and `light_type: "WWCW"`.
+A nonempty `raw_channels` takes precedence over the stored `color` union; its
+length must match the source profile and values are integers from 0 to 1023.
+Apply it only to a matching profile. Empty `raw_channels` uses the ordinary
+`color` representation. Preserve HSV temperature/brightness and RAW white values
+when applying a swatch; clients resolve UUIDs to current indexes at execution time.
+Preset timestamps use Unix seconds, fitting ConfigDB's signed integer storage.
+Writes require readback verification. There is no cross-client compare-and-swap
+guarantee; clients should read the latest preset before changing one membership.
+
 ### Animation capacity
 
 Queue depth is already advertised by `/info` as `rgbww.queuesize`; no new
