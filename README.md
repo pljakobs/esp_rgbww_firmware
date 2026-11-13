@@ -967,6 +967,31 @@ no per-call allocation or logging. Reports may be delayed when that thread is
 busy, and cannot be emitted while it is completely stalled. `window_ms` shows
 the actual reporting interval. Enable rsyslog as above to receive the reports.
 
+The validating exerciser runs individual tests, then concurrent fades for every
+subset of two or more selected lights. Each subset runs deduplicated RAW,
+HSV-brightness, HSV-trajectory (CT or hue where supported), and both alternating
+RAW/HSV assignments. This bounds workload selection rather than testing the
+Cartesian product of every fade case. `--light N` remains repeatable and limits
+both phases to the selected lights.
+
+```sh
+python3 tests/virtual_light_exerciser.py 192.168.29.69 --no-reboot --concurrent-only
+```
+
+Concurrent cases validate each light's intermediate updates, monotonicity,
+observed duration and final state independently, and report the batch request/
+acknowledgement interval as a conservative dispatch bound, not controller
+start skew. Each case uses the existing `cmds` batch API for both setup and
+fades, avoiding separate concurrent HTTP connections. Batch commands are
+processed sequentially by the controller, not synchronized hardware starts.
+Per-light observations and batch request
+timestamps are saved as `concurrent_fade` records in `--api-log`.
+Durations include state-reporting and transport latency, not physical PWM
+completion. Original states are restored after the concurrent suite unless
+`--no-restore` is set. Use `--skip-concurrent` for the previous individual-only
+validation; `--skip-fades` skips both fade phases. Soak and permissive modes
+retain their existing workloads.
+
 For exercise-only operation without rebooting or validating results:
 
 ```sh
