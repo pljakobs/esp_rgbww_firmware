@@ -646,7 +646,7 @@ bool APPLedCtrl::reload(String& error)
 	}
 	_ledTimer.stop();
 	auto finish = [&](bool success) {
-		if(_running) _ledTimer.startOnce();
+		if(_running) _ledTimer.start();
 		return success;
 	};
 	auto failedActivation = [&]() {
@@ -844,7 +844,6 @@ void APPLedCtrl::updateLedCb(void* pTimerArg)
 void APPLedCtrl::updateLed()
 {
 	CALLBACK_TIMING_SCOPE(timing, LedUpdate);
-	_ledTimer.startOnce();
 	bool animFinished = false;
 	bool defaultFinished = false;
 	VirtualLight* defaultLight = nullptr;
@@ -1052,7 +1051,8 @@ void APPLedCtrl::start()
 	_ledTimer.setCallback(APPLedCtrl::updateLedCb, this);
 	_ledTimer.setIntervalMs(_timerInterval);
 	cdebug_i(APPLEDCTRL, "APPLedCtrl::start: " ANSI_COLOR_BLUE "_timerInterval" ANSI_COLOR_RESET, _timerInterval);
-	_ledTimer.startOnce();
+	// Periodic, so dispatch latency delays a step without shifting later steps.
+	_ledTimer.start();
 }
 
 void APPLedCtrl::stop()
