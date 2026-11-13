@@ -797,6 +797,9 @@ cdebug_i(APPLICATION, "Application::init: " ANSI_COLOR_BLUE "running partition "
 	cfg =  std::make_unique<AppConfig>(configDB_PATH);
 	data = std::make_unique<AppData>(dataDB_PATH);
 	socPins = std::make_unique<Pins>(pinsDB_PATH);
+#if HAS_AS7341_EXTENSION
+	as7341 = std::make_unique<As7341Extension>();
+#endif
 	api = std::make_unique<Api>();
 	controllers = std::make_unique<Controllers>();
 	(void)getFreeHeapSize(); // sample heap after ConfigDB + Controllers construction
@@ -944,6 +947,11 @@ cdebug_i(APPLICATION, "Application::init: " ANSI_COLOR_BLUE "running partition "
 		statusDisplayTimer.initializeMs(1000, refreshDisplay).start();
 	}
 #endif
+#if HAS_AS7341_EXTENSION
+	if(as7341) {
+		as7341->configureBus(_hardwareInputs.i2cEnabled);
+	}
+#endif
 	cdebug_i(APPLICATION, "Application::init: " ANSI_COLOR_BLUE "network initizalized, ssid: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, WifiStation.getSSID().c_str());
 	(void)getFreeHeapSize(); // sample heap after WiFi init
 	{
@@ -985,6 +993,14 @@ String Application::inputsSignature() const
 
 bool Application::validateHardwareInputs(const HardwareInputs& inputs, String& error) const
 {
+#if HAS_AS7341_EXTENSION
+	if(as7341 && as7341->busy() &&
+	   (inputs.i2cEnabled != _hardwareInputs.i2cEnabled || inputs.sda != _hardwareInputs.sda ||
+	    inputs.scl != _hardwareInputs.scl || inputs.frequency != _hardwareInputs.frequency)) {
+		error = F("Cannot reconfigure I2C while AS7341 measurement is active");
+		return false;
+	}
+#endif
 #if STATUS_DISPLAY
 	if(statusDisplay && _hardwareInputs.i2cEnabled && !inputs.i2cEnabled) {
 		error = F("Cannot disable I2C while the status display is active");
@@ -1060,6 +1076,11 @@ bool Application::configureHardwareInputs(String& error)
 #endif
 	}
 	_hardwareInputs = std::move(next);
+#if HAS_AS7341_EXTENSION
+	if(busChanged && as7341) {
+		as7341->configureBus(_hardwareInputs.i2cEnabled);
+	}
+#endif
 	_buttonStates.swap(states);
 	if(!_hardwareInputs.buttons.empty()) {
 		_buttonPollTimer.initializeMs(10, TimerDelegate(&Application::pollButtons, this)).start();

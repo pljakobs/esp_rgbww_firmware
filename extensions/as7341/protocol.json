@@ -1,0 +1,52 @@
+[
+  {
+    "title": "extension_spectrum_start_measurement",
+    "type": "object",
+    "required": ["extension_id"],
+    "properties": {
+      "extension_id": { "type": "string" }
+    }
+  },
+  {
+    "title": "extension_spectrum_measurement_started",
+    "type": "object",
+    "required": ["extension_id", "valid"],
+    "properties": {
+      "extension_id": { "type": "string" },
+      "valid": { "type": "boolean", "default": false }
+    }
+  },
+  {
+    "title": "extension_spectrum_readings",
+    "type": "object",
+    "required": ["extension_id", "valid", "state", "error", "age_ms", "data"],
+    "properties": {
+      "extension_id": { "type": "string" },
+      "valid": { "type": "boolean", "default": false },
+      "state": { "type": "string", "enum": ["idle", "measuring", "complete", "error"], "default": "idle" },
+      "error": { "type": "string", "default": "" },
+      "age_ms": { "type": "integer", "minimum": 0, "maximum": 2147483647 },
+      "data": {
+        "type": "object",
+        "required": ["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "clear_low", "nir_low", "clear_high", "nir_high", "atime", "astep", "gain"],
+        "properties": {
+          "f1": { "type": "integer", "minimum": 0, "maximum": 65535 },
+          "f2": { "type": "integer", "minimum": 0, "maximum": 65535 },
+          "f3": { "type": "integer", "minimum": 0, "maximum": 65535 },
+          "f4": { "type": "integer", "minimum": 0, "maximum": 65535 },
+          "f5": { "type": "integer", "minimum": 0, "maximum": 65535 },
+          "f6": { "type": "integer", "minimum": 0, "maximum": 65535 },
+          "f7": { "type": "integer", "minimum": 0, "maximum": 65535 },
+          "f8": { "type": "integer", "minimum": 0, "maximum": 65535 },
+          "clear_low": { "type": "integer", "minimum": 0, "maximum": 65535 },
+          "nir_low": { "type": "integer", "minimum": 0, "maximum": 65535 },
+          "clear_high": { "type": "integer", "minimum": 0, "maximum": 65535 },
+          "nir_high": { "type": "integer", "minimum": 0, "maximum": 65535 },
+          "atime": { "type": "integer", "minimum": 0, "maximum": 255 },
+          "astep": { "type": "integer", "minimum": 0, "maximum": 65535 },
+          "gain": { "type": "integer", "minimum": 0, "maximum": 10 }
+        }
+      }
+    }
+  }
+]

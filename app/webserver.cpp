@@ -431,6 +431,8 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 	String paramsJson;
 	String authHash;
 	String notificationChannel;
+	String extensionId;
+	bool hasRequestId = false;
 	int requestId = 0;
 	int32_t lightSelector = -1;
 	bool sparse = true;
@@ -444,7 +446,7 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 	heapTestRequest = &heapTest;
 #endif
 
-	if(!app.api || !app.api->parseJsonRpcRequest(requestStream, methodName, paramsJson, requestId, authHash, sparse, paramsEmpty, errorMsg, heapTestRequest, &notificationChannel, &lightSelector)) {
+	if(!app.api || !app.api->parseJsonRpcRequest(requestStream, methodName, paramsJson, requestId, authHash, sparse, paramsEmpty, errorMsg, heapTestRequest, &notificationChannel, &lightSelector, &extensionId, &hasRequestId)) {
 		auto& codec = rpcCodec();
 		Jsonrpc::Root root(codec.db());
 		if(auto update = root.update()) {
@@ -473,7 +475,7 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 	// ---- Phase 1: decide the outcome without emitting any JSON ----------
 	// Streamed bytes can't be un-written, so all auth/method decisions (and any
 	// command side effects) happen here; phase 2 then streams the envelope once.
-	enum ResultKind { RK_None, RK_Authenticated, RK_SubTrue, RK_SubFalse, RK_CommandSuccess, RK_Data };
+	enum ResultKind { RK_None, RK_Authenticated, RK_SubTrue, RK_SubFalse, RK_CommandSuccess, RK_Data, RK_SpectrumStarted };
 	ResultKind resultKind = RK_None;
 	bool dataIsInfo = false;
 	String challenge; // non-empty => included in the JSON-RPC error object's "challenge" field
@@ -536,6 +538,44 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 	} else if(method[0] == '\0') {
 		errorCode = -32600;
 		errorMsg = F("missing method");
+#if HAS_AS7341_EXTENSION
+	} else if(std::strcmp(method, "extensions.start_measurement") == 0) {
+		StaticJsonDocument<512> envelope;
+		const auto parseStatus = deserializeJson(envelope, message);
+		const bool validId = !parseStatus && envelope[F("id")].is<int32_t>();
+		const bool validExtensionId = !parseStatus && envelope[F("params")][F("extension_id")].is<const char*>();
+		if(!hasRequestId || !validId || !validExtensionId || extensionId.length() == 0) {
+			errorCode = -32602;
+			errorMsg = F("integer request id and string extension_id are required");
+		} else if(extensionId != As7341Extension::id || !app.as7341 || !app.as7341->available()) {
+			errorCode = -32004;
+			errorMsg = F("extension unavailable");
+		} else if(app.as7341->busy()) {
+			errorCode = -32010;
+			errorMsg = F("measurement busy");
+		} else if(!wsAuth) {
+			errorCode = -32603;
+			errorMsg = F("internal error: no connection state");
+		} else {
+			std::weak_ptr<uint8_t> lifetime = wsAuth->lifetimeToken;
+			auto* requester = &socket;
+			if(app.as7341->start([this, requester, lifetime]() {
+				if(lifetime.expired()) return;
+				String payload;
+				if(renderAs7341(payload, true)) {
+					queueWsPayload(*requester, payload.c_str(), payload.length(), true);
+				} else {
+					cdebug_e(APPLICATIONWEBSERVER, "AS7341: unable to render completion notification");
+					requester->close();
+				}
+			})) {
+				resultKind = RK_SpectrumStarted;
+			} else {
+				errorCode = -32603;
+				errorMsg = F("measurement could not be started");
+			}
+		}
+#endif
 #if defined(ARCH_HOST) && !defined(SMING_RELEASE)
 	} else if(std::strcmp(method, "heap_test") == 0) {
 		char result[192];
@@ -648,6 +688,16 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 				update.toApiSuccess().setSuccess(true);
 			}
 			rpcStream = codec.renderStream({requestId, JsonRPC::Message::Kind::result, method}, root.asApiSuccess());
+#if HAS_AS7341_EXTENSION
+		} else if(resultKind == RK_SpectrumStarted) {
+			if(auto update = root.update()) {
+				auto started = update.toExtensionSpectrumMeasurementStarted();
+				started.setExtensionId(As7341Extension::id);
+				started.setValid(false);
+			}
+			rpcStream = codec.renderStream({requestId, JsonRPC::Message::Kind::result, method},
+										 root.asExtensionSpectrumMeasurementStarted());
+#endif
 		}
 		if(rpcStream) {
 			queueWsStream(socket, std::move(rpcStream));
@@ -1010,8 +1060,91 @@ bool ApplicationWebserver::importConfigBody(HttpRequest& request, HttpResponse& 
 	return reportStatus(target.importFromStream(ConfigDB::Json::format, buffered));
 }
 
+#if HAS_AS7341_EXTENSION
+bool ApplicationWebserver::renderAs7341(String& payload, bool notification)
+{
+	if(!app.as7341) return false;
+	const auto& reading = app.as7341->result();
+	auto& codec = rpcCodec();
+	Jsonrpc::Root root(codec.db());
+	{
+		auto update = root.update();
+		if(!update) return false;
+		auto result = update.toExtensionSpectrumReadings();
+		result.setExtensionId(As7341Extension::id);
+		result.setValid(reading.state == As7341Measurement::State::complete);
+		result.setState(static_cast<unsigned>(reading.state));
+		result.setError(reading.error);
+		uint32_t age = reading.state == As7341Measurement::State::complete ? millis() - reading.completedAt : 0;
+		result.setAgeMs(age > 2147483647u ? 2147483647u : age);
+		result.data.setF1(reading.channels[0]);
+		result.data.setF2(reading.channels[1]);
+		result.data.setF3(reading.channels[2]);
+		result.data.setF4(reading.channels[3]);
+		result.data.setClearLow(reading.channels[4]);
+		result.data.setNirLow(reading.channels[5]);
+		result.data.setF5(reading.channels[6]);
+		result.data.setF6(reading.channels[7]);
+		result.data.setF7(reading.channels[8]);
+		result.data.setF8(reading.channels[9]);
+		result.data.setClearHigh(reading.channels[10]);
+		result.data.setNirHigh(reading.channels[11]);
+		result.data.setAtime(reading.settings.atime);
+		result.data.setAstep(reading.settings.astep);
+		result.data.setGain(reading.settings.gain);
+	}
+	if(notification) {
+		return codec.render({0, JsonRPC::Message::Kind::notification, F("extensions.measurement")},
+							root.asExtensionSpectrumReadings(), payload);
+	}
+	return codec.renderPayload(root.asExtensionSpectrumReadings(), payload);
+}
+
+void ApplicationWebserver::onAs7341(HttpRequest& request, HttpResponse& response)
+{
+	const String base = String(F("/extensions/")) + As7341Extension::id;
+	const bool start = request.uri.Path == base + F("/start_measurement");
+	const bool readings = request.uri.Path == base + F("/readings");
+	if(!preflightRequest(request, response, start ? std::initializer_list<HttpMethod>{HttpMethod::POST}
+												 : std::initializer_list<HttpMethod>{HttpMethod::GET})) return;
+	auto reply = [&](HttpStatus status, const String& body) {
+		response.code = status;
+		response.setContentType(MIME_JSON);
+		response.sendString(body);
+	};
+	if((!start && !readings) || !app.as7341 || !app.as7341->available()) {
+		reply(HTTP_STATUS_NOT_FOUND, F("{\"error\":\"extension unavailable\"}"));
+		return;
+	}
+	if(start) {
+		if(app.as7341->busy()) {
+			reply(HTTP_STATUS_CONFLICT, F("{\"error\":\"measurement busy\"}"));
+			return;
+		}
+		if(!app.as7341->start({})) {
+			reply(HTTP_STATUS_INTERNAL_SERVER_ERROR, F("{\"error\":\"measurement could not be started\"}"));
+			return;
+		}
+		reply(HTTP_STATUS_ACCEPTED, F("{\"extension_id\":\"spectrum-1\",\"valid\":false}"));
+		return;
+	}
+	String payload;
+	if(!renderAs7341(payload, false)) {
+		reply(HTTP_STATUS_INTERNAL_SERVER_ERROR, F("{\"error\":\"unable to render measurement\"}"));
+		return;
+	}
+	reply(HTTP_STATUS_OK, payload);
+}
+#endif
+
 void ApplicationWebserver::onFile(HttpRequest& request, HttpResponse& response)
 {
+#if HAS_AS7341_EXTENSION
+	if(request.uri.Path.startsWith(F("/extensions/"))) {
+		onAs7341(request, response);
+		return;
+	}
+#endif
 	cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onFile: " ANSI_COLOR_BLUE "http onFile" ANSI_COLOR_RESET);
 	// LittleFS file serving buffers through lwIP — require more free heap than API calls.
 	if(!preflightRequest(request, response, {HttpMethod::GET, HttpMethod::HEAD}, 8000)) return;

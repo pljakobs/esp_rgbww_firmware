@@ -132,6 +132,10 @@ node tools/generate-api-schemas.mjs
 node --test .github/tests/test_hardware_schema.mjs .github/tests/test_virtual_light.mjs .github/tests/test_ledctrl.mjs
 ```
 
+Protocol schema variants can be provided by extensions without editing the
+core JSON-RPC schema. See [extensions/README.md](extensions/README.md) for the
+build-time composition format and current limitations.
+
 ---
 
 ## Features

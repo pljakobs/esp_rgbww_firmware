@@ -2,6 +2,88 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "properties": {
+    "extensions": {
+      "type": "object",
+      "properties": {
+        "display": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true
+            },
+            "address": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 119,
+              "default": 0,
+              "description": "7-bit I2C address; 0 uses the compiled display address"
+            }
+          }
+        },
+        "current_sensor": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true
+            },
+            "address": {
+              "type": "integer",
+              "minimum": 64,
+              "maximum": 79,
+              "default": 64
+            },
+            "shunt_ohms": {
+              "type": "number",
+              "minimum": 0.00001,
+              "maximum": 1,
+              "default": 0.1
+            },
+            "interval_ms": {
+              "type": "integer",
+              "minimum": 200,
+              "maximum": 3600000,
+              "default": 1000
+            }
+          }
+        },
+        "color_sensor": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true
+            },
+            "interval_ms": {
+              "type": "integer",
+              "minimum": 200,
+              "maximum": 3600000,
+              "default": 1000
+            },
+            "atime": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 255,
+              "default": 29
+            },
+            "astep": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65535,
+              "default": 599
+            },
+            "gain": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10,
+              "default": 6,
+              "description": "AS7341 gain register value"
+            }
+          }
+        }
+      }
+    },
     "general": {
       "type": "object",
       "properties": {

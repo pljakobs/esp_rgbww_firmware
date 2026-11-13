@@ -1,0 +1,14 @@
+[
+  {
+    "title": "extension_current_readings",
+    "type": "object",
+    "properties": {
+      "extension_id": { "type": "string" },
+      "valid": { "type": "boolean" },
+      "age_ms": { "type": "integer", "minimum": 0 },
+      "voltage_v": { "type": "number" },
+      "current_a": { "type": "number" },
+      "power_w": { "type": "number" }
+    }
+  }
+]

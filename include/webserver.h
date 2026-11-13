@@ -137,6 +137,10 @@ private:
     void ensureSecurityCache();
 
     void onFile(HttpRequest &request, HttpResponse &response);
+#if HAS_AS7341_EXTENSION
+    void onAs7341(HttpRequest& request, HttpResponse& response);
+    bool renderAs7341(String& payload, bool notification);
+#endif
     void onIndex(HttpRequest &request, HttpResponse &response);
     void onRedirector(HttpRequest &request, HttpResponse &response);
     void onWebapp(HttpRequest &request, HttpResponse &response);

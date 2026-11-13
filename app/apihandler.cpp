@@ -694,7 +694,8 @@ bool Api::handleHostHeapTest(const HeapTestRequest& request, char* result, size_
 
 bool Api::parseJsonRpcRequest(Stream& input, String& method, String& params, int& requestId, String& authHash,
 									 bool& sparse, bool& paramsEmpty, String& errorMsg, HeapTestRequest* heapTest,
-									 String* notificationChannel, int32_t* lightSelector)
+									 String* notificationChannel, int32_t* lightSelector, String* extensionId,
+									 bool* hasRequestId)
 {
 	auto& codec = rpcCodec();
 	Jsonrpc::Root root(codec.db());
@@ -723,11 +724,21 @@ bool Api::parseJsonRpcRequest(Stream& input, String& method, String& params, int
 	}
 	method = request.getMethod();
 	requestId = request.getId().toInt();
+	if(hasRequestId != nullptr) {
+		*hasRequestId = request.getId().length() != 0;
+	}
 	authHash = request.params.getHash();
 	const String sparseValue = request.params.getSparse();
 	sparse = sparseValue.length() == 0 ||
 		!(sparseValue == F("0") || sparseValue == F("false") || sparseValue == F("off"));
 	auto fields = request.params;
+#if HAS_AS7341_EXTENSION
+	if(extensionId != nullptr) {
+		*extensionId = fields.getExtensionId();
+	}
+#else
+	(void)extensionId;
+#endif
 	if(lightSelector != nullptr) {
 		*lightSelector = fields.getLight();
 	}

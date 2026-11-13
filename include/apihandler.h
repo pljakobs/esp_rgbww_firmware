@@ -39,7 +39,8 @@ public:
 	bool dispatchJsonRpc(const String& json, String& errorMsg, bool relay = false);
 	bool parseJsonRpcRequest(Stream& input, String& method, String& params, int& requestId, String& authHash,
 															 bool& sparse, bool& paramsEmpty, String& errorMsg, HeapTestRequest* heapTest = nullptr,
-											 String* notificationChannel = nullptr, int32_t* lightSelector = nullptr);
+											 String* notificationChannel = nullptr, int32_t* lightSelector = nullptr,
+											 String* extensionId = nullptr, bool* hasRequestId = nullptr);
 	bool renderData(const String& method, const JsonObject& params, String& out);
 	bool renderData(const String& method, const JsonObject& params, String& out, int requestId);
 	bool renderData(const String& method, bool sparse, String& out, int requestId, int32_t lightSelector = -1,

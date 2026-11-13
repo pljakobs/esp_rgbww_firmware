@@ -1,0 +1,13 @@
+[
+  {
+    "title": "extension_display_status",
+    "type": "object",
+    "properties": {
+      "extension_id": { "type": "string" },
+      "available": { "type": "boolean" },
+      "width": { "type": "integer" },
+      "height": { "type": "integer" },
+      "two_color": { "type": "boolean" }
+    }
+  }
+]
