@@ -920,7 +920,7 @@ New diagnostic builds emit versioned runtime-derived paths:
 
 ```text
 CallbackTiming seq=1 window_ms=5000 inclusive=1 order=avg_us format=2 dropped_scopes=0
-CallbackTiming seq=1 format=2 name=led_update/light_state/render calls=20 avg_us=800.0 max_us=1100 total_us=16000
+CallbackTiming seq=1 format=2 name=state_publish/light_state/render calls=20 avg_us=800.0 max_us=1100 total_us=16000
 ```
 
 `name` is the full synchronous measurement path, with `/` separating components.
@@ -928,7 +928,7 @@ Its parent is the prefix before the last `/`; a single-component name is a root
 scope. Sibling paths are separate scoped operations; ancestor totals include
 descendants. These are instrumented scopes, not a complete function call graph.
 The same function invoked in another context has a separate path, e.g.
-`led_update/light_state/send/ws_pump`, `current_state/send/ws_pump` or a deferred
+`state_publish/light_state/send/ws_pump`, `current_state/send/ws_pump` or a deferred
 top-level `ws_pump`. Dispatcher batches are not synthetic parents: TCP/IP work
 can execute outside a dispatcher batch. Async work does not inherit the scope
 that queued it. All durations still include blocking and preemption.
@@ -953,7 +953,7 @@ deriving format-2 parents from paths and retaining hints for legacy flat names.
 previous report, not lifetime statistics. Timings include blocking waits and
 preemption, so a high value means time spent occupying the callback, not
 necessarily CPU computation. Nested timings are inclusive: for example,
-`led_update` includes `light_show`, state publication and any WebSocket pumping
+`state_publish` includes the state publication and any WebSocket pumping
 it invokes. Do not sum those totals as independent CPU usage.
 
 Instrumented paths cover LED updates, individual light updates, actual
@@ -1106,7 +1106,8 @@ no additive "overall load" is calculated:
 | Measurement | Included measurements/work |
 |-------------|----------------------------|
 | DispatcherTiming batch duration | Synchronous instrumented and uninstrumented batch work, plus dispatcher overhead |
-| `led_update` | All `light_show` calls; `light_state` and `current_state` when publication occurs |
+| `led_update` | All `light_show` calls and publication trigger checks; no JSON construction or sends |
+| `state_publish` | One deferred message: MQTT clock, MQTT color, `current_state` or `light_state` |
 | `runtime_info` | `runtime_collect`, `runtime_json`, `runtime_enqueue`, surrounding logging/overhead |
 | `ota_verify` | `ota_hash` |
 | `timing_report` | Diagnostic formatting and syslog output, including frozen trace output |
@@ -1115,9 +1116,12 @@ no additive "overall load" is calculated:
 | `light_show`, runtime subsections, `ota_hash` | No explicitly nested timing buckets in current normal paths |
 | `light_reload`, `telemetry`, `buttons`, `mqtt_receive` | Whole operation, including any instrumented functions invoked synchronously |
 
-`light_state` and `current_state` are siblings of `light_show`, not included in
-it. Deferred callbacks belong to their later dispatcher batch, not the callback
-that queued them. MQTT reception runs in TCP/IP context and need not belong to a
+`light_state` and `current_state` run under `state_publish`, a separate dispatcher
+event queued by `led_update`; they are not included in `led_update`. Each
+`state_publish` event builds and sends at most one message and requeues itself
+while messages are pending; pending messages are coalesced to the latest state.
+Deferred callbacks belong to their later dispatcher batch, not the callback that
+queued them. MQTT reception runs in TCP/IP context and need not belong to a
 Sming dispatcher batch. Durations include blocking and preemption; never sum
 parent and child totals. DispatcherTiming is context here, not a plotted metric
 of the CallbackTiming module.

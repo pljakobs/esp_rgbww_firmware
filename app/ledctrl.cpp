@@ -864,27 +864,81 @@ void APPLedCtrl::updateLed()
 			defaultFinished = finished;
 		}
 	}
-	for(size_t count = 0; count < app.lights.size(); ++count) {
-		const size_t index = _nextLightEvent++ % app.lights.size();
-		if(app.eventserver.publishLightState(app.lights[index])) {
-			break;
-		}
+	// Only cheap trigger decisions happen here; JSON construction and sends run in
+	// later dispatcher events (publishDeferred) so they cannot stretch the fade tick.
+	uint8_t publish = 0;
+	if(!app.lights.empty() && app.eventserver.hasLightSubscribers()) {
+		publish |= PublishLightState;
 	}
 	++_stepCounter;
 	if(clockMaster && _stepCounter % std::max(clockMasterInterval, uint32_t(1)) == 0) {
-		app.mqttclient.publishClock(_stepCounter);
+		_pendingClockSteps = _stepCounter;
+		publish |= PublishClock;
 	}
 
 	const static uint32_t stepLenMs = 1000 / RGBWW_UPDATEFREQUENCY;
 	if(defaultLight != nullptr && colorMaster &&
 	   (defaultFinished || colorMasterInterval == 0 || ((stepLenMs * _stepCounter) % colorMasterInterval) < stepLenMs)) {
-		publishToMqtt(*defaultLight->led, defaultLight->index);
+		publish |= PublishMqttColor;
 	}
 	if(defaultLight != nullptr && colorMasterInterval >= 0 &&
 	   (animFinished || colorMasterInterval == 0 || ((stepLenMs * _stepCounter) % colorMasterInterval) < stepLenMs)) {
 		const uint32_t now = millis();
 		if(now - _lastColorEvent >= static_cast<uint32_t>(colorMinInterval)) {
 			_lastColorEvent = now;
+			publish |= PublishCurrentState;
+		}
+	}
+	schedulePublish(publish);
+}
+
+void APPLedCtrl::schedulePublish(uint8_t flags)
+{
+	_pendingPublish |= flags;
+	if(_pendingPublish == 0 || _publishQueued) {
+		return;
+	}
+	// On failure the flags stay pending and the next tick retries.
+	_publishQueued = System.queueCallback(APPLedCtrl::publishDeferredCb, this);
+}
+
+void APPLedCtrl::publishDeferredCb(void* param)
+{
+	static_cast<APPLedCtrl*>(param)->publishDeferred();
+}
+
+/**
+ * @brief Builds and sends one pending state message, then requeues itself if more is pending.
+ *
+ * Messages are coalesced: a pending message always reports the light's latest state.
+ * A callback queued from here runs in a later dispatcher batch, so LED ticks can interleave.
+ */
+void APPLedCtrl::publishDeferred()
+{
+	_publishQueued = false;
+	if(_shutdown) {
+		_pendingPublish = 0;
+		return;
+	}
+	CALLBACK_TIMING_SCOPE(timing, StatePublish);
+	VirtualLight* defaultLight = nullptr;
+	for(auto& light : app.lights) {
+		if(light.isDefault) {
+			defaultLight = &light;
+			break;
+		}
+	}
+	if(_pendingPublish & PublishClock) {
+		_pendingPublish &= ~PublishClock;
+		app.mqttclient.publishClock(_pendingClockSteps);
+	} else if(_pendingPublish & PublishMqttColor) {
+		_pendingPublish &= ~PublishMqttColor;
+		if(defaultLight != nullptr) {
+			publishToMqtt(*defaultLight->led, defaultLight->index);
+		}
+	} else if(_pendingPublish & PublishCurrentState) {
+		_pendingPublish &= ~PublishCurrentState;
+		if(defaultLight != nullptr) {
 			HSVCT currentHsv;
 			const HSVCT* hsv = nullptr;
 			if(defaultLight->led->getMode() == RGBWWLed::ColorMode::Hsv) {
@@ -893,7 +947,16 @@ void APPLedCtrl::updateLed()
 			}
 			app.eventserver.publishCurrentState(defaultLight->led->getCurrentOutput(), hsv);
 		}
+	} else if(_pendingPublish & PublishLightState) {
+		_pendingPublish &= ~PublishLightState;
+		for(size_t count = 0; count < app.lights.size(); ++count) {
+			const size_t index = _nextLightEvent++ % app.lights.size();
+			if(app.eventserver.publishLightState(app.lights[index])) {
+				break;
+			}
+		}
 	}
+	schedulePublish(0);
 }
 
 /**

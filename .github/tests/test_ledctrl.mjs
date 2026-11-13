@@ -58,8 +58,12 @@ test("MQTT synchronization publishes clock and default light state", () => {
   const end = controller.indexOf("void APPLedCtrl::checkStableColorState()", begin);
   assert.ok(begin >= 0 && end > begin);
   const update = controller.slice(begin, end);
-  assert.match(update, /clockMaster[\s\S]*publishClock\(_stepCounter\)/);
-  assert.match(update, /colorMaster[\s\S]*publishToMqtt\(\*defaultLight->led, defaultLight->index\)/);
+  const tick = update.slice(0, update.indexOf("void APPLedCtrl::schedulePublish("));
+  assert.match(tick, /clockMaster[\s\S]*_pendingClockSteps = _stepCounter;[\s\S]*publish \|= PublishClock/);
+  assert.match(tick, /colorMaster[\s\S]*publish \|= PublishMqttColor/);
+  assert.doesNotMatch(tick, /publishClock\(|publishToMqtt\(|publishCurrentState\(|publishLightState\(/);
+  assert.match(update, /PublishClock[\s\S]*publishClock\(_pendingClockSteps\)/);
+  assert.match(update, /PublishMqttColor[\s\S]*publishToMqtt\(\*defaultLight->led, defaultLight->index\)/);
   assert.match(mqtt, /light\.usesNamedRawChannels\(\)[\s\S]*toRawInputIndexed\(\)/);
 });
 

@@ -30,6 +30,7 @@ enum class Id : uint8_t {
 	Render,
 	Normalize,
 	Send,
+	StatePublish,
 	Count
 };
 

@@ -108,9 +108,14 @@ void EventServer::onClientComplete(TcpClient& client, bool succesfull)
 	cdebug_d(EVENTSERVER, "EventServer::onClientComplete: " "Client removed: %x\n", &client);
 }
 
+bool EventServer::hasLightSubscribers() const
+{
+	return webServer != nullptr && webServer->hasLightSubscribers();
+}
+
 bool EventServer::publishLightState(VirtualLight& light)
 {
-	if(webServer == nullptr || !webServer->hasLightSubscribers()) {
+	if(!hasLightSubscribers()) {
 		return false;
 	}
 	const auto raw = light.led->getCurrentOutput();
