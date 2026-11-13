@@ -99,6 +99,16 @@ The access point is a recovery/setup path, not a prerequisite for normal
 station-mode operation. Services that require a broker or reachable network
 are conditional on their configuration and on network availability.
 
+## Selected Board Profile
+
+The webapp or Home Assistant copies the selected catalog entry into
+`hardware.configuration.board_profile`, alongside matching `board_id`,
+`board_revision` and `soc`. Firmware reads the selected profile through typed
+ConfigDB accessors, without opening or parsing the catalog. The catalog is only
+a selection resource served to configuration clients, not a runtime dependency.
+Existing configurations without the snapshot require selecting and applying the
+board again; firmware reports an explicit error rather than guessing a profile.
+
 ## PWM Ownership and Scheduling: Future Investigation
 
 This is an architectural follow-up, not a committed redesign.

@@ -2,7 +2,7 @@
   "apiVersion": "1.0.0-inferred.1",
   "status": "inferred",
   "schemaHashAlgorithm": "sha256",
-  "schemaHash": "74878d77b2788109526e8c3bea3f14d0ccaa231837394b63eba5f16a4909a275",
+  "schemaHash": "fb9d7d76f60b69ab727bcfe3368cd061e9e89160656468fb334a671957ac3f1e",
   "sourceSchemas": [
     {
       "database": "Definitions",
@@ -23,8 +23,8 @@
       "source": "app-config.cfgdb",
       "projection": "schema/app-config.schema.json",
       "persistent": true,
-      "sourceHash": "6d56fb0f4336bf9bc407f09ce39234dc3b8f6e1fa8c5b617de23a74f00ada807",
-      "projectionHash": "38bd7574a70d6e62465c8f404dfad7790b86fd29f689f677836892ef8c676fdc"
+      "sourceHash": "15fd385316d7509d4d5582c859a3cc20fcfc6e7621e0ef358990987da322c8e5",
+      "projectionHash": "39db72c9021ebdf33858140621c1b225592fe734b88f4cbd9d4bbd8ed08c32dd"
     },
     {
       "database": "AppData",

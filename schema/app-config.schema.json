@@ -1358,6 +1358,10 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "board_profile": {
+          "$ref": "#/definitions/board_profile",
+          "description": "Selected board snapshot, supplied by the configuration client. Runtime hardware setup uses this profile, not the catalog."
+        },
         "revision": {
           "type": "integer",
           "minimum": 0,

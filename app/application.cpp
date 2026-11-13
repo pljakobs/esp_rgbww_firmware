@@ -978,13 +978,7 @@ String Application::inputsSignature() const
 	hardware.configuration.system.exportToStream(ConfigDB::Json::format, stream);
 	hardware.configuration.buttons.exportToStream(ConfigDB::Json::format, stream);
 	hardware.configuration.buses.exportToStream(ConfigDB::Json::format, stream);
-	for(auto board : hardware.boards) {
-		if(board.getId() == hardware.configuration.getBoardId() &&
-		   board.getRevision() == hardware.configuration.getBoardRevision()) {
-			board.exportToStream(ConfigDB::Json::format, stream);
-			break;
-		}
-	}
+	hardware.configuration.boardProfile.exportToStream(ConfigDB::Json::format, stream);
 	return stream.readString(stream.available());
 }
 
