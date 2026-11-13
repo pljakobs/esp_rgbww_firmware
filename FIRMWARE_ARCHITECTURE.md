@@ -109,41 +109,43 @@ a selection resource served to configuration clients, not a runtime dependency.
 Existing configurations without the snapshot require selecting and applying the
 board again; firmware reports an explicit error rather than guessing a profile.
 
-## PWM Ownership and Scheduling: Future Investigation
+## Controller-Owned ESP32 PWM
 
-This is an architectural follow-up, not a committed redesign.
+`APPLedCtrl` owns the PWM resources in `ledctrl.cpp`: one populated bank on
+ESP32-C3, or up to two speed-mode banks on classic ESP32. It centrally applies
+frequency, resolution, timer selection, spread spectrum and phase shift.
+RGBWWLed borrows channel bindings; colors and animation policy stay in the
+library, and the existing shared HardwarePwm worker executes hardware fades.
 
-Currently, each light's `PWMOutput` creates its own `Esp32HardwarePwm`
-instance(s). Instances can share an LEDC timer without owning a common
-timer-level configuration object. Frequency and spread spectrum are properties
-of that hardware timer, not independent properties of its channels or lights.
+All board pins allowing
+`light.pwm` are initialized at zero, in profile order, including pins not
+currently assigned to a light. Board capacity, SoC capabilities, reserved pins
+and conflicts with configured inputs/I2C are checked before changing outputs.
+A board must be selected before creating PWM lights. Unknown/mismatched profiles,
+missing snapshots or allocation failures are explicit errors, not fallbacks to
+arbitrary SoC GPIOs.
 
-The shared PWM worker currently tracks spread-spectrum deadlines per instance.
-At 8 kHz PWM with subsampling 4, each enabled instance requests a 500 us
-interval. Staggered deadlines can multiply worker/timer wakeups as instance
-count grows; sharing the worker alone does not coalesce the schedule. Actual
-rates depend on scheduling and overdue-work coalescing and must be measured.
+GPIO-to-bank/channel mapping is stable across light creation, deletion and
+reordering. Deleting the last light leaves the board PWM banks alive. Unchanged
+lights retain their instances, duties and animation queues when other lights
+change. Removed/rebound views cancel only their assigned channels. AUTO phase
+shift is distributed across the full physical bank, not each light's pin count.
 
-Investigate:
+Changing the selected board/profile/revision/SoC or PWM settings rebuilds the resources.
+Preparation failures preserve the active setup. After detachment, activation
+failures clear lights and PWM resources to a safe state, log the failure and
+publish the actual empty light set; there is no automatic rollback.
+Shutdown stops updates and invalidates reload callbacks, destroys light views,
+then releases banks. `Application` invokes this idempotent shutdown before
+member destruction because its light container otherwise dies first.
 
-- Controller-owned PWM resources, created by firmware, with `RGBWWLed` receiving
-  channel assignments or non-owning output views rather than constructing one
-  hardware backend per light.
-- Explicit ownership by LEDC speed mode, timer and channel. One controller
-  backend may still need multiple timer/bank configurations; do not assume one
-  frequency or resolution for every output.
-- Timer-level coordination of frequency/spread-spectrum settings and a shared
-  cadence that avoids redundant writes and staggered per-light wakeups.
-- Resource lifetime, runtime light reconfiguration, conflicting timer settings
-  and portability to ESP8266 and other output backends.
-- Keeping animation queues, color conversion and animation policy in RGBWWLed.
-  Prepared hardware segments can provide lookahead without moving animation
-  ownership into HardwarePWM; completion notifications must not gate the next
-  prepared segment on the 20 ms RGBWWLed tick.
-
-Measure timer firings, worker passes, per-hardware-timer updates and execution
-time before selecting an approach. No runtime behavior changes are implied by
-this note.
+ESP8266/Host retain their existing output construction path. RGBWWLed 0.10.z
+and Lightinator 5.0 pins are unaffected. The selected-profile persistence
+and controller-owned PWM migration belong only to Lightinator 5.1 with
+RGBWWLed 0.11.z; do not backport them to Lightinator 5.0 or RGBWWLed 0.10.z.
+Software builds/native tests do not
+establish physical fade cancellation on classic ESP32 or prove a flicker fix;
+matched device workloads and waveform measurements remain necessary.
 
 ## Opt-in fade timing measurements
 

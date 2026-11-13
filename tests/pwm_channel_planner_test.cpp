@@ -67,6 +67,23 @@ static void testSparseChannelsKeepLogicalMaskPositions()
 
 int main()
 {
+	// Physical placement follows board order, never light order/count.
+	const std::vector<uint8_t> board{27, 26, 25, 23, 22, 21, 19, 18, 17, 16, 15, 14, 13, 12, 4};
+	std::vector<PwmChannelPlanner::ChannelMap> mappings;
+	const std::vector<PinMap> reordered{{{17, -1, -1, 18, -1}}, {{27, -1, -1, -1, -1}}};
+	assert(PwmChannelPlanner::mapBoard(reordered, board, 8, 2, mappings) == Status::Ok);
+	assert(mappings[0][0].bank == 1 && mappings[0][0].channel == 0);
+	assert(mappings[0][3].bank == 0 && mappings[0][3].channel == 7);
+	assert(mappings[0][1].bank == -1);
+	assert(mappings[1][0].bank == 0 && mappings[1][0].channel == 0);
+	assert(PwmChannelPlanner::mapBoard({reordered[0]}, board, 8, 2, mappings) == Status::Ok);
+	assert(mappings[0][0].bank == 1 && mappings[0][0].channel == 0);
+	assert(PwmChannelPlanner::mapBoard({}, board, 8, 2, mappings) == Status::Ok);
+	assert(PwmChannelPlanner::mapBoard({{{99, -1, -1, -1, -1}}}, board, 8, 2, mappings) == Status::InvalidConfiguration);
+	assert(PwmChannelPlanner::mapBoard({reordered[0], reordered[0]}, board, 8, 2, mappings) == Status::InvalidConfiguration);
+	assert(mappings.empty());
+	assert(PwmChannelPlanner::mapBoard({}, {4, 4}, 8, 2, mappings) == Status::InvalidConfiguration);
+	assert(PwmChannelPlanner::mapBoard({}, board, 6, 1, mappings) == Status::CapacityExceeded);
 	testRgbwwLightCrossesBankBoundary();
 	testDualBankCapacityAndOverflow();
 	testSingleBankCapacity();

@@ -27,6 +27,7 @@
 #include "stepsync.h"
 #include "jsonprocessor.h"
 #include <memory>
+#include <array>
 #include <vector>
 
 #define APP_COLOR_FILE ".color"
@@ -82,6 +83,7 @@ public:
 
     void start();
     void stop();
+    void shutdown();
     void colorSave();
     void colorReset();
     void testChannels();
@@ -117,6 +119,15 @@ public:
     };
     void reconfigure();
 private:
+    bool _shutdown = false;
+    bool _running = false;
+#ifdef ARCH_ESP32
+    struct PwmResources {
+        std::array<std::unique_ptr<Esp32HardwarePwm>, 2> banks;
+        std::vector<uint8_t> pins;
+        String configuration;
+    } _pwmResources;
+#endif
     void requestReload();
     String configurationSignature() const;
     bool _reloadQueued = false;

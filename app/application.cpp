@@ -390,6 +390,7 @@ int32_t getVersion(IDataSourceStream& input)
 
 Application::~Application()
 {
+	rgbwwctrl.shutdown();
 	_buttonPollTimer.stop();
 	_resetPinTimer.stop();
 	if(pNtpclient != nullptr) {
