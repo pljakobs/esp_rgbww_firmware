@@ -90,7 +90,7 @@ public:
     void wsSendRuntimeInfo(const char* buffer, size_t length);
     bool hasLightSubscribers() const;
     bool hasRuntimeInfoSubscribers() const;
-    void wsSendLightEvent(const char* buffer, size_t length);
+    void wsSendLightEvent(const char* buffer, size_t length, uint32_t timingId = 0);
 
     String getApiCodeMsg(API_CODES code);
 
@@ -146,6 +146,7 @@ private:
     void onApiDocs(HttpRequest &request, HttpResponse &response);
     void onOpenApi(HttpRequest &request, HttpResponse &response);
     void onCatalog(HttpRequest &request, HttpResponse &response);
+    void onFadeTiming(HttpRequest &request, HttpResponse &response);
     void onInfo(HttpRequest &request, HttpResponse &response);
     void onColor(HttpRequest &request, HttpResponse &response);
     void onNetworks(HttpRequest &request, HttpResponse &response);

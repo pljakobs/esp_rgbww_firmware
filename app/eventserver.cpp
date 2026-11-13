@@ -24,6 +24,7 @@
  */
 #include <RGBWWCtrl.h>
 #include <CallbackTiming.h>
+#include <FadeTiming.h>
 
 EventServer::~EventServer()
 {
@@ -121,14 +122,16 @@ bool EventServer::publishLightState(VirtualLight& light)
 	     (!hasHsv || hsv == light.lastEventHsv)) || now - light.lastEventTime < 200)) {
 		return false;
 	}
-	CallbackTiming::Scope timing(CallbackTiming::Id::LightState);
+	CALLBACK_TIMING_SCOPE(timing, LightState);
+	const uint32_t timingId = FADE_TIMING_SAMPLE(light.index, FadeTiming::Event::State, light.index,
+		hasHsv ? hsv.v : raw.ww, hasHsv ? hsv.ct : raw.cw);
 	auto& codec = rpcCodec();
 	auto root = [&codec]() {
-		CallbackTiming::Scope rootTiming(CallbackTiming::Id::Root);
+		CALLBACK_TIMING_SCOPE(rootTiming, Root);
 		return Jsonrpc::Root(codec.db());
 	}();
 	{
-		CallbackTiming::Scope populateTiming(CallbackTiming::Id::Populate);
+		CALLBACK_TIMING_SCOPE(populateTiming, Populate);
 		if(auto update = root.update()) {
 			auto event = update.toLightState();
 			event.setLight(light.index);
@@ -169,21 +172,22 @@ bool EventServer::publishLightState(VirtualLight& light)
 	String payload;
 	bool rendered;
 	{
-		CallbackTiming::Scope renderTiming(CallbackTiming::Id::Render);
+		CALLBACK_TIMING_SCOPE(renderTiming, Render);
 		rendered = codec.render({0, JsonRPC::Message::Kind::notification, F("light_state")}, root.asLightState(), payload);
 	}
 	bool normalized = false;
 	if(rendered) {
-		CallbackTiming::Scope normalizeTiming(CallbackTiming::Id::Normalize);
+		CALLBACK_TIMING_SCOPE(normalizeTiming, Normalize);
 		normalized = normalizeRawUnionForWire(payload);
 	}
 	if(!rendered || !normalized) {
 		cdebug_e(EVENTSERVER, "Unable to serialize virtual-light state");
 		return false;
 	}
+	FADE_TIMING_ONLY(if(timingId) FadeTiming::record(FadeTiming::Event::Rendered, timingId);)
 	{
-		CallbackTiming::Scope sendTiming(CallbackTiming::Id::Send);
-		webServer->wsSendLightEvent(payload.c_str(), payload.length());
+		CALLBACK_TIMING_SCOPE(sendTiming, Send);
+		webServer->wsSendLightEvent(payload.c_str(), payload.length(), timingId);
 	}
 	light.lastEventRaw = raw;
 	light.lastEventHsv = hsv;
@@ -237,7 +241,7 @@ void EventServer::publishCurrentState(const ChannelOutput& raw, const HSVCT* pHs
 		cdebug_d(EVENTSERVER, "EventServer::publishCurrentState: " "eventserver, dropping currentState event\n");
 		return; // Silently discard this event
 	}
-	CallbackTiming::Scope timing(CallbackTiming::Id::CurrentState);
+	CALLBACK_TIMING_SCOPE(timing, CurrentState);
 	_lastRaw = raw;
 	_lastHasHsv = hasHsv;
 	if(hasHsv) {
@@ -247,11 +251,11 @@ void EventServer::publishCurrentState(const ChannelOutput& raw, const HSVCT* pHs
 
 	auto& codec = rpcCodec();
 	auto root = [&codec]() {
-		CallbackTiming::Scope rootTiming(CallbackTiming::Id::Root);
+		CALLBACK_TIMING_SCOPE(rootTiming, Root);
 		return Jsonrpc::Root(codec.db());
 	}();
 	{
-		CallbackTiming::Scope populateTiming(CallbackTiming::Id::Populate);
+		CALLBACK_TIMING_SCOPE(populateTiming, Populate);
 		if(auto update = root.update()) {
 			auto color = update.toColor();
 			if(pHsv) {
@@ -299,16 +303,16 @@ void EventServer::publishCurrentState(const ChannelOutput& raw, const HSVCT* pHs
 	String payload;
 	bool rendered;
 	{
-		CallbackTiming::Scope renderTiming(CallbackTiming::Id::Render);
+		CALLBACK_TIMING_SCOPE(renderTiming, Render);
 		rendered = codec.render({0, JsonRPC::Message::Kind::notification, F("color_event")}, root.asColor(), payload);
 	}
 	bool normalized = false;
 	if(rendered) {
-		CallbackTiming::Scope normalizeTiming(CallbackTiming::Id::Normalize);
+		CALLBACK_TIMING_SCOPE(normalizeTiming, Normalize);
 		normalized = normalizeRawUnionForWire(payload);
 	}
 	if(rendered && normalized) {
-		CallbackTiming::Scope sendTiming(CallbackTiming::Id::Send);
+		CALLBACK_TIMING_SCOPE(sendTiming, Send);
 		sendPayload(payload);
 	}
 }

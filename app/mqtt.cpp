@@ -204,7 +204,7 @@ bool AppMqttClient::isRunning() const
 
 int AppMqttClient::onMessageReceived(MqttClient& client, mqtt_message_t* msg)
 {
-	CallbackTiming::Scope timing(CallbackTiming::Id::MqttReceive);
+	CALLBACK_TIMING_SCOPE(timing, MqttReceive);
 	String topic = MqttBuffer(msg->publish.topic_name);
 
     String message = MqttBuffer(msg->publish.content);

@@ -410,14 +410,14 @@ void Application::uptimeCounter()
 
 void Application::checkRam()
 {
-	CallbackTiming::Scope timing(CallbackTiming::Id::RuntimeInfo);
+	CALLBACK_TIMING_SCOPE(timing, RuntimeInfo);
 	// generate and send memory update to fronend
 	{
 		size_t freeHeap;
 		size_t maxBlock;
 		unsigned frag;
 		{
-			CallbackTiming::Scope collectTiming(CallbackTiming::Id::RuntimeCollect);
+			CALLBACK_TIMING_SCOPE(collectTiming, RuntimeCollect);
 			freeHeap = getFreeHeapSize();
 			maxBlock = getMaxFreeBlockSize();
 			if(maxBlock < _minMaxFreeBlock) {
@@ -433,7 +433,7 @@ void Application::checkRam()
 		String runtimeNotification;
 		bool rendered;
 		{
-			CallbackTiming::Scope jsonTiming(CallbackTiming::Id::RuntimeJson);
+			CALLBACK_TIMING_SCOPE(jsonTiming, RuntimeJson);
 			auto& codec = rpcCodec();
 			Jsonrpc::Root root(codec.db());
 			if(auto update = root.update()){
@@ -453,7 +453,7 @@ void Application::checkRam()
 		}
 		if(rendered) {
 			cdebug_i(APPLICATION, "Application::checkRam: " ANSI_COLOR_GREEN "runtime info rendered successfully" ANSI_COLOR_RESET);
-			CallbackTiming::Scope enqueueTiming(CallbackTiming::Id::RuntimeEnqueue);
+			CALLBACK_TIMING_SCOPE(enqueueTiming, RuntimeEnqueue);
 			webserver.wsSendRuntimeInfo(runtimeNotification.c_str(), runtimeNotification.length());
 		} else {
 			cdebug_e(APPLICATION, "Application::checkRam: " ANSI_COLOR_RED "runtime info render failed, skipping tick" ANSI_COLOR_RESET);
@@ -464,7 +464,7 @@ void Application::checkRam()
 
 void Application::sendTelemetry()
 {
-	CallbackTiming::Scope timing(CallbackTiming::Id::Telemetry);
+	CALLBACK_TIMING_SCOPE(timing, Telemetry);
 	if(!telemetryClient.canPublishStats()) {
 		return;
 	}
@@ -737,8 +737,8 @@ void Application::init()
 	_uptimetimer.initializeMs(1000, TimerDelegate(&Application::uptimeCounter, this)).start();
 	_checkRamTimer.initializeMs(10000, TimerDelegate(&Application::checkRam, this)).start();
 	_sendTelemetryTimer.initializeMs(60000, TimerDelegate(&Application::sendTelemetry, this)).start();
-	EventQueueMonitor::start();
-	CallbackTiming::start();
+	EVENT_QUEUE_MONITOR_START();
+	CALLBACK_TIMING_START();
 
 	// Once we've stayed up this long without crashing, declare the running ROM
 	// healthy and clear the crash-loop counters (enforces the "within x seconds" window).
@@ -1101,7 +1101,7 @@ RGBWWLed* Application::getLight(int32_t index, String& error) const
 
 void Application::pollButtons()
 {
-	CallbackTiming::Scope timing(CallbackTiming::Id::Buttons);
+	CALLBACK_TIMING_SCOPE(timing, Buttons);
 	const uint32_t now = millis();
 	for(unsigned index = 0; index < _hardwareInputs.buttons.size(); ++index) {
 		const auto& button = _hardwareInputs.buttons[index];

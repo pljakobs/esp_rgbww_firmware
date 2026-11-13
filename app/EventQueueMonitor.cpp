@@ -3,7 +3,7 @@
 #include <RGBWWCtrl.h>
 #include <SmingCore.h>
 
-#ifdef ARCH_ESP32
+#if EVENT_MONITOR && defined(ARCH_ESP32) && !defined(SMING_RELEASE)
 #include <esp_timer.h>
 
 namespace {
@@ -91,13 +91,11 @@ void probeTimerCallback(void*)
 	}
 }
 } // namespace
-#endif
 
 namespace EventQueueMonitor {
 
 bool start()
 {
-#ifdef ARCH_ESP32
 	if(initialized) {
 		return state.available;
 	}
@@ -124,16 +122,12 @@ bool start()
 	state.available = true;
 	portEXIT_CRITICAL(&monitorMux);
 	return true;
-#else
-	return false;
-#endif
 }
 
 Snapshot snapshot()
 {
 	Snapshot result;
 	const uint32_t now = millis();
-#ifdef ARCH_ESP32
 	portENTER_CRITICAL(&monitorMux);
 	result.available = state.available;
 	result.stalled = state.stalled;
@@ -147,20 +141,8 @@ Snapshot snapshot()
 	result.lastDispatchMsAgo = state.hasDispatched ? now - state.lastDispatch : 0;
 	result.pendingMs = state.pending ? now - state.pendingSince : 0;
 	portEXIT_CRITICAL(&monitorMux);
-#else
-	result.available = false;
-	result.stalled = false;
-	result.pending = false;
-	result.hasDispatched = false;
-	result.probes = 0;
-	result.dispatched = 0;
-	result.enqueueFailures = 0;
-	result.consecutiveFailures = 0;
-	result.stalls = 0;
-	result.lastDispatchMsAgo = 0;
-	result.pendingMs = 0;
-#endif
 	return result;
 }
 
 } // namespace EventQueueMonitor
+#endif

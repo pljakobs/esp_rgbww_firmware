@@ -24,6 +24,7 @@
 
 
 #include <RGBWWCtrl.h>
+#include <FadeTiming.h>
 #include <apihandler.h>
 
 #define MIN_HEAP_FREE 4096
@@ -400,6 +401,8 @@ bool JsonProcessor::runColorCommand(RequestParameters& params, String& errorMsg)
 		return false;
 	}
 
+	FADE_TIMING_LIGHT(params.light, if(params.light >= 0)
+		FadeTiming::record(FadeTiming::Event::Command, params.light));
 	bool queueOk = false;
 	if(params.mode == RequestParameters::Mode::Hsv) {
 		if(!params.hasHsvFrom) {
@@ -433,6 +436,8 @@ bool JsonProcessor::runColorCommand(RequestParameters& params, String& errorMsg)
 		cdebug_i(JSONPROCESSOR, "JsonProcessor::runColorCommand: " ANSI_COLOR_BLUE "queue full" ANSI_COLOR_RESET);
 		errorMsg = F("Queue full");
 	}
+	FADE_TIMING_LIGHT(params.light, if(params.light >= 0)
+		FadeTiming::record(FadeTiming::Event::Accepted, params.light, queueOk));
 	return queueOk;
 }
 

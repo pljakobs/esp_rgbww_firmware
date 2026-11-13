@@ -26,6 +26,7 @@
 #include <RGBWWCtrl.h>
 #include <pwmchannelplanner.h>
 #include <CallbackTiming.h>
+#include <FadeTiming.h>
 #ifdef ARCH_ESP32
 #include <Esp32PwmPlatform.h>
 #endif
@@ -502,7 +503,7 @@ void APPLedCtrl::requestReload()
 	_reloadQueued = true;
 	std::weak_ptr<uint8_t> lifetime = _reloadLifetime;
 	System.queueCallback([this, lifetime]() {
-		CallbackTiming::Scope timing(CallbackTiming::Id::LightReload);
+		CALLBACK_TIMING_SCOPE(timing, LightReload);
 		if(lifetime.expired()) {
 			return;
 		}
@@ -711,14 +712,21 @@ void APPLedCtrl::updateLedCb(void* pTimerArg)
  */
 void APPLedCtrl::updateLed()
 {
-	CallbackTiming::Scope timing(CallbackTiming::Id::LedUpdate);
+	CALLBACK_TIMING_SCOPE(timing, LedUpdate);
 	_ledTimer.startOnce();
 	bool animFinished = false;
 	bool defaultFinished = false;
 	VirtualLight* defaultLight = nullptr;
 	for(auto& light : app.lights) {
-		CallbackTiming::Scope showTiming(CallbackTiming::Id::LightShow);
+		CALLBACK_TIMING_SCOPE(showTiming, LightShow);
 		const bool finished = light.led->show();
+		FADE_TIMING_LIGHT(light.index,
+			const auto& raw = light.led->getCurrentOutput();
+			const auto& hsv = light.led->getCurrentColor();
+			const bool isHsv = light.led->getMode() == RGBWWLed::ColorMode::Hsv;
+			FadeTiming::record(FadeTiming::Event::Show, light.index, isHsv ? hsv.v : raw.ww,
+							  (finished ? 0x80000000u : 0) | (isHsv ? uint32_t(hsv.ct) : uint32_t(raw.cw)));
+		);
 		animFinished |= finished;
 		if(light.isDefault) {
 			defaultLight = &light;

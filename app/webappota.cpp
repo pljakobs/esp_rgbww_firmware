@@ -508,7 +508,7 @@ int WebappOta::onFileDownloaded(HttpConnection& client, bool successful)
 
 void WebappOta::verifyAndContinue()
 {
-    CallbackTiming::Scope timing(CallbackTiming::Id::OtaVerify);
+    CALLBACK_TIMING_SCOPE(timing, OtaVerify);
     AppConfig::Webapp webapp(*app.cfg);
     auto file = webapp.current.files[_pendingFileIndices[_fileIndex]];
     String destPath = stagingPath(file.getFilename());
@@ -531,7 +531,7 @@ void WebappOta::verifyAndContinue()
 
 bool WebappOta::verifyFileMd5(const String& filePath, const String& expectedMd5)
 {
-    CallbackTiming::Scope timing(CallbackTiming::Id::OtaHash);
+    CALLBACK_TIMING_SCOPE(timing, OtaHash);
     FileStream fs;
     if(!fs.open(filePath, File::ReadOnly)) {
         cdebug_e(WEBAPPOTA, "WebappOta::verifyFileMd5: " ANSI_COLOR_RED "cannot open " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED "" ANSI_COLOR_RESET, filePath.c_str());

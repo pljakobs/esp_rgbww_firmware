@@ -145,6 +145,16 @@ GDBSTUB_BREAK_ON_INIT ?= 0
 USER_CFLAGS += -DGDBSTUB_BREAK_ON_INIT=$(GDBSTUB_BREAK_ON_INIT)
 # Keep format-string type checking strict even when global WERROR is disabled in CI.
 USER_CFLAGS += -Wformat -Werror=format
+
+FADE_TIMING_DIAGNOSTICS ?= 0
+COMPONENT_VARS += FADE_TIMING_DIAGNOSTICS
+export HWPWM_TIMING_TRACE := $(FADE_TIMING_DIAGNOSTICS)
+ifeq ($(FADE_TIMING_DIAGNOSTICS),1)
+ifneq ($(SMING_ARCH),Esp32)
+$(error FADE_TIMING_DIAGNOSTICS requires Esp32)
+endif
+USER_CFLAGS += -DFADE_TIMING_DIAGNOSTICS=1
+endif
 USER_CXXFLAGS += -Wformat -Werror=format
 # Opt-in per-function stack-frame analysis: `make ... STACK_USAGE=1` emits a .su
 # file next to every object (GCC -fstack-usage). Inert for normal builds.

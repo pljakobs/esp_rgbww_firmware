@@ -45,6 +45,7 @@ extern "C" {
 
 #include <fileMap.h>
 #include "EventQueueMonitor.h"
+#include <FadeTiming.h>
 
 IMPORT_FSTR_LOCAL(api_docs, PROJECT_DIR "/api-docs.html");
 IMPORT_FSTR_LOCAL(api_openapi, PROJECT_DIR "/openapi.generated.json.gz");
@@ -61,6 +62,7 @@ constexpr size_t WS_MAX_QUEUED_OUTPUTS = 4;
 struct WsQueuedOutput {
 	std::unique_ptr<IDataSourceStream> stream;
 	String payload;
+	uint32_t timingId = 0;
 };
 
 bool parseLightSelector(const String& value, int32_t& selector, String& error)
@@ -150,12 +152,14 @@ bool queueWsOutput(WebsocketConnection& socket, WsQueuedOutput output, bool must
 	return true;
 }
 
-void queueWsPayload(WebsocketConnection& socket, const char* payload, size_t length, bool mustKeep = false)
+void queueWsPayload(WebsocketConnection& socket, const char* payload, size_t length, bool mustKeep = false,
+					uint32_t timingId = 0)
 {
 	if(payload == nullptr || length == 0) {
 		return;
 	}
 	WsQueuedOutput output;
+	output.timingId = timingId;
 	output.payload.reserve(length);
 	if(!output.payload.concat(payload, length)) {
 		return;
@@ -187,7 +191,10 @@ void flushWsOutput(WebsocketConnection& socket)
 		state->pendingHead = (state->pendingHead + 1) % WS_MAX_QUEUED_OUTPUTS;
 		--state->pendingCount;
 		if(!output.stream) {
+			FADE_TIMING_ONLY(const auto timingPort = output.timingId ? socket.getConnection()->getRemotePort() : 0;
+			if(output.timingId) FadeTiming::record(FadeTiming::Event::Send, output.timingId, timingPort);)
 			const bool sent = socket.sendString(output.payload);
+			FADE_TIMING_ONLY(if(output.timingId) FadeTiming::record(FadeTiming::Event::Sent, output.timingId, sent, timingPort);)
 			if(lifetimeToken.expired() || socket.getUserData() != state) {
 				return;
 			}
@@ -323,6 +330,9 @@ void ApplicationWebserver::init()
 	paths.set(F("/api/docs/"), HttpPathDelegate(&ApplicationWebserver::onApiDocs, this));
 	paths.set(F("/api/openapi.json"), HttpPathDelegate(&ApplicationWebserver::onOpenApi, this));
 	paths.set(F("/catalog"), HttpPathDelegate(&ApplicationWebserver::onCatalog, this));
+#if FADE_TIMING_DIAGNOSTICS && defined(ARCH_ESP32)
+	paths.set(F("/debug/fade-timing"), HttpPathDelegate(&ApplicationWebserver::onFadeTiming, this));
+#endif
 	paths.set(F("/info"), HttpPathDelegate(&ApplicationWebserver::onInfo, this));
 	paths.set(F("/color"), HttpPathDelegate(&ApplicationWebserver::onColor, this));
 	paths.set(F("/networks"), HttpPathDelegate(&ApplicationWebserver::onNetworks, this));
@@ -711,7 +721,7 @@ bool ApplicationWebserver::hasLightSubscribers() const
 	return false;
 }
 
-void ApplicationWebserver::wsSendLightEvent(const char* buffer, size_t length)
+void ApplicationWebserver::wsSendLightEvent(const char* buffer, size_t length, uint32_t timingId)
 {
 	for(unsigned i = 0; i < webSockets.size(); ++i) {
 		auto* socket = webSockets[i];
@@ -720,7 +730,7 @@ void ApplicationWebserver::wsSendLightEvent(const char* buffer, size_t length)
 		}
 		auto* state = static_cast<WsAuthState*>(socket->getUserData());
 		if(state != nullptr && state->lightsSubscribed) {
-			queueWsPayload(*socket, buffer, length);
+			queueWsPayload(*socket, buffer, length, false, timingId);
 		}
 	}
 }
@@ -1631,6 +1641,28 @@ void ApplicationWebserver::onOpenApi(HttpRequest& request, HttpResponse& respons
 	response.headers[HTTP_HEADER_CONTENT_ENCODING] = F("gzip");
 	response.sendDataStream(new FSTR::Stream(api_openapi), MIME_JSON);
 }
+
+#if FADE_TIMING_DIAGNOSTICS && defined(ARCH_ESP32)
+void ApplicationWebserver::onFadeTiming(HttpRequest& request, HttpResponse& response)
+{
+	if(!preflightRequest(request, response, {HttpMethod::GET, HttpMethod::POST})) return;
+	if(request.method == HttpMethod::POST) {
+		int32_t light;
+		String error;
+		if(!parseLightSelector(request.getQueryParameter(F("light")), light, error) || light < 0 ||
+		   app.getLight(light, error) == nullptr) {
+			sendApiCode(response, API_CODES::API_BAD_REQUEST, "Select an existing light");
+			return;
+		}
+		FadeTiming::start(light);
+		sendApiCode(response, API_CODES::API_SUCCESS);
+		return;
+	}
+	auto stream = new MemoryDataStream();
+	FadeTiming::exportCsv(*stream);
+	response.sendDataStream(stream, F("text/csv"));
+}
+#endif
 
 void ApplicationWebserver::onCatalog(HttpRequest& request, HttpResponse& response)
 {

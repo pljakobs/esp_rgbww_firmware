@@ -135,6 +135,33 @@ Measure timer firings, worker passes, per-hardware-timer updates and execution
 time before selecting an approach. No runtime behavior changes are implied by
 this note.
 
+## Opt-in fade timing measurements
+
+ESP32 diagnostic builds may set `FADE_TIMING_DIAGNOSTICS=1` (default off).
+Authenticated `POST /debug/fade-timing?light=N` starts a bounded 1024-entry RAM
+capture; `GET /debug/fade-timing` stops it and exports CSV. No serial/syslog
+output or allocation occurs in trace writes, including the hardware fade ISR.
+Overflow is counted and the probe rejects such captures. The endpoint is not
+registered in ordinary builds.
+
+`tests/fade_timing_probe.py --host ADDRESS --light N --output DIRECTORY`
+records command acceptance, hardware segment setup/ISR completion, application
+state, serialization and websocket handoff. Client frame timestamps are taken
+before and after JSON decoding. State records and send records are correlated
+by trace ID and client TCP port, without extending normal light-state messages.
+The probe restores the selected light and saves raw records alongside summaries.
+
+Reported PWM duration spans first hardware setup to final completion ISR, not
+an oscilloscope edge measurement. Software-only completion is labeled separately.
+Host-minus-device spans quantify combined command transport and notification
+overhead without assuming synchronized clocks (clock-rate drift remains).
+Command request/response timestamps bound the host/device clock offset and
+therefore bound websocket handoff-to-receive latency without assuming symmetric
+network delays. This still includes TCP buffering, Wi-Fi and client scheduling;
+the client timestamp is websocket application delivery, not a packet arrival time.
+State progress for hardware fades is estimated: tolerance-based target detection
+can precede real hardware completion, so timing overhead can be negative.
+
 ## WebSocket String Output: Possible Later Optimization
 
 Investigate routing ordinary string notifications through the application's

@@ -276,6 +276,7 @@ class WsClient:
         self._reader: asyncio.Task | None = None
         self.events: list[Event] = []
         self.transitions: list[tuple[float, dict]] = []
+        self.timing_messages: list[dict] | None = None
         self._event_signal = asyncio.Event()
 
     async def connect(self) -> None:
@@ -292,11 +293,14 @@ class WsClient:
 
     async def _read_loop(self) -> None:
         async for message in self.ws:
+            received_at = time.monotonic()
             try:
                 msg = json.loads(message)
             except json.JSONDecodeError:
                 continue
             now = time.monotonic()
+            if self.timing_messages is not None:
+                self.timing_messages.append({"received_at": received_at, "decoded_at": now, "message": msg})
             if "id" in msg and msg["id"] in self._pending and ("result" in msg or "error" in msg):
                 fut = self._pending.pop(msg["id"])
                 if not fut.done():

@@ -54,6 +54,8 @@ struct Statistics {
 };
 
 #if EVENT_MONITOR && !defined(SMING_RELEASE)
+#define CALLBACK_TIMING_SCOPE(name, id) CallbackTiming::Scope name(CallbackTiming::Id::id)
+#define CALLBACK_TIMING_START() CallbackTiming::start()
 uint32_t nowUs();
 void start();
 
@@ -76,6 +78,8 @@ private:
 	uint32_t startedUs_;
 };
 #else
+#define CALLBACK_TIMING_SCOPE(name, id) ((void)0)
+#define CALLBACK_TIMING_START() ((void)0)
 inline void start()
 {
 }

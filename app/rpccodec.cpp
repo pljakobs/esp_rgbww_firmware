@@ -364,7 +364,7 @@ private:
 		if(!active || pumping) {
 			return;
 		}
-		CallbackTiming::Scope timing(CallbackTiming::Id::WebsocketPump);
+		CALLBACK_TIMING_SCOPE(timing, WebsocketPump);
 		pumping = true;
 
 		for(size_t i = 0; i < slots.size() && !eof; ++i) {

@@ -883,7 +883,15 @@ Callback timing instrumentation is opt-in: build debug firmware with
 `make ... EVENT_MONITOR=1`. The default `EVENT_MONITOR=0` compiles out scopes,
 timers, registry storage and CallbackTiming/DispatcherTiming/DispatcherTrace
 reporting. Release builds also compile these out even when the flag is enabled.
-The existing EventQueueMonitor queue-health probe is independent of this flag.
+The EventQueueMonitor queue-health probe is also gated by `EVENT_MONITOR=1`
+in debug ESP32 builds; otherwise `/info` reports `event_queue.available=false`
+and no probe timer, queue posts or monitor state are created. Callback scopes
+use `CALLBACK_TIMING_SCOPE` and initialization uses `CALLBACK_TIMING_START` /
+`EVENT_QUEUE_MONITOR_START`; disabled macros emit no probe calls.
+Fade capture remains separately opt-in with `FADE_TIMING_DIAGNOSTICS=1`.
+Its `FADE_TIMING_LIGHT`, `FADE_TIMING_SAMPLE` and `FADE_TIMING_ONLY` macros
+discard diagnostic expressions entirely when disabled, without evaluating
+arguments. Enabling fade capture does not enable callback/queue reporting.
 Sming's debug dispatcher counters are controlled separately by its debug build;
 this firmware flag controls their collection/reporting, not the framework hooks.
 
