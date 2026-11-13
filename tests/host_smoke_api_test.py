@@ -157,7 +157,7 @@ def test_virtual_light_create_delete_reloads_runtime(
 
         offset = app_log.stat().st_size
         post_config_update(smoke_config, {"hardware": {"configuration": {"lights": []}}})
-        wait_for_runtime("No virtual lights configured", offset)
+        wait_for_runtime("Initialized 0 virtual lights", offset)
         response = http_request("GET", f"{smoke_config.base_url}/config")
         stored = decode_json_response(
             response, {"response": response}, failure_message="Deleted light readback failed"
