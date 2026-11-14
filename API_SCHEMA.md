@@ -148,6 +148,9 @@ and controller-local scope. Deleting a preset removes it for every light on that
 controller; removing a star only changes membership for that light.
 
 Indexed RAW presets use `raw_channels: [250, 750]` and `light_type: "WWCW"`.
+RAW commands and presets use linear 0-1023 intensity values, scaled to the PWM
+range without CIE mapping or per-channel brightness correction. HSV retains
+both corrections.
 A nonempty `raw_channels` takes precedence over the stored `color` union; its
 length must match the source profile and values are integers from 0 to 1023.
 Apply it only to a matching profile. Empty `raw_channels` uses the ordinary

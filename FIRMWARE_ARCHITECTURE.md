@@ -168,6 +168,11 @@ HardwarePwm microfades. The existing PWM worker still owns LEDC sequencing.
 This changes transition output from whole-RAW-fade offloading to frame-level
 interpolation, including for HSV transitions.
 
+RAW commands and fades are linear 0-1023 intensity values scaled to the PWM
+range, bypassing both the dimming curve and per-channel brightness correction.
+HSV rendering retains these corrections. State getters report logical channel
+values, not physical PWM duty counts.
+
 The Sming loop only receives coalesced state/completion notifications;
 `APPLedCtrl::updateLed()` no longer renders ESP32 lights. Its calls to `show()`
 consume finished flags, and clock reporting consumes the worker's logical
