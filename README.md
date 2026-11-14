@@ -36,8 +36,10 @@ This is a fork of [Patrick Jahns' original firmware](https://github.com/patrickj
 | SoC | Status | PWM frequency |
 |-----|--------|---------------|
 | ESP8266 | ✅ Primary | 800 Hz |
-| ESP32 | ✅ Supported | 4 000 Hz |
-| ESP32-C3 | ✅ Supported | configurable |
+| ESP32 | ✅ Supported | configurable 1-20kHz |
+| ESP32-C3 | ✅ Supported | configurable 1-20kHz |
+
+* PWM bit width reduces at higher PWM frequency according to SoC capabilities
 
 ### QuinLED devices and templates
 
