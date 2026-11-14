@@ -800,6 +800,10 @@ cdebug_i(APPLICATION, "Application::init: " ANSI_COLOR_BLUE "running partition "
 #if HAS_AS7341_EXTENSION
 	as7341 = std::make_unique<As7341Extension>();
 #endif
+#if HAS_INA219_EXTENSION
+	ina219 = std::make_unique<Ina219Extension>();
+	ina219->setUpdateHandler([this]() { webserver.publishIna219(); });
+#endif
 	api = std::make_unique<Api>();
 	controllers = std::make_unique<Controllers>();
 	(void)getFreeHeapSize(); // sample heap after ConfigDB + Controllers construction
@@ -952,6 +956,9 @@ cdebug_i(APPLICATION, "Application::init: " ANSI_COLOR_BLUE "running partition "
 		as7341->configureBus(_hardwareInputs.i2cEnabled);
 	}
 #endif
+#if HAS_INA219_EXTENSION
+	if(ina219) ina219->configureBus(_hardwareInputs.i2cEnabled);
+#endif
 	cdebug_i(APPLICATION, "Application::init: " ANSI_COLOR_BLUE "network initizalized, ssid: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, WifiStation.getSSID().c_str());
 	(void)getFreeHeapSize(); // sample heap after WiFi init
 	{
@@ -1080,6 +1087,9 @@ bool Application::configureHardwareInputs(String& error)
 	if(busChanged && as7341) {
 		as7341->configureBus(_hardwareInputs.i2cEnabled);
 	}
+#endif
+#if HAS_INA219_EXTENSION
+	if(busChanged && ina219) ina219->configureBus(_hardwareInputs.i2cEnabled);
 #endif
 	_buttonStates.swap(states);
 	if(!_hardwareInputs.buttons.empty()) {

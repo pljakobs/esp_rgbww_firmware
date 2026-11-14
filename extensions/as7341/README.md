@@ -3,10 +3,26 @@
 When the extension is built, the firmware probes address `0x39` on the
 configured shared I2C bus and exposes these methods only while a matching,
 enabled sensor is detected. The fixed instance ID is `spectrum-1`. The
-separate `extension-as7341` ConfigDB contains the sensor's settings; there is
-not yet a public configuration or extension discovery API. Detection occurs at
+separate `extension-as7341` ConfigDB contains the sensor's settings. Detection occurs at
 startup and after an I2C bus reconfiguration. There is no periodic
 measurement; `interval_ms` in the storage schema has no runtime behavior.
+
+## Configuration
+
+Authenticated `GET /extensions/spectrum-1/config` returns `extension_id`,
+`available`, and the persistent settings: `enabled` (boolean),
+`interval_ms` (200-3600000, reserved; does not schedule measurements),
+`atime` (0-255), `astep` (0-65535), and `gain` (register index 0-10).
+`POST` to the same endpoint accepts a nonempty subset of those settings,
+validates and saves them, then reprobes the sensor. Unknown keys or invalid
+values return 400; changes during a measurement return 409 without interrupting
+it. Save failures return 500. Configuration remains accessible when the sensor
+or shared I2C bus is disabled or the device is disconnected.
+
+The webapp Sensors card exposes these settings alongside a fitted plot through
+all eight visible-channel ADC measurements. Clear brightness is shown separately
+for each acquisition, not as lux. Home Assistant exposes native configuration
+and measurement entities; use their history graphs for trends.
 
 ## Start a measurement
 

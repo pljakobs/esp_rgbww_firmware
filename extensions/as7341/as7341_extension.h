@@ -9,8 +9,17 @@
 class As7341Extension : private As7341Bus
 {
 public:
+	struct Settings {
+		bool enabled;
+		uint32_t intervalMs;
+		uint8_t atime;
+		uint16_t astep;
+		uint8_t gain;
+	};
 	As7341Extension();
 	void configureBus(bool enabled);
+	Settings settings();
+	bool setSettings(const Settings& next);
 	bool available() const { return present; }
 	bool busy() const { return pending; }
 	bool start(std::function<void()> completion);
@@ -27,4 +36,5 @@ private:
 	std::function<void()> completion;
 	bool present = false;
 	bool pending = false;
+	bool busEnabled = false;
 };
