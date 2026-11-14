@@ -29,6 +29,7 @@
 #include <FadeTiming.h>
 #ifdef ARCH_ESP32
 #include <Esp32PwmPlatform.h>
+#include <pwmboardprofile.h>
 #endif
 
 #include <Wiring/WVector.h>
@@ -83,7 +84,7 @@ struct ResolvedLight {
 	LightType type;
 	std::array<int, 5> pins{{-1, -1, -1, -1, -1}};
 #ifdef ARCH_ESP32
-	RGBWWPwmConfig pwm;
+	PwmChannelPlanner::ChannelMap channels;
 #endif
 };
 template <typename PinDatabase>
@@ -237,7 +238,7 @@ bool resolveConfiguredLights(const Hardware& hardware, const PinDatabase& pinDat
 
 #ifdef ARCH_ESP32
 template <typename PwmSettings>
-bool makePwmBankConfigs(const PwmSettings& settings, RGBWWPwmConfig& config, String& error)
+bool makePwmBankConfigs(const PwmSettings& settings, std::array<Esp32HardwarePwm::Config, 2>& config, String& error)
 {
 	if(settings.timer.getFrequency() <= 0) {
 		error = F("Invalid PWM frequency");
@@ -249,7 +250,12 @@ bool makePwmBankConfigs(const PwmSettings& settings, RGBWWPwmConfig& config, Str
 		return false;
 	}
 
-	auto& primary = config.primary;
+	if(!ESP32_PWM_VALIDATE_RESOLUTION(settings.timer.getResolution())) {
+		error = F("Unsupported PWM resolution");
+		return false;
+	}
+	auto& primary = config[0];
+	auto& secondary = config[1];
 	primary.timer.frequency = settings.timer.getFrequency();
 	primary.timer.resolution = static_cast<ledc_timer_bit_t>(settings.timer.getResolution());
 	primary.timer.timer_num = static_cast<ledc_timer_t>(timerNumber);
@@ -257,10 +263,10 @@ bool makePwmBankConfigs(const PwmSettings& settings, RGBWWPwmConfig& config, Str
 #if ESP32_PWM_HAS_HIGH_SPEED_MODE
 	if(speedMode == AppConfig::ContainedHardware::ContainedPwm::TimerSpeedMode::HIGHSPEED) {
 		primary.timer.speed_mode = LEDC_HIGH_SPEED_MODE;
-		config.secondary.timer.speed_mode = LEDC_LOW_SPEED_MODE;
+		secondary.timer.speed_mode = LEDC_LOW_SPEED_MODE;
 	} else if(speedMode == AppConfig::ContainedHardware::ContainedPwm::TimerSpeedMode::LOWSPEED) {
 		primary.timer.speed_mode = LEDC_LOW_SPEED_MODE;
-		config.secondary.timer.speed_mode = LEDC_HIGH_SPEED_MODE;
+		secondary.timer.speed_mode = LEDC_HIGH_SPEED_MODE;
 	} else {
 		error = F("Unsupported PWM speed mode");
 		return false;
@@ -272,31 +278,33 @@ bool makePwmBankConfigs(const PwmSettings& settings, RGBWWPwmConfig& config, Str
 	}
 	primary.timer.speed_mode = LEDC_LOW_SPEED_MODE;
 #endif
-	config.secondary.timer.frequency = primary.timer.frequency;
-	config.secondary.timer.resolution = primary.timer.resolution;
-	config.secondary.timer.timer_num = primary.timer.timer_num;
-	config.secondary.timer.clk_cfg = primary.timer.clk_cfg;
+	secondary.timer.frequency = primary.timer.frequency;
+	secondary.timer.resolution = primary.timer.resolution;
+	secondary.timer.timer_num = primary.timer.timer_num;
+	secondary.timer.clk_cfg = primary.timer.clk_cfg;
 
 	primary.spreadSpectrum.mode = settings.spreadSpectrum.getMode() ==
 		AppConfig::ContainedHardware::ContainedPwm::SpreadSpectrumMode::ON
 		? Esp32HardwarePwm::SpreadSpectrumMode::ON : Esp32HardwarePwm::SpreadSpectrumMode::OFF;
+	const int64_t width = settings.spreadSpectrum.getWidth();
+	const int64_t subsampling = settings.spreadSpectrum.getSubsampling();
+	if(primary.spreadSpectrum.mode == Esp32HardwarePwm::SpreadSpectrumMode::ON &&
+	   (width < 0 || width >= 100 || subsampling <= 0 || subsampling > UINT16_MAX)) {
+		error = F("Invalid PWM spread spectrum settings");
+		return false;
+	}
 	primary.spreadSpectrum.WidthPercent = settings.spreadSpectrum.getWidth();
 	primary.spreadSpectrum.Subsampling = settings.spreadSpectrum.getSubsampling();
-	config.secondary.spreadSpectrum = primary.spreadSpectrum;
+	secondary.spreadSpectrum = primary.spreadSpectrum;
 	primary.phaseShift.mode = settings.phaseShift.getMode() ==
 		AppConfig::ContainedHardware::ContainedPwm::PhaseShiftMode::ON
 		? Esp32HardwarePwm::PhaseShiftMode::AUTO : Esp32HardwarePwm::PhaseShiftMode::OFF;
-	config.secondary.phaseShift = primary.phaseShift;
+	secondary.phaseShift = primary.phaseShift;
 	return true;
 }
 
-template <typename PwmSettings>
-bool planPwmChannels(const PwmSettings& settings, std::vector<ResolvedLight>& lights, String& error)
+bool planPwmChannels(const std::vector<uint8_t>& boardPins, std::vector<ResolvedLight>& lights, String& error)
 {
-	RGBWWPwmConfig bankConfig;
-	if(!makePwmBankConfigs(settings, bankConfig, error)) {
-		return false;
-	}
 	#if ESP32_PWM_HAS_HIGH_SPEED_MODE
 	constexpr unsigned bankCount = 2;
 	#else
@@ -308,37 +316,65 @@ bool planPwmChannels(const PwmSettings& settings, std::vector<ResolvedLight>& li
 	for(const auto& light : lights) {
 		channelPinsByLight.push_back(light.pins);
 	}
-	std::vector<PwmChannelPlanner::Allocation> allocations;
-	const auto planStatus = PwmChannelPlanner::plan(channelPinsByLight, bankCapacity, bankCount, allocations);
+	std::vector<PwmChannelPlanner::ChannelMap> mappings;
+	const auto planStatus = PwmChannelPlanner::mapBoard(channelPinsByLight, boardPins, bankCapacity, bankCount, mappings);
 	if(planStatus != PwmChannelPlanner::Status::Ok) {
 		error = planStatus == PwmChannelPlanner::Status::CapacityExceeded ? F("PWM channel capacity exceeded")
-															 : F("Invalid PWM channel allocation");
+															 : F("Light GPIO is not a unique board PWM output");
 		return false;
 	}
-	bool spreadSpectrumOwner[2] = {};
-
 	for(std::size_t index = 0; index < lights.size(); ++index) {
-		auto& light = lights[index];
-		const auto& allocation = allocations[index];
-		light.pwm = bankConfig;
-		light.pwm.primary.channelStart = static_cast<ledc_channel_t>(allocation.primaryStart);
-		light.pwm.secondary.channelStart = static_cast<ledc_channel_t>(allocation.secondaryStart);
-		light.pwm.secondaryChannelMask = allocation.secondaryChannelMask;
-		const bool usesPrimary = allocation.primaryCount != 0;
-		const bool usesSecondary = allocation.secondaryCount != 0;
-		if(usesPrimary && light.pwm.primary.spreadSpectrum.mode != Esp32HardwarePwm::SpreadSpectrumMode::OFF) {
-			if(spreadSpectrumOwner[0]) {
-				light.pwm.primary.spreadSpectrum.mode = Esp32HardwarePwm::SpreadSpectrumMode::OFF;
-			} else {
-				spreadSpectrumOwner[0] = true;
-			}
-		}
-		if(usesSecondary && light.pwm.secondary.spreadSpectrum.mode != Esp32HardwarePwm::SpreadSpectrumMode::OFF) {
-			if(spreadSpectrumOwner[1]) {
-				light.pwm.secondary.spreadSpectrum.mode = Esp32HardwarePwm::SpreadSpectrumMode::OFF;
-			} else {
-				spreadSpectrumOwner[1] = true;
-			}
+		lights[index].channels = mappings[index];
+	}
+	return true;
+}
+
+template <typename Hardware>
+bool loadBoardPwmPins(const Hardware& hardware, std::vector<uint8_t>& pins, String& error)
+{
+	const auto& configuration = hardware.configuration;
+	const String boardId = configuration.getBoardId();
+	if(!boardId.length()) {
+		if(configuration.lights.getItemCount() == 0) return true;
+		error = F("Select a board before configuring PWM lights");
+		return false;
+	}
+	if(configuration.getSoc() != String(SOC)) {
+		error = F("Selected PWM board SoC does not match this firmware");
+		return false;
+	}
+	const auto* failure = PwmBoardProfile::load(configuration, pins);
+	if(failure != nullptr) {
+		error = failure;
+		return false;
+	}
+	return true;
+}
+
+template <typename Hardware, typename PinDatabase>
+bool validateBoardPwmPins(const Hardware& hardware, const PinDatabase& pinDatabase,
+						 const std::vector<uint8_t>& pins, String& error)
+{
+	const auto& configuration = hardware.configuration;
+	const String soc = configuration.getSoc();
+	std::array<bool, 256> claimed{};
+	auto reserve = [&](int pin) {
+		if(pin >= 0 && pin < int(claimed.size())) claimed[pin] = true;
+	};
+	if(configuration.system.getClearConfigEnabled()) reserve(configuration.system.getClearConfigPin());
+	for(auto button : configuration.buttons) reserve(button.getPin());
+	for(auto bus : configuration.buses) {
+		reserve(bus.getSda());
+		reserve(bus.getScl());
+	}
+#if STATUS_DISPLAY
+	reserve(STATUS_DISPLAY_SDA);
+	reserve(STATUS_DISPLAY_SCL);
+#endif
+	for(auto pin : pins) {
+		if(!claimSocPin(pinDatabase, soc, pin, F("light.pwm"), claimed)) {
+			error = F("Board PWM output is unavailable or conflicts with an input/bus");
+			return false;
 		}
 	}
 	return true;
@@ -359,11 +395,24 @@ void configureLightColor(RGBWWLed& light, const Color& color)
 
 APPLedCtrl::~APPLedCtrl()
 {
-	_reloadLifetime.reset();
+	shutdown();
 	delete _stepSync;
 	_stepSync = nullptr;
 }
 
+void APPLedCtrl::shutdown()
+{
+	if(_shutdown) return;
+	_shutdown = true;
+	_running = false;
+	_ledTimer.stop();
+	_reloadLifetime.reset();
+	app.lights.clear();
+#ifdef ARCH_ESP32
+	for(auto& bank : _pwmResources.banks) bank.reset();
+	_pwmResources.pins.clear();
+#endif
+}
 
 bool APPLedCtrl::resolveInputs(HardwareInputs& inputs, String& error) const
 {
@@ -374,11 +423,6 @@ bool APPLedCtrl::resolveInputs(HardwareInputs& inputs, String& error) const
 	if(!resolveConfiguredLights(hardware, pinDatabase, String(SOC), lights, error)) {
 		return false;
 	}
-#ifdef ARCH_ESP32
-	if(!lights.empty() && !planPwmChannels(hardware.pwm, lights, error)) {
-		return false;
-	}
-#endif
 	const auto& configuration = hardware.configuration;
 	if(configuration.buttons.getItemCount() == 0 && configuration.buses.getItemCount() == 0 &&
 	   !configuration.system.getClearConfigEnabled()) {
@@ -497,7 +541,7 @@ String APPLedCtrl::configurationSignature() const
 
 void APPLedCtrl::requestReload()
 {
-	if(_reloadQueued) {
+	if(_shutdown || _reloadQueued) {
 		return;
 	}
 	_reloadQueued = true;
@@ -524,6 +568,10 @@ void APPLedCtrl::requestReload()
 
 bool APPLedCtrl::reload(String& error)
 {
+	if(_shutdown) {
+		error = F("LED controller is shut down");
+		return false;
+	}
 	HardwareInputs inputs;
 	if(!resolveInputs(inputs, error) || !app.validateHardwareInputs(inputs, error)) {
 		return false;
@@ -535,65 +583,148 @@ bool APPLedCtrl::reload(String& error)
 		return false;
 	}
 #ifdef ARCH_ESP32
-	for(auto& light : app.lights) {
-		if(light.led->getPwmOutput() != nullptr && light.led->getPwmOutput()->hasPendingCallbacks()) {
+	for(const auto& bank : _pwmResources.banks) {
+		if(bank && bank->hasPendingCallbacks()) {
 			error = F("PWM callbacks pending");
 			return false;
 		}
 	}
-#endif
-	if(resolved.empty()) {
-		for(auto& light : app.lights) {
-			light.led->clearAnimationQueue();
-			light.led->getPwmOutput()->setOutput(0, 0, 0, 0, 0);
-		}
-		app.lights.clear();
-		if(!app.configureHardwareInputs(error)) {
-			return false;
-		}
-		_activeConfiguration = configurationSignature();
-		app.eventserver.publishLightsChanged();
-		cdebug_i(APPLEDCTRL, "No virtual lights configured");
-		return true;
+	std::array<Esp32HardwarePwm::Config, 2> bankConfigs;
+	if(!makePwmBankConfigs(hardware.pwm, bankConfigs, error)) return false;
+	MemoryDataStream pwmSignature;
+	pwmSignature.print(hardware.configuration.getBoardId());
+	pwmSignature.print('/');
+	pwmSignature.print(hardware.configuration.getBoardRevision());
+	pwmSignature.print('/');
+	pwmSignature.print(hardware.configuration.getSoc());
+	hardware.configuration.boardProfile.exportToStream(ConfigDB::Json::format, pwmSignature);
+	hardware.pwm.exportToStream(ConfigDB::Json::format, pwmSignature);
+	const String resourceConfiguration = pwmSignature.readString(pwmSignature.available());
+	const bool replaceBanks = resourceConfiguration != _pwmResources.configuration;
+	std::vector<uint8_t> boardPins = _pwmResources.pins;
+	if(replaceBanks) {
+		boardPins.clear();
+		if(!loadBoardPwmPins(hardware, boardPins, error)) return false;
 	}
-#ifdef ARCH_ESP32
-	if(!planPwmChannels(hardware.pwm, resolved, error)) {
+	if(!validateBoardPwmPins(hardware, pinDatabase, boardPins, error)) return false;
+	if(!planPwmChannels(boardPins, resolved, error)) {
 		return false;
 	}
 #endif
 	std::vector<VirtualLight> staged;
+	std::vector<int> reusable(resolved.size(), -1);
 	staged.reserve(resolved.size());
-	for(const auto& light : resolved) {
-		std::unique_ptr<RGBWWLed> instance(new RGBWWLed());
-		if(!instance) {
+	for(size_t i = 0; i < resolved.size(); ++i) {
+		const auto& light = resolved[i];
+#ifdef ARCH_ESP32
+		if(!replaceBanks) {
+			for(size_t old = 0; old < app.lights.size(); ++old) {
+				const auto& current = app.lights[old];
+				if(current.id != light.id || current.led->getLightType() != light.type) continue;
+				const auto& bindings = current.led->getPwmOutput()->getChannels();
+				bool matches = true;
+				for(size_t channel = 0; channel < bindings.size(); ++channel) {
+					const auto& mapped = light.channels[channel];
+					auto* bank = mapped.bank < 0 ? nullptr : _pwmResources.banks[mapped.bank].get();
+					matches &= bindings[channel].bank == bank &&
+							   (bank == nullptr || bindings[channel].channel == mapped.channel);
+				}
+				if(matches) reusable[i] = old;
+				break;
+			}
+		}
+#endif
+		std::unique_ptr<RGBWWLed> instance;
+		if(reusable[i] < 0) {
+			instance.reset(new RGBWWLed());
+		}
+		if(reusable[i] < 0 && !instance) {
 			error = F("Unable to allocate virtual light");
 			return false;
 		}
 		staged.push_back({light.id, light.name, std::move(instance), light.index, light.isDefault});
 	}
-	for(auto& light : app.lights) {
-		light.led->clearAnimationQueue();
-		light.led->getPwmOutput()->setOutput(0, 0, 0, 0, 0);
-	}
-	app.lights.clear();
-	if(!app.configureHardwareInputs(error)) {
-		return false;
-	}
-	for(unsigned index = 0; index < resolved.size(); ++index) {
-		const auto& light = resolved[index];
-		const auto& pins = light.pins;
+	_ledTimer.stop();
+	auto finish = [&](bool success) {
+		if(_running) _ledTimer.start();
+		return success;
+	};
+	auto failedActivation = [&]() {
+		// After detaching outputs there is no rollback: expose a safe, empty light set.
+		staged.clear();
+		app.lights.clear();
 #ifdef ARCH_ESP32
-		staged[index].led->init(pins[0], pins[1], pins[2], pins[3], pins[4], light.type, light.pwm);
+		for(auto& bank : _pwmResources.banks) bank.reset();
+		_pwmResources.pins.clear();
+		_pwmResources.configuration = String();
+#endif
+		_activeConfiguration = String();
+		app.eventserver.publishLightsChanged();
+		cdebug_e(APPLEDCTRL, "PWM activation failed; all lights detached: %s", error.c_str());
+		return finish(false);
+	};
+	for(size_t old = 0; old < app.lights.size(); ++old) {
+		if(std::find(reusable.begin(), reusable.end(), int(old)) == reusable.end()) {
+#ifndef ARCH_ESP32
+			app.lights[old].led->clearAnimationQueue();
+			app.lights[old].led->getPwmOutput()->setOutput(0, 0, 0, 0, 0);
+#endif
+			app.lights[old].led.reset();
+		}
+	}
+#ifdef ARCH_ESP32
+	if(replaceBanks) {
+		for(auto& bank : _pwmResources.banks) bank.reset();
+	}
+#endif
+	if(!app.configureHardwareInputs(error)) {
+		return failedActivation();
+	}
+#ifdef ARCH_ESP32
+	if(replaceBanks) {
+		for(size_t bank = 0; bank < _pwmResources.banks.size(); ++bank) {
+			const size_t first = bank * ESP32_PWM_MAX_CHANNELS;
+			if(first >= boardPins.size()) break;
+			const size_t end = std::min(first + ESP32_PWM_MAX_CHANNELS, boardPins.size());
+			std::vector<uint8_t> pins(boardPins.begin() + first, boardPins.begin() + end);
+			_pwmResources.banks[bank].reset(new Esp32HardwarePwm(pins, bankConfigs[bank]));
+			if(!_pwmResources.banks[bank] || !_pwmResources.banks[bank]->isInitialized()) {
+				error = F("Unable to initialize board PWM bank");
+				return failedActivation();
+			}
+		}
+		_pwmResources.pins = boardPins;
+		_pwmResources.configuration = resourceConfiguration;
+	}
+#endif
+	for(unsigned index = 0; index < resolved.size(); ++index) {
+		if(reusable[index] >= 0) {
+			staged[index].led = std::move(app.lights[reusable[index]].led);
+			continue;
+		}
+		const auto& light = resolved[index];
+#ifdef ARCH_ESP32
+		RGBWWPwmChannels bindings{};
+		for(size_t channel = 0; channel < bindings.size(); ++channel) {
+			const auto& mapped = light.channels[channel];
+			if(mapped.bank >= 0) bindings[channel] = {_pwmResources.banks[mapped.bank].get(), mapped.channel};
+		}
+		if(!staged[index].led->init(light.type, bindings)) {
+			error = F("Unable to bind virtual light to board PWM channels");
+			return failedActivation();
+		}
 #else
+		const auto& pins = light.pins;
 		staged[index].led->init(pins[0], pins[1], pins[2], pins[3], pins[4], light.type, PWM_FREQUENCY);
 #endif
 	}
 	app.lights.swap(staged);
+	staged.clear();
 	setup();
 	_activeConfiguration = configurationSignature();
 	app.eventserver.publishLightsChanged();
 	cdebug_i(APPLEDCTRL, "Initialized %u virtual lights", unsigned(app.lights.size()));
-	return true;
+	return finish(true);
 }
 
 
@@ -713,7 +844,6 @@ void APPLedCtrl::updateLedCb(void* pTimerArg)
 void APPLedCtrl::updateLed()
 {
 	CALLBACK_TIMING_SCOPE(timing, LedUpdate);
-	_ledTimer.startOnce();
 	bool animFinished = false;
 	bool defaultFinished = false;
 	VirtualLight* defaultLight = nullptr;
@@ -733,27 +863,81 @@ void APPLedCtrl::updateLed()
 			defaultFinished = finished;
 		}
 	}
-	for(size_t count = 0; count < app.lights.size(); ++count) {
-		const size_t index = _nextLightEvent++ % app.lights.size();
-		if(app.eventserver.publishLightState(app.lights[index])) {
-			break;
-		}
+	// Only cheap trigger decisions happen here; JSON construction and sends run in
+	// later dispatcher events (publishDeferred) so they cannot stretch the fade tick.
+	uint8_t publish = 0;
+	if(!app.lights.empty() && app.eventserver.hasLightSubscribers()) {
+		publish |= PublishLightState;
 	}
 	++_stepCounter;
 	if(clockMaster && _stepCounter % std::max(clockMasterInterval, uint32_t(1)) == 0) {
-		app.mqttclient.publishClock(_stepCounter);
+		_pendingClockSteps = _stepCounter;
+		publish |= PublishClock;
 	}
 
 	const static uint32_t stepLenMs = 1000 / RGBWW_UPDATEFREQUENCY;
 	if(defaultLight != nullptr && colorMaster &&
 	   (defaultFinished || colorMasterInterval == 0 || ((stepLenMs * _stepCounter) % colorMasterInterval) < stepLenMs)) {
-		publishToMqtt(*defaultLight->led, defaultLight->index);
+		publish |= PublishMqttColor;
 	}
 	if(defaultLight != nullptr && colorMasterInterval >= 0 &&
 	   (animFinished || colorMasterInterval == 0 || ((stepLenMs * _stepCounter) % colorMasterInterval) < stepLenMs)) {
 		const uint32_t now = millis();
 		if(now - _lastColorEvent >= static_cast<uint32_t>(colorMinInterval)) {
 			_lastColorEvent = now;
+			publish |= PublishCurrentState;
+		}
+	}
+	schedulePublish(publish);
+}
+
+void APPLedCtrl::schedulePublish(uint8_t flags)
+{
+	_pendingPublish |= flags;
+	if(_pendingPublish == 0 || _publishQueued) {
+		return;
+	}
+	// On failure the flags stay pending and the next tick retries.
+	_publishQueued = System.queueCallback(APPLedCtrl::publishDeferredCb, this);
+}
+
+void APPLedCtrl::publishDeferredCb(void* param)
+{
+	static_cast<APPLedCtrl*>(param)->publishDeferred();
+}
+
+/**
+ * @brief Builds and sends one pending state message, then requeues itself if more is pending.
+ *
+ * Messages are coalesced: a pending message always reports the light's latest state.
+ * A callback queued from here runs in a later dispatcher batch, so LED ticks can interleave.
+ */
+void APPLedCtrl::publishDeferred()
+{
+	_publishQueued = false;
+	if(_shutdown) {
+		_pendingPublish = 0;
+		return;
+	}
+	CALLBACK_TIMING_SCOPE(timing, StatePublish);
+	VirtualLight* defaultLight = nullptr;
+	for(auto& light : app.lights) {
+		if(light.isDefault) {
+			defaultLight = &light;
+			break;
+		}
+	}
+	if(_pendingPublish & PublishClock) {
+		_pendingPublish &= ~PublishClock;
+		app.mqttclient.publishClock(_pendingClockSteps);
+	} else if(_pendingPublish & PublishMqttColor) {
+		_pendingPublish &= ~PublishMqttColor;
+		if(defaultLight != nullptr) {
+			publishToMqtt(*defaultLight->led, defaultLight->index);
+		}
+	} else if(_pendingPublish & PublishCurrentState) {
+		_pendingPublish &= ~PublishCurrentState;
+		if(defaultLight != nullptr) {
 			HSVCT currentHsv;
 			const HSVCT* hsv = nullptr;
 			if(defaultLight->led->getMode() == RGBWWLed::ColorMode::Hsv) {
@@ -762,7 +946,16 @@ void APPLedCtrl::updateLed()
 			}
 			app.eventserver.publishCurrentState(defaultLight->led->getCurrentOutput(), hsv);
 		}
+	} else if(_pendingPublish & PublishLightState) {
+		_pendingPublish &= ~PublishLightState;
+		for(size_t count = 0; count < app.lights.size(); ++count) {
+			const size_t index = _nextLightEvent++ % app.lights.size();
+			if(app.eventserver.publishLightState(app.lights[index])) {
+				break;
+			}
+		}
 	}
+	schedulePublish(0);
 }
 
 /**
@@ -851,16 +1044,20 @@ void APPLedCtrl::publishStatus()
 
 void APPLedCtrl::start()
 {
+	if(_shutdown) return;
+	_running = true;
 	cdebug_i(APPLEDCTRL, "APPLedCtrl::start: " ANSI_COLOR_BLUE "APPLedCtrl::start" ANSI_COLOR_RESET);
 
 	_ledTimer.setCallback(APPLedCtrl::updateLedCb, this);
 	_ledTimer.setIntervalMs(_timerInterval);
 	cdebug_i(APPLEDCTRL, "APPLedCtrl::start: " ANSI_COLOR_BLUE "_timerInterval" ANSI_COLOR_RESET, _timerInterval);
-	_ledTimer.startOnce();
+	// Periodic, so dispatch latency delays a step without shifting later steps.
+	_ledTimer.start();
 }
 
 void APPLedCtrl::stop()
 {
+	_running = false;
 	cdebug_i(APPLEDCTRL, "APPLedCtrl::stop: " ANSI_COLOR_BLUE "APPLedCtrl::stop" ANSI_COLOR_RESET);
 	_ledTimer.stop();
 }

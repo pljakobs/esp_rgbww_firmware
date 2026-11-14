@@ -36,6 +36,7 @@ public:
 	void publishTransitionFinished(const String& name, bool requeued = false);
 	void publishKeepAlive();
 	void publishClockSlaveStatus(int offset, uint32_t interval);
+	bool hasLightSubscribers() const;
 	bool isEnabled() const { return enabled; }
 	void setEnabled(bool enabled) { this->enabled = enabled; }
 

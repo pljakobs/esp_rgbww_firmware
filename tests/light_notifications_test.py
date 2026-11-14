@@ -14,6 +14,7 @@ SUPPORT = r"""
 #include <string>
 #include <vector>
 #include <CallbackTiming.h>
+#include <FadeTiming.h>
 #define F(value) value
 #define cdebug_e(...) ((void)0)
 #define cdebug_d(...) ((void)0)
@@ -136,7 +137,7 @@ struct ApplicationWebserver {
     bool subscribed=true;
     std::vector<Frame> frames;
     bool hasLightSubscribers() const { return subscribed; }
-    void wsSendLightEvent(const char*, unsigned) { frames.push_back(frame); }
+    void wsSendLightEvent(const char*, unsigned, uint32_t=0) { frames.push_back(frame); }
 };
 struct Application {
     int config=0;
@@ -156,6 +157,7 @@ struct Hardware {
 }
 struct EventServer {
     ApplicationWebserver* webServer;
+    bool hasLightSubscribers() const { return webServer && webServer->hasLightSubscribers(); }
     bool publishLightState(VirtualLight&);
     void publishLightsChanged();
     void publishCurrentState(const ChannelOutput&, const HSVCT*);

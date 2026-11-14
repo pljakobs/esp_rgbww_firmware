@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -20,6 +21,41 @@ struct Allocation {
 	std::size_t secondaryCount = 0;
 	uint8_t secondaryChannelMask = 0;
 };
+
+struct Channel {
+	int bank = -1;
+	uint8_t channel = 0;
+};
+using ChannelMap = std::array<Channel, 5>;
+
+inline Status mapBoard(const std::vector<std::array<int, 5>>& lights, const std::vector<uint8_t>& boardPins,
+					   std::size_t bankCapacity, std::size_t bankCount, std::vector<ChannelMap>& mappings)
+{
+	mappings.clear();
+	if(bankCapacity == 0 || bankCount == 0 || bankCount > 2) return Status::InvalidConfiguration;
+	if(boardPins.size() > bankCapacity * bankCount) return Status::CapacityExceeded;
+	std::array<bool, 256> available{};
+	for(auto gpio : boardPins) {
+		if(available[gpio]) return Status::InvalidConfiguration;
+		available[gpio] = true;
+	}
+	std::array<bool, 256> claimed{};
+	for(const auto& pins : lights) {
+		ChannelMap mapping{};
+		for(size_t i = 0; i < pins.size(); ++i) {
+			if(pins[i] < 0) continue;
+			if(pins[i] > UINT8_MAX || !available[pins[i]] || claimed[pins[i]]) {
+				mappings.clear();
+				return Status::InvalidConfiguration;
+			}
+			claimed[pins[i]] = true;
+			const auto position = std::find(boardPins.begin(), boardPins.end(), pins[i]) - boardPins.begin();
+			mapping[i] = {int(position / bankCapacity), uint8_t(position % bankCapacity)};
+		}
+		mappings.push_back(mapping);
+	}
+	return Status::Ok;
+}
 
 inline Status plan(const std::vector<std::array<int, 5>>& channelPinsByLight, std::size_t bankCapacity,
 				   std::size_t bankCount, std::vector<Allocation>& allocations)

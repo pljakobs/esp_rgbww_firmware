@@ -12,7 +12,13 @@ For each light from ``/config`` (``hardware.configuration.lights``) the script
    WebSocket notifications of the ``lights`` channel,
 3. runs timed ``fade`` commands and analyses the ``light_state`` stream
    (number of intermediate updates, monotonic progress, duration, end value),
-4. restores the original color of each light.
+4. restores the original color of each light,
+5. exercises every subset of two or more selected lights concurrently with
+   RAW, HSV brightness, HSV trajectory and alternating RAW/HSV workloads.
+
+Use ``--concurrent-only`` to omit the individual tests, or
+``--skip-concurrent`` to retain the individual-only run. Concurrent timing is
+command-to-observed-state latency, not physical PWM completion time.
 
 For an extended low-intensity run, ``--soak-hours`` uploads a five-minute
 sequence of fast and slow fades per light, including individual and combined
@@ -551,6 +557,33 @@ def fade_plan(light: Light) -> list[tuple[str, str, Any, Any, Any]]:
     return fades
 
 
+def concurrent_plan(lights: list[Light]):
+    """Every multi-light subset, with deduplicated representative fade mixes."""
+    for size in range(2, len(lights) + 1):
+        for subset in itertools.combinations(lights, size):
+            plans = [fade_plan(light) for light in subset]
+            raw = [next(step for step in plan if step[1] == "raw") for plan in plans]
+            brightness = [plan[0] for plan in plans]
+            trajectory = [
+                next((step for step in plan if step[4] == "ct"),
+                     next((step for step in plan if step[4] == "h"), plan[0]))
+                for plan in plans
+            ]
+            workloads = [
+                ("raw", raw),
+                ("hsv-brightness", brightness),
+                ("hsv-trajectory", trajectory),
+                ("mixed-raw-hsv", [raw[i] if i % 2 == 0 else trajectory[i] for i in range(size)]),
+                ("mixed-hsv-raw", [trajectory[i] if i % 2 == 0 else raw[i] for i in range(size)]),
+            ]
+            seen = set()
+            for label, steps in workloads:
+                signature = tuple(step[0] for step in steps)
+                if signature not in seen:
+                    seen.add(signature)
+                    yield label, list(zip(subset, steps))
+
+
 def soak_commands(light: Light, intensity_max: int) -> list[dict[str, Any]]:
     """Build 30 up/down fade pairs, queued internally for a five-minute cycle."""
     channel_count = len(NAMED_CHANNELS[light.type]) if light.has_rgb else INDEXED_LENGTH[light.type]
@@ -630,7 +663,8 @@ class Exerciser:
             if "error" in reply:
                 raise RuntimeError(f"color command rejected: {reply['error']}")
         else:
-            await self.http.post(f"/color?light={body['light']}", body)
+            path = f"/color?light={body['light']}" if "light" in body else "/color"
+            await self.http.post(path, body)
 
     # --- solid steps
 
@@ -695,6 +729,113 @@ class Exerciser:
             self.results.check(match, f"{light.index}/{desc} final GET /color", detail)
             await asyncio.sleep(self.args.dwell)
 
+    async def run_concurrent(self, lights: list[Light]) -> None:
+        cases = list(concurrent_plan(lights))
+        if not cases:
+            print(dim("Concurrent fades require at least two selected lights; no cases."))
+            return
+        print(head(f"\nConcurrent fades: {len(cases)} cases across all multi-light subsets"))
+        print(dim("  Durations include state reporting and transport; not physical PWM timing."))
+        originals = [(light, await self.read_color(light)) for light in lights]
+        pollers = [
+            asyncio.create_task(self.poll(light))
+            for light in lights if self.observer(light) == "http-poll"
+        ]
+        try:
+            for number, (label, assignments) in enumerate(cases, 1):
+                tag = f"concurrent-{number}/{label}"
+                print(head(f"\n  {tag}: lights {[light.index for light, _ in assignments]}"))
+
+                prepared_at = time.monotonic()
+                try:
+                    await self.send({"cmds": [
+                        self.command(light, step[1], step[2]) for light, step in assignments
+                    ]})
+                except (RuntimeError, OSError) as err:
+                    self.results.check(False, f"{tag} setup batch", str(err))
+                    continue
+
+                async def prepare(light, step):
+                    desc, mode, start, _, _ = step
+                    event = await self.ws.wait_for_event(
+                        lambda e: e.light == light.index and e.t >= prepared_at
+                        and compare(light, mode, start, e.state)[0],
+                        self.args.event_timeout)
+                    return self.results.check(event is not None, f"{tag}/{light.index} setup",
+                                              desc if event else "start state not observed")
+
+                ready = await asyncio.gather(*(prepare(light, step) for light, step in assignments))
+                if not all(ready):
+                    continue
+                await asyncio.sleep(0.4)
+
+                named = [(light, step, f"probe-{light.index}-{next(self._names)}")
+                         for light, step in assignments]
+                since = time.monotonic()
+                try:
+                    await self.send({"cmds": [
+                        self.command(light, step[1], step[3], cmd="fade",
+                                     t=self.args.fade_ms, name=name)
+                        for light, step, name in named
+                    ]})
+                except (RuntimeError, OSError) as err:
+                    self.results.check(False, f"{tag} fade batch accepted", str(err))
+                    continue
+                acknowledged = time.monotonic()
+                dispatch_span = acknowledged - since
+                self.results.check(
+                    dispatch_span < min(1.0, self.args.fade_ms / 2000),
+                    f"{tag} batch command window",
+                    f"{dispatch_span * 1000:.1f} ms request/acknowledgement "
+                    "(host bound, not controller start skew)")
+
+                async def observe(light, step, name):
+                    mode, target = step[1], step[3]
+                    event = await self.ws.wait_for_event(
+                        lambda e: e.light == light.index and e.t >= since
+                        and compare(light, mode, target, e.state)[0],
+                        max(0, since + self.args.fade_ms / 1000 + self.args.event_timeout
+                            - time.monotonic()))
+                    return light, step, name, event
+
+                observations = await asyncio.gather(*(observe(*item) for item in named))
+                for light, step, name, event in observations:
+                    desc, mode, start, target, key = step
+                    done_at = next((t for t, params in self.ws.transitions
+                                    if t >= since and params.get("name") == name), None)
+                    self.analyse_fade(light, f"{tag}/{desc}", mode, start, target, key, since, done_at)
+                    state = await self.read_color(light)
+                    match, detail = compare(light, mode, target, state)
+                    self.results.check(match, f"{tag}/{light.index} final GET /color", detail)
+                    self.api_log.write({
+                        "kind": "concurrent_fade",
+                        "case": tag,
+                        "lights": [lt.index for lt, _ in assignments],
+                        "light": light.index,
+                        "description": desc,
+                        "mode": mode,
+                        "requested_ms": self.args.fade_ms,
+                        "started": since,
+                        "acknowledged": acknowledged,
+                        "dispatch": "batch",
+                        "target_observed": event.t if event else None,
+                        "transition_finished": done_at,
+                        "events": [
+                            {"t": e.t, "light_id": e.light_id, "state": e.state, "source": e.source}
+                            for e in self.ws.events_for(light, since)
+                        ],
+                    })
+                await asyncio.sleep(self.args.dwell)
+        finally:
+            for poller in pollers:
+                poller.cancel()
+            for poller in pollers:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await poller
+            if not self.args.no_restore:
+                for light, original in originals:
+                    await self.restore(light, original)
+
     def analyse_fade(self, light: Light, desc: str, mode: str, start: Any, target: Any, key: Any,
                      since: float, done_at: float | None) -> None:
         events = self.ws.events_for(light, since)
@@ -747,8 +888,8 @@ class Exerciser:
         try:
             await self.send(self.command(light, mode, value))
             print(dim(f"  restored {fmt_state(original)}"))
-        except RuntimeError as err:
-            print(bad(f"  could not restore original state: {err}"))
+        except (RuntimeError, OSError) as err:
+            self.results.check(False, f"{light.index} restore original state", str(err))
 
     # --- observation
 
@@ -853,6 +994,9 @@ class Exerciser:
             if not lights:
                 print(bad(f"none of the requested lights {self.args.light} exist"))
                 return 2
+        if self.args.concurrent_only and len(lights) < 2:
+            print(bad("--concurrent-only requires at least two selected lights"))
+            return 2
 
         await self.ws.connect()
         try:
@@ -865,7 +1009,7 @@ class Exerciser:
                           "for the others"))
             else:
                 print(dim("subscribed to websocket 'lights' channel"))
-            for light in lights:
+            for light in ([] if self.args.concurrent_only else lights):
                 print(head(f"\n== {light.label()}"))
                 original = await self.read_color(light)
                 print(f"  initial GET /color: {fmt_state(original)}")
@@ -882,6 +1026,8 @@ class Exerciser:
                             await poller
                     if not self.args.no_restore:
                         await self.restore(light, original)
+            if not self.args.skip_fades and not self.args.skip_concurrent:
+                await self.run_concurrent(lights)
         finally:
             await self.ws.close()
 
@@ -1038,6 +1184,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                    help="seconds to wait for a matching websocket event (default 3)")
     p.add_argument("--timeout", type=float, default=5.0, help="HTTP timeout in seconds (default 5)")
     p.add_argument("--no-reboot", action="store_true", help="skip the initial controller reboot")
+    concurrent = p.add_mutually_exclusive_group()
+    concurrent.add_argument("--concurrent-only", action="store_true",
+                            help="only validate concurrent fades across all selected light subsets")
+    concurrent.add_argument("--skip-concurrent", action="store_true",
+                            help="skip concurrent fades (individual tests only)")
     p.add_argument("--permissive", action="store_true",
                    help="HTTP exercise only: skip reboot/validation/log collection; report errors and continue")
     p.add_argument("--reboot-timeout", type=float, default=60.0,
@@ -1059,6 +1210,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         p.error("--cycle-minutes must be positive")
     if not 0 <= args.intensity_max <= 10:
         p.error("--intensity-max must be between 0 and 10")
+    if args.fade_ms <= 0 or args.event_timeout <= 0 or args.poll_interval <= 0 or args.dwell < 0:
+        p.error("--fade-ms, --event-timeout and --poll-interval must be positive; --dwell must be nonnegative")
+    if args.concurrent_only and (args.skip_fades or args.permissive or args.soak_hours is not None):
+        p.error("--concurrent-only cannot be combined with --skip-fades, --permissive or --soak-hours")
     return args
 
 

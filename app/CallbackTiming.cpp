@@ -16,7 +16,7 @@ constexpr std::array<const char*, unsigned(Id::Count)> names{{
 	"led_update", "light_show", "light_state", "current_state", "ws_pump", "light_reload",
 	"ota_verify", "ota_hash", "runtime_info", "runtime_collect", "runtime_json", "runtime_enqueue",
 	"telemetry", "buttons", "mqtt_receive", "timing_report",
-	"root", "populate", "render", "normalize", "send",
+	"root", "populate", "render", "normalize", "send", "state_publish",
 }};
 constexpr uint16_t noPath = UINT16_MAX;
 constexpr size_t maxPaths = 96;

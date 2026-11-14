@@ -383,7 +383,7 @@ class CallbackTimingTests(unittest.TestCase):
         ]:
             statistic.consume(LogRecord.from_json(value))
         report = statistic.report(timeline="load")
-        self.assertIn("siblings of light_show, not inside it", report)
+        self.assertIn("state_publish -> one deferred light_state, current_state or MQTT message", report)
         self.assertIn("runtime_info -> runtime_collect, runtime_json, runtime_enqueue", report)
         self.assertIn("ota_verify -> ota_hash", report)
         self.assertIn("Deferred callbacks belong to later batches", report)

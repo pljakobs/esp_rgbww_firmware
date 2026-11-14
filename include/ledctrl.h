@@ -27,6 +27,7 @@
 #include "stepsync.h"
 #include "jsonprocessor.h"
 #include <memory>
+#include <array>
 #include <vector>
 
 #define APP_COLOR_FILE ".color"
@@ -82,6 +83,7 @@ public:
 
     void start();
     void stop();
+    void shutdown();
     void colorSave();
     void colorReset();
     void testChannels();
@@ -117,6 +119,15 @@ public:
     };
     void reconfigure();
 private:
+    bool _shutdown = false;
+    bool _running = false;
+#ifdef ARCH_ESP32
+    struct PwmResources {
+        std::array<std::unique_ptr<Esp32HardwarePwm>, 2> banks;
+        std::vector<uint8_t> pins;
+        String configuration;
+    } _pwmResources;
+#endif
     void requestReload();
     String configurationSignature() const;
     bool _reloadQueued = false;
@@ -126,6 +137,9 @@ private:
     static PinConfig parsePinConfigString(String& pinStr);
     static PinConfig parsePinConfigString(const String& pinStr);
     static void updateLedCb(void* pTimerArg);
+    static void publishDeferredCb(void* param);
+    void publishDeferred();
+    void schedulePublish(uint8_t flags);
     static bool isPinValid(int pin);
     void publishToEventServer();
     void publishToMqtt(const RGBWWLed& light, uint16_t index);
@@ -159,4 +173,15 @@ private:
     HashMap<String, bool> _stepFinishedAnimations;
     uint32_t _lastColorEvent = 0;
     size_t _nextLightEvent = 0;
+
+    // State publication runs outside the LED tick, one message per dispatcher event.
+    enum PendingPublish : uint8_t {
+        PublishClock = 1u << 0,
+        PublishMqttColor = 1u << 1,
+        PublishCurrentState = 1u << 2,
+        PublishLightState = 1u << 3,
+    };
+    uint8_t _pendingPublish = 0;
+    bool _publishQueued = false;
+    uint32_t _pendingClockSteps = 0;
 };
