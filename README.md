@@ -333,7 +333,7 @@ Boot
 
 1. **Power on** — with no credentials stored the controller starts an access point:
    - SSID: `Lightinator_<chipid>` (e.g. `Lightinator_12AB34`)
-   - Password: `rgbwwctrl`
+   - Password: `configesp`
    - IP: `192.168.4.1`
 2. **Connect** a phone or laptop to the AP network.
 3. **Open the web UI** at `http://192.168.4.1/` — a DNS captive portal redirects all traffic there automatically.
