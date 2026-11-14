@@ -62,6 +62,7 @@ COMPONENT_DEPENDS += HuffmanCodec
 endif
 
 ifeq ($(SMING_ARCH), Esp32)
+    SDK_CUSTOM_CONFIG := sdkconfig.esp32
     COMPONENT_DEPENDS += Esp32HardwarePwm
 endif
 ifdef ARCH_HOST

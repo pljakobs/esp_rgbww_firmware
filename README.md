@@ -1422,6 +1422,13 @@ make SMING_ARCH=Esp32
 make SMING_ARCH=Host
 ```
 
+ESP32-family builds select `sdkconfig.esp32` through `SDK_CUSTOM_CONFIG` in
+`component.mk`, increasing the lwIP TCP/IP receive mailbox from 32 to 64 entries
+for the experiment discussed in [SmingHub/Sming#3045](https://github.com/SmingHub/Sming/issues/3045).
+Existing SDK configurations retain their old value: use `make sdk-menuconfig
+SMING_ARCH=Esp32` to set `CONFIG_LWIP_TCPIP_RECVMBOX_SIZE` to 64, or regenerate the
+SDK configuration. This does not change the ESP8266 or Host configuration.
+
 ### Flash
 
 ```bash
