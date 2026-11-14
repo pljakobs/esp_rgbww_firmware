@@ -137,6 +137,10 @@ private:
     static PinConfig parsePinConfigString(String& pinStr);
     static PinConfig parsePinConfigString(const String& pinStr);
     static void updateLedCb(void* pTimerArg);
+#ifdef ARCH_ESP32
+    bool startLightServices();
+    void stopLightServices();
+#endif
     static bool isPinValid(int pin);
     void publishToEventServer();
     void publishToMqtt(const RGBWWLed& light, uint16_t index);
@@ -165,8 +169,13 @@ private:
 
     static const uint32_t _saveAfterStableColorMs = 2000;
 
+#ifndef ARCH_ESP32
     SimpleTimer _ledTimer;
     uint32_t _timerInterval = RGBWW_MINTIMEDIFF;
+#else
+    SimpleTimer _idleClockTimer;
+    uint32_t _timerInterval = RGBWW_MINTIMEDIFF_US;
+#endif
     HashMap<String, bool> _stepFinishedAnimations;
     uint32_t _lastColorEvent = 0;
     size_t _nextLightEvent = 0;

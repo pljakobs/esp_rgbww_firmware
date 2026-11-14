@@ -1,0 +1,41 @@
+diff --git a/Sming/Arch/Esp32/Components/esp32/src/tasks.cpp b/Sming/Arch/Esp32/Components/esp32/src/tasks.cpp
+--- a/Sming/Arch/Esp32/Components/esp32/src/tasks.cpp
++++ b/Sming/Arch/Esp32/Components/esp32/src/tasks.cpp
+@@ -31,6 +31,7 @@
+ 
+ tcpip_callback_msg* callbackMessage;
+ volatile bool eventQueueFlag;
++DRAM_ATTR portMUX_TYPE eventKickMux = portMUX_INITIALIZER_UNLOCKED;
+ 
+ #ifndef SMING_RELEASE
+ DRAM_ATTR sming_dispatch_trace_entry_t traceEntries[SMING_DISPATCH_TRACE_LENGTH]{};
+@@ -56,7 +57,9 @@
+ #ifndef SMING_RELEASE
+ 	const auto startedUs = esp_timer_get_time();
+ #endif
++	portENTER_CRITICAL(&eventKickMux);
+ 	eventQueueFlag = false;
++	portEXIT_CRITICAL(&eventKickMux);
+ 	// Process only waiting messages (not newly posted ones) so tcpip doesn't starve
+ 	auto messageCount = uxQueueMessagesWaiting(eventQueue);
+ #ifndef SMING_RELEASE
+@@ -120,9 +123,12 @@
+ bool IRAM_ATTR tcpip_kick_thread()
+ {
+ 	// If queue isn't empty and we haven't already asked for a tcpip callback, do that now
++	portENTER_CRITICAL_ISR(&eventKickMux);
+ 	if(xQueueIsQueueEmptyFromISR(eventQueue) == pdFALSE && !eventQueueFlag) {
+ 		eventQueueFlag = true;
+ 		auto err = tcpip_callbackmsg_trycallback_fromisr(callbackMessage);
++		if(err == ERR_MEM) eventQueueFlag = false;
++		portEXIT_CRITICAL_ISR(&eventKickMux);
+ #ifndef SMING_RELEASE
+ 		portENTER_CRITICAL_ISR(&statsMux);
+ 		++dispatchStats.mailbox_post_attempts;
+@@ -144,5 +150,6 @@
+ 		return (err == ERR_NEED_SCHED);
+ 	}
+ 
++	portEXIT_CRITICAL_ISR(&eventKickMux);
+ 	return false;
+ }

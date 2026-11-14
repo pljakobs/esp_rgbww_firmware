@@ -62,8 +62,9 @@ The principal responsibilities are:
    `JsonProcessor`.
 2. MQTT command messages are decoded by `AppMqttClient` and forwarded through
    the same command-dispatch layer where applicable.
-3. `APPLedCtrl`, built on `RGBWWLed`, applies the operation, updates PWM
-   outputs, and advances the animation queues.
+3. `APPLedCtrl` applies the operation to the selected `RGBWWLed`. On ESP32,
+   the library's shared animation worker advances queues and updates PWM
+   independently of the Sming event loop.
 4. State changes are made available to clients over WebSocket, MQTT, or the TCP
    event server according to configuration. `transition_finished` is emitted
    when an animation step completes.
@@ -156,6 +157,157 @@ Software builds/native tests do not
 establish physical fade cancellation on classic ESP32 or prove a flicker fix;
 matched device workloads and waveform measurements remain necessary.
 
+## ESP32 Animation Servicing (5.1+)
+
+Each configured light opts into RGBWWLed's shared FreeRTOS animation worker.
+There is one animation task for the controller, not one task or timer per
+light. It waits against monotonic frame positions at a nominal 50 Hz and
+advances over missed steps without replaying physical frames. Transition
+targets are converted and corrected in RGBWWLed, then submitted as short
+HardwarePwm microfades. The existing PWM worker still owns LEDC sequencing.
+This changes transition output from whole-RAW-fade offloading to frame-level
+interpolation, including for HSV transitions.
+
+The Sming loop only receives coalesced state/completion notifications;
+`APPLedCtrl::updateLed()` no longer renders ESP32 lights. Its calls to `show()`
+consume finished flags, and clock reporting consumes the worker's logical
+step counts (including skipped frames). Master-clock steering updates the
+library service intervals in microseconds. A periodic firmware clock remains
+only when no lights are configured, preserving clock-master operation on an
+empty controller.
+
+Commands and rendering share the library mutex. Color correction updates use
+`RGBWWLed::Guard`; state getters return value snapshots. Reload stops and
+detaches services before changing light bindings or PWM banks, then registers
+the active lights again. Shutdown detaches services before destroying lights.
+The animation task remains parked for reuse after the last detachment.
+Networking and ConfigDB work stay outside the animation task and mutex.
+ESP8266/Host retain cooperative servicing.
+
+### Experimental dual-core execution
+
+The classic ESP32 test configuration enables both FreeRTOS cores while keeping
+Sming and the application event loop serial on core 0. It is not a multicore
+Sming port: only the isolated animation and hardware-PWM workers move to core 1.
+
+| Execution context | Core | Responsibility |
+| --- | --- | --- |
+| Sming/TCP-IP (`tiT`) | 0 | Commands, ConfigDB, state serialization, network delivery and application callbacks |
+| Wi-Fi, main task and FreeRTOS timer task | 0 | Existing network/startup/timer work |
+| RGBWWLed (`rgbww-led`) | 1 | Shared monotonic animation scheduling, color conversion/correction and microfade submission |
+| HardwarePwm (`pwm-worker`) | 1 | LEDC fade sequencing and hardware-completion processing |
+| FreeRTOS idle and IPC tasks | Both | Per-core scheduling and SDK cross-core coordination |
+
+The animation worker has a 6144-byte stack and priority `tskIDLE_PRIORITY + 1`;
+the PWM worker has a 4096-byte stack and priority `tskIDLE_PRIORITY + 2`.
+These are controller-wide workers, not per-light tasks. Moving the workers
+does not move already-registered LEDC interrupts: in the tested configuration,
+the fade ISR remains on the core where the driver was initialized, core 0.
+
+The command/output path is:
+
+1. A command enters on the Sming thread and updates animation state under the
+   shared recursive `RGBWWLed::Guard` mutex.
+2. The core-1 animation worker services the lights at nominal 20 ms frame
+   positions, catches up logical time after missed frames, and submits corrected
+   PWM microfades through the existing synchronized HardwarePwm interface.
+3. LEDC runs the physical fade; completion interrupts wake the PWM worker.
+4. State/completion notifications are coalesced back onto the Sming queue.
+   Application callbacks run on core 0, outside the animation mutex.
+
+Commands, snapshots, color correction, attachment and detachment must use the
+same library synchronization as rendering. Light/container lifetime changes
+remain on the Sming thread, with services detached before views or banks are
+destroyed. Core-1 workers must not directly execute networking, ConfigDB or
+application callbacks. The cross-core boundary is synchronized LED state,
+HardwarePwm handoff and queued notifications, not general parallel application
+execution.
+
+#### SDK and framework requirements
+
+`LED_WORKER_CORE=1` selects worker affinity through `RGBWW_SERVICE_CORE` and
+`HWPWM_SERVICE_CORE`; it does not enable the second core by itself. The SDK must
+be built with:
+
+```text
+CONFIG_FREERTOS_UNICORE=n
+CONFIG_ESP_MAIN_TASK_AFFINITY_CPU0=y
+CONFIG_LWIP_TCPIP_TASK_AFFINITY_CPU0=y
+CONFIG_ESP_WIFI_TASK_PINNED_TO_CORE_0=y
+```
+
+The worker core must be less than `portNUM_PROCESSORS`, enforced at compile
+time. Leaving `LED_WORKER_CORE` unset preserves default task creation; ESP8266
+and single-core ESP32-C3 do not gain a second execution core.
+
+The experiment uses an isolated Sming/SDK build rather than modifying the
+shared installed framework. The firmware carries two required patches in
+`docker/patches/`, applied by `docker/Dockerfile` after initializing the PWM
+submodule and before building framework samples:
+
+- `Esp32HardwarePwm/src/FadeWorker.cpp` supports `HWPWM_SERVICE_CORE` and pinned
+  PWM-worker creation.
+- The ESP32 dispatcher in `esp32/src/tasks.cpp` protects its coalesced wake flag
+  with a dedicated cross-core `portMUX`. A failed TCP/IP mailbox kick
+  (`ERR_MEM`) clears the flag so a subsequent post can retry; the flag is not
+  synchronization-safe merely because it is volatile.
+
+Both patches are always applied to containers built from this repository.
+They are not committed or pushed to either framework fork. `git apply --check`
+must pass for both before either is applied; an incompatible or already-patched
+base fails the container build instead of silently skipping a patch. The
+container's `SMING_COMMIT` still identifies its base source, not the locally
+patched tree. Pin that build argument for reproducible images and retain the
+firmware revision identifying the patches. PWM affinity remains opt-in when
+`HWPWM_SERVICE_CORE` is set; the dispatcher synchronization is always active.
+
+The firmware build flag alone is therefore not a complete dual-core port of
+an unmodified framework. Build the SDK and affected framework/library objects
+with matching configuration; changing affinity flags must not reuse stale
+worker objects. ESP-IDF 5.2 startup supports the tested multicore application
+with the existing unicore bootloader, so this classic-ESP32 experiment used
+application-only OTA. This is a verified property of that configuration, not
+a blanket bootloader-compatibility guarantee for other targets or SDKs.
+
+For a fresh classic-ESP32 build using the patched container, select the
+repository's dual-core SDK configuration explicitly:
+
+```sh
+make SMING_ARCH=Esp32 SMING_SOC=esp32 OUT_BASE=out/dualcore \
+  SDK_CUSTOM_CONFIG=sdkconfig.dualcore LED_WORKER_CORE=1 \
+  FADE_TIMING_DIAGNOSTICS=1 EVENT_MONITOR=0
+```
+
+An existing generated SDK configuration is not overridden by changing
+`SDK_CUSTOM_CONFIG`. Use a dedicated container/build cache; regenerate its SDK
+configuration with `sdk-config-clean` using the same architecture, SoC and
+build flags before building. Do not clean a shared installed SDK. Core
+selection is explicit and does not change the normal firmware's SDK defaults.
+
+#### Capacity and timing boundaries
+
+Core-1 execution removes animation/PWM worker CPU demand from Sming's core,
+but does not prevent a slow Sming callback from blocking all other application
+callbacks. State serialization and delivery still consume core-0 time and can
+lag independently of physical output. SDK flash/cache operations can also
+coordinate or stall both cores; core 1 is not an uninterrupted real-time island.
+
+After fixing the diagnostic ISR path, ten paired measurement windows completed
+on the dual-core test build. Under the measured all-channel fade workloads,
+combined LED/PWM worker runtime was about 6.8-7.4% of one core, with about
+55-63% idle capacity on core 1. LED Sming-callback wall occupancy still peaked
+at 41-47 ms and enqueue-to-entry latency reached about 1.06 s. These are
+workload-specific measurements, not reserved capacity or addressable-LED
+deadline guarantees.
+
+The large simultaneous-fade suite measures host-observed state timing, not
+physical PWM edges, and did not capture synchronized traces explaining each
+late observation. Do not attribute those observations solely to worker delays
+or solely to network/queue delays. Addressable-LED support still needs a
+hardware-assisted output design and its own worst-case timing validation.
+Diagnostic builds reserve 48 KiB for the bounded trace buffer even when
+recording is disabled; that memory cost is not intrinsic to dual-core operation.
+
 ## Optional Sensor Extensions
 
 `Application` owns the optional INA219 and AS7341 drivers when those extensions
@@ -180,11 +332,52 @@ an explicit pair of extension routes, not a general runtime extension registry.
 ## Opt-in fade timing measurements
 
 ESP32 diagnostic builds may set `FADE_TIMING_DIAGNOSTICS=1` (default off).
-Authenticated `POST /debug/fade-timing?light=N` starts a bounded 1024-entry RAM
+Authenticated `POST /debug/fade-timing?light=N` starts a bounded 2048-entry RAM
 capture; `GET /debug/fade-timing` stops it and exports CSV. No serial/syslog
 output or allocation occurs in trace writes, including the hardware fade ISR.
+The ISR trace path and its helpers must remain in IRAM, with data in internal
+RAM: flash access can disable the cache while PWM interrupts are still enabled.
+Flag reads use compiler atomics to avoid out-of-line standard-library calls;
+verify the linked ISR call path when changing this instrumentation.
 Overflow is counted and the probe rejects such captures. The endpoint is not
 registered in ordinary builds.
+
+Add `&service=1` to capture shared animation worker accounting instead of
+per-channel hardware events. Events 20/21 bracket each service pass; event 21
+contains mutex wait (`value`) and total pass time (`detail`), in microseconds.
+For the selected light, event 22 records frame lateness and logical step count;
+event 23 records render duration and step count (bit 31 marks completion).
+Events 24/25/26 mark callback enqueue, dispatch entry and dispatch exit;
+event 26 contains total dispatch duration. Event 27 marks rejected enqueue.
+Worker/global events use `UINT32_MAX` as their light key. State and transport
+events remain enabled, so worker delays can be separated from callback queue
+and WebSocket delivery delays on the same monotonic clock. Service captures
+do not measure hardware completion; keep them short and reject overflow.
+
+`GET /debug/fade-timing?tasks=1` exports bounded FreeRTOS task runtime snapshots
+when ESP-timer-based runtime statistics are enabled in the SDK. It does not
+start or stop a trace. Difference two snapshots over a quiet measurement
+window: task runtime delta divided by total-time delta is utilization of one
+core; divide again by the reported core count for share of whole-chip CPU.
+Subtract summed idle-task utilization from the core count to determine busy
+capacity (including single-core configurations). Compare
+steady outputs with fading to separate baseline service cost from fade cost;
+task runtime includes interrupt time charged to that task, not just its code.
+Worker CPU totals do not include state serialization on the TCP/IP task, so
+measure that task's change as well. This is utilization, not deadline or
+addressable-output-driver validation.
+
+For paired CPU and dispatcher measurements, take a task snapshot with
+`&account=1`, wait for the desired window, then take another with `&account=0`.
+The second CSV header includes reset-on-read dispatcher batch totals/maxima,
+sampled queue peak, enqueue failures, and aggregate LED service/mutex/dispatch
+times. `queue_wait` measures LED callback enqueue-to-entry latency;
+`led_dispatch` is wall time spent inside the LED Sming callback, during which
+the dispatcher cannot execute another queued callback. `batch_max_us` covers
+an entire Sming batch, not a single callback or queue residence time. Wall
+times include preemption and must not be interpreted as CPU runtime or summed
+with the CPU percentages. Accounting is bounded and does not emit per-frame
+logs. Leave `EVENT_MONITOR=0` to avoid another consumer resetting these counters.
 
 `tests/fade_timing_probe.py --host ADDRESS --light N --output DIRECTORY`
 records command acceptance, hardware segment setup/ISR completion, application

@@ -18,6 +18,13 @@ COMPONENT_CPPFLAGS += -DHAS_INA219_EXTENSION=1
 endif
 
 EVENT_MONITOR ?= 0
+LED_WORKER_CORE ?=
+COMPONENT_VARS += LED_WORKER_CORE
+ifneq ($(strip $(LED_WORKER_CORE)),)
+ifneq ($(SMING_ARCH),Esp32)
+$(error LED_WORKER_CORE requires Esp32)
+endif
+endif
 ifneq ($(filter $(EVENT_MONITOR),0 1),$(EVENT_MONITOR))
 $(error EVENT_MONITOR must be 0 or 1)
 endif
@@ -162,6 +169,9 @@ GDBSTUB_BREAK_ON_INIT ?= 0
 USER_CFLAGS += -DGDBSTUB_BREAK_ON_INIT=$(GDBSTUB_BREAK_ON_INIT)
 # Keep format-string type checking strict even when global WERROR is disabled in CI.
 USER_CFLAGS += -Wformat -Werror=format
+ifneq ($(strip $(LED_WORKER_CORE)),)
+USER_CFLAGS += -DRGBWW_SERVICE_CORE=$(LED_WORKER_CORE) -DHWPWM_SERVICE_CORE=$(LED_WORKER_CORE)
+endif
 
 FADE_TIMING_DIAGNOSTICS ?= 0
 COMPONENT_VARS += FADE_TIMING_DIAGNOSTICS

@@ -761,6 +761,13 @@ class Exerciser:
                         lambda e: e.light == light.index and e.t >= prepared_at
                         and compare(light, mode, start, e.state)[0],
                         self.args.event_timeout)
+                    if event is None:
+                        try:
+                            state = await self.read_color(light)
+                        except (RuntimeError, OSError) as err:
+                            return self.results.check(False, f"{tag}/{light.index} setup GET", str(err))
+                        if compare(light, mode, start, state)[0]:
+                            return self.results.check(True, f"{tag}/{light.index} setup", desc)
                     return self.results.check(event is not None, f"{tag}/{light.index} setup",
                                               desc if event else "start state not observed")
 
@@ -804,9 +811,12 @@ class Exerciser:
                     done_at = next((t for t, params in self.ws.transitions
                                     if t >= since and params.get("name") == name), None)
                     self.analyse_fade(light, f"{tag}/{desc}", mode, start, target, key, since, done_at)
-                    state = await self.read_color(light)
-                    match, detail = compare(light, mode, target, state)
-                    self.results.check(match, f"{tag}/{light.index} final GET /color", detail)
+                    try:
+                        state = await self.read_color(light)
+                        match, detail = compare(light, mode, target, state)
+                        self.results.check(match, f"{tag}/{light.index} final GET /color", detail)
+                    except (RuntimeError, OSError) as err:
+                        self.results.check(False, f"{tag}/{light.index} final GET /color", str(err))
                     self.api_log.write({
                         "kind": "concurrent_fade",
                         "case": tag,

@@ -23,8 +23,10 @@ enum class Event : uint8_t {
 	do { if(FadeTiming::selected(light)) { __VA_ARGS__; } } while(false)
 uint32_t record(Event event, uint32_t key, uint32_t value = 0, uint32_t detail = 0);
 bool selected(uint16_t light);
-void start(uint16_t light);
+void start(uint16_t light, bool service = false);
+bool serviceEnabled();
 void exportCsv(MemoryDataStream& stream);
+bool exportTasks(MemoryDataStream& stream, bool account = false);
 #else
 #define FADE_TIMING_ONLY(...)
 #define FADE_TIMING_SAMPLE(light, ...) 0u
