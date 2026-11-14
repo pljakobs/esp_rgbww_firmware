@@ -270,7 +270,8 @@ raise SystemExit('Forbidden git operation in policy test: ' + repr(arguments))
         run = step(workflow("build_firmware.yml"), "build", "Run Build in Docker Container")["run"]
         self.assertIn('[ "${{ matrix.soc }}" != "esp8266" ]', run)
         self.assertIn("make sdk-config-clean SMING_SOC=${{ matrix.soc }} SMING_RELEASE=${{ matrix.release }}", run)
-        self.assertIn(".github/scripts/check_sdkconfig.sh sdkconfig.esp32", run)
+        self.assertIn(".github/scripts/check_sdkconfig.sh $sdk_config", run)
+        self.assertIn('sdk_config=sdkconfig.dualcore; else sdk_config=sdkconfig.esp32', run)
         for target in ("make GIT_VERSION", "make mergeflash GIT_VERSION"):
             with self.subTest(target=target):
                 build = run.index(target)

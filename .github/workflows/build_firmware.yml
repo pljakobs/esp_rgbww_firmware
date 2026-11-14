@@ -474,7 +474,8 @@ jobs:
           if [ "${{ matrix.soc }}" != "esp8266" ]; then
             if [ "${{ matrix.release }}" = "1" ]; then build_type=release; else build_type=debug; fi
             sdk_reset="make sdk-config-clean SMING_SOC=${{ matrix.soc }} SMING_RELEASE=${{ matrix.release }}"
-            sdk_check="bash ./.github/scripts/check_sdkconfig.sh sdkconfig.esp32 \$SMING_HOME/Arch/Esp32/Components/esp32/project/${{ matrix.soc }}/$build_type/sdkconfig"
+            if [ "${{ matrix.soc }}" = "esp32" ]; then sdk_config=sdkconfig.dualcore; else sdk_config=sdkconfig.esp32; fi
+            sdk_check="bash ./.github/scripts/check_sdkconfig.sh $sdk_config \$SMING_HOME/Arch/Esp32/Components/esp32/project/${{ matrix.soc }}/$build_type/sdkconfig"
           fi
           if [ "${{ matrix.single }}" = "0" ]; then
             docker run --rm --privileged -v ${{ github.workspace }}:/workspace -w /workspace \
