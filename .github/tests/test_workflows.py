@@ -239,6 +239,41 @@ raise SystemExit('Forbidden git operation in policy test: ' + repr(arguments))
         self.assertEqual(matrix["release"], [0, 1])
         self.assertEqual(matrix["single"], [0, 1])
 
+    def test_esp32_builds_reset_and_verify_the_project_sdkconfig(self):
+        run = step(workflow("build_firmware.yml"), "build", "Run Build in Docker Container")["run"]
+        self.assertIn('[ "${{ matrix.soc }}" != "esp8266" ]', run)
+        self.assertIn("make sdk-config-clean SMING_SOC=${{ matrix.soc }} SMING_RELEASE=${{ matrix.release }}", run)
+        self.assertIn(".github/scripts/check_sdkconfig.sh sdkconfig.esp32", run)
+        for target in ("make GIT_VERSION", "make mergeflash GIT_VERSION"):
+            with self.subTest(target=target):
+                build = run.index(target)
+                self.assertLess(run.rindex("$sdk_reset", 0, build), build)
+                self.assertGreater(run.index("$sdk_check", build), build)
+        requested = (ROOT / "sdkconfig.esp32").read_text()
+        self.assertIn("CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y", requested)
+        self.assertIn("CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y", requested)
+
+    def test_sdkconfig_check_rejects_options_overridden_by_a_stale_config(self):
+        script = ROOT / ".github/scripts/check_sdkconfig.sh"
+        with tempfile.TemporaryDirectory() as directory:
+            requested = Path(directory) / "requested"
+            generated = Path(directory) / "sdkconfig"
+            requested.write_text("# comment\nCONFIG_A=y\nCONFIG_B=64  # trailing\nCONFIG_C=n\n")
+            cases = {
+                "applied": ("CONFIG_A=y\nCONFIG_B=64\n# CONFIG_C is not set\n", 0),
+                "absent-n": ("CONFIG_A=y\nCONFIG_B=64\n", 0),
+                "not-set": ("# CONFIG_A is not set\nCONFIG_B=64\n", 1),
+                "wrong-value": ("CONFIG_A=y\nCONFIG_B=32\n", 1),
+                "missing": ("CONFIG_B=64\n", 1),
+                "n-but-enabled": ("CONFIG_A=y\nCONFIG_B=64\nCONFIG_C=y\n", 1),
+            }
+            for name, (content, expected) in cases.items():
+                with self.subTest(case=name):
+                    generated.write_text(content)
+                    result = subprocess.run(["bash", str(script), str(requested), str(generated)],
+                                            capture_output=True, text=True)
+                    self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+
     def test_build_verifies_the_line_specific_rgbwwled_source_version(self):
         document = workflow("build_firmware.yml")
         resolver = step(document, "generate-matrix", "Resolve release matrix")

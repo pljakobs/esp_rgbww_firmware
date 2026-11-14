@@ -64,6 +64,10 @@ endif
 ifeq ($(SMING_ARCH), Esp32)
     SDK_CUSTOM_CONFIG := sdkconfig.esp32
     COMPONENT_DEPENDS += Esp32HardwarePwm
+    # Sming doesn't export the espcoredump headers; needed to read the coredump partition.
+    COMPONENT_INCDIRS += \
+        $(IDF_PATH)/components/espcoredump/include \
+        $(IDF_PATH)/components/espcoredump/include/port/$(if $(IDF_TARGET_ARCH_RISCV),riscv,xtensa)
 endif
 ifdef ARCH_HOST
     COMPONENT_DEPENDS += malloc_count
