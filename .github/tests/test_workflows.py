@@ -30,6 +30,33 @@ def step(document, job, name):
 
 
 class WorkflowPolicyTests(unittest.TestCase):
+    def test_container_applies_firmware_owned_framework_patches_before_building(self):
+        dockerfile = (ROOT / "docker/Dockerfile").read_text()
+        initialize = dockerfile.index("git submodule update --init Sming/Libraries/Esp32HardwarePwm")
+        copy = dockerfile.index("COPY docker/patches/")
+        check = dockerfile.index("git apply --check /opt/firmware-patches/sming-cross-core-wakeup.patch")
+        pwm_check = dockerfile.index(
+            "git -C Sming/Libraries/Esp32HardwarePwm apply --check /opt/firmware-patches/pwm-worker-affinity.patch")
+        apply = dockerfile.index("&& git apply /opt/firmware-patches/sming-cross-core-wakeup.patch")
+        pwm_apply = dockerfile.index(
+            "&& git -C Sming/Libraries/Esp32HardwarePwm apply /opt/firmware-patches/pwm-worker-affinity.patch")
+        build = dockerfile.index("make python-requirements")
+        self.assertLess(initialize, copy)
+        self.assertLess(copy, check)
+        self.assertLess(check, pwm_check)
+        self.assertLess(pwm_check, apply)
+        self.assertLess(apply, pwm_apply)
+        self.assertLess(pwm_apply, build)
+        for name in ("sming-cross-core-wakeup.patch", "pwm-worker-affinity.patch"):
+            self.assertTrue((ROOT / "docker/patches" / name).is_file())
+
+    def test_container_records_firmware_patch_revision(self):
+        build = step(workflow("build-container.yml"), "build", "Build and push Docker image")["with"]
+        self.assertIn("pjakobs/sming:firmware-${{ github.sha }}", build["tags"])
+        self.assertIn("io.lightinator.firmware.revision=${{ github.sha }}", build["labels"])
+        self.assertIn("io.lightinator.framework.patches=sming-cross-core-wakeup,pwm-worker-affinity",
+                      build["labels"])
+
     def test_container_dispatch_preserves_exact_source_revision(self):
         document = workflow("build-container.yml")
         self.assertIn("sming_commit", document["on"]["workflow_dispatch"]["inputs"])

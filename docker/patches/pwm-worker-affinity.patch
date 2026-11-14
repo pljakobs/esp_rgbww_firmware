@@ -1,0 +1,20 @@
+diff --git a/src/FadeWorker.cpp b/src/FadeWorker.cpp
+--- a/src/FadeWorker.cpp
++++ b/src/FadeWorker.cpp
+@@ -160,7 +160,15 @@
+ 	}
+ 	// No affinity: works with CONFIG_FREERTOS_UNICORE and multi-core targets.
+ 	TaskHandle_t task = nullptr;
+-	if(xTaskCreate(workerTask, "pwm-worker", 4096, nullptr, tskIDLE_PRIORITY + 2, &task) != pdPASS) {
++#ifdef HWPWM_SERVICE_CORE
++	static_assert(HWPWM_SERVICE_CORE >= 0 && HWPWM_SERVICE_CORE < portNUM_PROCESSORS,
++				  "HWPWM_SERVICE_CORE must select an enabled CPU");
++	const auto created = xTaskCreatePinnedToCore(workerTask, "pwm-worker", 4096, nullptr,
++											   tskIDLE_PRIORITY + 2, &task, HWPWM_SERVICE_CORE);
++#else
++	const auto created = xTaskCreate(workerTask, "pwm-worker", 4096, nullptr, tskIDLE_PRIORITY + 2, &task);
++#endif
++	if(created != pdPASS) {
+ 		if(timer_) {
+ 			esp_timer_delete(timer_);
+ 		}
