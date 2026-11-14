@@ -7,6 +7,7 @@ on:
       - '.github/**'
       - '**/*.cfgdb'
       - 'tools/generate-api-schemas.mjs'
+      - 'component.mk'
       - 'api*.json'
       - 'api-docs.html'
       - 'openapi*.json*'
@@ -51,13 +52,13 @@ jobs:
       - name: Lint every workflow
         run: '"$(go env GOPATH)/bin/actionlint" -color -shellcheck= .github/workflows/*.yml'
 
-      - name: Test workflow syntax and policies
-        run: python -m unittest discover -s .github/tests -v
-
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
           node-version: '24'
+
+      - name: Test workflow syntax and policies
+        run: python -m unittest discover -s .github/tests -v
 
       - name: Test M3 hardware schema and light ownership
         run: |
@@ -69,7 +70,10 @@ jobs:
           node tools/generate-api-schemas.mjs
           node --test .github/tests/test_openapi.mjs
           npx --yes @redocly/cli@2.12.0 lint openapi.generated.json --extends=minimal
-          git diff --exit-code -- api-version.json schema/app-config.schema.json schema/app-data.schema.json json-rpc-api.schema.json openapi.generated.json openapi.generated.json.gz
+          if ! git diff --exit-code -- api-version.json schema/app-config.schema.json schema/app-data.schema.json json-rpc-api.schema.json openapi.generated.json openapi.generated.json.gz; then
+            echo "::error::Generated API schemas are stale. Run node tools/generate-api-schemas.mjs and commit all generated outputs with the schema changes."
+            exit 1
+          fi
 
       - name: Upload API documentation
         uses: actions/upload-artifact@v7

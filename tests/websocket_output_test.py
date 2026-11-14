@@ -19,6 +19,8 @@ CPP_SUPPORT = r"""
 #include <vector>
 
 #define F(value) value
+#define HAS_INA219_EXTENSION 1
+#define FADE_TIMING_ONLY(...)
 
 class String : public std::string {
 public:
@@ -75,7 +77,8 @@ struct ApplicationWebserver {
     std::vector<WebsocketConnection*> webSockets;
     bool hasLightSubscribers() const;
     bool hasRuntimeInfoSubscribers() const;
-    void wsSendLightEvent(const char*, size_t);
+    void wsSendLightEvent(const char*, size_t, uint32_t = 0);
+    void wsSendIna219(const char*, size_t);
 };
 """
 
@@ -196,6 +199,23 @@ int main(int argc, char** argv) {
         server.wsSendLightEvent("closed", 6);
         assert(socket.sent.size() == 2);
         runtime.close();
+    } else if(scenario == "current_subscription") {
+        WebsocketConnection other;
+        other.state = new WsAuthState();
+        ApplicationWebserver server;
+        server.webSockets = {nullptr, &socket, &other};
+        state->currentSubscribed = true;
+        server.wsSendIna219("reading", 7);
+        assert(socket.sent == std::vector<std::string>({"reading"}));
+        assert(other.sent.empty());
+        state->currentSubscribed = false;
+        static_cast<WsAuthState*>(other.state)->currentSubscribed = true;
+        server.wsSendIna219("invalid", 7);
+        assert(socket.sent.size() == 1);
+        assert(other.sent == std::vector<std::string>({"invalid"}));
+        other.close();
+        server.wsSendIna219("closed", 6);
+        assert(other.sent.size() == 1);
     } else {
         return 2;
     }
@@ -220,10 +240,13 @@ def websocket_output_binary(tmp_path_factory: pytest.TempPathFactory) -> Path:
     start = source.index("bool ApplicationWebserver::hasRuntimeInfoSubscribers()")
     end = source.index("unsigned ApplicationWebserver::getHttpActiveConnections()", start)
     light_output = source[start:end]
+    start = source.index("void ApplicationWebserver::wsSendIna219(")
+    end = source.index("void ApplicationWebserver::publishIna219(", start)
+    current_output = source[start:end]
     binary = tmp_path_factory.mktemp("websocket-output") / "test"
     result = subprocess.run(
         [compiler, "-std=c++17", "-D_GLIBCXX_ASSERTIONS", "-x", "c++", "-", "-o", str(binary)],
-        input=CPP_SUPPORT + implementation + CPP_LIGHT_INTERFACE + light_output + CPP_TESTS,
+        input=CPP_SUPPORT + implementation + CPP_LIGHT_INTERFACE + light_output + current_output + CPP_TESTS,
         text=True,
         capture_output=True,
         check=False,
@@ -235,7 +258,7 @@ def websocket_output_binary(tmp_path_factory: pytest.TempPathFactory) -> Path:
 @pytest.mark.parametrize(
     "scenario",
     ["fifo", "overflow", "stream_completion", "disconnect_text", "disconnect_start", "late_completion",
-     "light_subscription", "runtime_subscription"],
+     "light_subscription", "runtime_subscription", "current_subscription"],
 )
 def test_websocket_output(websocket_output_binary: Path, scenario: str) -> None:
     result = subprocess.run(
