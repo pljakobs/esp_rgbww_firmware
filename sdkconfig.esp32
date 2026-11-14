@@ -1,0 +1,2 @@
+# Allow bursts of lwIP messages and Sming dispatcher wakeups.
+CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=64
