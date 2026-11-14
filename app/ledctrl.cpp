@@ -30,6 +30,9 @@
 #ifdef ARCH_ESP32
 #include <Esp32PwmPlatform.h>
 #include <pwmboardprofile.h>
+#if FADE_TIMING_DIAGNOSTICS
+#include <RGBWWLed/RGBWWLedService.h>
+#endif
 #endif
 
 #include <Wiring/WVector.h>
@@ -40,6 +43,24 @@
 #include <array>
 #include <utility>
 #include <vector>
+
+#if FADE_TIMING_DIAGNOSTICS && defined(ARCH_ESP32)
+void rgbwwLedTimingTrace(RGBWWServiceTrace event, const RGBWWLed* light, uint32_t value, uint32_t detail)
+{
+	if(!FadeTiming::serviceEnabled()) return;
+	uint32_t index = UINT32_MAX;
+	if(light != nullptr) {
+		for(const auto& entry : app.lights) {
+			if(entry.led.get() != light) continue;
+			if(!FadeTiming::selected(entry.index)) return;
+			index = entry.index;
+			break;
+		}
+		if(index == UINT32_MAX) return;
+	}
+	FadeTiming::record(static_cast<FadeTiming::Event>(event), index, value, detail);
+}
+#endif
 
 namespace
 {
@@ -384,6 +405,7 @@ bool validateBoardPwmPins(const Hardware& hardware, const PinDatabase& pinDataba
 template <typename Color>
 void configureLightColor(RGBWWLed& light, const Color& color)
 {
+	RGBWWLed::Guard guard;
 	light.colorutils.setBrightnessCorrection(color.brightness.getRed(), color.brightness.getGreen(),
 											color.brightness.getBlue(), color.brightness.getWw(), color.brightness.getCw());
 	light.colorutils.setHSVcorrection(color.hsv.getRed(), color.hsv.getYellow(), color.hsv.getGreen(),
@@ -405,7 +427,11 @@ void APPLedCtrl::shutdown()
 	if(_shutdown) return;
 	_shutdown = true;
 	_running = false;
+#ifdef ARCH_ESP32
+	stopLightServices();
+#else
 	_ledTimer.stop();
+#endif
 	_reloadLifetime.reset();
 	app.lights.clear();
 #ifdef ARCH_ESP32
@@ -644,9 +670,21 @@ bool APPLedCtrl::reload(String& error)
 		}
 		staged.push_back({light.id, light.name, std::move(instance), light.index, light.isDefault});
 	}
+#ifdef ARCH_ESP32
+	stopLightServices();
+#else
 	_ledTimer.stop();
+#endif
 	auto finish = [&](bool success) {
+#ifdef ARCH_ESP32
+		if(_running && !startLightServices()) {
+			_running = false;
+			error = F("Unable to start LED animation service");
+			return false;
+		}
+#else
 		if(_running) _ledTimer.start();
+#endif
 		return success;
 	};
 	auto failedActivation = [&]() {
@@ -844,17 +882,29 @@ void APPLedCtrl::updateLedCb(void* pTimerArg)
 void APPLedCtrl::updateLed()
 {
 	CALLBACK_TIMING_SCOPE(timing, LedUpdate);
+#ifdef ARCH_ESP32
+	if(!_running || _shutdown) return;
+	uint32_t advancedSteps = app.lights.empty() ? 1 : 0;
+#else
+	uint32_t advancedSteps = 1;
+#endif
 	bool animFinished = false;
 	bool defaultFinished = false;
 	VirtualLight* defaultLight = nullptr;
 	for(auto& light : app.lights) {
+#ifndef ARCH_ESP32
 		CALLBACK_TIMING_SCOPE(showTiming, LightShow);
+#endif
 		const bool finished = light.led->show();
+#ifdef ARCH_ESP32
+		const uint32_t servicedSteps = light.led->takeServiceSteps();
+		if(&light == &app.lights.front()) advancedSteps = servicedSteps;
+#endif
 		FADE_TIMING_LIGHT(light.index,
 			const auto& raw = light.led->getCurrentOutput();
 			const auto& hsv = light.led->getCurrentColor();
 			const bool isHsv = light.led->getMode() == RGBWWLed::ColorMode::Hsv;
-			FadeTiming::record(FadeTiming::Event::Show, light.index, isHsv ? hsv.v : raw.ww,
+			FadeTiming::record(FadeTiming::Event::State, light.index, isHsv ? hsv.v : raw.ww,
 							  (finished ? 0x80000000u : 0) | (isHsv ? uint32_t(hsv.ct) : uint32_t(raw.cw)));
 		);
 		animFinished |= finished;
@@ -869,19 +919,22 @@ void APPLedCtrl::updateLed()
 	if(!app.lights.empty() && app.eventserver.hasLightSubscribers()) {
 		publish |= PublishLightState;
 	}
-	++_stepCounter;
-	if(clockMaster && _stepCounter % std::max(clockMasterInterval, uint32_t(1)) == 0) {
+	_stepCounter += advancedSteps;
+	const uint32_t clockInterval = std::max(clockMasterInterval, uint32_t(1));
+	if(clockMaster && (advancedSteps >= clockInterval || _stepCounter % clockInterval < advancedSteps)) {
 		_pendingClockSteps = _stepCounter;
 		publish |= PublishClock;
 	}
 
 	const static uint32_t stepLenMs = 1000 / RGBWW_UPDATEFREQUENCY;
 	if(defaultLight != nullptr && colorMaster &&
-	   (defaultFinished || colorMasterInterval == 0 || ((stepLenMs * _stepCounter) % colorMasterInterval) < stepLenMs)) {
+	   (defaultFinished || colorMasterInterval == 0 || uint64_t(stepLenMs) * advancedSteps >= colorMasterInterval ||
+	    ((stepLenMs * _stepCounter) % colorMasterInterval) < uint64_t(stepLenMs) * advancedSteps)) {
 		publish |= PublishMqttColor;
 	}
 	if(defaultLight != nullptr && colorMasterInterval >= 0 &&
-	   (animFinished || colorMasterInterval == 0 || ((stepLenMs * _stepCounter) % colorMasterInterval) < stepLenMs)) {
+	   (animFinished || colorMasterInterval == 0 || uint64_t(stepLenMs) * advancedSteps >= colorMasterInterval ||
+	    ((stepLenMs * _stepCounter) % colorMasterInterval) < uint64_t(stepLenMs) * advancedSteps)) {
 		const uint32_t now = millis();
 		if(now - _lastColorEvent >= static_cast<uint32_t>(colorMinInterval)) {
 			_lastColorEvent = now;
@@ -1011,6 +1064,13 @@ void APPLedCtrl::publishFinishedStepAnimations()
 void APPLedCtrl::onMasterClockReset()
 {
 	_timerInterval = _stepSync->reset();
+#ifdef ARCH_ESP32
+	{
+		RGBWWLed::Guard guard;
+		for(auto& light : app.lights) light.led->setServiceIntervalUs(_timerInterval);
+	}
+	_idleClockTimer.setIntervalUs(_timerInterval);
+#endif
 	publishStatus();
 }
 
@@ -1031,7 +1091,15 @@ void APPLedCtrl::onMasterClock(uint32_t stepsMaster)
 	// limit interval to sane values (just for safety)
 	_timerInterval = std::min(std::max(_timerInterval, static_cast<uint32_t>(RGBWW_MINTIMEDIFF_US / 2u)),
 							  static_cast<uint32_t>(RGBWW_MINTIMEDIFF_US * 1.5));
+#ifdef ARCH_ESP32
+	{
+		RGBWWLed::Guard guard;
+		for(auto& light : app.lights) light.led->setServiceIntervalUs(_timerInterval);
+	}
+	_idleClockTimer.setIntervalUs(_timerInterval);
+#else
 	_ledTimer.setIntervalUs(_timerInterval);
+#endif
 	publishStatus();
 }
 
@@ -1048,19 +1116,61 @@ void APPLedCtrl::start()
 	_running = true;
 	cdebug_i(APPLEDCTRL, "APPLedCtrl::start: " ANSI_COLOR_BLUE "APPLedCtrl::start" ANSI_COLOR_RESET);
 
+#ifdef ARCH_ESP32
+	if(!startLightServices()) _running = false;
+#else
 	_ledTimer.setCallback(APPLedCtrl::updateLedCb, this);
 	_ledTimer.setIntervalMs(_timerInterval);
 	cdebug_i(APPLEDCTRL, "APPLedCtrl::start: " ANSI_COLOR_BLUE "_timerInterval" ANSI_COLOR_RESET, _timerInterval);
 	// Periodic, so dispatch latency delays a step without shifting later steps.
 	_ledTimer.start();
+#endif
 }
 
 void APPLedCtrl::stop()
 {
 	_running = false;
 	cdebug_i(APPLEDCTRL, "APPLedCtrl::stop: " ANSI_COLOR_BLUE "APPLedCtrl::stop" ANSI_COLOR_RESET);
+#ifdef ARCH_ESP32
+	stopLightServices();
+#else
 	_ledTimer.stop();
+#endif
 }
+
+#ifdef ARCH_ESP32
+bool APPLedCtrl::startLightServices()
+{
+	RGBWWLed::Guard guard;
+	if(app.lights.empty()) {
+		_idleClockTimer.setCallback(APPLedCtrl::updateLedCb, this);
+		_idleClockTimer.setIntervalUs(_timerInterval);
+		_idleClockTimer.start();
+		return true;
+	}
+	_idleClockTimer.stop();
+	for(size_t i = 0; i < app.lights.size(); ++i) {
+		auto& light = *app.lights[i].led;
+		if(!light.setServiceIntervalUs(_timerInterval) ||
+		   !light.startService(i == 0 ? APPLedCtrl::updateLedCb : nullptr, this)) {
+			cdebug_e(APPLEDCTRL, "Unable to start RGBWWLed animation worker");
+			stopLightServices();
+			return false;
+		}
+	}
+	return true;
+}
+
+void APPLedCtrl::stopLightServices()
+{
+	RGBWWLed::Guard guard;
+	_idleClockTimer.stop();
+	if(!app.lights.empty()) _stepCounter += app.lights.front().led->takeServiceSteps();
+	for(auto& light : app.lights) {
+		if(light.led) light.led->stopService();
+	}
+}
+#endif
 
 void APPLedCtrl::colorSave()
 {

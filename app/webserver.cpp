@@ -1989,11 +1989,32 @@ void ApplicationWebserver::onFadeTiming(HttpRequest& request, HttpResponse& resp
 			sendApiCode(response, API_CODES::API_BAD_REQUEST, "Select an existing light");
 			return;
 		}
-		FadeTiming::start(light);
+		const String service = request.getQueryParameter(F("service"));
+		if(service.length() && service != F("0") && service != F("1")) {
+			sendApiCode(response, API_CODES::API_BAD_REQUEST, "service must be 0 or 1");
+			return;
+		}
+		FadeTiming::start(light, service == F("1"));
 		sendApiCode(response, API_CODES::API_SUCCESS);
 		return;
 	}
 	auto stream = new MemoryDataStream();
+	if(request.getQueryParameter(F("tasks")) == F("1")) {
+		const String account = request.getQueryParameter(F("account"));
+		if(account.length() && account != F("0") && account != F("1")) {
+			delete stream;
+			sendApiCode(response, API_CODES::API_BAD_REQUEST, "account must be 0 or 1");
+			return;
+		}
+		if(!FadeTiming::exportTasks(*stream, account == F("1"))) {
+			delete stream;
+			sendApiCode(response, API_CODES::API_BAD_REQUEST, "Task runtime statistics unavailable");
+			response.code = HTTP_STATUS_INTERNAL_SERVER_ERROR;
+			return;
+		}
+		response.sendDataStream(stream, F("text/csv"));
+		return;
+	}
 	FadeTiming::exportCsv(*stream);
 	response.sendDataStream(stream, F("text/csv"));
 }
