@@ -4,6 +4,7 @@ This directory is the entry point for planning docs in the firmware repo.
 
 ## Active plans
 
+- [Lightinator 5.2: Addressable LEDs and Virtual Lights](5.2-addressable-leds.md)
 - [ESP8266 Freeze, ESP32 Growth, Shared Codebase Strategy](esp8266_esp32_shared_strategy.md)
 
 Current runtime design is in [FIRMWARE_ARCHITECTURE.md](../FIRMWARE_ARCHITECTURE.md),
