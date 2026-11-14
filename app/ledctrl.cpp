@@ -346,9 +346,6 @@ void APPLedCtrl::updateLedCb(void* pTimerArg)
  */
 void APPLedCtrl::updateLed()
 {
-	// arm next timer
-	_ledTimer.startOnce();
-
 	/************************** 
      * those rely on the mqtt master/secodary toggles to be set
      * but really, they should also look at the main mqtt enable flag
@@ -483,7 +480,7 @@ void APPLedCtrl::start()
 	_ledTimer.setCallback(APPLedCtrl::updateLedCb, this);
 	_ledTimer.setIntervalMs(_timerInterval);
 	cdebug_i(APPLEDCTRL, "APPLedCtrl::start: " ANSI_COLOR_BLUE "_timerInterval" ANSI_COLOR_RESET, _timerInterval);
-	_ledTimer.startOnce();
+	_ledTimer.start();
 }
 
 void APPLedCtrl::stop()
