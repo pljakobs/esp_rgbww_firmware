@@ -138,6 +138,19 @@ raise SystemExit('Forbidden git operation in policy test: ' + repr(arguments))
         self.assertEqual(document["jobs"]["validate"]["runs-on"], "ubuntu-latest")
         self.assertFalse(step(document, "validate", "Checkout")["with"]["persist-credentials"])
 
+
+    def test_validation_sets_up_node_before_python_tests(self):
+        steps = workflow("validate-workflows.yml")["jobs"]["validate"]["steps"]
+        names = [selected.get("name") for selected in steps]
+        self.assertLess(names.index("Set up Node.js"), names.index("Test workflow syntax and policies"))
+
+
+    def test_host_smoke_runs_sensor_and_transport_regressions(self):
+        script = (ROOT / ".github/scripts/host_ci_smoke_test.sh").read_text()
+        for name in ("test_as7341_measurement.py", "test_ina219_measurement.py",
+                     "test_extension_schema_composition.py", "websocket_output_test.py"):
+            self.assertIn(f"tests/{name}", script)
+
     def test_branch_resolution_for_push_dispatch_and_pr(self):
         document = workflow("build_firmware.yml")
         selected = step(document, "generate-matrix", "Resolve release matrix")
@@ -380,9 +393,52 @@ raise SystemExit('Forbidden git operation in policy test: ' + repr(arguments))
 
     def test_firmware_publisher_never_publishes_pr_builds(self):
         document = workflow("deploy-pages.yml")
-        expected = "${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository) }}"
-        for job in ("get-version", "publish"):
-            self.assertEqual(" ".join(document["jobs"][job]["if"].split()), expected)
+        cases = []
+        for event_name in ("workflow_dispatch", "workflow_run", "pull_request"):
+            for source_event in ("push", "workflow_dispatch", "pull_request", "pull_request_target"):
+                for conclusion in ("success", "failure", "cancelled", "skipped"):
+                    for repository in ("owner/firmware", "fork/firmware"):
+                        github = {
+                            "event_name": event_name,
+                            "repository": "owner/firmware",
+                            "event": {"workflow_run": {
+                                "event": source_event if event_name == "workflow_run" else "",
+                                "conclusion": conclusion if event_name == "workflow_run" else "",
+                                "head_repository": {
+                                    "full_name": repository if event_name == "workflow_run" else "",
+                                },
+                            }},
+                        }
+                        expected = event_name == "workflow_dispatch" or (
+                            event_name == "workflow_run" and conclusion == "success"
+                            and source_event in ("push", "workflow_dispatch")
+                            and repository == "owner/firmware"
+                        )
+                        cases.append({"github": github, "expected": expected})
+        script = """
+const { readFileSync } = require("node:fs");
+const { runInNewContext } = require("node:vm");
+const { conditions, cases } = JSON.parse(readFileSync(0, "utf8"));
+for (const [job, condition] of Object.entries(conditions)) {
+    for (const { github, expected } of cases) {
+        const actual = runInNewContext(condition, {
+            github, fromJSON: JSON.parse,
+            contains: (values, value) => values.includes(value),
+        }, { timeout: 1000 });
+        if (actual !== expected) {
+            throw new Error(JSON.stringify({ job, github, expected, actual }));
+        }
+    }
+}
+"""
+        conditions = {
+            job: EXPRESSION.fullmatch(document["jobs"][job]["if"]).group(1)
+            for job in ("get-version", "publish")
+        }
+        result = subprocess.run(["node", "-e", script],
+                                input=json.dumps({"conditions": conditions, "cases": cases}),
+                                env=self.environment, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         events = document["on"]
         self.assertEqual(events["workflow_run"]["branches"][-2:], ["5.0/**", "5.1/**"])
         options = events["workflow_dispatch"]["inputs"]["branch"]["options"]

@@ -4,3 +4,9 @@
 	url = https://github.com/pljakobs/RGBWWled.git
 	branch = origin/feature/fade
 
+[submodule "Components/Adafruit_INA219"]
+	path = Components/Adafruit_INA219
+	url = https://github.com/adafruit/Adafruit_INA219.git
+[submodule "Components/Adafruit_AS7341"]
+	path = Components/Adafruit_AS7341
+	url = https://github.com/adafruit/Adafruit_AS7341.git

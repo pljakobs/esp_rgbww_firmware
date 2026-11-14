@@ -124,6 +124,9 @@ struct WsAuthState {
 	bool authenticated = false;
 	bool runtimeInfoSubscribed = false;
 	bool lightsSubscribed = false;
+#if HAS_INA219_EXTENSION
+	bool currentSubscribed = false;
+#endif
 	String challenge;
 	std::array<WsQueuedOutput, WS_MAX_QUEUED_OUTPUTS> pendingOutput{};
 	size_t pendingHead{};
@@ -431,6 +434,8 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 	String paramsJson;
 	String authHash;
 	String notificationChannel;
+	String extensionId;
+	bool hasRequestId = false;
 	int requestId = 0;
 	int32_t lightSelector = -1;
 	bool sparse = true;
@@ -444,7 +449,7 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 	heapTestRequest = &heapTest;
 #endif
 
-	if(!app.api || !app.api->parseJsonRpcRequest(requestStream, methodName, paramsJson, requestId, authHash, sparse, paramsEmpty, errorMsg, heapTestRequest, &notificationChannel, &lightSelector)) {
+	if(!app.api || !app.api->parseJsonRpcRequest(requestStream, methodName, paramsJson, requestId, authHash, sparse, paramsEmpty, errorMsg, heapTestRequest, &notificationChannel, &lightSelector, &extensionId, &hasRequestId)) {
 		auto& codec = rpcCodec();
 		Jsonrpc::Root root(codec.db());
 		if(auto update = root.update()) {
@@ -473,7 +478,7 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 	// ---- Phase 1: decide the outcome without emitting any JSON ----------
 	// Streamed bytes can't be un-written, so all auth/method decisions (and any
 	// command side effects) happen here; phase 2 then streams the envelope once.
-	enum ResultKind { RK_None, RK_Authenticated, RK_SubTrue, RK_SubFalse, RK_CommandSuccess, RK_Data };
+	enum ResultKind { RK_None, RK_Authenticated, RK_SubTrue, RK_SubFalse, RK_CommandSuccess, RK_Data, RK_SpectrumStarted };
 	ResultKind resultKind = RK_None;
 	bool dataIsInfo = false;
 	String challenge; // non-empty => included in the JSON-RPC error object's "challenge" field
@@ -536,6 +541,44 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 	} else if(method[0] == '\0') {
 		errorCode = -32600;
 		errorMsg = F("missing method");
+#if HAS_AS7341_EXTENSION
+	} else if(std::strcmp(method, "extensions.start_measurement") == 0) {
+		StaticJsonDocument<512> envelope;
+		const auto parseStatus = deserializeJson(envelope, message);
+		const bool validId = !parseStatus && envelope[F("id")].is<int32_t>();
+		const bool validExtensionId = !parseStatus && envelope[F("params")][F("extension_id")].is<const char*>();
+		if(!hasRequestId || !validId || !validExtensionId || extensionId.length() == 0) {
+			errorCode = -32602;
+			errorMsg = F("integer request id and string extension_id are required");
+		} else if(extensionId != As7341Extension::id || !app.as7341 || !app.as7341->available()) {
+			errorCode = -32004;
+			errorMsg = F("extension unavailable");
+		} else if(app.as7341->busy()) {
+			errorCode = -32010;
+			errorMsg = F("measurement busy");
+		} else if(!wsAuth) {
+			errorCode = -32603;
+			errorMsg = F("internal error: no connection state");
+		} else {
+			std::weak_ptr<uint8_t> lifetime = wsAuth->lifetimeToken;
+			auto* requester = &socket;
+			if(app.as7341->start([this, requester, lifetime]() {
+				if(lifetime.expired()) return;
+				String payload;
+				if(renderAs7341(payload, true)) {
+					queueWsPayload(*requester, payload.c_str(), payload.length(), true);
+				} else {
+					cdebug_e(APPLICATIONWEBSERVER, "AS7341: unable to render completion notification");
+					requester->close();
+				}
+			})) {
+				resultKind = RK_SpectrumStarted;
+			} else {
+				errorCode = -32603;
+				errorMsg = F("measurement could not be started");
+			}
+		}
+#endif
 #if defined(ARCH_HOST) && !defined(SMING_RELEASE)
 	} else if(std::strcmp(method, "heap_test") == 0) {
 		char result[192];
@@ -558,13 +601,21 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 		if(legacyMethod && notificationChannel.length() == 0) {
 			notificationChannel = F("runtime_info");
 		}
-		if(notificationChannel != F("runtime_info") && notificationChannel != F("lights")) {
+		if(notificationChannel != F("runtime_info") && notificationChannel != F("lights")
+#if HAS_INA219_EXTENSION
+		   && notificationChannel != F("extensions.current-1")
+#endif
+		) {
 			errorCode = -32602;
-			errorMsg = F("channel must be runtime_info or lights");
+			errorMsg = F("unknown subscription channel");
 		} else {
 			if(wsAuth) {
 				if(notificationChannel == F("lights")) {
 					wsAuth->lightsSubscribed = subscribing;
+#if HAS_INA219_EXTENSION
+				} else if(notificationChannel == F("extensions.current-1")) {
+					wsAuth->currentSubscribed = subscribing;
+#endif
 				} else {
 					wsAuth->runtimeInfoSubscribed = subscribing;
 				}
@@ -648,6 +699,16 @@ void ApplicationWebserver::wsMessage(WebsocketConnection& socket, const String& 
 				update.toApiSuccess().setSuccess(true);
 			}
 			rpcStream = codec.renderStream({requestId, JsonRPC::Message::Kind::result, method}, root.asApiSuccess());
+#if HAS_AS7341_EXTENSION
+		} else if(resultKind == RK_SpectrumStarted) {
+			if(auto update = root.update()) {
+				auto started = update.toExtensionSpectrumMeasurementStarted();
+				started.setExtensionId(As7341Extension::id);
+				started.setValid(false);
+			}
+			rpcStream = codec.renderStream({requestId, JsonRPC::Message::Kind::result, method},
+										 root.asExtensionSpectrumMeasurementStarted());
+#endif
 		}
 		if(rpcStream) {
 			queueWsStream(socket, std::move(rpcStream));
@@ -1010,8 +1071,282 @@ bool ApplicationWebserver::importConfigBody(HttpRequest& request, HttpResponse& 
 	return reportStatus(target.importFromStream(ConfigDB::Json::format, buffered));
 }
 
+#if HAS_AS7341_EXTENSION
+bool ApplicationWebserver::renderAs7341(String& payload, bool notification)
+{
+	if(!app.as7341) return false;
+	const auto& reading = app.as7341->result();
+	auto& codec = rpcCodec();
+	Jsonrpc::Root root(codec.db());
+	{
+		auto update = root.update();
+		if(!update) return false;
+		auto result = update.toExtensionSpectrumReadings();
+		result.setExtensionId(As7341Extension::id);
+		result.setValid(reading.state == As7341Measurement::State::complete);
+		result.setState(static_cast<unsigned>(reading.state));
+		result.setError(reading.error);
+		uint32_t age = reading.state == As7341Measurement::State::complete ? millis() - reading.completedAt : 0;
+		result.setAgeMs(age > 2147483647u ? 2147483647u : age);
+		result.data.setF1(reading.channels[0]);
+		result.data.setF2(reading.channels[1]);
+		result.data.setF3(reading.channels[2]);
+		result.data.setF4(reading.channels[3]);
+		result.data.setClearLow(reading.channels[4]);
+		result.data.setNirLow(reading.channels[5]);
+		result.data.setF5(reading.channels[6]);
+		result.data.setF6(reading.channels[7]);
+		result.data.setF7(reading.channels[8]);
+		result.data.setF8(reading.channels[9]);
+		result.data.setClearHigh(reading.channels[10]);
+		result.data.setNirHigh(reading.channels[11]);
+		result.data.setAtime(reading.settings.atime);
+		result.data.setAstep(reading.settings.astep);
+		result.data.setGain(reading.settings.gain);
+	}
+	if(notification) {
+		return codec.render({0, JsonRPC::Message::Kind::notification, F("extensions.measurement")},
+							root.asExtensionSpectrumReadings(), payload);
+	}
+	return codec.renderPayload(root.asExtensionSpectrumReadings(), payload);
+}
+
+void ApplicationWebserver::onAs7341(HttpRequest& request, HttpResponse& response)
+{
+	const String base = String(F("/extensions/")) + As7341Extension::id;
+	const bool start = request.uri.Path == base + F("/start_measurement");
+	const bool readings = request.uri.Path == base + F("/readings");
+	const bool config = request.uri.Path == base + F("/config");
+	if(!preflightRequest(request, response, config ? std::initializer_list<HttpMethod>{HttpMethod::GET, HttpMethod::POST}
+												: start ? std::initializer_list<HttpMethod>{HttpMethod::POST}
+												 : std::initializer_list<HttpMethod>{HttpMethod::GET})) return;
+	auto reply = [&](HttpStatus status, const String& body) {
+		response.code = status;
+		response.setContentType(MIME_JSON);
+		response.sendString(body);
+	};
+	if((!start && !readings && !config) || !app.as7341 || (!config && !app.as7341->available())) {
+		reply(HTTP_STATUS_NOT_FOUND, F("{\"error\":\"extension unavailable\"}"));
+		return;
+	}
+	if(config) {
+		auto settings = app.as7341->settings();
+		if(request.method == HttpMethod::POST) {
+			if(app.as7341->busy()) {
+				reply(HTTP_STATUS_CONFLICT, F("{\"error\":\"measurement busy\"}"));
+				return;
+			}
+			StaticJsonDocument<512> doc;
+			auto body = request.getBodyStream();
+			auto status = body ? deserializeJson(doc, *body) : deserializeJson(doc, request.getBody());
+			if(status || !doc.is<JsonObject>() || doc.as<JsonObject>().size() == 0) {
+				reply(HTTP_STATUS_BAD_REQUEST, F("{\"error\":\"expected a nonempty settings object\"}"));
+				return;
+			}
+			for(JsonPair entry : doc.as<JsonObject>()) {
+				const char* key = entry.key().c_str();
+				JsonVariant value = entry.value();
+				if(strcmp(key, "enabled") == 0 && value.is<bool>()) settings.enabled = value.as<bool>();
+				else if(strcmp(key, "interval_ms") == 0 && value.is<uint32_t>() && value.as<uint32_t>() >= 200 && value.as<uint32_t>() <= 3600000)
+					settings.intervalMs = value.as<uint32_t>();
+				else if(strcmp(key, "atime") == 0 && value.is<unsigned>() && value.as<unsigned>() <= 255)
+					settings.atime = value.as<unsigned>();
+				else if(strcmp(key, "astep") == 0 && value.is<unsigned>() && value.as<unsigned>() <= 65535)
+					settings.astep = value.as<unsigned>();
+				else if(strcmp(key, "gain") == 0 && value.is<unsigned>() && value.as<unsigned>() <= 10)
+					settings.gain = value.as<unsigned>();
+				else {
+					reply(HTTP_STATUS_BAD_REQUEST, F("{\"error\":\"unknown or invalid setting\"}"));
+					return;
+				}
+			}
+			if(!app.as7341->setSettings(settings)) {
+				reply(HTTP_STATUS_INTERNAL_SERVER_ERROR, F("{\"error\":\"settings could not be saved\"}"));
+				return;
+			}
+			settings = app.as7341->settings();
+		}
+		StaticJsonDocument<256> result;
+		result["extension_id"] = As7341Extension::id;
+		result["enabled"] = settings.enabled;
+		result["interval_ms"] = settings.intervalMs;
+		result["atime"] = settings.atime;
+		result["astep"] = settings.astep;
+		result["gain"] = settings.gain;
+		result["available"] = app.as7341->available();
+		String payload;
+		serializeJson(result, payload);
+		reply(HTTP_STATUS_OK, payload);
+		return;
+	}
+	if(start) {
+		if(app.as7341->busy()) {
+			reply(HTTP_STATUS_CONFLICT, F("{\"error\":\"measurement busy\"}"));
+			return;
+		}
+		if(!app.as7341->start({})) {
+			reply(HTTP_STATUS_INTERNAL_SERVER_ERROR, F("{\"error\":\"measurement could not be started\"}"));
+			return;
+		}
+		reply(HTTP_STATUS_ACCEPTED, F("{\"extension_id\":\"spectrum-1\",\"valid\":false}"));
+		return;
+	}
+	String payload;
+	if(!renderAs7341(payload, false)) {
+		reply(HTTP_STATUS_INTERNAL_SERVER_ERROR, F("{\"error\":\"unable to render measurement\"}"));
+		return;
+	}
+	reply(HTTP_STATUS_OK, payload);
+}
+#endif
+
+#if HAS_INA219_EXTENSION
+bool ApplicationWebserver::renderIna219(String& payload, bool notification)
+{
+	if(!app.ina219) return false;
+	const auto& reading = app.ina219->result();
+	auto& codec = rpcCodec();
+	Jsonrpc::Root root(codec.db());
+	{
+		auto update = root.update();
+		if(!update) return false;
+		auto result = update.toExtensionCurrentReadings();
+		result.setExtensionId(Ina219Extension::id);
+		result.setValid(reading.valid);
+		result.setError(reading.error);
+		uint32_t age = reading.valid ? millis() - reading.completedAt : 0;
+		result.setAgeMs(age > 2147483647u ? 2147483647u : age);
+		result.setVoltageV(ConfigDB::Number(reading.voltage));
+		result.setCurrentA(ConfigDB::Number(reading.current));
+		result.setPowerW(ConfigDB::Number(reading.power));
+	}
+	if(notification) {
+		return codec.render({0, JsonRPC::Message::Kind::notification, F("extensions.measurement")},
+							root.asExtensionCurrentReadings(), payload);
+	}
+	return codec.renderPayload(root.asExtensionCurrentReadings(), payload);
+}
+
+void ApplicationWebserver::wsSendIna219(const char* buffer, size_t length)
+{
+	for(unsigned i = 0; i < webSockets.size(); ++i) {
+		auto* socket = webSockets[i];
+		if(!socket || socket->getState() != eWSCS_Open) continue;
+		auto* state = static_cast<WsAuthState*>(socket->getUserData());
+		if(state && state->currentSubscribed) queueWsPayload(*socket, buffer, length);
+	}
+}
+
+void ApplicationWebserver::publishIna219(bool sendWebsocket)
+{
+	bool subscribed = false;
+	for(unsigned i = 0; sendWebsocket && i < webSockets.size(); ++i) {
+		auto* socket = webSockets[i];
+		if(socket && socket->getState() == eWSCS_Open) {
+			auto* state = static_cast<WsAuthState*>(socket->getUserData());
+			if(state && state->currentSubscribed) {
+				subscribed = true;
+				break;
+			}
+		}
+	}
+	if(subscribed) {
+		String notification;
+		if(renderIna219(notification, true)) {
+			wsSendIna219(notification.c_str(), notification.length());
+		} else {
+			cdebug_e(APPLICATIONWEBSERVER, "INA219: unable to render notification");
+		}
+	}
+	if(app.mqttclient.isRunning()) {
+		String payload;
+		if(renderIna219(payload, false)) app.mqttclient.publishIna219(payload);
+		else cdebug_e(APPLICATIONWEBSERVER, "INA219: unable to render MQTT reading");
+	}
+}
+
+void ApplicationWebserver::onIna219(HttpRequest& request, HttpResponse& response)
+{
+	const String base = String(F("/extensions/")) + Ina219Extension::id;
+	const bool config = request.uri.Path == base + F("/config");
+	const bool readings = request.uri.Path == base + F("/readings");
+	if(!preflightRequest(request, response, config ? std::initializer_list<HttpMethod>{HttpMethod::GET, HttpMethod::POST}
+												 : std::initializer_list<HttpMethod>{HttpMethod::GET})) return;
+	auto reply = [&](HttpStatus status, const String& body) {
+		response.code = status;
+		response.setContentType(MIME_JSON);
+		response.sendString(body);
+	};
+	if((!config && !readings) || !app.ina219 || (readings && !app.ina219->available())) {
+		reply(HTTP_STATUS_NOT_FOUND, F("{\"error\":\"extension unavailable\"}"));
+		return;
+	}
+	if(readings) {
+		String payload;
+		if(!renderIna219(payload, false)) {
+			reply(HTTP_STATUS_INTERNAL_SERVER_ERROR, F("{\"error\":\"unable to render measurement\"}"));
+			return;
+		}
+		reply(HTTP_STATUS_OK, payload);
+		return;
+	}
+	auto settings = app.ina219->settings();
+	if(request.method == HttpMethod::POST) {
+		StaticJsonDocument<512> doc;
+		auto body = request.getBodyStream();
+		auto status = body ? deserializeJson(doc, *body) : deserializeJson(doc, request.getBody());
+		if(status || !doc.is<JsonObject>() || doc.as<JsonObject>().size() == 0) {
+			reply(HTTP_STATUS_BAD_REQUEST, F("{\"error\":\"expected a nonempty settings object\"}"));
+			return;
+		}
+		for(JsonPair entry : doc.as<JsonObject>()) {
+			const char* key = entry.key().c_str();
+			JsonVariant value = entry.value();
+			if(strcmp(key, "enabled") == 0 && value.is<bool>()) settings.enabled = value.as<bool>();
+			else if(strcmp(key, "address") == 0 && value.is<unsigned>() && value.as<unsigned>() >= 64 && value.as<unsigned>() <= 79)
+				settings.address = value.as<unsigned>();
+			else if(strcmp(key, "shunt_ohms") == 0 && value.is<double>() && value.as<double>() >= 0.00001 && value.as<double>() <= 1)
+				settings.shuntOhms = value.as<double>();
+			else if(strcmp(key, "interval_ms") == 0 && value.is<uint32_t>() && value.as<uint32_t>() >= 200 && value.as<uint32_t>() <= 3600000)
+				settings.intervalMs = value.as<uint32_t>();
+			else {
+				reply(HTTP_STATUS_BAD_REQUEST, F("{\"error\":\"unknown or invalid setting\"}"));
+				return;
+			}
+		}
+		if(!app.ina219->setSettings(settings)) {
+			reply(HTTP_STATUS_INTERNAL_SERVER_ERROR, F("{\"error\":\"settings could not be saved\"}"));
+			return;
+		}
+		settings = app.ina219->settings();
+	}
+	StaticJsonDocument<256> result;
+	result["extension_id"] = Ina219Extension::id;
+	result["enabled"] = settings.enabled;
+	result["address"] = settings.address;
+	result["shunt_ohms"] = settings.shuntOhms;
+	result["interval_ms"] = settings.intervalMs;
+	result["available"] = app.ina219->available();
+	String payload;
+	serializeJson(result, payload);
+	reply(HTTP_STATUS_OK, payload);
+}
+#endif
+
 void ApplicationWebserver::onFile(HttpRequest& request, HttpResponse& response)
 {
+#if HAS_INA219_EXTENSION
+	if(request.uri.Path.startsWith(F("/extensions/current-1/"))) {
+		onIna219(request, response);
+		return;
+	}
+#endif
+#if HAS_AS7341_EXTENSION
+	if(request.uri.Path.startsWith(F("/extensions/"))) {
+		onAs7341(request, response);
+		return;
+	}
+#endif
 	cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onFile: " ANSI_COLOR_BLUE "http onFile" ANSI_COLOR_RESET);
 	// LittleFS file serving buffers through lwIP — require more free heap than API calls.
 	if(!preflightRequest(request, response, {HttpMethod::GET, HttpMethod::HEAD}, 8000)) return;

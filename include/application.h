@@ -29,6 +29,12 @@
 #include <mdnsHandler.h>
 #include <virtuallight.h>
 #include <vector>
+#if HAS_AS7341_EXTENSION
+#include <as7341_extension.h>
+#endif
+#if HAS_INA219_EXTENSION
+#include <ina219_extension.h>
+#endif
 #if STATUS_DISPLAY
 #include <statusDisplay.h>
 #endif
@@ -133,6 +139,12 @@ public:
     std::unique_ptr<AppConfig> cfg;
     std::unique_ptr<AppData> data;
     std::unique_ptr<Pins> socPins;
+#if HAS_AS7341_EXTENSION
+    std::unique_ptr<As7341Extension> as7341;
+#endif
+#if HAS_INA219_EXTENSION
+    std::unique_ptr<Ina219Extension> ina219;
+#endif
 
 
     

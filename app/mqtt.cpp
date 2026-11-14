@@ -160,6 +160,9 @@ int AppMqttClient::onConnected(MqttClient& client, mqtt_message_t* message){
 	_haConfigPublished = false;
 	// Publish availability "online" to match the LWT "offline"
 	publish(buildTopic(F("availability")), F("online"), true);
+#if HAS_INA219_EXTENSION
+	if(app.ina219) app.webserver.publishIna219(false);
+#endif
 	{
 		AppConfig::Sync sync(*app.cfg);
 		if(sync.getClockSlaveEnabled()) {
@@ -390,6 +393,16 @@ String AppMqttClient::buildTopic(const String& suffix)
 	topic += _id + F("/");
 	return topic + suffix;
 }
+
+#if HAS_INA219_EXTENSION
+void AppMqttClient::publishIna219(const String& payload)
+{
+	if(!_running || !mqtt || mqtt->getConnectionState() != TcpClientState::eTCS_Connected) return;
+	if(!mqtt->publish(buildTopic(F("extensions/current-1/readings")), payload, 0)) {
+		cdebug_w(APPMQTTCLIENT, "INA219: failed to publish reading");
+	}
+}
+#endif
 
 void AppMqttClient::publishClock(uint32_t steps)
 {

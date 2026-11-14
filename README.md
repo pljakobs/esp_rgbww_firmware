@@ -70,34 +70,37 @@ Templates provide frontend setup defaults; selecting one does not implicitly
 activate hardware configuration. The frontend resolves board pin IDs to GPIO
 numbers before saving the active configuration.
 
-### M3 hardware schema (5.1 feature branch)
+### 5.1 hardware configuration and multi-light runtime
 
-The M3 schema replaces `hardware.pinconfigs` with a separation between SoC
-capabilities, frontend catalog data and the active device configuration:
+The 5.1 API replaces the legacy `hardware.pinconfigs` workflow with a separation
+between SoC capabilities, the frontend catalog and active device configuration:
 
 - `pins.cfgdb`: SoC GPIO records describing input/output, PWM, strapping,
   internal pull capabilities and reserved resources, stored in a separate ConfigDB.
 - `hardware-catalog.json.gz`: frontend-only board inventories and templates,
   kept as a filesystem working copy and streamed by `GET /catalog`.
-- `hardware.configuration`: active light types with GPIO-number pin arrays,
-  per-light color settings, clear input, buttons and buses.
+- `hardware.configuration`: selected board identity and profile snapshot, active
+  light types with numeric GPIO arrays, per-light color settings, clear input,
+  buttons and buses.
 
-The frontend resolves template board-pin IDs to physical GPIOs before writing
-active configuration. Firmware validates GPIO assignments against the selected
-SoC's capability mask; it does not need board maps or templates. Templates never
-become active implicitly, and GPIO0 remains a valid physical pin.
+The frontend resolves template pin IDs to physical GPIOs before writing active
+configuration. PWM lights require a selected board profile whose ID, revision
+and SoC match the saved profile snapshot. Firmware validates output assignments
+against that profile, SoC capabilities, reservations and resource limits; it
+does not read the catalog or activate a template at runtime. An empty light list
+does not require a board. GPIO0 remains a valid physical pin when the profile
+permits it.
 
 The SoC pin seed lives in `soc-pins.json`. Board/template defaults are embedded
 as FSTR resources, copied to LittleFS when missing, and upgraded only when the
 filesystem catalog revision is older than the firmware seed. A version sidecar
 allows that comparison without decompressing or parsing the catalog.
 
-Configured lights are validated by type and numeric GPIO against the SoC
-capability ConfigDB, then instantiated as independent `RGBWWLed` devices. A
-hardware ConfigDB commit queues a runtime reload; PWM callback drain and
-resource validation are checked before running instances are replaced. Button,
-clear-input and I2C setup also use the numeric GPIO and electrical properties
-from active configuration.
+Configured lights are validated and instantiated as independent `RGBWWLed`
+devices. A hardware ConfigDB commit queues a runtime reload; PWM callback drain
+and resource validation are checked before running instances are replaced.
+Button, clear-input and I2C setup also use the numeric GPIOs and electrical
+properties from active configuration.
 
 The 5.1 runtime supports per-light commands and readback. HTTP requests select
 a light with `?light=N`; JSON-RPC, WebSocket and MQTT commands accept
@@ -109,21 +112,26 @@ notifications. The 5.1 ESP32 PWM channel planner allocates outputs across
 available LEDC speed-mode banks and rejects unavailable or conflicting
 assignments.
 
+The 5.1 firmware can include the INA219 current and AS7341 spectral sensor
+extensions. Their `/extensions/<id>/config` endpoints report the extension ID
+and whether the extension is enabled and detected on the configured I2C bus; a
+missing endpoint means that extension is not included in the running build.
+Configuration writes accept only the extension's writable setting keys, not
+response metadata. Readings include a validity flag and must not be interpreted
+when invalid. INA219 sampling is periodic while enabled and detected. AS7341
+measurements are started explicitly; its stored `interval_ms` setting does not
+schedule measurements. See the [extension guide](extensions/README.md),
+[INA219 API reference](extensions/ina219/README.md), and [AS7341 measurement
+reference](extensions/as7341/README.md).
+
 The HTTP API specification is available at `/api/openapi.json`, with an
 interactive Swagger UI at `/api/docs`. Both are served by the firmware; the
 Swagger UI assets themselves require an internet connection.
 
-The interim M3 string-ID pin schema was never released and does not need
-migration. Any 5.0-to-5.1 migration is a separate compatibility task; the 5.0
-schema and runtime are unchanged. The 5.1 development branch remains in
-progress, and supported upgrade behavior should be checked for the specific
-build before upgrading.
-
-An earlier, unreleased M3 schema stored board labels such as `L1` in light
-`pins`, button `pin`, clear-pin and I2C SDA/SCL fields. It is not a released
-format and requires no migration. The current active schema stores numeric GPIOs.
-5.0’s separate legacy pin configuration is unchanged; any supported 5.0-to-5.1
-migration is a separate compatibility task.
+The 5.1 line targets ESP32 and ESP32-C3; it does not support ESP8266. Firmware
+5.0 retains its legacy schema and runtime. Check the release notes and the
+specific build's compatibility contract before changing firmware lines; do not
+assume an automatic 5.0-to-5.1 configuration migration.
 
 Schema fixture tests:
 
@@ -131,6 +139,10 @@ Schema fixture tests:
 node tools/generate-api-schemas.mjs
 node --test .github/tests/test_hardware_schema.mjs .github/tests/test_virtual_light.mjs .github/tests/test_ledctrl.mjs
 ```
+
+Protocol schema variants can be provided by extensions without editing the
+core JSON-RPC schema. See [extensions/README.md](extensions/README.md) for the
+build-time composition format and current limitations.
 
 ---
 

@@ -2,19 +2,12 @@
 
 This directory is the entry point for planning docs in the firmware repo.
 
-## New / active plan
+## Active plans
 
 - [ESP8266 Freeze, ESP32 Growth, Shared Codebase Strategy](esp8266_esp32_shared_strategy.md)
 
-## Existing plan documents in the repository
-
-- [Containerized Host-Build for Webapp CI — Plan](../CONTAINERIZED_HOST_CI_PLAN.md)
-- [API Layer + JSON-RPC over WebSocket Plan](../apiClass_plan.md)
-- [Hardware-in-the-Loop CI Plan](../plan-new.md)
-- [Experimental Branch Remediation Plan](../remediationPlan.md)
-
-## Related plans in sibling repos
-
-- `/home/pjakobs/devel/lightinator_server/plan.md`
-- `/home/pjakobs/devel/esp_rgb_webapp2/plan-hybridWebappDelivery.prompt.md`
-- `/home/pjakobs/devel/lightinator_server/plan.md`
+Current runtime design is in [FIRMWARE_ARCHITECTURE.md](../FIRMWARE_ARCHITECTURE.md),
+and the ConfigDB schema/generation contract is in [API_SCHEMA.md](../API_SCHEMA.md).
+Cross-project delivery milestones are maintained in the webapp repository's
+`MASTER_PLAN.md`. Superseded planning drafts are archived locally and are not
+authoritative implementation guidance.

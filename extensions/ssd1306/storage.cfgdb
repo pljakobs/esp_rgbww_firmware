@@ -1,0 +1,24 @@
+{
+  "type": "object",
+  "store": true,
+  "properties": {
+    "enabled": { "type": "boolean", "default": true },
+    "address": {
+      "type": "integer",
+      "minimum": 60,
+      "maximum": 61,
+      "default": 60
+    },
+    "height": {
+      "type": "integer",
+      "enum": [32, 64],
+      "default": 64,
+      "description": "SSD1306 display height in pixels; width is 128"
+    },
+    "two_color": {
+      "type": "boolean",
+      "default": false,
+      "description": "Display has fixed physical color bands, not independently selectable pixel colors"
+    }
+  }
+}

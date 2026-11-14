@@ -1,0 +1,15 @@
+{
+  "type": "object",
+  "store": true,
+  "properties": {
+    "enabled": { "type": "boolean", "default": true },
+    "address": { "type": "integer", "minimum": 64, "maximum": 79, "default": 64 },
+    "shunt_ohms": {
+      "type": "number",
+      "minimum": 0.00001,
+      "maximum": 1,
+      "default": 0.1
+    },
+    "interval_ms": { "type": "integer", "minimum": 200, "maximum": 3600000, "default": 1000 }
+  }
+}

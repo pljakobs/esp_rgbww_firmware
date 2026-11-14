@@ -1,0 +1,55 @@
+diff --git a/Adafruit_INA219.cpp b/Adafruit_INA219.cpp
+index 47f480c..d8e5e1f 100644
+--- a/Adafruit_INA219.cpp
++++ b/Adafruit_INA219.cpp
+@@ -55,11 +55,12 @@ bool Adafruit_INA219::begin(TwoWire *theWire) {
+     i2c_dev = new Adafruit_I2CDevice(ina219_i2caddr, theWire);
+   }
+ 
+-  if (!i2c_dev->begin()) {
++  theWire->beginTransmission(ina219_i2caddr);
++  if (theWire->endTransmission() != TwoWire::I2C_ERR_SUCCESS) {
+     return false;
+   }
+   init();
+-  return true;
++  return success();
+ }
+ 
+ /*!
+@@ -75,7 +76,7 @@ void Adafruit_INA219::init() {
+  *  @return the raw bus voltage reading
+  */
+ int16_t Adafruit_INA219::getBusVoltage_raw() {
+-  uint16_t value;
++  uint16_t value = 0;
+ 
+   Adafruit_BusIO_Register bus_voltage_reg =
+       Adafruit_BusIO_Register(i2c_dev, INA219_REG_BUSVOLTAGE, 2, MSBFIRST);
+@@ -90,7 +91,7 @@ int16_t Adafruit_INA219::getBusVoltage_raw() {
+  *  @return the raw shunt voltage reading
+  */
+ int16_t Adafruit_INA219::getShuntVoltage_raw() {
+-  uint16_t value;
++  uint16_t value = 0;
+   Adafruit_BusIO_Register shunt_voltage_reg =
+       Adafruit_BusIO_Register(i2c_dev, INA219_REG_SHUNTVOLTAGE, 2, MSBFIRST);
+   _success = shunt_voltage_reg.read(&value);
+@@ -102,7 +103,7 @@ int16_t Adafruit_INA219::getShuntVoltage_raw() {
+  *  @return the raw current reading
+  */
+ int16_t Adafruit_INA219::getCurrent_raw() {
+-  uint16_t value;
++  uint16_t value = 0;
+ 
+   // Sometimes a sharp load will reset the INA219, which will
+   // reset the cal register, meaning CURRENT and POWER will
+@@ -124,7 +125,7 @@ int16_t Adafruit_INA219::getCurrent_raw() {
+  *  @return raw power reading
+  */
+ int16_t Adafruit_INA219::getPower_raw() {
+-  uint16_t value;
++  uint16_t value = 0;
+ 
+   // Sometimes a sharp load will reset the INA219, which will
+   // reset the cal register, meaning CURRENT and POWER will

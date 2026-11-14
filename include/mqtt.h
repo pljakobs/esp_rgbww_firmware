@@ -43,6 +43,9 @@ public:
     void publishCommand(const String& method, const JsonObject& params);
     void publishCommandJson(const String& rpcMessage);
     void publishTransitionFinished(const String& name, bool requeued);
+#if HAS_INA219_EXTENSION
+    void publishIna219(const String& payload);
+#endif
 
     void initHomeAssistant();
     void handleHomeAssistantCommand(const String& message);

@@ -36,6 +36,70 @@ def post_config_update(smoke_config: SmokeConfig, update: dict[str, Any]) -> Non
         fail_with_trace("Configuration update was rejected", trace)
 
 
+@pytest.mark.skipif(
+    os.environ.get("HOST_SMOKE_REAL_DEVICE") == "1",
+    reason="changes optional sensor configuration on the Host emulator only",
+)
+@pytest.mark.parametrize(
+    ("extension_id", "settings", "invalid_updates"),
+    [
+        ("current-1", {"address": 65, "shunt_ohms": 0.05, "interval_ms": 200},
+         [{"address": 63}, {"address": 80}, {"shunt_ohms": 0}, {"interval_ms": 199}]),
+        ("spectrum-1", {"atime": 255, "astep": 65535, "gain": 10, "interval_ms": 200},
+         [{"atime": 256}, {"astep": 65536}, {"gain": 11}, {"interval_ms": 3600001}]),
+    ],
+)
+def test_sensor_configuration_endpoints(
+    smoke_config: SmokeConfig, api_secured: bool,
+    extension_id: str, settings: dict[str, Any], invalid_updates: list[dict[str, Any]],
+) -> None:
+    """Sensor settings persist through HTTP while disabled; invalid writes are atomic."""
+    if api_secured:
+        pytest.skip("configuration mutation requires an unsecured Host instance")
+    url = f"{smoke_config.base_url}/extensions/{extension_id}/config"
+
+    def send(method: str, update: dict[str, Any] | None = None) -> tuple[int, dict[str, Any]]:
+        response = http_request(
+            method, url,
+            body=json.dumps(update).encode("utf-8") if update is not None else None,
+            headers={"Content-Type": "application/json"} if update is not None else {},
+        )
+        payload = decode_json_response(response, {"response": response}, failure_message="Sensor config response invalid")
+        return response["status"], payload
+
+    status, original = send("GET")
+    assert status == 200, original
+    assert original["extension_id"] == extension_id
+    assert isinstance(original["available"], bool)
+    writable = ["enabled", *settings]
+    try:
+        update = {"enabled": False, **settings}
+        status, saved = send("POST", update)
+        assert status == 200, saved
+        assert {key: saved[key] for key in writable} == update
+        assert saved["available"] is False
+        assert send("GET") == (200, saved)
+
+        for invalid in [{}, {"unknown": True}, {"enabled": 1}, {"available": True}, *invalid_updates]:
+            status, error = send("POST", invalid)
+            assert status == 400, (invalid, error)
+            assert error.get("error")
+            assert send("GET") == (200, saved), invalid
+
+        status, saved = send("POST", {"interval_ms": 1000})
+        assert status == 200, saved
+        assert saved["interval_ms"] == 1000
+        assert all(saved[key] == update[key] for key in writable if key != "interval_ms")
+        response = http_request("GET", f"{smoke_config.base_url}/extensions/{extension_id}/readings")
+        assert response["status"] == 404
+        if extension_id == "spectrum-1":
+            response = http_request("POST", f"{smoke_config.base_url}/extensions/{extension_id}/start_measurement")
+            assert response["status"] == 404
+    finally:
+        status, restored = send("POST", {key: original[key] for key in writable})
+        assert status == 200, restored
+
+
 def test_catalog_endpoint_streams_gzip(smoke_config: SmokeConfig, api_secured: bool) -> None:
     if api_secured:
         pytest.skip("catalog endpoint check requires an unsecured Host instance")

@@ -91,6 +91,10 @@ public:
     bool hasLightSubscribers() const;
     bool hasRuntimeInfoSubscribers() const;
     void wsSendLightEvent(const char* buffer, size_t length, uint32_t timingId = 0);
+#if HAS_INA219_EXTENSION
+    void publishIna219(bool sendWebsocket = true);
+    void wsSendIna219(const char* buffer, size_t length);
+#endif
 
     String getApiCodeMsg(API_CODES code);
 
@@ -137,6 +141,14 @@ private:
     void ensureSecurityCache();
 
     void onFile(HttpRequest &request, HttpResponse &response);
+#if HAS_AS7341_EXTENSION
+    void onAs7341(HttpRequest& request, HttpResponse& response);
+    bool renderAs7341(String& payload, bool notification);
+#endif
+#if HAS_INA219_EXTENSION
+    void onIna219(HttpRequest& request, HttpResponse& response);
+    bool renderIna219(String& payload, bool notification);
+#endif
     void onIndex(HttpRequest &request, HttpResponse &response);
     void onRedirector(HttpRequest &request, HttpResponse &response);
     void onWebapp(HttpRequest &request, HttpResponse &response);

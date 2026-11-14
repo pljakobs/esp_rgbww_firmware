@@ -1,0 +1,16 @@
+[
+  {
+    "title": "extension_current_readings",
+    "type": "object",
+    "required": ["extension_id", "valid", "error", "age_ms", "voltage_v", "current_a", "power_w"],
+    "properties": {
+      "extension_id": { "type": "string" },
+      "valid": { "type": "boolean", "default": false },
+      "error": { "type": "string", "default": "" },
+      "age_ms": { "type": "integer", "minimum": 0, "maximum": 2147483647 },
+      "voltage_v": { "type": "number" },
+      "current_a": { "type": "number" },
+      "power_w": { "type": "number" }
+    }
+  }
+]

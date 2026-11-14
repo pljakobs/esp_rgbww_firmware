@@ -1,0 +1,26 @@
+diff --git a/Adafruit_AS7341.cpp b/Adafruit_AS7341.cpp
+index 736aca6..1f34628 100644
+--- a/Adafruit_AS7341.cpp
++++ b/Adafruit_AS7341.cpp
+@@ -31,10 +31,7 @@ Adafruit_AS7341::Adafruit_AS7341(void) {}
+  *
+  */
+ Adafruit_AS7341::~Adafruit_AS7341(void) {
+-  //   if (temp_sensor)
+-  //     delete temp_sensor;
+-  //   if (pressure_sensor)
+-  //     delete pressure_sensor;
++  delete i2c_dev;
+ }
+ 
+ /*!
+@@ -55,7 +52,8 @@ bool Adafruit_AS7341::begin(uint8_t i2c_address, TwoWire *wire,
+ 
+   i2c_dev = new Adafruit_I2CDevice(i2c_address, wire);
+ 
+-  if (!i2c_dev->begin()) {
++  wire->beginTransmission(i2c_address);
++  if (wire->endTransmission() != TwoWire::I2C_ERR_SUCCESS) {
+     return false;
+   }
+ 
