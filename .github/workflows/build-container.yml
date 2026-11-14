@@ -101,8 +101,11 @@ jobs:
             pjakobs/sming:latest
             pjakobs/sming:${{ env.SMING_TAG }}
             pjakobs/sming:${{ env.SMING_BRANCH }}
+            pjakobs/sming:firmware-${{ github.sha }}
           labels: |
             org.opencontainers.image.title=Sming
             org.opencontainers.image.description=Sming build image for Esp8266, Esp32 and Esp32c3
             org.opencontainers.image.version=${{ env.SMING_TAG }}
             org.opencontainers.image.revision=${{ env.SMING_COMMIT }}
+            io.lightinator.firmware.revision=${{ github.sha }}
+            io.lightinator.framework.patches=sming-cross-core-wakeup,pwm-worker-affinity

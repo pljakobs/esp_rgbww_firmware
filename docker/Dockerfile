@@ -44,6 +44,12 @@ RUN git submodule update --init Sming/Libraries/Esp32HardwarePwm \
     && test "$(git -C Sming/Libraries/Esp32HardwarePwm rev-parse HEAD)" = \
         "$(git rev-parse HEAD:Sming/Libraries/Esp32HardwarePwm)"
 
+COPY docker/patches/ /opt/firmware-patches/
+RUN git apply --check /opt/firmware-patches/sming-cross-core-wakeup.patch \
+    && git -C Sming/Libraries/Esp32HardwarePwm apply --check /opt/firmware-patches/pwm-worker-affinity.patch \
+    && git apply /opt/firmware-patches/sming-cross-core-wakeup.patch \
+    && git -C Sming/Libraries/Esp32HardwarePwm apply /opt/firmware-patches/pwm-worker-affinity.patch
+
 SHELL ["/bin/bash", "-c"]
 WORKDIR "/opt/Sming"
 RUN Tools/install.sh $INSTALL_ARGS 

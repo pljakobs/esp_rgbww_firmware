@@ -1402,7 +1402,22 @@ The container workflow and Dockerfile remain in this repository. Pushes to
 `pljakobs/Sming`'s `develop` branch dispatch
 `.github/workflows/build-container.yml` on `5.1/develop`, passing the exact
 Sming commit SHA. The image retains the `pjakobs/sming:latest`, `develop`, and
-version tags; its OCI revision label records the source SHA.
+version tags; its OCI revision label records the Sming base source SHA.
+
+Before compiling Sming, the Dockerfile always applies the firmware-owned
+`docker/patches/sming-cross-core-wakeup.patch` and
+`docker/patches/pwm-worker-affinity.patch`. Both must pass `git apply --check`
+before either is applied; incompatible bases fail the build. Neither framework
+fork is modified. The dispatcher patch protects cross-core wakeup coordination;
+PWM affinity remains opt-in through `HWPWM_SERVICE_CORE`.
+
+The `firmware-<SHA>` image tag and `io.lightinator.firmware.revision` label
+identify the firmware revision carrying these patches. The
+`io.lightinator.framework.patches` label names the applied patch set. Record
+both source revisions (or use the image digest) when reproducing a build.
+Container-only changes must be merged before manually dispatching a new image;
+then firmware builds can consume that image. Applying the patches does not
+itself enable dual-core firmware or change the SDK defaults.
 
 The fork-only trigger requires an Actions secret named
 `SMING_CONTAINER_DISPATCH_TOKEN` in `pljakobs/Sming`, containing a token with
