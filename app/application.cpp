@@ -39,6 +39,7 @@
 #include <CallbackTiming.h>
 #ifdef ARCH_ESP32
 #include <driver/gpio.h>
+#include <esp_core_dump.h>
 #endif
 #if defined(ESP8266)
   #include <osapi.h>
@@ -165,7 +166,15 @@ extern "C" void __wrap_user_pre_init(void)
 	__real_user_pre_init();
 }
 
-// ─── Crash-dump capture via RTC user memory ──────────────────────────────────
+#endif // ARCH_ESP8266
+
+#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
+// ─── Crash-dump capture ──────────────────────────────────────────────────────
+// ESP8266: captured by custom_crash_callback into RTC user memory (below).
+// ESP32:   the IDF panic handler writes an ELF core dump to the "coredump"
+//          partition; readCrashDump() condenses its summary into this struct.
+//
+// ESP8266 RTC user area: slots 64-127, each 4 bytes → 256 bytes total.
 // RTC user area: slots 64-127, each 4 bytes → 256 bytes total.
 // Layout: magic(4) + reason(4) + exccause(4) + epc1(4) + epc2(4) + epc3(4)
 //         + excvaddr(4) + depc(4) + stackBase(4) + stackCount(4)
@@ -188,7 +197,9 @@ static_assert(sizeof(CrashDump) == (CRASH_STACK_WORDS + CRASH_METADATA_WORDS) * 
 static CrashDump g_crashDump;
 static bool g_crashDumpValid = false;
 static bool g_crashTelemetryPending = false;
+#endif
 
+#ifdef ARCH_ESP8266
 // Overrides the weak alias in crash_handler.c — runs before the reset.
 // Keep it minimal: only SDK primitive writes are safe here.
 extern "C" void custom_crash_callback(struct rst_info* ri, uint32_t stack, uint32_t stack_end)
@@ -324,8 +335,10 @@ void onReady()
 	app.rtc_info = system_get_rst_info();
 	cdebug_i(APPLICATION, "onReady: " ANSI_COLOR_BLUE "Reboot reason: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE ", exccause: " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, app.rtc_info->reason, app.rtc_info->exccause);
 
-#ifdef ARCH_ESP8266
+#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
 	app.readCrashDump();
+#endif
+#ifdef ARCH_ESP8266
 #ifndef SMING_RELEASE
 	osMessageInterceptor.begin(onOsMessage);
 	cdebug_i(APPLICATION, "onReady: " ANSI_COLOR_BLUE "starting os message interceptor" ANSI_COLOR_RESET);
@@ -499,11 +512,20 @@ void Application::sendTelemetry()
 			telemetry.reboot.setEpc3(app.rtc_info->epc3);
 			telemetry.reboot.setExcvaddr(app.rtc_info->excvaddr);
 			telemetry.reboot.setDepc(app.rtc_info->depc);
-				#ifdef ARCH_ESP8266
+				#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
 			telemetry.reboot.stackWords.clear();
 			telemetry.reboot.resetStackBase();
 			telemetry.reboot.resetStackCount();
 			if(g_crashTelemetryPending) {
+				#ifdef ARCH_ESP32
+				// rst_info carries no exception registers on ESP32; use the core dump instead.
+				telemetry.reboot.setExccause(g_crashDump.exccause);
+				telemetry.reboot.setEpc1(g_crashDump.epc1);
+				telemetry.reboot.setEpc2(g_crashDump.epc2);
+				telemetry.reboot.setEpc3(g_crashDump.epc3);
+				telemetry.reboot.setExcvaddr(g_crashDump.excvaddr);
+				telemetry.reboot.setDepc(g_crashDump.depc);
+				#endif
 				const uint32_t stackCount = g_crashDump.stackCount > CRASH_STACK_WORDS ? CRASH_STACK_WORDS : g_crashDump.stackCount;
 				telemetry.reboot.setStackBase(g_crashDump.stackBase);
 				telemetry.reboot.setStackCount(stackCount);
@@ -532,7 +554,7 @@ void Application::sendTelemetry()
 			}
 			*/
 		} else {
-				#ifdef ARCH_ESP8266
+				#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
 			g_crashTelemetryPending = false;
 				#endif
 		}
@@ -1257,6 +1279,81 @@ void Application::readCrashDump()
 		system_rtc_mem_write(CRASH_RTC_SLOT, &dump, sizeof(dump));
 	}
 }
+#elif defined(ARCH_ESP32)
+#if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH && CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF
+static char g_crashTask[sizeof(esp_core_dump_summary_t::exc_task) + 1];
+static char g_crashPanicReason[128];
+#endif
+
+void Application::readCrashDump()
+{
+#if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH && CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF
+	esp_err_t err = esp_core_dump_image_check();
+	if(err == ESP_ERR_NOT_FOUND) {
+		return;
+	}
+	if(err != ESP_OK) {
+		cdebug_e(APPLICATION, "Application::readCrashDump: " ANSI_COLOR_RED "core dump present but unusable (" ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED "), erasing" ANSI_COLOR_RESET,
+				 esp_err_to_name(err));
+		esp_core_dump_image_erase();
+		return;
+	}
+
+	// Large on RISC-V (embedded stack dump), so keep it off the stack.
+	auto summary = static_cast<esp_core_dump_summary_t*>(malloc(sizeof(esp_core_dump_summary_t)));
+	if(summary == nullptr) {
+		cdebug_e(APPLICATION, "Application::readCrashDump: " ANSI_COLOR_RED "no memory for core dump summary, keeping image for next boot" ANSI_COLOR_RESET);
+		return;
+	}
+
+	err = esp_core_dump_get_summary(summary);
+	if(err == ESP_OK) {
+		CrashDump dump{};
+		dump.magic = CRASH_COREDUMP_MAGIC;
+		dump.reason = (rtc_info != nullptr) ? rtc_info->reason : 0;
+		dump.epc1 = summary->exc_pc;
+#if CONFIG_IDF_TARGET_ARCH_XTENSA
+		// Xtensa: the summary carries a decoded backtrace rather than raw stack,
+		// so stackWords holds backtrace PCs (decode-stacktrace.py handles either).
+		const auto& ex = summary->ex_info;
+		dump.exccause = ex.exc_cause;
+		dump.excvaddr = ex.exc_vaddr;
+		dump.epc2 = (ex.epcx_reg_bits & (1 << 1)) ? ex.epcx[1] : 0;
+		dump.epc3 = (ex.epcx_reg_bits & (1 << 2)) ? ex.epcx[2] : 0;
+		dump.stackBase = ex.exc_a[1];
+		const uint32_t depth = std::min<uint32_t>(summary->exc_bt_info.depth, CRASH_STACK_WORDS);
+		memcpy(dump.stackWords, summary->exc_bt_info.bt, depth * sizeof(uint32_t));
+		dump.stackCount = depth;
+#else
+		// RISC-V: no on-device backtrace; keep the raw stack words starting at SP.
+		const auto& ex = summary->ex_info;
+		dump.exccause = ex.mcause;
+		dump.excvaddr = ex.mtval;
+		dump.depc = ex.ra;
+		dump.stackBase = ex.sp;
+		const uint32_t words = std::min<uint32_t>(summary->exc_bt_info.dump_size / sizeof(uint32_t), CRASH_STACK_WORDS);
+		memcpy(dump.stackWords, summary->exc_bt_info.stackdump, words * sizeof(uint32_t));
+		dump.stackCount = words;
+#endif
+		g_crashDump = dump;
+		g_crashDumpValid = true;
+		g_crashTelemetryPending = true;
+
+		memcpy(g_crashTask, summary->exc_task, sizeof(summary->exc_task));
+		g_crashTask[sizeof(g_crashTask) - 1] = '\0';
+		if(esp_core_dump_get_panic_reason(g_crashPanicReason, sizeof(g_crashPanicReason)) != ESP_OK) {
+			g_crashPanicReason[0] = '\0';
+		}
+	} else {
+		cdebug_e(APPLICATION, "Application::readCrashDump: " ANSI_COLOR_RED "failed to read core dump summary (" ANSI_COLOR_CYAN "%s" ANSI_COLOR_RED ")" ANSI_COLOR_RESET,
+				 esp_err_to_name(err));
+	}
+	free(summary);
+
+	// Erase so it doesn't re-report on subsequent reboots
+	esp_core_dump_image_erase();
+#endif
+}
 #endif
 
 void Application::checkCrashLoop()
@@ -1393,6 +1490,36 @@ void Application::reportCrashDump()
                 cdebug_w(APPLICATION, "Application::reportCrashDump: " ANSI_COLOR_YELLOW "" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW ":  " ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " " ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " " ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " " ANSI_COLOR_CYAN "%08x" ANSI_COLOR_RESET, addr, w0, w1, w2, w3);
             }
         }
+    }
+#elif defined(ARCH_ESP32) && CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH && CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF
+    if(g_crashDumpValid) {
+        g_crashDumpValid = false;
+        fullDumpReported = true;
+
+        cdebug_w(APPLICATION, "Application::reportCrashDump: " ANSI_COLOR_YELLOW "*** CORE DUMP FOUND *** task=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_YELLOW " reason=" ANSI_COLOR_CYAN "%s" ANSI_COLOR_RESET,
+                g_crashTask, g_crashPanicReason[0] ? g_crashPanicReason : "?");
+        cdebug_w(APPLICATION, "Application::reportCrashDump: " ANSI_COLOR_YELLOW "pc=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " sp=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " excvaddr=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_RESET,
+                g_crashDump.epc1, g_crashDump.stackBase, g_crashDump.excvaddr);
+#if CONFIG_IDF_TARGET_ARCH_XTENSA
+        cdebug_w(APPLICATION, "Application::reportCrashDump: " ANSI_COLOR_YELLOW "epc2=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " epc3=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " exccause=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW " reason=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_RESET,
+                g_crashDump.epc2, g_crashDump.epc3, g_crashDump.exccause, g_crashDump.reason);
+        cdebug_w(APPLICATION, "Application::reportCrashDump: " ANSI_COLOR_YELLOW "Backtrace (" ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW " frames):" ANSI_COLOR_RESET, g_crashDump.stackCount);
+        for(uint32_t i = 0; i < g_crashDump.stackCount; ++i) {
+            cdebug_w(APPLICATION, "Application::reportCrashDump: " ANSI_COLOR_YELLOW "  #%u pc=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_RESET, i, g_crashDump.stackWords[i]);
+        }
+#else
+        cdebug_w(APPLICATION, "Application::reportCrashDump: " ANSI_COLOR_YELLOW "ra=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " mcause=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_YELLOW " mtval=0x" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " reason=" ANSI_COLOR_CYAN "%u" ANSI_COLOR_RESET,
+                g_crashDump.depc, g_crashDump.exccause, g_crashDump.excvaddr, g_crashDump.reason);
+        cdebug_w(APPLICATION, "Application::reportCrashDump: " ANSI_COLOR_YELLOW "Stack dump:" ANSI_COLOR_RESET);
+        uint32_t addr = g_crashDump.stackBase;
+        for(uint32_t i = 0; i < g_crashDump.stackCount; i += 4, addr += 16) {
+            uint32_t w0 = g_crashDump.stackWords[i];
+            uint32_t w1 = (i + 1 < g_crashDump.stackCount) ? g_crashDump.stackWords[i + 1] : 0;
+            uint32_t w2 = (i + 2 < g_crashDump.stackCount) ? g_crashDump.stackWords[i + 2] : 0;
+            uint32_t w3 = (i + 3 < g_crashDump.stackCount) ? g_crashDump.stackWords[i + 3] : 0;
+            cdebug_w(APPLICATION, "Application::reportCrashDump: " ANSI_COLOR_YELLOW "" ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW ":  " ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " " ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " " ANSI_COLOR_CYAN "%08x" ANSI_COLOR_YELLOW " " ANSI_COLOR_CYAN "%08x" ANSI_COLOR_RESET, addr, w0, w1, w2, w3);
+        }
+#endif
     }
 #endif
 

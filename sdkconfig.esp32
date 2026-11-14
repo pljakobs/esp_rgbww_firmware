@@ -1,2 +1,7 @@
 # Allow bursts of lwIP messages and Sming dispatcher wakeups.
 CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=64
+
+# Write an ELF core dump to the "coredump" partition on panic; the firmware reads
+# its summary on the next boot (Application::readCrashDump) and reports it.
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y

@@ -231,6 +231,7 @@
 #define CRASH_RTC_SLOT         68 // Moved from 64 to avoid rBoot collision
 #define CRASH_RTC_MAGIC 0xDEADC0DEu
 #define CRASH_RTC_MAGIC_OVERFLOW 0xBAD57AC0u
+#define CRASH_COREDUMP_MAGIC 0xC0DEDC0Du // ESP32: dump recovered from the coredump partition
 #define CRASH_METADATA_WORDS 10
 #define CRASH_STACK_WORDS 50
 

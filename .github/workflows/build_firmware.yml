@@ -467,6 +467,15 @@ jobs:
           MQTT_PASS: ${{ secrets.MQTT_PASS }}
           MQTT_USER: ${{ secrets.MQTT_USER }}
         run: |
+          # The Sming image ships pre-generated ESP32 SDK configs whose values take
+          # precedence over sdkconfig.esp32, so reset them and verify the result.
+          sdk_reset="true"
+          sdk_check="true"
+          if [ "${{ matrix.soc }}" != "esp8266" ]; then
+            if [ "${{ matrix.release }}" = "1" ]; then build_type=release; else build_type=debug; fi
+            sdk_reset="make sdk-config-clean SMING_SOC=${{ matrix.soc }} SMING_RELEASE=${{ matrix.release }}"
+            sdk_check="bash ./.github/scripts/check_sdkconfig.sh sdkconfig.esp32 \$SMING_HOME/Arch/Esp32/Components/esp32/project/${{ matrix.soc }}/$build_type/sdkconfig"
+          fi
           if [ "${{ matrix.single }}" = "0" ]; then
             docker run --rm --privileged -v ${{ github.workspace }}:/workspace -w /workspace \
               -e GITHUB_RUN_NUMBER=${{ github.run_number }} \
@@ -476,7 +485,9 @@ jobs:
               bash -c "git config --global --add safe.directory /workspace && \
               source /opt/Sming/Tools/export.sh && \
               make configdb-rebuild && \
-              make GIT_VERSION='${{ steps.get_fw_info.outputs.fw_version }}' SMING_SOC=${{ matrix.soc }} SMING_RELEASE=${{ matrix.release }} DISABLE_WERROR=1 COM_SPEED=115200"
+              $sdk_reset && \
+              make GIT_VERSION='${{ steps.get_fw_info.outputs.fw_version }}' SMING_SOC=${{ matrix.soc }} SMING_RELEASE=${{ matrix.release }} DISABLE_WERROR=1 COM_SPEED=115200 && \
+              $sdk_check"
           else
             docker run --rm --privileged -v ${{ github.workspace }}:/workspace -w /workspace \
               -e GITHUB_RUN_NUMBER=${{ github.run_number }} \
@@ -486,7 +497,9 @@ jobs:
               bash -c "git config --global --add safe.directory /workspace && \
               source /opt/Sming/Tools/export.sh && \
               make configdb-rebuild && \
-              make mergeflash GIT_VERSION='${{ steps.get_fw_info.outputs.fw_version }}' SMING_SOC=${{ matrix.soc }} SMING_RELEASE=${{ matrix.release }} DISABLE_WERROR=1 COM_SPEED=115200"
+              $sdk_reset && \
+              make mergeflash GIT_VERSION='${{ steps.get_fw_info.outputs.fw_version }}' SMING_SOC=${{ matrix.soc }} SMING_RELEASE=${{ matrix.release }} DISABLE_WERROR=1 COM_SPEED=115200 && \
+              $sdk_check"
           fi
 
       - name: Set firmware path

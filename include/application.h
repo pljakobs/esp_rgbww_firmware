@@ -92,8 +92,10 @@ public:
     void checkCrashLoop();
     void markFirmwareHealthy();
 
-#ifdef ARCH_ESP8266
+#if defined(ARCH_ESP8266) || defined(ARCH_ESP32)
     void readCrashDump();
+#endif
+#ifdef ARCH_ESP8266
     inline bool isTempBoot() { return _bootmode == MODE_TEMP_ROM; };
 #else
     bool isTempBoot() { return false; };
