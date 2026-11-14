@@ -137,7 +137,7 @@
     },
     "command-request-fields": {
       "type": "object",
-      "$comment": "Inbound counterpart of command-fields (see CONFIGDB_JSON_INBOUND_PLAN.md Phase A) - kept as a separate schema member so the existing outbound command-fields/raw/hsv numeric typing (used for MQTT relay) is untouched. Same properties as command-request-item plus the 'cmds' batch array.",
+      "$comment": "Inbound counterpart of command-fields. Kept separate so existing outbound command-fields/raw/hsv numeric typing (used for MQTT relay) is untouched. Same properties as command-request-item plus the 'cmds' batch array.",
       "properties": {
         "cmd": { "$ref": "value-types/$defs/string-value" },
         "raw": { "$ref": "#/$defs/raw-input" },

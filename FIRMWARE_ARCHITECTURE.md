@@ -17,7 +17,7 @@ flowchart LR
     Clients --> MQTT[MQTT]
     HTTP --> API[Api and JsonProcessor]
     MQTT --> API
-   API --> Control[APPLedCtrl extends RGBWWLed]
+    API --> Control[APPLedCtrl extends RGBWWLed]
    Control --> PWM[LED channels and PWM]
     API --> Config[AppConfig]
     API --> Data[AppData]
@@ -25,12 +25,16 @@ flowchart LR
     Data --> FS
     App[Application coordinator] --> HTTP
     App --> MQTT
+    App --> Sensors[Optional sensor extensions]
     App --> Event[TCP EventServer]
     App --> WiFi[AppWIFI]
     WiFi --> MDNS[mDNS and Controllers]
     Event --> Clients
     HTTP --> Clients
+    HTTP --> Sensors
     MQTT --> Clients
+    Sensors --> I2C[Configured I2C bus]
+    Sensors --> RpcCodec
 ```
 
 The principal responsibilities are:
@@ -44,6 +48,7 @@ The principal responsibilities are:
 | `Api` / `JsonProcessor` | Implements data queries, command dispatch, and command validation. | Uses ConfigDB-backed JSON schemas and forwards control requests to `APPLedCtrl`. |
 | `RpcCodec` | Renders API, event, and command payloads using generated ConfigDB types. | Shared by HTTP/WebSocket, MQTT, and TCP event publishing paths. |
 | `APPLedCtrl` / `RGBWWLed` | Application-specific LED controller extending the RGBWW library's color conversion, per-channel output, and animation/transition engine. | Applies commands, drives PWM outputs, and publishes state changes and transition completion. |
+| Sensor extensions | Optional INA219 current and AS7341 spectral drivers. | Owned and configured by `Application`; use the shared I2C bus and explicit HTTP handlers. INA219 readings also publish over subscribed WebSocket and MQTT; AS7341 measurements notify the requesting WebSocket client. |
 | `AppMqttClient` | Publishes state/events and receives configured MQTT command topics. | Uses the shared command path for device commands and publishes through `RpcCodec`. |
 | `EventServer` | Sends state-change events to persistent TCP clients. | Receives event publications from application and LED-control callbacks. |
 | `Controllers` / `mdnsHandler` | Tracks known controllers and advertises/discovers network services. | Uses mDNS and `AppData`; supports peer awareness and controller synchronization. |
@@ -65,6 +70,10 @@ The principal responsibilities are:
 5. Persistent configuration and application data are separate ConfigDB stores
    backed by LittleFS. The transient JSON-RPC store is used to import or render
    one message at a time and is not application persistence.
+6. When sensor extensions are included, `Application` configures them against
+   the active I2C bus. `ApplicationWebserver` routes their config and reading
+   endpoints, while `RpcCodec` provides the shared payload schemas for
+   WebSocket/MQTT publication.
 
 The API schemas live in the `.cfgdb` files. Generated types and `RpcCodec`
 provide the JSON boundary, while command semantics and cross-field validation
@@ -146,6 +155,27 @@ RGBWWLed 0.11.z; do not backport them to Lightinator 5.0 or RGBWWLed 0.10.z.
 Software builds/native tests do not
 establish physical fade cancellation on classic ESP32 or prove a flicker fix;
 matched device workloads and waveform measurements remain necessary.
+
+## Optional Sensor Extensions
+
+`Application` owns the optional INA219 and AS7341 drivers when those extensions
+are included in the build. They share the active configured I2C bus; startup
+and bus reconfiguration update sensor detection and measurement state. Their
+extension-specific HTTP handlers are routed by `ApplicationWebserver`, while
+generated payloads and notifications use the shared ConfigDB schemas and
+`RpcCodec`.
+
+`GET /extensions/<id>/config` is the current per-extension capability report:
+the response identifies the extension and includes `available`. Clients must
+match the reported ID before exposing extension-specific controls; availability
+also reflects extension settings and the configured I2C bus, not just physical
+presence. A missing endpoint means the extension is not included in that build.
+Config POST handlers accept only writable settings. INA219 readings are sampled
+periodically while enabled and available, with notifications to subscribed
+WebSocket clients and MQTT. AS7341 measurements are started explicitly; results
+are sent to the requesting WebSocket client or returned by HTTP polling. Both
+readings expose validity and error state, which clients must respect. This is
+an explicit pair of extension routes, not a general runtime extension registry.
 
 ## Opt-in fade timing measurements
 
@@ -239,10 +269,9 @@ root member only when a body is actually sent over a framed transport; HTTP-only
 bodies need no framing entry. Primitive constraints belong in
 [value-types.cfgdb](value-types.cfgdb), never inlined.
 
-Design and migration history for this stack lives in
-[CONFIGDB_JSONRPC_MESSAGES_PLAN.md](CONFIGDB_JSONRPC_MESSAGES_PLAN.md),
-[CONFIGDB_JSON_MIGRATION_PLAN.md](CONFIGDB_JSON_MIGRATION_PLAN.md) and
-[CONFIGDB_JSON_INBOUND_PLAN.md](CONFIGDB_JSON_INBOUND_PLAN.md).
+The current schema inventory and generation process are documented in
+[API_SCHEMA.md](API_SCHEMA.md). Historical migration and design proposals are
+not part of the current runtime contract.
 
 ### Known deviations (cleanup backlog)
 

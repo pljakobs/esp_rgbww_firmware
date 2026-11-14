@@ -20,8 +20,8 @@ echo '== ping after malformed POST =='
 curl -sS -m 8 -i "$BASE/ping"
 
 # ---------------------------------------------------------------------------
-# ConfigDB-backed /color inbound parsing (CONFIGDB_JSON_INBOUND_PLAN.md Phase A/B:
-# Api::dispatchColorFromStream() -> JsonProcessor::onColor(CommandRequestFieldsUpdater)).
+# ConfigDB-backed /color inbound parsing:
+# Api::dispatchColorFromStream() -> JsonProcessor::onColor(CommandRequestFieldsUpdater).
 # Each case: POST, then GET /color to eyeball the resulting state.
 # Run against a real device/emulator at $BASE - not executed automatically here.
 # ---------------------------------------------------------------------------

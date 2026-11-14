@@ -21,11 +21,15 @@ letter. Removing an extension removes its generated C++ storage types; it does
 not delete any on-device persistent settings.
 
 General automatic discovery of extension code, runtime registry entries,
-configuration APIs, and generated public API documentation is not implemented
-yet. The AS7341 is compiled when its extension directory is present and
-provides a presence-gated measurement API described in
-[`as7341/README.md`](as7341/README.md). The SSD1306 and INA219 extension
-schema fragments do not yet enable those devices.
+configuration APIs and generated public API documentation is not implemented.
+The INA219 and AS7341 drivers are currently wired into `Application` and their
+HTTP routes are explicitly handled by `ApplicationWebserver`. Each configuration
+endpoint reports its extension ID and whether enabled hardware is detected on
+the configured I2C bus; clients should use that response to gate
+extension-specific controls and writes. The INA219 and AS7341 APIs are
+documented in [`ina219/README.md`](ina219/README.md) and
+[`as7341/README.md`](as7341/README.md). The SSD1306 schema fragment alone does
+not enable a runtime extension.
 
 The expanded schema is generated at `out/extension-schema/jsonrpc.cfgdb`.
 `EXTENSION_SCHEMA_DIR` can select an alternative extension directory. If the

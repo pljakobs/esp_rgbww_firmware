@@ -51,7 +51,7 @@ public:
 	bool handleHostHeapTest(const HeapTestRequest& request, char* result, size_t resultSize);
 #endif
 
-	// ConfigDB-backed command dispatch for HTTP request bodies (see CONFIGDB_JSON_INBOUND_PLAN.md Phase B)
+	// ConfigDB-backed command dispatch for HTTP request bodies.
 	bool dispatchCommandFromStream(const String& method, Stream& body, String& errorMsg, bool relay = true,
 									   int32_t lightSelector = -1, bool rawUnionNormalized = false);
 
