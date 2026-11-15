@@ -830,7 +830,20 @@ void ApplicationWebserver::stop()
 	_infoV2Cache = nullptr;
 	_infoV1CacheTime = 0;
 	_infoV2CacheTime = 0;
-	close();
+
+	// TcpConnection::close() calls tcp_poll(), which lwIP asserts on for a LISTEN pcb.
+	// TcpServer::shutdown() would `delete this`, so close the listener directly.
+	if(tcp != nullptr) {
+		tcp_arg(tcp, nullptr);
+		tcp_accept(tcp, nullptr);
+		tcp_close(tcp);
+		tcp = nullptr;
+	}
+	for(auto connection : connections) {
+		if(connection != nullptr) {
+			connection->setTimeOut(1);
+		}
+	}
 	_running = false;
 }
 
