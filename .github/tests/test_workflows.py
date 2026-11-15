@@ -390,7 +390,7 @@ raise SystemExit('Forbidden git operation in policy test: ' + repr(arguments))
                 self.assertEqual(result["artifact_branch"], artifact_name)
 
     def test_actual_firmware_version_step_with_isolated_tag_fixtures(self):
-        selected = step(workflow("build_firmware.yml"), "build", "Get firmware version")
+        selected = step(workflow("build_firmware.yml"), "generate-matrix", "Get firmware version")
         cases = [
             ("5.0", "develop", ["v5.0.0-1019-develop"], "V5.0.0-1020-develop"),
             ("5.0", "develop", ["v5.0.0-1014-experimental", "v5.0.0-1019-develop"], "V5.0.0-1020-develop"),
@@ -402,14 +402,37 @@ raise SystemExit('Forbidden git operation in policy test: ' + repr(arguments))
         for release_line, stage, tags, expected in cases:
             with self.subTest(release_line=release_line, stage=stage, tags=tags):
                 result = self.execute(selected, {
-                    "needs.generate-matrix.outputs.release_line": release_line,
-                    "needs.generate-matrix.outputs.stage": stage,
-                    "needs.generate-matrix.outputs.release_ref": f"{release_line}/{stage}",
+                    "steps.resolve.outputs.release_line": release_line,
+                    "steps.resolve.outputs.stage": stage,
+                    "steps.resolve.outputs.release_ref": f"{release_line}/{stage}",
                 },
                     {"CI_TEST_TAGS": "\n".join(tags)})
                 self.assertEqual(result["fw_version"], expected)
                 self.assertEqual(result["fw_build_tag"], "v" + expected[1:])
                 self.assertEqual(result["fw_branch"], f"{release_line}/{stage}")
+
+    def test_release_runs_are_serialized_and_matrix_uses_one_version(self):
+        document = workflow("build_firmware.yml")
+        self.assertEqual(document["concurrency"], {
+            "group": "firmware-release-versioning", "cancel-in-progress": False,
+        })
+        outputs = document["jobs"]["generate-matrix"]["outputs"]
+        self.assertEqual(outputs["fw_version"], "${{ steps.version.outputs.fw_version }}")
+        self.assertEqual(outputs["fw_build_tag"], "${{ steps.version.outputs.fw_build_tag }}")
+        checkout = step(document, "generate-matrix", "Checkout version source")["with"]
+        self.assertEqual(checkout["fetch-depth"], 0)
+        self.assertEqual(checkout["ref"], "${{ steps.resolve.outputs.checkout_ref }}")
+        selected = step(document, "build", "Get firmware version")
+        result = self.execute(selected, {
+            "needs.generate-matrix.outputs.release_line": "5.1",
+            "needs.generate-matrix.outputs.release_ref": "5.1/develop",
+            "needs.generate-matrix.outputs.fw_version": "V5.1.0-34-develop",
+            "needs.generate-matrix.outputs.fw_build_tag": "v5.1.0-34-develop",
+        }, {"CI_TEST_TAGS": "v5.1.0-99-develop"})
+        self.assertEqual(result["fw_version"], "V5.1.0-34-develop")
+        self.assertEqual(result["fw_build_tag"], "v5.1.0-34-develop")
+        tag = step(document, "build", "Tag release")
+        self.assertIn("push_release_tag.sh", tag["run"])
 
     def test_publisher_requires_immutable_pin(self):
         document = workflow("deploy-pages.yml")
