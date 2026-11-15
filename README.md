@@ -284,6 +284,13 @@ and binary download URL.
 
 Build-version defaults use the source tree's `FIRMWARE_RELEASE_LINE` in
 `component.mk` (5.1 on this line), not the version of an ancestor tag. Explicit
+Release builds share one workflow-level version across all matrix jobs.
+Firmware workflows are serialized to prevent overlapping runs from selecting
+the same next release number. GitHub keeps at most one pending run in this
+concurrency group; a newer pending run replaces an older pending run, without
+cancelling the active build. Existing release tags are accepted only when they
+point to the build commit; conflicting tags are never overwritten.
+
 `GIT_VERSION` values supplied by release CI remain unchanged. Local builds use
 cached `ci/<branch>/<run>` tags and report
 `V5.1-<run>-<branch>-<hostname>-<commits>[-dirty]`, retaining the entire branch

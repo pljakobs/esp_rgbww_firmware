@@ -3,6 +3,10 @@ name: firmwareBuild
 permissions:
   contents: write
 
+concurrency:
+  group: firmware-release-versioning
+  cancel-in-progress: false
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
@@ -44,6 +48,8 @@ jobs:
       rgbwwled_version: ${{ steps.resolve.outputs.rgbwwled_version }}
       soc_json: ${{ steps.resolve.outputs.soc_json }}
       soc_csv: ${{ steps.resolve.outputs.soc_csv }}
+      fw_version: ${{ steps.version.outputs.fw_version }}
+      fw_build_tag: ${{ steps.version.outputs.fw_build_tag }}
     steps:
       - name: Checkout workflow helpers
         uses: actions/checkout@v6
@@ -94,6 +100,24 @@ jobs:
           echo "source_ref=$source_ref" >> "$GITHUB_OUTPUT"
           echo "checkout_ref=$checkout_ref" >> "$GITHUB_OUTPUT"
           python3 .github/scripts/release_metadata.py resolve "$release_ref" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout version source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.resolve.outputs.checkout_ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Get firmware version
+        id: version
+        env:
+          CI_RELEASE_LINE: ${{ steps.resolve.outputs.release_line }}
+          CI_RELEASE_STAGE: ${{ steps.resolve.outputs.stage }}
+          CI_RELEASE_REF: ${{ steps.resolve.outputs.release_ref }}
+        run: |
+          git tag --list | python3 .github/scripts/release_metadata.py version \
+            "$CI_RELEASE_LINE" "$CI_RELEASE_STAGE" >> "$GITHUB_OUTPUT"
+          echo "fw_branch=$CI_RELEASE_REF" >> "$GITHUB_OUTPUT"
 
   host-smoke:
     needs: generate-matrix
@@ -426,12 +450,12 @@ jobs:
         id: get_fw_info
         env:
           CI_RELEASE_LINE: ${{ needs.generate-matrix.outputs.release_line }}
-          CI_RELEASE_STAGE: ${{ needs.generate-matrix.outputs.stage }}
           CI_RELEASE_REF: ${{ needs.generate-matrix.outputs.release_ref }}
+          CI_FW_VERSION: ${{ needs.generate-matrix.outputs.fw_version }}
+          CI_FW_BUILD_TAG: ${{ needs.generate-matrix.outputs.fw_build_tag }}
         run: |
-          git fetch --tags --force
-          git tag --list | python3 .github/scripts/release_metadata.py version \
-            "$CI_RELEASE_LINE" "$CI_RELEASE_STAGE" >> "$GITHUB_OUTPUT"
+          echo "fw_version=$CI_FW_VERSION" >> "$GITHUB_OUTPUT"
+          echo "fw_build_tag=$CI_FW_BUILD_TAG" >> "$GITHUB_OUTPUT"
           echo "fw_branch=$CI_RELEASE_REF" >> "$GITHUB_OUTPUT"
           echo "fw_semver_base=${CI_RELEASE_LINE}.0" >> "$GITHUB_OUTPUT"
 
@@ -613,16 +637,9 @@ jobs:
           matrix.soc == 'esp32' &&
           matrix.release == 0 &&
           matrix.single == 0
-        run: |
-          git config user.name github-actions
-          git config user.email github-actions@github.com
-          tag_name='${{ steps.get_fw_info.outputs.fw_build_tag }}'
-          if git rev-parse "$tag_name" >/dev/null 2>&1; then
-            echo "Tag $tag_name already exists, skipping"
-            exit 0
-          fi
-          git tag "$tag_name"
-          git push origin "$tag_name"
+        env:
+          CI_FW_BUILD_TAG: ${{ steps.get_fw_info.outputs.fw_build_tag }}
+        run: bash .github/scripts/push_release_tag.sh "$CI_FW_BUILD_TAG"
 
       - name: Notify webapp of schema update
         # Runs once per push (same matrix guard as Tag release).
