@@ -369,13 +369,14 @@ void AppWIFI::_STAGotIP(IpAddress ip, IpAddress mask, IpAddress gateway)
 		}
 	} // end ConfigDB network context
 
-	// After network is up, report any crash/watchdog reboot to the syslog target
-	app.reportCrashDump();
 	// Now that we have an IP address, drain any log messages that were compressed
 	// into the pre-network ring buffer before the UDP socket was routable.
 #ifndef SMING_RELEASE
 	app.udpSyslogStream.drainPreNetBuffer();
 #endif
+	// Report after draining so the dump goes straight to the network instead of
+	// competing for (and being evicted from) the pre-network buffer.
+	app.reportCrashDump();
 
 	// Kick off background webapp update check with a 10s delay to allow system to stabilize[cite: 18].
     // Static SimpleTimer avoids dynamic memory allocation during the boot sequence.

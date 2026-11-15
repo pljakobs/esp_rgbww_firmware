@@ -71,6 +71,9 @@ public:
     void reset();
     void restart();
     void forget_wifi_and_restart();
+#ifndef SMING_RELEASE
+    void crash();
+#endif
     bool delayedCMD(String cmd, int delay);
 
     void wsBroadcast(const String& message);
