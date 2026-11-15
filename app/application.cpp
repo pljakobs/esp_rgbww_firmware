@@ -1810,35 +1810,39 @@ bool Application::mountfs(int slot)
      * exercised as on the target instead of the host-OS passthrough.
      */
 
+#ifdef ARCH_ESP8266
+	// Only ESP8266 devices that predate the LittleFS migration can still have SPIFFS partitions.
 	auto part = Storage::findPartition(F("spiffs") + String(slot));
 	if(part) {
 		cdebug_i(APPLICATION, "Application::mountfs: " ANSI_COLOR_BLUE "mouting spiffs partition " ANSI_COLOR_CYAN "%i" ANSI_COLOR_BLUE " at " ANSI_COLOR_CYAN "%x" ANSI_COLOR_BLUE ", length " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, slot, part.address(), part.size());
 		_fs_mounted = spiffs_mount(part);
 		return _fs_mounted;
-	} else {
-		part = Storage::findPartition(F("lfs0"));
-		if(part) {
-			cdebug_i(APPLICATION, "Application::mountfs: " ANSI_COLOR_BLUE "mouting primary littlefs partition at " ANSI_COLOR_CYAN "%x" ANSI_COLOR_BLUE ", length " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, part.address(), part.size());
-			if(lfs_mount(part)) {
-				_fs_mounted = true;
-				return _fs_mounted;
-			} else {
-				auto secondary = Storage::findPartition(F("lfs1"));
-				if(!secondary) {
-					cdebug_e(APPLICATION, "Application::mountfs: " ANSI_COLOR_RED "primary partition mount failed and secondary lfs partition was not found" ANSI_COLOR_RESET);
-					_fs_mounted = false;
-					return _fs_mounted;
-				}
-				cdebug_e(APPLICATION, "Application::mountfs: " ANSI_COLOR_RED "primary partition mount failed, mounting secondary lfs partition  at " ANSI_COLOR_CYAN "%x" ANSI_COLOR_RED ", length " ANSI_COLOR_CYAN "%d" ANSI_COLOR_RED "" ANSI_COLOR_RESET,
-						secondary.address(), secondary.size());
-				_fs_mounted = lfs_mount(secondary);
-				return _fs_mounted;
-			};
-		}
-		cdebug_i(APPLICATION, "Application::mountfs: " ANSI_COLOR_BLUE "partition is neither spiffs nor lfs" ANSI_COLOR_RESET);
-		_fs_mounted = false;
-		return _fs_mounted;
 	}
+	part = Storage::findPartition(F("lfs0"));
+#else
+	auto part = Storage::findPartition(F("lfs0"));
+#endif
+	if(part) {
+		cdebug_i(APPLICATION, "Application::mountfs: " ANSI_COLOR_BLUE "mouting primary littlefs partition at " ANSI_COLOR_CYAN "%x" ANSI_COLOR_BLUE ", length " ANSI_COLOR_CYAN "%d" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, part.address(), part.size());
+		if(lfs_mount(part)) {
+			_fs_mounted = true;
+			return _fs_mounted;
+		} else {
+			auto secondary = Storage::findPartition(F("lfs1"));
+			if(!secondary) {
+				cdebug_e(APPLICATION, "Application::mountfs: " ANSI_COLOR_RED "primary partition mount failed and secondary lfs partition was not found" ANSI_COLOR_RESET);
+				_fs_mounted = false;
+				return _fs_mounted;
+			}
+			cdebug_e(APPLICATION, "Application::mountfs: " ANSI_COLOR_RED "primary partition mount failed, mounting secondary lfs partition  at " ANSI_COLOR_CYAN "%x" ANSI_COLOR_RED ", length " ANSI_COLOR_CYAN "%d" ANSI_COLOR_RED "" ANSI_COLOR_RESET,
+					secondary.address(), secondary.size());
+			_fs_mounted = lfs_mount(secondary);
+			return _fs_mounted;
+		};
+	}
+	cdebug_i(APPLICATION, "Application::mountfs: " ANSI_COLOR_BLUE "partition is neither spiffs nor lfs" ANSI_COLOR_RESET);
+	_fs_mounted = false;
+	return _fs_mounted;
 
 }
 
