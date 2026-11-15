@@ -22,7 +22,7 @@
         "lfs0": {
             "device": "spiFlash",
             "address": "0x00170000",
-            "size": "1152K",
+            "size": "1024K",
             "type": "data",
             "subtype": "littlefs",
             "readonly": false,
@@ -31,7 +31,7 @@
         },
         "rom1": {
             "device": "spiFlash",
-            "address": "0x00290000",
+            "address": "0x00270000",
             "size": "1408K",
             "type": "app",
             "subtype": "ota_1",
@@ -39,10 +39,20 @@
             "encrypted": false,
             "filename": ""
         },
+        "lfs1": {
+            "device": "spiFlash",
+            "address": "0x003d0000",
+            "size": "152K",
+            "type": "data",
+            "subtype": "littlefs",
+            "readonly": false,
+            "encrypted": false,
+            "filename": ""
+        },
         "coredump": {
             "device": "spiFlash",
-            "address": "0x003f0000",
-            "size": "56K",
+            "address": "0x003f6000",
+            "size": "32K",
             "type": "data",
             "subtype": "coredump",
             "readonly": false,

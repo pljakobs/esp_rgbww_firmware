@@ -251,6 +251,21 @@ Refer to the [Wiki — Flashing](https://github.com/verybadsoldier/esp_rgbww_fir
 0x300000  lfs1  (~1 000 kB, fallback LittleFS)
 ```
 
+### Flash layout (ESP32, 4 MB)
+
+Defined in `Lightinator_Esp32.hw`. The partition table is written only by a
+full USB flash; OTA updates keep the table already on the device.
+
+```
+0x008000  Partition table
+0x010000  rom0      (1408 kB, OTA slot 0)
+0x170000  lfs0      (1024 kB, active LittleFS incl. webapp staging)
+0x270000  rom1      (1408 kB, OTA slot 1)
+0x3D0000  lfs1      (152 kB, fallback LittleFS)
+0x3F6000  coredump  (32 kB, panic core dump)
+0x3FE000  otadata   (8 kB)
+```
+
 ---
 
 ## OTA Updates
