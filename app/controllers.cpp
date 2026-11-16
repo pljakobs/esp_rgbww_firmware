@@ -312,6 +312,13 @@ void Controllers::noteIdentity(unsigned int id, const char* hostname, int ttl, H
         return;
     }
 
+    // Only known lightinator device classes may enter the inventory. UNKNOWN
+    // (foreign devices) and ALIAS (leader/group hostnames) identities are
+    // never stored, mirroring the guard in addOrUpdate().
+    if (hostType != HOST_TYPE_CONTROLLER && hostType != HOST_TYPE_WALLPANEL) {
+        return;
+    }
+
     // If an address for this hostname was staged before we knew the id, the
     // record is now complete.
     size_t pendingIndex = findPendingAddressIndex(hostname);

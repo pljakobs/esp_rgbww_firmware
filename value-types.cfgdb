@@ -14,6 +14,11 @@
       "type": "integer",
       "minimum": 0
     },
+    "uint32-value": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
     "address": {
       "type": "integer",
       "minimum": 0,
