@@ -189,6 +189,10 @@ Boot
 
 ### Shared webapp host
 
+This feature is enabled only for ESP8266 builds (`ARCH_ESP8266`). ESP32
+controllers running 5.0 continue serving their own UI and do not embed the
+redirect bootstrap.
+
 When a visible controller has an ID above `0xFFFFFF` and above this controller's
 own ID, opening `/` serves a small flash-embedded bootstrap page. The browser
 checks the highest-ID eligible controller's app entry point using a CORS-enabled

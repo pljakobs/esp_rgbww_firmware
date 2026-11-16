@@ -5,6 +5,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "../include/fileList.h"
 
 class String : public std::string
 {
@@ -17,7 +18,6 @@ String operator+(const String& left, const char* right) { return String(left) +=
 String operator+(const String& left, const String& right) { return String(left) += right; }
 
 #define F(value) value
-#define ARCH_ESP8266
 #define cdebug_i(...) ((void)0)
 constexpr int HTTP_STATUS_OK = 200;
 constexpr int HTTP_STATUS_PERMANENT_REDIRECT = 308;
@@ -84,11 +84,17 @@ struct TemplateStream : Stream {
 };
 }
 struct Asset {
-	explicit operator bool() const { return false; }
-	void* content() const { return nullptr; }
+	bool present = false;
+	explicit operator bool() const { return present; }
+	void* content() const { assert(present); return nullptr; }
 };
 struct {
-	Asset operator[](const char*) const { return {}; }
+	Asset operator[](const char* fileName) const {
+#define XX(symbol, file) if(std::string(fileName) == file) return {true};
+		FILE_LIST(XX)
+#undef XX
+		return {};
+	}
 } fileMap;
 bool fileExist(const char*) { return true; }
 
@@ -126,12 +132,14 @@ struct HttpResponse {
 	}
 };
 struct ApplicationWebserver {
+#ifdef ARCH_ESP8266
 	bool _redirectToLeader = false;
 	IpAddress _webappLeaderAddress;
+	void updateWebappLeader();
+#endif
 	bool preflight = true;
 	bool preflightRequest(HttpRequest&, HttpResponse&, std::initializer_list<HttpMethod>) { return preflight; }
 	void setCorsHeaders(HttpResponse& response) { response.cors = true; }
-	void updateWebappLeader();
 	void onIndex(HttpRequest&, HttpResponse&);
 };
 
@@ -147,6 +155,15 @@ int main()
 
 	Controllers controllers;
 	app.controllers = &controllers;
+#ifndef ARCH_ESP8266
+	controllers.data = {{0xFFFFFFFF, "192.168.29.69"}};
+	HttpResponse esp32;
+	server.onIndex(request, esp32);
+	assert(esp32.code == HTTP_STATUS_PERMANENT_REDIRECT);
+	assert(esp32.headers[HTTP_HEADER_LOCATION] == "/index.html");
+	assert(esp32.variables.empty());
+	return 0;
+#else
 	controllers.data = {{0xFFFFFF, "192.168.29.69"}};
 	server.updateWebappLeader();
 	assert(!server._redirectToLeader);
@@ -220,4 +237,5 @@ int main()
 	server.onIndex(request, fallback);
 	assert(!server._redirectToLeader && server._webappLeaderAddress.isNull());
 	assert(fallback.headers[HTTP_HEADER_LOCATION] == "/index.html");
+#endif
 }

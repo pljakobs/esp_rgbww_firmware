@@ -33,7 +33,9 @@
 #include <array>
 #include <memory>
 #include <stdio.h>
+#ifdef ARCH_ESP8266
 #include <FlashString/TemplateStream.hpp>
+#endif
 
 #include <Network/Http/Websocket/WebsocketResource.h>
 #include <Storage.h>
@@ -987,6 +989,7 @@ void ApplicationWebserver::onRedirector(HttpRequest& request, HttpResponse& resp
 	onIndex(request, response);
 }
 
+#ifdef ARCH_ESP8266
 void ApplicationWebserver::updateWebappLeader()
 {
 	_redirectToLeader = false;
@@ -1010,6 +1013,7 @@ void ApplicationWebserver::updateWebappLeader()
 		_redirectToLeader = true;
 	}
 }
+#endif
 
 void ApplicationWebserver::onIndex(HttpRequest& request, HttpResponse& response)
 {
@@ -1025,6 +1029,7 @@ void ApplicationWebserver::onIndex(HttpRequest& request, HttpResponse& response)
 	}
 #endif
 
+#ifdef ARCH_ESP8266
 	updateWebappLeader();
 	if(_redirectToLeader) {
 		auto page = fileMap[F("webapp-redirect.html")];
@@ -1038,6 +1043,7 @@ void ApplicationWebserver::onIndex(HttpRequest& request, HttpResponse& response)
 		response.sendDataStream(stream.release(), MIME_HTML);
 		return;
 	}
+#endif
 
 	bool hasLfsIndex = app.isFilesystemMounted() &&
 	     (fileExist(F("index.html")) || fileExist(F("index.html.gz")));
