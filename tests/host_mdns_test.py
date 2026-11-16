@@ -16,7 +16,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 zeroconf = pytest.importorskip("zeroconf", reason="mDNS tests require pip install zeroconf")
 
-from virtual_controllers import BASE_CHIP_ID, VirtualController, controller_ip
+from virtual_controllers import BASE_CHIP_ID, VirtualController, VirtualForeignDevice, controller_ip
 from host_smoke_api_test import (
     SmokeConfig, append_jsonl, http_request, recv_ws_text, smoke_config,
     websocket_handshake, ws_request, write_json,
@@ -387,6 +387,77 @@ def test_ramp_sequence_and_cleanup_offline(monkeypatch: pytest.MonkeyPatch, tmp_
         assert stages[-1]["drop_from_baseline"] == 800
         assert settled_counts == [0, 2, 4, 0]
     assert sock.closed and fleet.closed and not fleet.services
+
+
+@pytest.mark.skipif(os.environ.get("HOST_MDNS_RAMP") != "1", reason="opt-in TAP mDNS/RAM integration test")
+def test_foreign_http_service_is_not_admitted(smoke_config: SmokeConfig) -> None:
+    """A non-lightinator _http._tcp advertisement (e.g. a SONOFF Zigbee bridge
+    with its own "id" TXT key) must never enter the controller inventory, and
+    an overflowing id on the swarm service itself must be rejected rather than
+    saturated into a plausible-looking controller id."""
+    interface_ip = os.environ["HOST_MDNS_INTERFACE_IP"]
+    ttl = int(os.environ.get("HOST_MDNS_TTL", "30"))
+    device = VirtualForeignDevice(os.environ.get("HOST_MDNS_FOREIGN_IP", "192.168.13.99"))
+    assert device.ip_address not in {smoke_config.app_ip, interface_ip}
+    zc = zeroconf.Zeroconf(interfaces=[interface_ip], ip_version=zeroconf.IPVersion.V4Only)
+    registered = []
+
+    def refresh_services() -> None:
+        for service in registered:
+            zc.update_service(service)
+
+    try:
+        for service in device.build_services(include_rogue_swarm=True):
+            service.host_ttl = ttl
+            service.other_ttl = ttl
+            zc.register_service(service, ttl=ttl)
+            registered.append(service)
+        print(f"Settling foreign device advertisement for {2 * ttl}s", flush=True)
+        settle_for_ttl(ttl, refresh_services)
+        for row in host_records(read_json(f"{smoke_config.base_url}/hosts?all=true")):
+            assert device.name not in str(row.get("hostname")), f"foreign device admitted: {row}"
+            assert row.get("ip_address") != device.ip_address, f"foreign device admitted: {row}"
+    finally:
+        try:
+            for service in registered:
+                zc.unregister_service(service)
+        finally:
+            zc.close()
+
+
+@pytest.mark.skipif(os.environ.get("HOST_MDNS_RAMP") != "1", reason="opt-in TAP mDNS/RAM integration test")
+def test_large_chip_id_is_not_clamped(smoke_config: SmokeConfig) -> None:
+    """Chip ids above INT_MAX (esp32 ids use the full 32 bits) must round-trip
+    unclamped through /hosts instead of saturating to 2147483647."""
+    interface_ip = os.environ["HOST_MDNS_INTERFACE_IP"]
+    ttl = int(os.environ.get("HOST_MDNS_TTL", "30"))
+    timeout = float(os.environ.get("HOST_MDNS_TIMEOUT", "300"))
+    controller = VirtualController(0, os.environ.get("HOST_MDNS_BIGID_IP", "192.168.13.98"),
+                                   base_chip_id=4031650001, hostname="virt-uint32")
+    assert controller.chip_id > 2**31 - 1
+    assert controller.ip_address not in {smoke_config.app_ip, interface_ip}
+    zc = zeroconf.Zeroconf(interfaces=[interface_ip], ip_version=zeroconf.IPVersion.V4Only)
+    registered = []
+
+    def refresh_services() -> None:
+        for service in registered:
+            zc.update_service(service)
+
+    try:
+        for service in controller.build_services():
+            service.host_ttl = ttl
+            service.other_ttl = ttl
+            zc.register_service(service, ttl=ttl)
+            registered.append(service)
+        # check_hosts matches rows by exact id, so a clamped id fails here.
+        wait_for_hosts(smoke_config.base_url, [controller], {controller.chip_id}, timeout,
+                       refresh_services, label="uint32-id inventory")
+    finally:
+        try:
+            for service in registered:
+                zc.unregister_service(service)
+        finally:
+            zc.close()
 
 
 @pytest.mark.skipif(os.environ.get("HOST_MDNS_RAMP") != "1", reason="opt-in TAP mDNS/RAM integration test")

@@ -22,15 +22,33 @@
 #include <vector>
 #include <algorithm>
 #include <memory>
+#include <cstdlib>
+#include <cctype>
+#include <cerrno>
 
 
 #define CONTROLLER_HOSTNAME_MAX_SIZE 64
 #define CONTROLLER_IP_MAX_SIZE 16
 
-// String::toInt() saturates at INT_MAX, but chip IDs can use the full 32 bits
+// Strict decimal parse of a chip id; returns 0 (invalid) unless the whole
+// string is a decimal number that fits in uint32_t. mDNS TXT records of
+// foreign devices may carry arbitrary "id" values (e.g. a SONOFF Zigbee
+// bridge advertises a 14-digit serial) which must be rejected rather than
+// saturated into a plausible-looking id. String::toInt() saturates at
+// INT_MAX and bare strtoul() at UINT32_MAX, so neither is usable here.
 inline uint32_t parseControllerId(const String& id)
 {
-    return strtoul(id.c_str(), nullptr, 10);
+    const char* str = id.c_str();
+    if(!isdigit(static_cast<unsigned char>(str[0]))) {
+        return 0;
+    }
+    char* end;
+    errno = 0;
+    unsigned long long value = strtoull(str, &end, 10);
+    if(errno == ERANGE || *end != '\0' || value > 0xFFFFFFFFull) {
+        return 0;
+    }
+    return static_cast<uint32_t>(value);
 }
 
 class Controllers {
