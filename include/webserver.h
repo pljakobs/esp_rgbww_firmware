@@ -95,6 +95,11 @@ private:
 
     bool _init = false;
     bool _running = false;
+#ifdef ARCH_ESP8266
+    bool _redirectToLeader = false;
+    IpAddress _webappLeaderAddress;
+    void updateWebappLeader();
+#endif
 
     // Base HTTP server settings, retained so setMaxActiveConnections() can
     // adjust the connection limit without discarding heap/keep-alive config.

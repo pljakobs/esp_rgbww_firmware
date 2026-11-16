@@ -187,6 +187,43 @@ Boot
    - **`<device_name>.local`** via mDNS (once a device name is configured)
 7. **Set the pin configuration** for your hardware in *Settings → Hardware* (`general.current_pin_config_name`). A reboot is required for pin changes to take effect.
 
+### Shared webapp host
+
+This feature is enabled only for ESP8266 builds (`ARCH_ESP8266`). ESP32
+controllers running 5.0 continue serving their own UI and do not embed the
+redirect bootstrap.
+
+When a visible controller has an ID above `0xFFFFFF` and above this controller's
+own ID, opening `/` serves a small flash-embedded bootstrap page. The browser
+checks the highest-ID eligible controller's app entry point using a CORS-enabled
+HTTP `HEAD` request with a three-second timeout. A successful HTML response
+redirects the browser to:
+`http://<leader-ip>/index.html?home=<local-ip>`. The leader serves the webapp;
+the browser sends API and WebSocket traffic directly to the original controller.
+The leader's installed webapp must support the `home` query parameter and allow
+cross-origin `HEAD` requests to its app entry point.
+
+Network errors, timeouts, CORS failures, unsuccessful HTTP responses, and
+non-HTML responses fall back to the original controller's `/index.html`,
+bypassing the bootstrap to avoid a redirect loop. An "Open local interface" link
+is always available, including without JavaScript. The bootstrap does not depend
+on LittleFS or the installed webapp; the local fallback does require an installed
+webapp. The probe checks reachability, not whether the remote app's JavaScript
+and other assets will load successfully after navigation.
+
+The existing controller inventory supplies the numeric IP, so the browser does
+not need mDNS and there are no controller-side HTTP probes or JSON parsing. The ID
+threshold excludes ESP8266 controllers; ESP32 controllers with smaller IDs are
+not selected. Offline/incomplete hosts and non-controller hosts are ignored.
+Bootstrap responses are uncached. With no eligible peer, the UI
+continues to be served locally. A controller never redirects to itself, and
+disconnected Wi-Fi setup and firmware-OTA handling remain local. `/index.html`
+remains available directly as a local-UI fallback. This does not change leader
+election.
+
+ESP8266 firmware stays on this 5.0 line, even when the shared webapp host runs
+5.1 firmware.
+
 ### Connection failure behaviour
 
 If the controller cannot reach the saved network (wrong password, out of range, etc.) after the configured number of retries, it:

@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Lightinator</title>
+<style>
+body{font-family:system-ui,sans-serif;background:#f0f2f5;color:#222;padding:12px}
+main{max-width:28rem;margin:10vh auto;background:#fff;border-radius:8px;padding:24px;box-shadow:0 1px 4px rgba(0,0,0,.12)}
+h1{font-size:1.2rem;color:#1976d2}
+a{color:#1976d2}
+</style>
+</head>
+<body>
+<main>
+<h1>Lightinator</h1>
+<p id="status" role="status">Checking the shared web interface...</p>
+<p><a href="/index.html">Open local interface</a></p>
+<noscript><p>JavaScript is disabled. Use the local interface link above.</p></noscript>
+</main>
+<script>
+(async function () {
+  const target = 'http://{{leader}}/index.html?home={{home}}';
+  let timeout;
+  try {
+    const controller = new AbortController();
+    timeout = setTimeout(function () { controller.abort(); }, 3000);
+    const response = await fetch(target, {
+      method: 'HEAD',
+      mode: 'cors',
+      cache: 'no-store',
+      signal: controller.signal
+    });
+    const type = (response.headers.get('Content-Type') || '').split(';')[0].trim().toLowerCase();
+    if (!response.ok || type !== 'text/html') {
+      throw new Error('The shared web interface did not return an HTML page.');
+    }
+    window.location.replace(target);
+  } catch (error) {
+    console.warn('Shared web interface unavailable; opening the local interface.', error);
+    document.getElementById('status').textContent = 'Shared interface unavailable. Opening the local interface...';
+    window.location.replace('/index.html');
+  } finally {
+    clearTimeout(timeout);
+  }
+}());
+</script>
+</body>
+</html>
