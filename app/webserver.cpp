@@ -33,6 +33,7 @@
 #include <array>
 #include <memory>
 #include <stdio.h>
+#include <FlashString/TemplateStream.hpp>
 
 #include <Network/Http/Websocket/WebsocketResource.h>
 #include <Storage.h>
@@ -986,6 +987,30 @@ void ApplicationWebserver::onRedirector(HttpRequest& request, HttpResponse& resp
 	onIndex(request, response);
 }
 
+void ApplicationWebserver::updateWebappLeader()
+{
+	_redirectToLeader = false;
+	_webappLeaderAddress = IpAddress();
+	if(!WifiStation.isConnected() || !app.controllers) {
+		return;
+	}
+
+	uint32_t highestId = std::max(uint32_t(0xFFFFFF), system_get_chip_id());
+	for(const auto& controller : *app.controllers) {
+		if(controller.id <= highestId || controller.state != Controllers::ONLINE ||
+		   controller.hostType != Controllers::HOST_TYPE_CONTROLLER || controller.ipAddress[0] == '\0') {
+			continue;
+		}
+		const IpAddress address(controller.ipAddress);
+		if(address.isNull() || address == WifiStation.getIP()) {
+			continue;
+		}
+		highestId = controller.id;
+		_webappLeaderAddress = address;
+		_redirectToLeader = true;
+	}
+}
+
 void ApplicationWebserver::onIndex(HttpRequest& request, HttpResponse& response)
 {
 	cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::onIndex: " ANSI_COLOR_BLUE "http onIndex" ANSI_COLOR_RESET);
@@ -999,6 +1024,20 @@ void ApplicationWebserver::onIndex(HttpRequest& request, HttpResponse& response)
 		void publishTransitionFinished(const String& name, bool requeued = false);
 	}
 #endif
+
+	updateWebappLeader();
+	if(_redirectToLeader) {
+		auto page = fileMap[F("webapp-redirect.html")];
+		auto stream = std::make_unique<FSTR::TemplateStream>(page.content());
+		stream->setDoubleBraces(true);
+		stream->setVar(F("leader"), _webappLeaderAddress.toString());
+		stream->setVar(F("home"), WifiStation.getIP().toString());
+		response.headers[HTTP_HEADER_CACHE_CONTROL] = F("no-store");
+		setCorsHeaders(response);
+		response.code = HTTP_STATUS_OK;
+		response.sendDataStream(stream.release(), MIME_HTML);
+		return;
+	}
 
 	bool hasLfsIndex = app.isFilesystemMounted() &&
 	     (fileExist(F("index.html")) || fileExist(F("index.html.gz")));

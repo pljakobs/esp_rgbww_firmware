@@ -95,6 +95,9 @@ private:
 
     bool _init = false;
     bool _running = false;
+    bool _redirectToLeader = false;
+    IpAddress _webappLeaderAddress;
+    void updateWebappLeader();
 
     // Base HTTP server settings, retained so setMaxActiveConnections() can
     // adjust the connection limit without discarding heap/keep-alive config.

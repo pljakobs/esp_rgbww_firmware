@@ -57,6 +57,7 @@ webapp/*
 # except the static bootstrap files owned by the firmware repo
 !webapp/captive.html
 !webapp/updating.html
+!webapp/webapp-redirect.html
 include/filelist.h
 
 # exclude local script to update db that is under constant development
