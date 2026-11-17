@@ -46,7 +46,8 @@
  * This preserves boot-time log messages that arrive before the network is ready.
  *
  * huffman_table.h (PROGMEM encode/decode tables) must be pre-generated:
- *   python3 huffman_analysis.py --ngrams --emit --out huffman_table.h
+ *   python3 Components/HuffmanCodec/tools/huffman_analysis.py --ngrams --emit \
+ *       --out Components/HuffmanCodec/include/huffman_table.h
  */
 class UdpSyslogStream : public Stream
 {
