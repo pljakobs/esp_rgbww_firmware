@@ -15,6 +15,52 @@ from zeroconf import IPVersion, ServiceInfo, Zeroconf
 
 BASE_CHIP_ID = 1000100
 
+# 14-digit serial as advertised by e.g. a SONOFF Zigbee bridge: exceeds
+# uint32, so the firmware must reject it instead of saturating it into a
+# plausible-looking controller id.
+FOREIGN_DEVICE_ID = "26350200018272"
+
+
+class VirtualForeignDevice:
+    """Non-lightinator device advertising only _http._tcp with its own "id" TXT key.
+
+    Mimics a SONOFF Zigbee Dongle-M, whose TXT record carries a name= label and
+    an id= serial number. Such devices must never enter the controller inventory.
+    """
+
+    def __init__(self, ip_address: str, name: str = "SONOFF Dongle-M_TEST"):
+        self.name = name
+        self.hostname_fqdn = "Dongle-M-test.local."
+        self.ip_address = ip_address
+        self.ip_bytes = socket.inet_aton(ip_address)
+        self.services = []
+
+    def build_services(self, include_rogue_swarm: bool = False) -> list[ServiceInfo]:
+        http_service = ServiceInfo(
+            "_http._tcp.local.",
+            f"{self.name}._http._tcp.local.",
+            addresses=[self.ip_bytes],
+            port=80,
+            properties={"name": self.name, "id": FOREIGN_DEVICE_ID},
+            server=self.hostname_fqdn,
+        )
+        self.services = [http_service]
+        if include_rogue_swarm:
+            # A rogue/broken device on the swarm service type itself: the
+            # overflowing id must be rejected by parseControllerId rather than
+            # saturated into a valid-looking controller id.
+            swarm_txt = {"id": FOREIGN_DEVICE_ID, "type": "CONTROLLER",
+                         "host_type": "CONTROLLER", "isLeader": "0"}
+            self.services.append(ServiceInfo(
+                "_lightinator._tcp.local.",
+                f"{self.name}._lightinator._tcp.local.",
+                addresses=[self.ip_bytes],
+                port=80,
+                properties=swarm_txt,
+                server=self.hostname_fqdn,
+            ))
+        return self.services
+
 
 class VirtualController:
     def __init__(self, index: int, ip_address: str, is_leader: bool = False, base_chip_id: int = BASE_CHIP_ID,
