@@ -7,6 +7,10 @@ valuable n-grams, builds a canonical Huffman code over a 255-symbol alphabet
 (0x00 EOM, 0x01-0x7E ASCII, 0x7F unused, 0x80-0xFE n-gram tokens) and emits
 the PROGMEM encode/decode tables consumed by HuffmanEncoder/HuffmanDecoder.
 
+With --boot-corpus, training is restricted to pre-network boot content (boot
+start up to the UdpSyslogStream::drainPreNetBuffer banner) — the only text
+the codec ever compresses on-device.
+
 Typical use:
     python3 huffman_analysis.py --emit --out ../include/huffman_table.h
 
@@ -60,12 +64,12 @@ def fetch_controllers(server):
     return [c["ip"] for c in data.get("items", []) if c.get("ip")]
 
 
-def fetch_messages(server, ip, max_messages):
-    """Page backwards through /api/v1/logs for one controller."""
-    messages = []
+def fetch_items(server, ip, max_messages):
+    """Page backwards through /api/v1/logs for one controller (chronological)."""
+    all_items = []
     before = None
-    while len(messages) < max_messages:
-        limit = min(2000, max_messages - len(messages))
+    while len(all_items) < max_messages:
+        limit = min(2000, max_messages - len(all_items))
         params = {"ip": ip, "limit": limit}
         if before:
             params["before"] = before
@@ -75,11 +79,37 @@ def fetch_messages(server, ip, max_messages):
         if not items:
             break
         # items are chronological; prepend so the corpus stays oldest-first
-        messages = [it.get("message", "") for it in items] + messages
+        all_items = items + all_items
         before = data.get("nextBefore")
         if not before:
             break
-    return messages
+    return all_items
+
+
+def fetch_boot_segments(server, ip, marker):
+    """Fetch pre-network boot content via the /api/v1/boots index.
+
+    For every boot the service retains, reads the head of the boot's log and
+    cuts at the drain banner — exactly the text that passes through the
+    Huffman codec on-device.  Boots whose banner never appeared (e.g. no
+    network established) are skipped.
+
+    Returns (segments, boot_count, marker_count).
+    """
+    boots = http_get_json(f"{server}/api/v1/boots?" +
+                          urllib.parse.urlencode({"ip": ip})).get("items", [])
+    boots.sort(key=lambda b: b.get("firstId", 0))
+    segments = []
+    for b in boots:
+        if "firstId" not in b:
+            continue
+        url = f"{server}/api/v1/logs?" + urllib.parse.urlencode(
+            {"ip": ip, "from": b["firstId"], "limit": 2000})
+        msgs = [it.get("message", "") for it in http_get_json(url).get("items", [])]
+        idx = next((i for i, m in enumerate(msgs) if marker in m), None)
+        if idx is not None:
+            segments.append(msgs[:idx + 1])
+    return segments, len(boots), len(segments)
 
 
 def sanitize(msg):
@@ -104,7 +134,15 @@ def load_corpus(args):
     sources = []
     for ip in ips:
         try:
-            m = fetch_messages(server, ip, args.max_messages)
+            if args.boot_corpus:
+                segments, nboots, nmarked = fetch_boot_segments(server, ip, args.boot_marker)
+                m = [msg for seg in segments for msg in seg]
+                print(f"  {ip}: {nboots} boots retained, {nmarked} with drain banner "
+                      f"→ {len(m):,} boot messages")
+            else:
+                items = fetch_items(server, ip, args.max_messages)
+                m = [it.get("message", "") for it in items]
+                print(f"  {ip}: {len(m):,} messages")
         except (urllib.error.URLError, OSError) as e:
             print(f"  {ip}: fetch failed ({e}), skipping", file=sys.stderr)
             continue
@@ -112,7 +150,6 @@ def load_corpus(args):
         if m:
             sources.append(ip)
             msgs.extend(m)
-        print(f"  {ip}: {len(m):,} messages")
     if not msgs:
         sys.exit("error: empty corpus")
 
@@ -499,6 +536,13 @@ def main():
                     help="max messages to fetch per controller (default: 100000)")
     ap.add_argument("--corpus", help="read corpus from a local file instead of the log service")
     ap.add_argument("--save-corpus", help="save the fetched corpus to a file for reuse")
+    ap.add_argument("--boot-corpus", action="store_true",
+                    help="train only on pre-network boot content: messages from each "
+                         "boot start (new nonce) up to the drain banner — exactly the "
+                         "text that passes through the codec on-device")
+    ap.add_argument("--boot-marker", default="UdpSyslogStream::drainPreNetBuffer",
+                    help="substring marking the end of pre-network boot content "
+                         "(default: UdpSyslogStream::drainPreNetBuffer)")
     ap.add_argument("--ngrams", action="store_true", default=True,
                     help="enable n-gram token selection (default: on)")
     ap.add_argument("--no-ngrams", dest="ngrams", action="store_false",
