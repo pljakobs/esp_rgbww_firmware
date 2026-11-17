@@ -22,7 +22,6 @@
 #include "HuffmanEncoder.h"
 #include "HuffmanDecoder.h"
 #include "HuffmanRingBuffer.h"
-#include "huffman_table.h"
 
 static std::string unescape(const std::string& in)
 {
@@ -47,6 +46,23 @@ int main(int argc, char** argv)
     HuffmanRingBuffer rb(ringMem, sizeof(ringMem));
     HuffmanEncoder encoder(rb);
 
+    // Regression check: write('\0') must be equivalent to flush() — the NUL
+    // itself must not be encoded (flush() appends the single EOM symbol).
+    {
+        uint8_t f1[HuffmanDecoder::COMP_BUF_SIZE], f2[HuffmanDecoder::COMP_BUF_SIZE];
+        uint16_t l1 = 0, l2 = 0;
+        encoder.print("eom equivalence probe");
+        encoder.flush();
+        rb.read(f1, sizeof(f1), l1);
+        encoder.print("eom equivalence probe");
+        encoder.write('\0');
+        rb.read(f2, sizeof(f2), l2);
+        if(l1 != l2 || memcmp(f1, f2, l1) != 0) {
+            fprintf(stderr, "FAIL: write('\\0') frame differs from flush() frame (double EOM?)\n");
+            return 1;
+        }
+    }
+
     unsigned long total = 0, failed = 0, inBytes = 0, outBytes = 0;
     char line[8192];
 
@@ -61,12 +77,10 @@ int main(int argc, char** argv)
         }
 
         std::string msg = unescape(line);
-        // The decoder guarantees full round-trip only up to
-        // DECODE_BUF_SIZE - NGRAM_MAX_LEN chars (it reserves n-gram expansion
-        // headroom), so mirror that end-to-end limit here.
-        constexpr size_t maxMsg = HuffmanDecoder::DECODE_BUF_SIZE - NGRAM_MAX_LEN;
-        if(msg.size() > maxMsg) {
-            msg.resize(maxMsg);
+        // The encoder caps a message at INPUT_BUF_SIZE chars; the decoder's
+        // exact bounds-checking round-trips everything up to that limit.
+        if(msg.size() > HuffmanEncoder::INPUT_BUF_SIZE) {
+            msg.resize(HuffmanEncoder::INPUT_BUF_SIZE);
         }
 
         total++;
