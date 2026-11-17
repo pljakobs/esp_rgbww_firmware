@@ -314,7 +314,24 @@ void ApplicationWebserver::init()
 void ApplicationWebserver::wsConnected(WebsocketConnection& socket)
 {
     cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::wsConnected: " ANSI_COLOR_BLUE "===>wsConnected" ANSI_COLOR_RESET);
-    
+
+    // Cap concurrent websocket clients: evict the oldest so stale browser tabs
+    // cannot pin down the small TCP PCB pool and starve new connections.
+    while(webSockets.size() >= WEBSERVER_MAX_WEBSOCKETS) {
+        WebsocketConnection* oldest = webSockets[0];
+        if(oldest == nullptr || oldest == &socket) {
+            webSockets.removeElementAt(0);
+            continue;
+        }
+        cdebug_i(APPLICATIONWEBSERVER, "ApplicationWebserver::wsConnected: " ANSI_COLOR_BLUE "websocket limit (" ANSI_COLOR_CYAN "%u" ANSI_COLOR_BLUE ") reached — evicting oldest client" ANSI_COLOR_RESET, (unsigned)WEBSERVER_MAX_WEBSOCKETS);
+        oldest->close(); // triggers wsDisconnected(), which removes it from the list
+        if(webSockets.size() > 0 && webSockets[0] == oldest) {
+            // close() completed without the disconnect callback firing yet —
+            // drop it from the list now so we never evict twice.
+            webSockets.removeElementAt(0);
+        }
+    }
+
     // Prevent memory leaks if userData was previously set
     delete static_cast<WsAuthState*>(socket.getUserData());
     socket.setUserData(new WsAuthState());
@@ -2250,4 +2267,8 @@ void ApplicationWebserver::setCorsHeaders(HttpResponse& response)
 {
 	response.setAllowCrossDomainOrigin("*");
 	response.setHeader(F("Access-Control-Allow-Headers"), F("Content-Type, Cache-Control, Authorization"));
+	// Let browsers cache the preflight approval for a day. Without this every
+	// single cross-origin API call pays an extra OPTIONS round-trip, doubling
+	// TCP connection churn on the tiny lwIP PCB pool.
+	response.setHeader(F("Access-Control-Max-Age"), F("86400"));
 }
