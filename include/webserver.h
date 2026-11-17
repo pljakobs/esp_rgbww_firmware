@@ -49,10 +49,16 @@
     #define WEBSERVER_MAX_CONN_OTA 4
     #define WEBSERVER_MAX_CONN_DEFAULT 6
     #define WEBAPP_OTA_MAX_CONN 4
+    // Max concurrent websocket clients. Each held-open browser tab keeps one
+    // upgraded TCP connection inside the small lwIP PCB pool; beyond this the
+    // oldest client is evicted so new tabs (and OTA fetches) can still connect.
+    // One slot is typically held permanently by Home Assistant.
+    #define WEBSERVER_MAX_WEBSOCKETS 3
 #else
     #define WEBSERVER_MAX_CONN_OTA 8
     #define WEBSERVER_MAX_CONN_DEFAULT 10
     #define WEBAPP_OTA_MAX_CONN 8
+    #define WEBSERVER_MAX_WEBSOCKETS 6
 #endif
 
 
