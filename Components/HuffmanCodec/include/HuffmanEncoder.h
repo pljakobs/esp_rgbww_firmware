@@ -18,9 +18,8 @@
  *   encoder.write('\0');      // writing NUL triggers flush automatically
  * @endcode
  *
- * The encoder buffers input until flush().  If the input buffer overflows
- * (> INPUT_BUF_SIZE - 1 bytes between flushes) the oldest buffered bytes are
- * silently dropped to leave room for the NUL terminator.
+ * The encoder buffers input until flush().  If the input buffer fills up
+ * (INPUT_BUF_SIZE bytes between flushes) further input is silently dropped.
  */
 class HuffmanEncoder : public Print
 {
@@ -34,8 +33,9 @@ public:
      * @brief Buffer one character for encoding.
      *
      * Characters are accumulated until flush() is called.  Writing a NUL (0x00)
-     * triggers flush() automatically.  Input silently truncated if the buffer is
-     * full (INPUT_BUF_SIZE bytes).
+     * triggers flush() instead of being buffered (flush() appends the EOM symbol
+     * itself).  Input is silently dropped once the buffer is full
+     * (INPUT_BUF_SIZE bytes).
      * @param c  Byte to buffer
      * @return   Always 1
      */
@@ -61,6 +61,9 @@ public:
 
     /** @brief Discard accumulated input without encoding. */
     void discard() { _inLen = 0; }
+
+    /** @return Number of unencoded bytes currently buffered. */
+    uint16_t buffered() const { return _inLen; }
 
 private:
     /// @brief Underlying ring buffer reference.
