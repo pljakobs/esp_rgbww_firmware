@@ -8,7 +8,10 @@ valuable n-grams, builds a canonical Huffman code over a 255-symbol alphabet
 the PROGMEM encode/decode tables consumed by HuffmanEncoder/HuffmanDecoder.
 
 Typical use:
-    python3 huffman_analysis.py --ngrams --emit --out ../include/huffman_table.h
+    python3 huffman_analysis.py --emit --out ../include/huffman_table.h
+
+N-gram selection is on by default (--ngrams is accepted for compatibility);
+pass --no-ngrams for a chars-only code.
 
 The log service URL defaults to $LIGHTINATOR_LOG_SERVER, falling back to
 http://192.168.29.5:4821 — override with --server.
@@ -496,7 +499,10 @@ def main():
                     help="max messages to fetch per controller (default: 100000)")
     ap.add_argument("--corpus", help="read corpus from a local file instead of the log service")
     ap.add_argument("--save-corpus", help="save the fetched corpus to a file for reuse")
-    ap.add_argument("--ngrams", action="store_true", help="enable n-gram token selection")
+    ap.add_argument("--ngrams", action="store_true", default=True,
+                    help="enable n-gram token selection (default: on)")
+    ap.add_argument("--no-ngrams", dest="ngrams", action="store_false",
+                    help="chars-only Huffman code, no n-gram tokens (much worse ratio)")
     ap.add_argument("--ngram-count", type=int, default=127,
                     help="number of n-grams to select, max 127 (default: 127)")
     ap.add_argument("--ngram-max-len", type=int, default=8,
@@ -517,6 +523,8 @@ def main():
         print("Selecting n-grams…")
         ngrams = select_ngrams(msgs, args.ngram_count, args.ngram_max_len)
         print(f"Selected {len(ngrams)} n-grams")
+    else:
+        print("note: --no-ngrams — chars-only code, expect a much worse ratio")
 
     matcher = build_matcher(ngrams)
     print("Tokenising corpus…")
