@@ -277,7 +277,7 @@
     "device-info": {
       "type": "object",
       "properties": {
-        "deviceid": { "$ref": "value-types/$defs/non-negative-integer" },
+        "deviceid": { "$ref": "value-types/$defs/uint32-value" },
         "soc": { "$ref": "value-types/$defs/string-value" },
         "current_rom": { "$ref": "value-types/$defs/string-value" }
       },
@@ -506,7 +506,7 @@
     "host-item": {
       "type": "object",
       "properties": {
-        "id": { "$ref": "value-types/$defs/non-negative-integer" },
+        "id": { "$ref": "value-types/$defs/uint32-value" },
         "hostname": { "$ref": "value-types/$defs/string-value" },
         "ip_address": { "$ref": "value-types/$defs/string-value" },
         "host_type": { "$ref": "value-types/$defs/string-value" },
@@ -558,7 +558,7 @@
     "telemetry-params": {
       "type": "object",
       "properties": {
-        "id": { "$ref": "value-types/$defs/non-negative-integer" },
+        "id": { "$ref": "value-types/$defs/uint32-value" },
         "time": { "$ref": "value-types/$defs/integer-value" },
         "uptime": { "$ref": "value-types/$defs/non-negative-integer" },
         "ip": { "$ref": "value-types/$defs/string-value" },

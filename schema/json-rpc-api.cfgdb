@@ -398,7 +398,7 @@
       "type": "object",
       "required": ["id", "hostname", "ip_address", "host_type", "visible", "state"],
       "properties": {
-        "id": { "type": "integer", "minimum": 0 },
+        "id": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
         "hostname": { "type": "string" },
         "ip_address": { "type": "string" },
         "host_type": { "$ref": "#/definitions/hostType" },

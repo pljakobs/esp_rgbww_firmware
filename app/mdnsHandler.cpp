@@ -235,27 +235,11 @@ bool mdnsHandler::onMessage(mDNS::Message& message)
             handled |= processSwarmServiceResponse(message, srv_answer);
             continue;
         }
-        const char* http_tcp_local = "._http._tcp.local";
-        if(hasSuffix(answerName, http_tcp_local)) {
-            const char* p = strstr(answerName, http_tcp_local);
-            size_t hostname_len = p - answerName;
-            // Bound the copy to a fixed buffer: answerName comes straight off
-            // the network, so a VLA sized from it would let a remote peer decide
-            // how much stack this frame consumes (unbounded alloca, CWE-789) —
-            // dangerous on the shared SYS/network stack this runs on.  A single
-            // mDNS label never exceeds 63 bytes; 64 covers the label + NUL.
-            char hostname[64];
-            if (hostname_len >= sizeof(hostname)) {
-                hostname_len = sizeof(hostname) - 1;
-            }
-            memcpy(hostname, answerName, hostname_len);
-            hostname[hostname_len] = '\0';
-
-#ifdef DEBUG_MDNS
-            cdebug_i(MDNSHANDLER, "mdnsHandler::onMessage: " ANSI_COLOR_BLUE "Processing hostname response for: " ANSI_COLOR_CYAN "%s" ANSI_COLOR_BLUE "" ANSI_COLOR_RESET, hostname);
-#endif
-            handled |= processHostnameResponse(message, srv_answer, hostname);
-        }
+        // All other SRV answers (notably _http._tcp) are deliberately ignored:
+        // controllers identify peers exclusively via the lightinator service
+        // types above. _http._tcp is the human-facing web service; foreign
+        // devices (e.g. SONOFF Zigbee bridges) advertise it with their own
+        // "id" TXT key and must never enter the controller inventory.
     }
 
     if(!hasSrv) {
@@ -305,7 +289,14 @@ bool mdnsHandler::processSwarmServiceResponse(mDNS::Message& message, mDNS::Answ
             if (hostnameType.length() == 0) {
                 hostnameType = txt[F("type")];
             }
-            const Controllers::HostType hostType = Controllers::hostTypeFromString(hostnameType);
+            Controllers::HostType hostType = Controllers::hostTypeFromString(hostnameType);
+            if (hostType == Controllers::HOST_TYPE_UNKNOWN) {
+                // No usable type key in TXT: the lightinator-specific service
+                // type this answer arrived on identifies the device class.
+                hostType = hasSuffix(instanceName.c_str(), "._wall-panel-api._tcp.local")
+                               ? Controllers::HOST_TYPE_WALLPANEL
+                               : Controllers::HOST_TYPE_CONTROLLER;
+            }
             app.controllers->noteIdentity(id, hostName, txt_answer->getTtl(), hostType);
             handled = true;
         }
@@ -352,37 +343,6 @@ bool mdnsHandler::processHostnameARecord(mDNS::Message& message, mDNS::Answer* a
     // TXT reveals the id.
     app.controllers->noteAddress(hostname, ipAddress.c_str(), ttl);
     return true;
-}
-
-// Process hostname responses with potential SRV records
-bool mdnsHandler::processHostnameResponse(mDNS::Message& message, mDNS::Answer& srv, const char* hostname)
-{
-    using namespace mDNS;
-
-    bool handled = false;
-
-    // TXT fragment carries the immutable id (plus type).
-    if (auto txt_answer = findAnswer(message, ResourceType::TXT, String(srv.getName()))) {
-        mDNS::Resource::TXT txt(*txt_answer);
-        unsigned int controllerId = parseControllerId(txt["id"]);
-        if (controllerId != 0) {
-            Controllers::HostType hostType = Controllers::hostTypeFromString(txt["host_type"]);
-            if (hostType == Controllers::HOST_TYPE_UNKNOWN) {
-                hostType = Controllers::hostTypeFromString(txt["type"]);
-            }
-            app.controllers->noteIdentity(controllerId, hostname, txt_answer->getTtl(), hostType);
-            handled = true;
-        }
-    }
-
-    // A fragment carries the address; completes the record once the id is known.
-    if (auto a_answer = findAnswer(message, ResourceType::A, String(Resource::SRV(srv).getHost()))) {
-        String ipAddress = a_answer->getRecordString();
-        app.controllers->noteAddress(hostname, ipAddress.c_str(), a_answer->getTtl());
-        handled = true;
-    }
-
-    return handled;
 }
 
 void mdnsHandler::sendSearch()
