@@ -60,8 +60,7 @@ uint16_t HuffmanDecoder::_decodeMessage(const uint8_t* data, uint16_t lenBytes)
     _bitPos = 0;
 
     uint16_t outLen = 0;
-    // Leave NGRAM_MAX_LEN headroom so an n-gram expansion never overruns
-    while(_hasBit() && outLen < (uint16_t)(DECODE_BUF_SIZE - NGRAM_MAX_LEN)) {
+    while(_hasBit() && outLen < DECODE_BUF_SIZE) {
         uint16_t sym = _decodeSymbol();
 
         if(sym == 0xFFFFu) break;       // decode error
@@ -71,10 +70,10 @@ uint16_t HuffmanDecoder::_decodeMessage(const uint8_t* data, uint16_t lenBytes)
             // Single ASCII character
             _decodedBuf[outLen++] = (uint8_t)sym;
         } else if(sym >= 0x80u && sym <= 0xFEu) {
-            // N-gram token: expand string from PROGMEM table
+            // N-gram token: expand string from PROGMEM table, clipped to the buffer
             uint8_t idx  = (uint8_t)(sym - 0x80u);
             uint8_t nlen = pgm_read_byte(&NGRAM_LEN[idx]);
-            for(uint8_t j = 0; j < nlen; j++) {
+            for(uint8_t j = 0; j < nlen && outLen < DECODE_BUF_SIZE; j++) {
                 _decodedBuf[outLen++] = pgm_read_byte(&NGRAM_TABLE[idx][j]);
             }
         }
@@ -126,7 +125,7 @@ uint16_t HuffmanDecoder::decodeFrame(const uint8_t* data, uint16_t lenBytes,
         return 0xFFFFu;
     };
 
-    while(hasBit() && outLen < (uint16_t)(outMax - NGRAM_MAX_LEN)) {
+    while(hasBit() && outLen < outMax) {
         uint16_t sym = decodeSym();
         if(sym == 0xFFFFu || sym == 0x0000u) break;
         if(sym <= 0x7Eu) {
@@ -134,7 +133,7 @@ uint16_t HuffmanDecoder::decodeFrame(const uint8_t* data, uint16_t lenBytes,
         } else if(sym >= 0x80u && sym <= 0xFEu) {
             uint8_t idx  = (uint8_t)(sym - 0x80u);
             uint8_t nlen = pgm_read_byte(&NGRAM_LEN[idx]);
-            for(uint8_t j = 0; j < nlen; j++) {
+            for(uint8_t j = 0; j < nlen && outLen < outMax; j++) {
                 out[outLen++] = (char)pgm_read_byte(&NGRAM_TABLE[idx][j]);
             }
         }

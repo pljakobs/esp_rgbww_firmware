@@ -193,9 +193,8 @@ def main():
     ap.add_argument("--table", required=True, help="huffman_table.h to verify")
     ap.add_argument("--corpus", required=True, help="messages, one per line (\\x1b = ESC)")
     ap.add_argument("--frames", help="hex frames from test_roundtrip --dump to compare against")
-    ap.add_argument("--max-input", type=int, default=504,
-                    help="max round-trippable message length "
-                         "(DECODE_BUF_SIZE - NGRAM_MAX_LEN, default: 504)")
+    ap.add_argument("--max-input", type=int, default=512,
+                    help="encoder message cap (INPUT_BUF_SIZE, default: 512)")
     args = ap.parse_args()
 
     t = parse_table(args.table)

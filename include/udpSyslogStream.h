@@ -294,6 +294,11 @@ public:
                     _encoder->flush();
                 } else {
                     _encoder->write(c);
+                    // Chunk long lines at MAX_MSG_LEN like the post-net path does,
+                    // so every stored frame fits the replay buffer in _drainStep().
+                    if(_encoder->buffered() >= MAX_MSG_LEN) {
+                        _encoder->flush();
+                    }
                 }
             }
             return 1;

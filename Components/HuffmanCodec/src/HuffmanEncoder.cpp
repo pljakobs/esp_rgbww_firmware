@@ -35,11 +35,13 @@ void HuffmanEncoder::_encodeSymbol(uint8_t sym)
 
 size_t HuffmanEncoder::write(uint8_t c)
 {
+    if(c == '\0') {
+        // flush() appends the EOM symbol itself — don't encode the NUL as input
+        flush();
+        return 1;
+    }
     if(_inLen < INPUT_BUF_SIZE) {
         _inBuf[_inLen++] = c;
-    }
-    if(c == '\0') {
-        flush();
     }
     return 1;
 }
