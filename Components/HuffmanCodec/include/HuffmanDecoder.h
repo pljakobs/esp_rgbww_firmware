@@ -42,6 +42,7 @@ public:
      * Decodes a frame produced by HuffmanEncoder::flush() into plaintext.
      * Does NOT require a HuffmanRingBuffer — intended for use in replay drain
      * (e.g. UdpSyslogStream::begin()).  Does not append a NUL terminator.
+     * The full outMax capacity is usable; output is clipped exactly at outMax.
      *
      * @param data      Compressed frame bytes (from HuffmanRingBuffer::read)
      * @param lenBytes  Frame length in bytes
